@@ -37,26 +37,34 @@ class DisclosureRedemptionIT {
 
     @Test
     @TestSecurity(user = "customer", roles = ["ROLE_API"])
-    fun `only one racing request receives a view-once sealed PDF`() {
+    fun `idempotent races consume each requested PDF view at most once`() {
         val grantor = UUID.randomUUID()
         val disclosureId = seedReadyDisclosure(grantor)
         connector.sink<String>("notification-requests-out").clear()
+        val issueBody =
+            """{"recipient":"recipient@example.test","expiresAt":"${Instant.now().plusSeconds(600)}","maxViews":2}"""
         val issued = RestAssured.given()
             .contentType(ContentType.JSON)
             .header("X-Customer-Party-Id", grantor.toString())
-            .body(
-                """{"recipient":"recipient@example.test","expiresAt":"${Instant.now().plusSeconds(
-                    600,
-                )}","maxViews":1}""",
-            )
+            .header("Idempotency-Key", "issue-race")
+            .body(issueBody)
             .post("/api/v1/disclosures/$disclosureId/redemptions")
             .then().statusCode(201).extract()
+
+        RestAssured.given()
+            .contentType(ContentType.JSON)
+            .header("X-Customer-Party-Id", grantor.toString())
+            .header("Idempotency-Key", "issue-race")
+            .body(issueBody)
+            .post("/api/v1/disclosures/$disclosureId/redemptions")
+            .then().statusCode(404)
 
         val notification = connector.sink<String>("notification-requests-out").received().single().payload
         val otp = mapper.readTree(notification).path("variables").path("code").asText()
         val magicToken = issued.path<String>("magicToken")
         val ticket = RestAssured.given()
             .contentType(ContentType.JSON)
+            .header("Idempotency-Key", "verify-race")
             .body("""{"magicToken":"$magicToken","otp":"$otp"}""")
             .post("/api/v1/public/disclosures/verify")
             .then().statusCode(200).extract().path<String>("accessTicket")
@@ -66,6 +74,7 @@ class DisclosureRedemptionIT {
             (1..2).map {
                 pool.submit<Int> {
                     RestAssured.given().contentType(ContentType.JSON)
+                        .header("Idempotency-Key", "content-race")
                         .body("""{"accessTicket":"$ticket"}""")
                         .post("/api/v1/public/disclosures/content").statusCode
                 }
@@ -75,7 +84,13 @@ class DisclosureRedemptionIT {
         }
 
         assertThat(statuses).containsExactlyInAnyOrder(200, 404)
-        assertThat(redemptionState(disclosureId)).isEqualTo("EXHAUSTED:1:true")
+        assertThat(redemptionState(disclosureId)).isEqualTo("VERIFIED:1:false")
+        RestAssured.given().contentType(ContentType.JSON)
+            .header("Idempotency-Key", "content-final")
+            .body("""{"accessTicket":"$ticket"}""")
+            .post("/api/v1/public/disclosures/content")
+            .then().statusCode(200)
+        assertThat(redemptionState(disclosureId)).isEqualTo("EXHAUSTED:2:true")
     }
 
     @Test
@@ -87,6 +102,7 @@ class DisclosureRedemptionIT {
         val magicToken = RestAssured.given()
             .contentType(ContentType.JSON)
             .header("X-Customer-Party-Id", grantor.toString())
+            .header("Idempotency-Key", "issue-lock")
             .body(
                 """{"recipient":"recipient@example.test","expiresAt":"${Instant.now().plusSeconds(
                     600,
@@ -99,9 +115,10 @@ class DisclosureRedemptionIT {
         ).path("variables").path("code").asText()
         val wrongOtp = if (issuedOtp == "000000") "000001" else "000000"
 
-        repeat(5) {
+        repeat(5) { attempt ->
             RestAssured.given()
                 .contentType(ContentType.JSON)
+                .header("Idempotency-Key", "verify-wrong-$attempt")
                 .body("""{"magicToken":"$magicToken","otp":"$wrongOtp"}""")
                 .post("/api/v1/public/disclosures/verify")
                 .then().statusCode(404)

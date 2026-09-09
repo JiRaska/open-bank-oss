@@ -63,10 +63,19 @@ class DisclosureResource(
     suspend fun issueRedemption(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") callerPartyId: UUID?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: IssueDisclosureRedemptionRequest,
     ): Response {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         val issued = redemption.issue(
-            IssueDisclosureRedemptionCommand(id, callerPartyId, request.recipient, request.expiresAt, request.maxViews),
+            IssueDisclosureRedemptionCommand(
+                id,
+                callerPartyId,
+                request.recipient,
+                request.expiresAt,
+                request.maxViews,
+                idempotencyKey,
+            ),
         )
         return Response.status(Response.Status.CREATED).entity(
             IssueDisclosureRedemptionResponse(

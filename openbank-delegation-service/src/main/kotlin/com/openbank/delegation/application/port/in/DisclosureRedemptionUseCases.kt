@@ -20,6 +20,7 @@ data class IssueDisclosureRedemptionCommand(
     val recipient: String,
     val expiresAt: Instant,
     val maxViews: Int,
+    val idempotencyKey: String,
 )
 
 data class IssuedDisclosureRedemption(
@@ -35,6 +36,6 @@ interface IssueDisclosureRedemptionUseCase {
 }
 
 interface PublicDisclosureRedemptionUseCase {
-    suspend fun verify(magicToken: String, otp: String): String
-    suspend fun download(accessTicket: String): RedeemedDisclosureContent
+    suspend fun verify(magicToken: String, otp: String, idempotencyKey: String): String
+    suspend fun download(accessTicket: String, idempotencyKey: String): RedeemedDisclosureContent
 }

@@ -8,6 +8,7 @@ import com.openbank.delegation.infrastructure.rest.dto.VerifyDisclosureRedemptio
 import com.openbank.delegation.infrastructure.rest.dto.VerifyDisclosureRedemptionResponse
 import jakarta.annotation.security.PermitAll
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -23,8 +24,16 @@ class PublicDisclosureRedemptionResource(private val redemption: PublicDisclosur
     @POST
     @Path("/verify")
     @Produces(MediaType.APPLICATION_JSON)
-    suspend fun verify(request: VerifyDisclosureRedemptionRequest): Response = concealInvalid {
-        Response.ok(VerifyDisclosureRedemptionResponse(redemption.verify(request.magicToken, request.otp)))
+    suspend fun verify(
+        request: VerifyDisclosureRedemptionRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response = concealInvalid {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        Response.ok(
+            VerifyDisclosureRedemptionResponse(
+                redemption.verify(request.magicToken, request.otp, idempotencyKey),
+            ),
+        )
             .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
             .build()
     }
@@ -32,8 +41,12 @@ class PublicDisclosureRedemptionResource(private val redemption: PublicDisclosur
     @POST
     @Path("/content")
     @Produces("application/pdf")
-    suspend fun content(request: DownloadDisclosureRequest): Response = concealInvalid {
-        val result = redemption.download(request.accessTicket)
+    suspend fun content(
+        request: DownloadDisclosureRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response = concealInvalid {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        val result = redemption.download(request.accessTicket, idempotencyKey)
         Response.ok(result.content, "application/pdf")
             .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
             .header(HttpHeaders.ETAG, "\"${result.sha256}\"")

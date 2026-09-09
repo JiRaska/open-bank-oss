@@ -235,6 +235,17 @@ immutable disclosure evidence so credential retention/erasure can evolve without
 evidence record. Migration V21 is additive; rollback disables issuance and public routes while
 retaining used rows until the applicable security/evidence retention process removes them.
 
+Every mutating redemption POST requires a caller-generated `Idempotency-Key`, but secret-bearing
+responses are never placed in a replay cache. Only a domain-separated SHA-256 digest is retained.
+Issuance is append-only: repeating the same key applies no effect, while a new key atomically
+revokes the prior unverified issuance and creates a new generation; verified issuance cannot be
+rotated. Verification attempts have a per-generation effect ledger, so retrying either a failed or
+successful attempt cannot increment the lock counter or exchange credentials twice. Content views
+have a separate ledger with uniqueness on both `(redemption, key hash)` and
+`(redemption, view number)`; claiming that ledger entry and incrementing the bounded view counter
+are one transaction. Repeats therefore fail closed without storing replayable magic tokens, access
+tickets or PDF bytes, and without bypassing expiry, revocation or view limits.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the

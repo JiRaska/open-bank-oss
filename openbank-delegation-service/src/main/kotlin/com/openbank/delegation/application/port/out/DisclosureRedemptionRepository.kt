@@ -26,6 +26,7 @@ data class IssueRedemptionRecord(
     val otpHash: String,
     val expiresAt: Instant,
     val maxViews: Int,
+    val issuanceIdempotencyKeyHash: String,
     val now: Instant,
 )
 
@@ -33,10 +34,10 @@ interface DisclosureRedemptionRepository {
     /** Creates or rotates an unverified redemption; terminal/verified rows cannot be replaced. */
     suspend fun issue(record: IssueRedemptionRecord): Boolean
     suspend fun findChallenge(magicTokenHash: String): RedemptionChallenge?
-    suspend fun recordFailedAttempt(id: UUID, now: Instant): Boolean
-    suspend fun verify(id: UUID, accessTicketHash: String, now: Instant): Boolean
+    suspend fun recordFailedAttempt(id: UUID, idempotencyKeyHash: String, now: Instant): Boolean
+    suspend fun verify(id: UUID, accessTicketHash: String, idempotencyKeyHash: String, now: Instant): Boolean
     suspend fun peek(accessTicketHash: String, now: Instant): RedeemableSnapshot?
-    suspend fun consume(accessTicketHash: String, now: Instant): RedeemableSnapshot?
+    suspend fun consume(accessTicketHash: String, idempotencyKeyHash: String, now: Instant): RedeemableSnapshot?
     suspend fun revoke(disclosureId: UUID, grantorPartyId: UUID, now: Instant): Boolean
 }
 

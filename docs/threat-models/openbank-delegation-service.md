@@ -118,6 +118,14 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - Snapshot bytes are obtained only through document-service's authenticated snapshot-id-plus-digest
   route and re-hashed locally before view consumption. A downstream outage therefore does not spend
   the recipient's view; a conditional database update prevents concurrent over-delivery.
+- Every issue, verification and content POST requires an effect-scoped `Idempotency-Key`. Only its
+  domain-separated SHA-256 digest is stored: append-only issuance generations, verification-attempt
+  entries and view-consumption entries make repeated effects no-ops without caching a recoverable
+  token, ticket, OTP or PDF. Uniqueness on both the key and view ordinal plus the row-state update in
+  one transaction prevents same-key retries and different-key races from spending a view twice.
+- Rotation preserves prior issuance evidence. A disclosure-row lock serialises concurrent issuers;
+  a new key revokes only an unverified generation and inserts a new one, while a verified generation
+  is non-rotatable. This avoids both multiple active recipient grants and destructive history rewrite.
 - Residual: email OTP and a magic link forwarded into the same compromised mailbox/device do not
   provide independent-channel assurance. High-assurance recipients require the planned datová
   schránka/EUDI channel; rate limiting at ingress remains defence in depth beyond per-redemption

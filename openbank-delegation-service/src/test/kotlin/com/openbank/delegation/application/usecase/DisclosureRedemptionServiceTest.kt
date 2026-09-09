@@ -43,13 +43,13 @@ class DisclosureRedemptionServiceTest {
         val candidate = snapshot(sha256(bytes), 1)
         coEvery { redemptions.peek(secrets.hashOpaqueToken(ticket), now) } returns candidate
         coEvery { contentReader.read(candidate.snapshotId, candidate.snapshotSha256) } returns bytes
-        coEvery { redemptions.consume(secrets.hashOpaqueToken(ticket), now) } returns candidate
+        coEvery { redemptions.consume(secrets.hashOpaqueToken(ticket), any(), now) } returns candidate
 
-        val result = service.download(ticket)
+        val result = service.download(ticket, "download-1")
 
         assertThat(result.content).isEqualTo(bytes)
         assertThat(result.viewNumber).isEqualTo(1)
-        coVerify(exactly = 1) { redemptions.consume(secrets.hashOpaqueToken(ticket), now) }
+        coVerify(exactly = 1) { redemptions.consume(secrets.hashOpaqueToken(ticket), any(), now) }
     }
 
     @Test
@@ -59,9 +59,9 @@ class DisclosureRedemptionServiceTest {
         coEvery { redemptions.peek(secrets.hashOpaqueToken(ticket), now) } returns candidate
         coEvery { contentReader.read(candidate.snapshotId, candidate.snapshotSha256) } returns "tampered".toByteArray()
 
-        assertThatThrownBy { runBlocking { service.download(ticket) } }
+        assertThatThrownBy { runBlocking { service.download(ticket, "download-2") } }
             .isInstanceOf(DisclosureRedemptionUnavailableException::class.java)
-        coVerify(exactly = 0) { redemptions.consume(any(), any()) }
+        coVerify(exactly = 0) { redemptions.consume(any(), any(), any()) }
     }
 
     @Test
@@ -71,9 +71,9 @@ class DisclosureRedemptionServiceTest {
         val candidate = snapshot(sha256(bytes), 1)
         coEvery { redemptions.peek(any(), now) } returns candidate
         coEvery { contentReader.read(any(), any()) } returns bytes
-        coEvery { redemptions.consume(any(), now) } returns null
+        coEvery { redemptions.consume(any(), any(), now) } returns null
 
-        assertThatThrownBy { runBlocking { service.download(ticket) } }
+        assertThatThrownBy { runBlocking { service.download(ticket, "download-3") } }
             .isInstanceOf(DisclosureRedemptionInvalidException::class.java)
     }
 

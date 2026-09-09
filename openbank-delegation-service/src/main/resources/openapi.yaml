@@ -69,6 +69,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -99,6 +100,8 @@ paths:
       tags: [Disclosures]
       security: []
       summary: Exchange a magic token and emailed OTP for a short-lived access ticket
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -116,6 +119,8 @@ paths:
       tags: [Disclosures]
       security: []
       summary: Consume one permitted view and return the sealed PDF
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -659,6 +664,16 @@ paths:
             delegate has already spent through.
 components:
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Caller-generated effect key, scoped to this operation and credential. Only a
+        domain-separated SHA-256 digest is retained. A repeat never replays secret-bearing output;
+        it fails closed without applying the effect again. Use a new key only for a deliberate
+        credential rotation or a genuinely new permitted view.
+      schema: { type: string, minLength: 1, maxLength: 200 }
     ApprovalId:
       name: approvalId
       in: path

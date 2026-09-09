@@ -41,6 +41,7 @@ class DisclosureRedemptionService(
         require(!command.expiresAt.isAfter(now.plus(MAX_VALIDITY))) { "validity must not exceed seven days" }
         require(command.maxViews in 1..MAX_VIEWS) { "maxViews must be between 1 and 10" }
         require(EMAIL.matches(command.recipient)) { "recipient must be a well-formed email address" }
+        validateIdempotencyKey(command.idempotencyKey)
         val disclosure = disclosures.findById(command.disclosureId) ?: throw DisclosureRedemptionUnavailableException()
         if (command.grantorPartyId == null ||
             disclosure.grantorPartyId != command.grantorPartyId ||
@@ -63,6 +64,7 @@ class DisclosureRedemptionService(
                 otpDigest.digest,
                 command.expiresAt,
                 command.maxViews,
+                hashIdempotencyKey(command.idempotencyKey),
                 now,
             ),
         )
@@ -71,8 +73,10 @@ class DisclosureRedemptionService(
         return IssuedDisclosureRedemption(redemptionId, magicToken, command.expiresAt, command.maxViews)
     }
 
-    override suspend fun verify(magicToken: String, otp: String): String {
+    override suspend fun verify(magicToken: String, otp: String, idempotencyKey: String): String {
+        validateIdempotencyKey(idempotencyKey)
         val now = Instant.now(clock)
+        val idempotencyKeyHash = hashIdempotencyKey(idempotencyKey)
         val challenge = redemptions.findChallenge(secrets.hashOpaqueToken(magicToken))
             ?: throw DisclosureRedemptionInvalidException()
         if (challenge.status != RedemptionStatus.ISSUED ||
@@ -82,17 +86,18 @@ class DisclosureRedemptionService(
             throw DisclosureRedemptionInvalidException()
         }
         if (!secrets.verifyOtp(otp, challenge.otpSalt, challenge.otpHash)) {
-            redemptions.recordFailedAttempt(challenge.id, now)
+            redemptions.recordFailedAttempt(challenge.id, idempotencyKeyHash, now)
             throw DisclosureRedemptionInvalidException()
         }
         val ticket = secrets.newOpaqueToken()
-        if (!redemptions.verify(challenge.id, secrets.hashOpaqueToken(ticket), now)) {
+        if (!redemptions.verify(challenge.id, secrets.hashOpaqueToken(ticket), idempotencyKeyHash, now)) {
             throw DisclosureRedemptionInvalidException()
         }
         return ticket
     }
 
-    override suspend fun download(accessTicket: String): RedeemedDisclosureContent {
+    override suspend fun download(accessTicket: String, idempotencyKey: String): RedeemedDisclosureContent {
+        validateIdempotencyKey(idempotencyKey)
         val ticketHash = secrets.hashOpaqueToken(accessTicket)
         val candidate = redemptions.peek(ticketHash, Instant.now(clock))
             ?: throw DisclosureRedemptionInvalidException()
@@ -100,7 +105,7 @@ class DisclosureRedemptionService(
         if (!MessageDigest.isEqual(sha256(content).toByteArray(), candidate.snapshotSha256.toByteArray())) {
             throw DisclosureRedemptionUnavailableException()
         }
-        val consumed = redemptions.consume(ticketHash, Instant.now(clock))
+        val consumed = redemptions.consume(ticketHash, hashIdempotencyKey(idempotencyKey), Instant.now(clock))
             ?: throw DisclosureRedemptionInvalidException()
         return RedeemedDisclosureContent(content, consumed.snapshotSha256, consumed.viewNumber, consumed.maxViews)
     }
@@ -117,9 +122,20 @@ class DisclosureRedemptionService(
         return "${local.first()}***@$domain"
     }
 
+    private fun validateIdempotencyKey(key: String) {
+        require(key.isNotBlank()) { "Idempotency-Key header is required" }
+        require(key.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key must be at most 200 characters" }
+    }
+
+    private fun hashIdempotencyKey(key: String): String = sha256(
+        "$IDEMPOTENCY_DOMAIN\u0000$key".toByteArray(),
+    )
+
     private companion object {
         const val MAX_VIEWS = 10
         const val MAX_ATTEMPTS = 5
+        const val MAX_IDEMPOTENCY_KEY_LENGTH = 200
+        const val IDEMPOTENCY_DOMAIN = "openbank.delegation.disclosure-redemption.idempotency-key.v1"
         val MAX_VALIDITY: Duration = Duration.ofDays(7)
         val EMAIL = Regex("^[^@\\s]{1,64}@[^@\\s]{1,190}$")
 

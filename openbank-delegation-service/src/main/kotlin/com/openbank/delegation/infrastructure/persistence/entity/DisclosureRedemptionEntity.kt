@@ -36,6 +36,12 @@ class DisclosureRedemptionEntity {
     @Column(name = "access_ticket_hash")
     var accessTicketHash: String? = null
 
+    @Column(name = "issuance_idempotency_key_hash")
+    lateinit var issuanceIdempotencyKeyHash: String
+
+    @Column(name = "verification_idempotency_key_hash")
+    var verificationIdempotencyKeyHash: String? = null
+
     @Column(name = "expires_at")
     lateinit var expiresAt: Instant
 

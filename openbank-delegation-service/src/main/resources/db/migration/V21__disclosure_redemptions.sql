@@ -1,10 +1,11 @@
 -- Ephemeral recipient authorization is separate from immutable disclosure evidence.
 -- Rollback: stop issue/verify/content traffic first. Before production use and only if empty,
--- DROP TABLE disclosure_redemptions. After use, retain access evidence and erase secret hashes only
+-- drop the two effect-ledger tables, then disclosure_redemptions. After use, retain access evidence
+-- and erase secret hashes only
 -- through the governed retention process; reverting the application must not delete audit history.
 CREATE TABLE disclosure_redemptions (
     id UUID PRIMARY KEY,
-    disclosure_id UUID NOT NULL UNIQUE REFERENCES delegation_disclosures(id),
+    disclosure_id UUID NOT NULL REFERENCES delegation_disclosures(id),
     status VARCHAR(16) NOT NULL CHECK (status IN ('ISSUED', 'VERIFIED', 'LOCKED', 'REVOKED', 'EXHAUSTED')),
     recipient_hint VARCHAR(160) NOT NULL,
     magic_token_hash VARCHAR(64) UNIQUE CHECK (
@@ -14,6 +15,12 @@ CREATE TABLE disclosure_redemptions (
     otp_hash VARCHAR(64) CHECK (otp_hash IS NULL OR otp_hash ~ '^[0-9a-f]{64}$'),
     access_ticket_hash VARCHAR(64) UNIQUE CHECK (
         access_ticket_hash IS NULL OR access_ticket_hash ~ '^[0-9a-f]{64}$'
+    ),
+    issuance_idempotency_key_hash VARCHAR(64) NOT NULL CHECK (
+        issuance_idempotency_key_hash ~ '^[0-9a-f]{64}$'
+    ),
+    verification_idempotency_key_hash VARCHAR(64) CHECK (
+        verification_idempotency_key_hash IS NULL OR verification_idempotency_key_hash ~ '^[0-9a-f]{64}$'
     ),
     expires_at TIMESTAMPTZ NOT NULL,
     max_views SMALLINT NOT NULL CHECK (max_views BETWEEN 1 AND 10),
@@ -33,5 +40,26 @@ CREATE TABLE disclosure_redemptions (
     CHECK (access_ticket_hash IS NULL OR verified_at IS NOT NULL)
 );
 
+CREATE TABLE disclosure_redemption_view_consumptions (
+    redemption_id UUID NOT NULL REFERENCES disclosure_redemptions(id),
+    idempotency_key_hash VARCHAR(64) NOT NULL CHECK (idempotency_key_hash ~ '^[0-9a-f]{64}$'),
+    view_number SMALLINT NOT NULL CHECK (view_number BETWEEN 1 AND 10),
+    consumed_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (redemption_id, idempotency_key_hash),
+    UNIQUE (redemption_id, view_number)
+);
+
+CREATE TABLE disclosure_redemption_verification_attempts (
+    redemption_id UUID NOT NULL REFERENCES disclosure_redemptions(id),
+    idempotency_key_hash VARCHAR(64) NOT NULL CHECK (idempotency_key_hash ~ '^[0-9a-f]{64}$'),
+    successful BOOLEAN NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (redemption_id, idempotency_key_hash)
+);
+
 CREATE INDEX idx_disclosure_redemptions_expiry ON disclosure_redemptions(expires_at)
+    WHERE status IN ('ISSUED', 'VERIFIED');
+
+CREATE UNIQUE INDEX uq_disclosure_redemptions_active
+    ON disclosure_redemptions(disclosure_id)
     WHERE status IN ('ISSUED', 'VERIFIED');
