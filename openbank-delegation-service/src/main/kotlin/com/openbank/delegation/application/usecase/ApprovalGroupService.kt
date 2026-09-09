@@ -62,7 +62,7 @@ class ApprovalGroupService(
         )
         return repository.create(
             group,
-            ApprovalGroupChanged.from(group, "ApprovalGroupCreated", clock.instant()),
+            ApprovalGroupChanged.from(group, eventType = "ApprovalGroupCreated", at = clock.instant()),
         )
     }
 
@@ -98,7 +98,7 @@ class ApprovalGroupService(
         return repository.update(
             revised,
             current.revision,
-            ApprovalGroupChanged.from(revised, "ApprovalGroupRevised", clock.instant()),
+            ApprovalGroupChanged.from(revised, eventType = "ApprovalGroupRevised", at = clock.instant()),
         )
     }
 
@@ -109,7 +109,7 @@ class ApprovalGroupService(
         return repository.update(
             deactivated,
             current.revision,
-            ApprovalGroupChanged.from(deactivated, "ApprovalGroupDeactivated", clock.instant()),
+            ApprovalGroupChanged.from(deactivated, eventType = "ApprovalGroupDeactivated", at = clock.instant()),
         )
     }
 

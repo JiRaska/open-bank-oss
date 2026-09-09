@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.ApprovalGroupRepository
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.domain.model.ApprovalGroup
 import com.openbank.delegation.infrastructure.persistence.entity.ApprovalGroupEntity
+import com.openbank.delegation.infrastructure.persistence.entity.ApprovalGroupRevisionEntity
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -27,7 +28,10 @@ class ApprovalGroupRepositoryImpl(
     PanacheRepository<ApprovalGroupEntity> {
 
     override suspend fun create(group: ApprovalGroup, event: DomainEvent): ApprovalGroup = Panache.withTransaction {
-        persist(ApprovalGroupEntity.fromDomain(group))
+        Panache.getSession()
+            .flatMap { session -> session.persist(ApprovalGroupEntity.fromDomain(group)) }
+            .flatMap { Panache.getSession() }
+            .flatMap { session -> session.persist(ApprovalGroupRevisionEntity.fromDomain(group)) }
             .flatMap { outboxRepository.persistInTransaction(event.toOutbox()).replaceWith(group) }
     }.awaitSuspending()
 
@@ -50,6 +54,8 @@ class ApprovalGroupRepositoryImpl(
                     entity.lastScaSessionId = group.lastScaSessionId
                     entity.updatedAt = group.updatedAt
                     Panache.getSession().flatMap { it.flush() }
+                        .flatMap { Panache.getSession() }
+                        .flatMap { session -> session.persist(ApprovalGroupRevisionEntity.fromDomain(group)) }
                         .flatMap { outboxRepository.persistInTransaction(event.toOutbox()) }
                         .replaceWith(group)
                 }
