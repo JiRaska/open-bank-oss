@@ -58,6 +58,15 @@ interface PartyEligibilityClient {
     suspend fun eligibilityOf(partyId: UUID): PartyEligibility
 }
 
+enum class GrantorAuthorityVerdict { AUTHORIZED, DENIED, UNVERIFIABLE }
+
+data class GrantorAuthority(val verdict: GrantorAuthorityVerdict, val displayName: String? = null)
+
+/** ADR-0232 D5 / ADR-0284: may this authenticated human create authority for this principal? */
+interface GrantorAuthorityClient {
+    suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority
+}
+
 data class ScaChallengeSnapshot(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
 
 interface ScaChallengeClient {

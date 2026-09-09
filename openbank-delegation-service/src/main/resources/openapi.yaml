@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.15.0
+  version: 1.16.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -92,7 +92,8 @@ paths:
       tags: [Approval groups]
       summary: Create an SCA-bound approval group
       parameters:
-        - { $ref: '#/components/parameters/CustomerPartyId' }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -122,6 +123,7 @@ paths:
     put:
       tags: [Approval groups]
       summary: Replace a roster under optimistic revision and a fresh SCA challenge
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
       requestBody:
         required: true
         content:
@@ -134,6 +136,7 @@ paths:
     delete:
       tags: [Approval groups]
       summary: Deactivate the group for future operation snapshots
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
       responses:
         '200': { description: Approval group deactivated }
   /api/v1/delegation-role-presets:
@@ -191,6 +194,7 @@ paths:
           in: header
           schema: { type: string }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -214,8 +218,9 @@ paths:
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+        '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
       tags: [Delegations]
@@ -228,6 +233,7 @@ paths:
         directory.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -240,8 +246,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
         '400': { description: Unsupported or inconsistent constraints }
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or resource ownership could not be established }
+        '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -602,6 +609,16 @@ components:
         query string is a claim by the caller, this header is not.
 
         Absent on an operator/back-office call, which is gated by role and OPA instead.
+      schema: { type: string, format: uuid }
+    CustomerActorPartyId:
+      name: X-Customer-Actor-Party-Id
+      in: header
+      required: false
+      description: |
+        The natural person authenticated by customer-edge. Required together with
+        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
+        individual profile; for an organization profile it differs and the service verifies the
+        actor's active PartyMandate before accepting the request. Never supplied by the app.
       schema: { type: string, format: uuid }
     DelegationId:
       name: id

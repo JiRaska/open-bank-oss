@@ -7,6 +7,9 @@ package com.openbank.delegation.application.usecase
 import com.openbank.delegation.application.port.`in`.CreateApprovalGroupCommand
 import com.openbank.delegation.application.port.`in`.ReviseApprovalGroupCommand
 import com.openbank.delegation.application.port.out.ApprovalGroupRepository
+import com.openbank.delegation.application.port.out.GrantorAuthority
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
@@ -33,8 +36,10 @@ class ApprovalGroupServiceTest {
     private val repository: ApprovalGroupRepository = mockk()
     private val eligibility: PartyEligibilityClient = mockk()
     private val sca: ScaChallengeClient = mockk()
+    private val authority: GrantorAuthorityClient = mockk()
     private val clock = Clock.fixed(Instant.parse("2026-09-09T08:00:00Z"), ZoneOffset.UTC)
     private val owner = UUID.randomUUID()
+    private val organizationActor = UUID.randomUUID()
     private val memberA = UUID.randomUUID()
     private val memberB = UUID.randomUUID()
     private val scaId = UUID.randomUUID()
@@ -42,7 +47,8 @@ class ApprovalGroupServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = ApprovalGroupService(repository, eligibility, sca, clock)
+        service = ApprovalGroupService(repository, eligibility, sca, authority, clock)
+        coEvery { authority.authorityFor(owner, owner) } returns GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { repository.findByScaSessionId(any()) } returns null
         listOf(memberA, memberB).forEach { member ->
             coEvery { eligibility.eligibilityOf(member) } returns PartyEligibility(member, true, "FULL")
@@ -136,6 +142,37 @@ class ApprovalGroupServiceTest {
     }
 
     @Test
+    fun `organization actor authority is revalidated and the human actor consumes SCA`(): Unit = runBlocking {
+        coEvery { authority.authorityFor(owner, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+        coEvery { sca.getChallenge(scaId) } returns
+            ScaChallengeSnapshot(scaId, organizationActor, "DELEGATION_APPROVAL_GROUP", "PENDING")
+        coEvery { sca.consumeChallenge(scaId, organizationActor, any()) } returns
+            ScaChallengeSnapshot(scaId, organizationActor, "DELEGATION_APPROVAL_GROUP", "COMPLETED")
+        coEvery { repository.create(any(), any()) } answers { firstArg() }
+
+        val created = service.create(createCommand().copy(actorPartyId = organizationActor))
+
+        assertThat(created.ownerPartyId).isEqualTo(owner)
+        coVerify { authority.authorityFor(owner, organizationActor) }
+        coVerify { sca.consumeChallenge(scaId, organizationActor, any()) }
+    }
+
+    @Test
+    fun `revoked organization actor is refused before replay lookup or SCA`(): Unit = runBlocking {
+        coEvery { authority.authorityFor(owner, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+
+        assertThatThrownBy {
+            runBlocking { service.create(createCommand().copy(actorPartyId = organizationActor)) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { repository.findByScaSessionId(any()) }
+        coVerify(exactly = 0) { sca.getChallenge(any()) }
+        coVerify(exactly = 0) { sca.consumeChallenge(any(), any(), any()) }
+    }
+
+    @Test
     fun `ineligible member refuses the change without burning SCA`(): Unit = runBlocking {
         coEvery { eligibility.eligibilityOf(memberB) } returns PartyEligibility(memberB, false, "NONE")
 
@@ -166,6 +203,7 @@ class ApprovalGroupServiceTest {
                 id = current.id,
                 ownerPartyId = owner,
                 callerPartyId = owner,
+                actorPartyId = owner,
                 expectedRevision = 1,
                 name = "Treasury board",
                 members = setOf(memberA),
@@ -185,7 +223,7 @@ class ApprovalGroupServiceTest {
         coEvery { repository.findById(current.id) } returns current
         coEvery { repository.update(any(), any(), any()) } answers { firstArg() }
 
-        val deactivated = service.deactivate(current.id, owner, owner)
+        val deactivated = service.deactivate(current.id, owner, owner, owner)
 
         assertThat(deactivated.active).isFalse()
         assertThat(deactivated.revision).isEqualTo(2)
@@ -206,6 +244,7 @@ class ApprovalGroupServiceTest {
     private fun createCommand() = CreateApprovalGroupCommand(
         ownerPartyId = owner,
         callerPartyId = owner,
+        actorPartyId = owner,
         name = "  Treasury  ",
         members = setOf(memberA, memberB),
         threshold = 2,
