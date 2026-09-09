@@ -9,6 +9,8 @@ import com.openbank.delegation.application.port.`in`.CallerPartyId
 import com.openbank.delegation.application.port.`in`.CreateApprovalGroupCommand
 import com.openbank.delegation.application.port.`in`.ReviseApprovalGroupCommand
 import com.openbank.delegation.application.port.out.ApprovalGroupRepository
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.domain.event.ApprovalGroupChanged
@@ -33,6 +35,7 @@ class ApprovalGroupService(
     private val repository: ApprovalGroupRepository,
     private val eligibilityClient: PartyEligibilityClient,
     private val scaClient: ScaChallengeClient,
+    private val authorityClient: GrantorAuthorityClient,
     private val clock: Clock,
 ) : ApprovalGroupUseCase {
 
@@ -41,10 +44,12 @@ class ApprovalGroupService(
         repository: ApprovalGroupRepository,
         eligibilityClient: PartyEligibilityClient,
         scaClient: ScaChallengeClient,
-    ) : this(repository, eligibilityClient, scaClient, Clock.systemUTC())
+        authorityClient: GrantorAuthorityClient,
+    ) : this(repository, eligibilityClient, scaClient, authorityClient, Clock.systemUTC())
 
     override suspend fun create(command: CreateApprovalGroupCommand): ApprovalGroup {
         requireOwner(command.callerPartyId, command.ownerPartyId)
+        requireManagementAuthority(command.ownerPartyId, command.actorPartyId)
         repository.findByScaSessionId(command.scaSessionId)?.let { existing ->
             return requireMatchingReplay(existing, command)
         }
@@ -61,7 +66,7 @@ class ApprovalGroupService(
         validateMembers(group.members)
         consumeManagementSca(
             command.scaSessionId,
-            command.ownerPartyId,
+            command.actorPartyId,
             ApprovalGroupScaBinding.create(command.ownerPartyId, group.name, group.members, group.threshold),
         )
         return try {
@@ -78,6 +83,7 @@ class ApprovalGroupService(
 
     override suspend fun revise(command: ReviseApprovalGroupCommand): ApprovalGroup {
         requireOwner(command.callerPartyId, command.ownerPartyId)
+        requireManagementAuthority(command.ownerPartyId, command.actorPartyId)
         val current = owned(command.id, command.ownerPartyId)
         if (current.revision != command.expectedRevision) {
             throw com.openbank.delegation.application.port.out.ApprovalGroupConcurrentUpdateException(
@@ -95,7 +101,7 @@ class ApprovalGroupService(
         validateMembers(revised.members)
         consumeManagementSca(
             command.scaSessionId,
-            command.ownerPartyId,
+            command.actorPartyId,
             ApprovalGroupScaBinding.revise(
                 command.ownerPartyId,
                 command.id,
@@ -112,8 +118,14 @@ class ApprovalGroupService(
         )
     }
 
-    override suspend fun deactivate(id: UUID, ownerPartyId: UUID, callerPartyId: CallerPartyId): ApprovalGroup {
+    override suspend fun deactivate(
+        id: UUID,
+        ownerPartyId: UUID,
+        callerPartyId: CallerPartyId,
+        actorPartyId: UUID,
+    ): ApprovalGroup {
         requireOwner(callerPartyId, ownerPartyId)
+        requireManagementAuthority(ownerPartyId, actorPartyId)
         val current = owned(id, ownerPartyId)
         val deactivated = current.deactivate(OffsetDateTime.now(clock))
         return repository.update(
@@ -141,17 +153,17 @@ class ApprovalGroupService(
     }
 
     @Suppress("TooGenericExceptionCaught", "ThrowsCount")
-    private suspend fun consumeManagementSca(sessionId: UUID, ownerPartyId: UUID, reference: String) {
+    private suspend fun consumeManagementSca(sessionId: UUID, actorPartyId: UUID, reference: String) {
         val challenge = try {
             scaClient.getChallenge(sessionId)
         } catch (e: Exception) {
             throw ApprovalGroupScaException("approval-group SCA $sessionId could not be verified", e)
         }
-        if (challenge.partyId != ownerPartyId || challenge.purpose != SCA_PURPOSE) {
-            throw ApprovalGroupScaException("approval-group SCA $sessionId does not match owner or purpose")
+        if (challenge.partyId != actorPartyId || challenge.purpose != SCA_PURPOSE) {
+            throw ApprovalGroupScaException("approval-group SCA $sessionId does not match actor or purpose")
         }
         try {
-            scaClient.consumeChallenge(sessionId, ownerPartyId, reference)
+            scaClient.consumeChallenge(sessionId, actorPartyId, reference)
         } catch (e: Exception) {
             throw ApprovalGroupScaException("approval-group SCA $sessionId could not be consumed", e)
         }
@@ -166,6 +178,18 @@ class ApprovalGroupService(
     private fun requireOwner(callerPartyId: CallerPartyId, ownerPartyId: UUID) {
         if (callerPartyId != ownerPartyId) {
             throw ApprovalGroupForbiddenException("caller may manage only their own approval groups")
+        }
+    }
+
+    private suspend fun requireManagementAuthority(ownerPartyId: UUID, actorPartyId: UUID) {
+        when (authorityClient.authorityFor(ownerPartyId, actorPartyId).verdict) {
+            GrantorAuthorityVerdict.AUTHORIZED -> Unit
+            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
+                "actor $actorPartyId has no active authority for approval-group owner $ownerPartyId",
+            )
+            GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
+                "authority for approval-group owner $ownerPartyId could not be established",
+            )
         }
     }
 
