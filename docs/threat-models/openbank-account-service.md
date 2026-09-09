@@ -636,9 +636,11 @@ The delegation event consumer stores each complete approval-group roster under `
 an identical replay is a no-op and different content for the same identity fails to the configured
 DLQ. Operations will reference one revision and copy its eligible actors into their own immutable
 snapshot, so later membership changes cannot rewrite an in-flight decision. This consumer does not
-activate N-of-M by itself. Kafka remains a seven-day change feed: bootstrap and reconciliation must
-read delegation-service's append-only revision history before N-of-M is enabled. Missing history
-fails closed. Rollout is producer history first, then this projection, then operation enforcement;
+activate N-of-M by itself. Revisions arrive on a dedicated compacted, unbounded-retention topic
+keyed by `groupId:revision`; its separate consumer group prevents a large bootstrap from delaying
+authority-removing grant lifecycle events. Delegation-service's append-only database history remains
+the reconciliation source if Kafka state is lost. Missing history fails closed. Rollout is the
+producer topic and history first, then this projection, then operation enforcement;
 rollback disables enforcement first and leaves both additive history tables intact for evidence.
 
 ## SCA-derived representative identity
