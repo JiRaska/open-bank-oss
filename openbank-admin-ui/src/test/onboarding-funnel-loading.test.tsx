@@ -123,4 +123,36 @@ describe('onboarding funnel loading (issue #8233)', () => {
     expect(screen.queryByRole('group', { name: 'Onboarding stage filters' })).not.toBeInTheDocument()
     expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
+
+  it('does not let an older unfiltered response replace the active stage filter', async () => {
+    const firstRecords = deferred<Response>()
+    const activeRecord = {
+      partyId: 'party-active', legalName: 'Current Result', email: null, partyStatus: 'ACTIVE',
+      kycCaseId: null, kycStatus: null, scaEnrolled: true, deviceCount: 1, funnelStage: 'ACTIVE',
+      blockedReason: null, createdAt: '2026-09-01T08:00:00Z', updatedAt: '2026-09-09T08:00:00Z',
+    }
+    let recordsCalls = 0
+    vi.stubGlobal('fetch', routedFetch({
+      funnel: () => Promise.resolve(response(200, FUNNEL)),
+      records: () => {
+        recordsCalls += 1
+        return recordsCalls === 1
+          ? firstRecords.promise
+          : Promise.resolve(response(200, { items: [activeRecord], total: 1, page: 0, size: 20, stageFilter: 'ACTIVE' }))
+      },
+    }))
+
+    renderPage()
+    const filters = await screen.findByRole('group', { name: 'Onboarding stage filters' })
+    fireEvent.click(within(filters).getByRole('button', { name: /Active/ }))
+    expect(await screen.findByText('Current Result')).toBeVisible()
+
+    await act(async () => {
+      firstRecords.resolve(response(200, RECORDS))
+      await firstRecords.promise
+    })
+
+    expect(screen.getByText('Current Result')).toBeVisible()
+    expect(within(filters).getByRole('button', { name: /Active/ })).toHaveAttribute('aria-pressed', 'true')
+  })
 })

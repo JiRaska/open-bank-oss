@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -12,46 +12,23 @@ import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-re
 import Link from 'next/link'
 import { Drawer, PageHeader } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import {
+  ONBOARDING_STAGES, parseFunnelCounts, parseOnboardingPage,
+  type OnboardingRecordEvidence, type OnboardingRecordPageEvidence,
+} from '@/lib/onboarding/evidenceContract'
 
 const SVC = 'onboarding-service'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface OnboardingRecord {
-  partyId: string
-  legalName: string | null
-  email: string | null
-  partyStatus: string
-  kycCaseId: string | null
-  kycStatus: string | null
-  scaEnrolled: boolean
-  deviceCount: number
-  funnelStage: string
-  blockedReason: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-interface RecordPage {
-  items: OnboardingRecord[]
-  total: number
-  page: number
-  size: number
-  stageFilter?: string
-}
+type OnboardingRecord = OnboardingRecordEvidence
+type RecordPage = OnboardingRecordPageEvidence
 
 type FunnelCounts = Record<string, number>
 
 // ── Stage display config ──────────────────────────────────────────────────────
 
-const STAGES = [
-  'REGISTERED',
-  'KYC_OPEN',
-  'KYC_UNDER_REVIEW',
-  'SCA_PENDING',
-  'ACTIVE',
-  'BLOCKED',
-] as const
+const STAGES = ONBOARDING_STAGES
 
 type Stage = typeof STAGES[number]
 
@@ -104,6 +81,8 @@ export default function OnboardingPage() {
 
   // drawer
   const [selected, setSelected] = useState<OnboardingRecord | null>(null)
+  const countsGeneration = useRef(0)
+  const recordsGeneration = useRef(0)
 
   const stageLabel = useCallback((s: string) =>
     language === 'cs'
@@ -115,32 +94,43 @@ export default function OnboardingPage() {
   // ── Load funnel counts ──────────────────────────────────────────────────────
 
   const loadCounts = useCallback(async () => {
+    const generation = ++countsGeneration.current
     setCountsLoading(true); setCountsUnavail(null)
     try {
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/funnel'), { signal: AbortSignal.timeout(5000) })
+      if (generation !== countsGeneration.current) return
       if (!res.ok) { setCountsUnavail({ kind: await classifyBffFailure(res) }); return }
-      setCounts(await res.json())
+      const next = parseFunnelCounts(await res.json() as unknown)
+      if (generation === countsGeneration.current) setCounts(next)
     } catch {
-      setCountsUnavail({ kind: 'unreachable' })
-    } finally { setCountsLoading(false) }
+      if (generation === countsGeneration.current) setCountsUnavail({ kind: 'unreachable' })
+    } finally {
+      if (generation === countsGeneration.current) setCountsLoading(false)
+    }
   }, [])
 
   // ── Load records list ───────────────────────────────────────────────────────
 
   const loadRecords = useCallback(async (pg: number, stg: Stage | '') => {
+    const generation = ++recordsGeneration.current
     setLoading(true); setListUnavail(null)
     try {
       const query: Record<string, string> = { page: String(pg), size: '20' }
       if (stg) query.stage = stg
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/records', query), { signal: AbortSignal.timeout(5000) })
+      if (generation !== recordsGeneration.current) return
       if (!res.ok) { setListUnavail({ kind: await classifyBffFailure(res) }); setRecords([]); return }
-      const data: RecordPage = await res.json()
-      setRecords(data.items ?? [])
-      setTotal(data.total ?? 0)
+      const data = parseOnboardingPage(await res.json() as unknown, pg)
+      if (generation !== recordsGeneration.current) return
+      setRecords(data.items)
+      setTotal(data.total)
     } catch {
+      if (generation !== recordsGeneration.current) return
       setListUnavail({ kind: 'unreachable' })
       setRecords([])
-    } finally { setLoading(false) }
+    } finally {
+      if (generation === recordsGeneration.current) setLoading(false)
+    }
   }, [])
 
   const refresh = useCallback(() => {
