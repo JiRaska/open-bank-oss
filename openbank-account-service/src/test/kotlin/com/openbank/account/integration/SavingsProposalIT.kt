@@ -93,7 +93,9 @@ class SavingsProposalIT {
         StubScaChallengeClient.party.set(representative)
 
         var response: io.restassured.response.Response? = null
-        for (_ in 0 until 40) {
+        var attempts = 0
+        while (response?.statusCode != 200 && attempts < 40) {
+            attempts++
             response = io.restassured.RestAssured.given()
                 .contentType("application/json")
                 .header("X-Customer-Party-Id", representative.toString())
