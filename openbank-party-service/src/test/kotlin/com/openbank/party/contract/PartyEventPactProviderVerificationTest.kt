@@ -18,7 +18,14 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.MandateAuthority
+import com.openbank.party.domain.model.MandateRole
+import com.openbank.party.domain.model.MandateSource
+import com.openbank.party.domain.model.MandateStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyActor
+import com.openbank.party.domain.model.PartyEvents
+import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
@@ -233,6 +240,52 @@ class PartyEventPactProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    @State("a sole party mandate has been granted")
+    fun solePartyMandateHasBeenGranted() {
+        // Message produced deterministically below; no database state is required.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_GRANTED event")
+    fun producePartyMandateGrantedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateGranted(
+            pactMandate(MandateStatus.ACTIVE),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    @State("a party mandate has been revoked")
+    fun partyMandateHasBeenRevoked() {
+        // Revocation is the negative authorization fact: after consumption access crosses 403.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_REVOKED event")
+    fun producePartyMandateRevokedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateRevoked(
+            pactMandate(MandateStatus.REVOKED),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    private fun pactMandate(status: MandateStatus) = PartyMandate(
+        id = UUID.fromString("e1e1e1e1-f2f2-4a4a-8b8b-c1c1c1c1c1c1"),
+        principalPartyId = KYB_MANDATE_PRINCIPAL_ID,
+        agentPartyId = KYB_MANDATE_AGENT_ID,
+        role = MandateRole.LEGAL_REPRESENTATIVE,
+        authority = MandateAuthority.SOLE,
+        requiredSignatures = 1,
+        source = MandateSource.REGISTRY,
+        status = status,
+        evidenceRef = "pact:mandate",
+        validFrom = Instant.EPOCH,
+        validTo = null,
+        revokedAt = if (status == MandateStatus.REVOKED) Instant.EPOCH else null,
+        revokeReason = if (status == MandateStatus.REVOKED) "pact revocation" else null,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+    )
 
     @State("a party has been erased")
     fun partyHasBeenErased() {
