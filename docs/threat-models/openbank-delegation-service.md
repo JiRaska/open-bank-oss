@@ -200,11 +200,13 @@ gap closes only with a consumer pact or a run against a deployed stack.
 Every create, revise and deactivate now appends the full roster revision in the same database
 transaction as the mutable current row and transactional outbox message. The current table remains
 the fast management view; `delegation_approval_group_revisions` is the authoritative historical
-source for audit, bootstrap and disaster recovery after the seven-day Kafka feed expires. Rows are
+source for audit and reconciliation. Product services bootstrap from the dedicated compacted
+`openbank.delegation.approval-group-revisions` stream, keyed by `groupId:revision`, rather than
+calling delegation-service synchronously on an authorization path. Rows are
 immutable and uniquely keyed by `(group_id, revision)`, while a deterministic primary key makes a
 duplicate write fail rather than create two histories. A later internal reconciliation endpoint
-must expose only authenticated service-to-service reads and page by a stable cursor; N-of-M remains
-off until that path and consumer health are proven. Rollback keeps the append-only table because
+can repopulate that stream under an audited recovery procedure; N-of-M remains off until consumer
+health and operation snapshotting are proven. Rollback keeps the append-only table because
 dropping it would erase evidence even though no existing authorization path depends on it.
 
 # Client draft preview
