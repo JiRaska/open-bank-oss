@@ -4,7 +4,7 @@
 
 'use client'
 import { useState } from 'react'
-import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, AlertOctagon } from 'lucide-react'
+import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, UserRoundSearch, AlertOctagon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
@@ -13,16 +13,7 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
-
-interface AmlCase {
-  id: string;
-  customerName: string;
-  customerType: string;
-  riskLevel: string;
-  status: string;
-  score: number;
-  timestamp: string;
-}
+import { parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
 
 export default function AmlPage() {
   const { t, language } = useLanguage()
@@ -33,20 +24,23 @@ export default function AmlPage() {
     svcUrl('aml-service', '/api/v1/aml/cases'),
     { select: (raw) => {
       setLastSuccessfulAt(new Date())
-      return Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])
+      return parseAmlCases(raw)
     } },
   )
   const cases = data ?? []
   const hasSnapshot = data !== null
   const showingRetainedSnapshot = unavailable !== null && hasSnapshot
   const filtered = cases.filter(c =>
-    c.customerName?.toLowerCase().includes(search.toLowerCase()) ||
-    c.riskLevel?.toLowerCase().includes(search.toLowerCase()) ||
-    c.status?.toLowerCase().includes(search.toLowerCase())
+    c.customerReference.toLowerCase().includes(search.toLowerCase()) ||
+    c.partyId.toLowerCase().includes(search.toLowerCase()) ||
+    c.alertCode.toLowerCase().includes(search.toLowerCase()) ||
+    c.screeningType.toLowerCase().includes(search.toLowerCase()) ||
+    c.riskLevel.toLowerCase().includes(search.toLowerCase()) ||
+    c.status.toLowerCase().includes(search.toLowerCase())
   )
 
   const highRisk = cases.filter(c => c.riskLevel === 'HIGH' || c.riskLevel === 'CRITICAL')
-  const pending = cases.filter(c => c.status === 'PENDING_REVIEW')
+  const pending = cases.filter(c => c.status === 'OPEN' || c.status === 'UNDER_REVIEW')
   const escalated = cases.filter(c => c.status === 'ESCALATED')
 
   return (
@@ -69,9 +63,6 @@ export default function AmlPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <span role="status" style={{ fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '280px', textAlign: 'right' }}>
-              {t('Automatické AML skenování není v tomto prostředí nakonfigurováno.', 'Automated AML scanning is not configured in this environment.')}
-            </span>
             <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit AML případy', 'Refresh AML cases')} className="btn btn-secondary btn-sm">
               <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
             </button>
@@ -145,12 +136,12 @@ export default function AmlPage() {
               lang={language}
               detail={search
                 ? t('Žádný případ neodpovídá zadanému filtru. Zkuste upravit hledaný výraz.', 'No case matches the filter. Try adjusting the search term.')
-                : t('Služba běží, ale zatím neeviduje žádné AML případy. Automatické skenování není v tomto prostředí nakonfigurováno.', 'Service is up but no AML cases recorded yet. Automated AML scanning is not configured in this environment.')}
+                : t('Služba běží, ale zadaný výběr zatím neobsahuje žádné AML případy.', 'The service is running, but the current result set contains no AML cases.')}
             />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {[t('ID případu', 'Case ID'), t('Klient', 'Customer'), t('Typ', 'Type'), t('Riziko', 'Risk'), t('Skóre', 'Score'), t('Stav', 'Status'), t('Aktualizováno', 'Updated')].map(h => (
+                {[t('Případ / klient', 'Case / customer'), t('Screening', 'Screening'), t('Riziko', 'Risk'), t('Důvod alertu', 'Alert evidence'), t('Stav', 'Status'), t('Vlastník', 'Owner'), t('Aktualizováno', 'Updated')].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
@@ -159,29 +150,27 @@ export default function AmlPage() {
                   <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                     onMouseLeave={e => e.currentTarget.style.background = ''}>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
-                      #{c.id || '---'}
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}><UserRoundSearch size={12} aria-hidden="true" />{c.customerReference}</div>
+                      <div style={{ marginTop: 3, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>#{c.id}</div>
+                      <div style={{ marginTop: 2, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{t('Party', 'Party')}: {c.partyId}</div>
                     </td>
-                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <User size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />{c.customerName}
-                    </td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.customerType}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.screeningType.replaceAll('_', ' ')}</td>
                     <td style={{ padding: '12px 16px' }}>
                       <StatusBadge status={c.riskLevel} />
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: 'var(--surface-4)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${c.score ?? 0}%`, borderRadius: '2px',
-                            background: (c.score ?? 0) > 80 ? 'var(--danger)' : (c.score ?? 0) > 50 ? 'var(--warning)' : 'var(--success)' }} />
-                        </div>
-                        <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', minWidth: '30px' }}>{c.score ?? 0}</span>
-                      </div>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', maxWidth: 260 }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-primary)' }}>{c.alertCode}</div>
+                      {c.alertDetail && <div style={{ marginTop: 3, color: 'var(--text-secondary)' }}>{c.alertDetail}</div>}
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       <StatusBadge status={c.status} label={c.status.replace('_', ' ')} />
                     </td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.timestamp ? new Date(c.timestamp).toLocaleString(numberLocale) : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {c.assignedAnalyst ?? t('Nepřiřazeno', 'Unassigned')}
+                      {c.decidedBy && <div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}>{t('Rozhodl/a', 'Decided by')}: {c.decidedBy}</div>}
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{new Date(c.updatedAt).toLocaleString(numberLocale)}</td>
                   </tr>
                 )
               })}</tbody>
