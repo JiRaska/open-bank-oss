@@ -16,7 +16,7 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { BADGE_CLASS, PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import { BADGE_CLASS, Drawer, PageHeader, StatusBadge, statusTone } from '@/components/ui'
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   SAVINGS:      <Banknote size={13} />,
@@ -130,7 +130,13 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
   ].filter(tab => tab.show)
 
   return (
-    <div style={{ position: 'fixed', top: 0, right: 0, width: '520px', height: '100vh', background: 'var(--surface-1)', borderLeft: '1px solid var(--border)', zIndex: 900, display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 32px rgba(0,0,0,0.18)', animation: 'slideInRight 0.2s ease-out' }}>
+    <Drawer
+      title={t(`Detail produktu ${product.name}`, `Product details for ${product.name}`)}
+      description={t('Konfigurace produktu, sazby, poplatky a řízený životní cyklus.', 'Product configuration, rates, fees and governed lifecycle.')}
+      onClose={onClose}
+      width={520}
+    >
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -419,6 +425,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
         )}
       </div>
     </div>
+    </Drawer>
   )
 }
 
@@ -675,6 +682,14 @@ export default function ProductCatalogPage() {
                 {!loading && filtered.map(p => (
                   <tr key={p.id}
                     onClick={() => setSelectedProduct(selectedProduct?.id === p.id ? null : p)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedProduct(selectedProduct?.id === p.id ? null : p)
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={t(`Otevřít detail produktu ${p.name}`, `Open product details for ${p.name}`)}
                     style={{ cursor: 'pointer', background: selectedProduct?.id === p.id ? 'var(--accent)0d' : undefined, borderLeft: selectedProduct?.id === p.id ? '3px solid var(--accent)' : '3px solid transparent' }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px', color: 'var(--text-primary)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
