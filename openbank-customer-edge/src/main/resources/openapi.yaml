@@ -3,11 +3,8 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  # 1.53.1 -> 1.54.0 (#9044): additive — optional termsVersionShown on OpenTermDepositRequest
-  # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
-  # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
-  # on POST /term-deposits.
-  version: 1.54.0
+  # 1.54.0 -> 1.55.0: additive client-managed approval-group routes (ADR-0284 D3).
+  version: 1.55.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3395,6 +3392,78 @@ paths:
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
 
+  /delegations/approval-groups/sca-reference:
+    post:
+      tags: [Delegation]
+      summary: Calculate the canonical reference that a management SCA must sign
+      operationId: calculateApprovalGroupScaReference
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
+      responses:
+        '200': {description: Pass reference as dynamicLinkingData.reference when initiating SCA}
+        '400': {description: Invalid create/revise shape}
+
+  /delegations/approval-groups:
+    get:
+      tags: [Delegation]
+      summary: List approval groups for the currently selected profile
+      operationId: listApprovalGroups
+      security: [{ customerOidc: [delegations:read] }]
+      responses:
+        '200': {description: Versioned groups, including inactive history}
+    post:
+      tags: [Delegation]
+      summary: Create an SCA-bound approval group
+      operationId: createApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '201': {description: Approval group created}
+        '400': {description: Invalid roster or SCA}
+
+  /delegations/approval-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Delegation]
+      summary: Get an approval group owned by the selected profile
+      operationId: getApprovalGroup
+      security: [{ customerOidc: [delegations:read] }]
+      responses:
+        '200': {description: Approval group}
+        '404': {description: Missing or belongs to another profile}
+    put:
+      tags: [Delegation]
+      summary: Replace the roster under optimistic revision and fresh SCA
+      operationId: reviseApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '200': {description: Approval group revised}
+        '409': {description: expectedRevision is stale}
+    delete:
+      tags: [Delegation]
+      summary: Deactivate the group for future operation snapshots
+      operationId: deactivateApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      responses:
+        '200': {description: Approval group deactivated}
+
   /profiles:
     get:
       tags: [Profiles]
@@ -3777,6 +3846,38 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    ApprovalGroupScaReferenceRequest:
+      type: object
+      required: [name, members, threshold]
+      properties:
+        groupId: {type: string, format: uuid, description: Present only for revision}
+        expectedRevision: {type: integer, format: int64, minimum: 1, description: Required with groupId}
+        name: {type: string, minLength: 1, maxLength: 120}
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        threshold: {type: integer, minimum: 1}
+    ApprovalGroupWriteRequest:
+      type: object
+      required: [name, members, threshold, scaSessionId]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        threshold: {type: integer, minimum: 1}
+        scaSessionId: {type: string, format: uuid}
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required on PUT to prevent overwriting a newer roster.
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file

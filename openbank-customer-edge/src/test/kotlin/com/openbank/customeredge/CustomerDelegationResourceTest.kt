@@ -65,6 +65,54 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `approval group management is scoped to the selected token-derived profile`() {
+        val upstream = mockk<UpstreamClient>()
+        val party = slot<String>()
+        val url = slot<String>()
+        every { upstream.post(capture(url), capture(party), any(), any()) } returns Response.status(201).build()
+
+        val response = resource(upstream).createApprovalGroup("""{"name":"Treasury"}""")
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/approval-groups")
+        assertThat(party.captured).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `approval group SCA reference is calculated for the selected profile`() {
+        val upstream = mockk<UpstreamClient>()
+        val party = slot<String>()
+        every { upstream.post(any(), capture(party), any(), any()) } returns Response.ok().build()
+
+        resource(upstream).approvalGroupScaReference(
+            """{"name":"Treasury","members":["$stranger"],"threshold":1}""",
+        )
+
+        assertThat(party.captured).isEqualTo(caller.toString())
+        verify {
+            upstream.post(
+                "$svc/api/v1/delegations/approval-groups/sca-reference",
+                caller.toString(),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `approval group revision cannot choose an owner in path or query`() {
+        val upstream = mockk<UpstreamClient>()
+        val party = slot<String>()
+        val groupId = UUID.randomUUID()
+        every { upstream.put(any(), capture(party), any()) } returns Response.ok().build()
+
+        resource(upstream).reviseApprovalGroup(groupId, """{"expectedRevision":1}""")
+
+        assertThat(party.captured).isEqualTo(caller.toString())
+        verify { upstream.put("$svc/api/v1/delegations/approval-groups/$groupId", caller.toString(), any()) }
+    }
+
+    @Test
     fun `every read forwards the token party as the upstream party header`() {
         val upstream = mockk<UpstreamClient>()
         val party = slot<String>()
