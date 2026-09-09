@@ -11,6 +11,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -79,7 +80,7 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
-    fun `approval group SCA reference is calculated for the selected profile`() {
+    fun `approval group SCA reference is calculated for the selected profile`(): Unit = runBlocking {
         val upstream = mockk<UpstreamClient>()
         val party = slot<String>()
         every { upstream.post(any(), capture(party), any(), any()) } returns Response.ok().build()
