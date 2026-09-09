@@ -58,7 +58,7 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 | **Tampering — disclosure source substitution or retry race** | Snapshot issuance requires the command's expected party to equal the immutable source `partyRef`, status `SIGNED`, media type PDF, and source bytes to match the persisted SHA-256. `request_id` is unique; the blob key includes deterministic request identity plus content digest, and the service validates the row returned after `ON CONFLICT`, so two conflicting requests cannot overwrite or substitute the winner. A database trigger rejects UPDATE/DELETE of evidence rows. |
 | **Tampering — SSTI / XSS via template + data** | The phase-1 renderer is logic-less `{{token}}` substitution (regex only, no engine), and substituted values are HTML-escaped. Production Handlebars/Qute adapter (ADR-0162) must stay logic-less and sandboxed behind the same port. |
 | **Repudiation** | Lifecycle transitions emit domain events to the outbox → audit pipeline; phase-2 PAdES sealing makes the signed artifact independently verifiable (non-repudiation). Ceremony records each signer's decision + timestamp. |
-| **Information disclosure** | Content is `restricted`-class; access is role-gated; no PII in logs (JSON console, no body logging). Content bytes are served only via an authenticated `/{id}/content` endpoint. Phase-2 pre-signed URLs must be short-lived and scoped. |
+| **Information disclosure** | Content is `restricted`-class; access is role- and OPA-gated; no PII in logs (JSON console, no body logging). Ordinary content remains behind authenticated `/{id}/content`. Disclosure redemption has a separate snapshot-only read: it requires the caller's expected SHA-256, answers 404 for missing/malformed/mismatched values, returns no storage key, and sets `private, no-store`. It cannot resolve mutable source-document bytes. |
 | **Disclosure command forgery** | Only delegation-service's KafkaUser may write `openbank.delegation.events`; document-service has Read/Describe and a dedicated consumer group. Malformed commands are ignored/rejected with bounded reason codes and no source detail. No snapshot-creation REST endpoint exists behind the fleet-shared OIDC client. |
 | **Denial of service** | Rendering is bounded and event-driven, off the money path; platform rate-limit (`openbank.rate-limit`, 200 concurrent). The PDF/seal sidecars (phase-2) need their own timeouts + bulkheads at the port. |
 | **Elevation / cluster pivot** | Restricted PSS, non-root, OPA authz (`@Authorize`, advisory→enforce, ADR-0034); egress NetworkPolicy allowlists only Postgres, Kafka, OIDC, OPA (and, in phase-2, the render sidecar + KMS/HSM). |
@@ -76,6 +76,12 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   retention/erasure job — a tracked follow-up.
 
 ## Change log
+
+- **2026-09-09** — Added the authenticated snapshot-content read required by delegation redemption.
+  The boundary accepts only an immutable snapshot id plus its expected SHA-256, conflates mismatch
+  with absence, verifies stored bytes again through the snapshot use case, and never returns a
+  source-document or object-store locator. It is deliberately not public; delegation-service owns
+  recipient proof, expiry, revocation and atomic view consumption.
 
 - **2026-09-09** — External disclosure snapshot boundary added (ADR-0232 D7): immutable metadata,
   digest verification, idempotent command handling, service-specific Kafka authentication, explicit
