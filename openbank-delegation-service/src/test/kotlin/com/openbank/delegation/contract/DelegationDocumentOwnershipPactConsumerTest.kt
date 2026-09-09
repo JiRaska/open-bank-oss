@@ -70,6 +70,17 @@ class DelegationDocumentOwnershipPactConsumerTest {
         .body(PDF)
         .toPact()
 
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
+    fun getDisclosureSnapshotContentWithoutIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an immutable disclosure snapshot exists but caller identity is missing")
+        .uponReceiving("GET disclosure snapshot content without service identity")
+        .path("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
+        .method("GET")
+        .headers("X-Expected-SHA256", SNAPSHOT_SHA256)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "getDocumentOwnerPact")
     fun `metadata exposes only the owner binding required by the gate`(mockServer: MockServer) {
@@ -98,5 +109,16 @@ class DelegationDocumentOwnershipPactConsumerTest {
             .extract().asByteArray()
 
         assertThat(bytes).isEqualTo(PDF.toByteArray())
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "getDisclosureSnapshotContentWithoutIdentityPact")
+    fun `content read rejects a missing service identity with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .header("X-Expected-SHA256", SNAPSHOT_SHA256)
+            .get("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
+            .then()
+            .statusCode(401)
     }
 }

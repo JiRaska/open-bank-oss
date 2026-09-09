@@ -26,6 +26,24 @@
       }
     },
     {
+      "description": "GET disclosure snapshot content without service identity",
+      "providerStates": [
+        {
+          "name": "an immutable disclosure snapshot exists but caller identity is missing"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Expected-SHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "method": "GET",
+        "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "GET exact disclosure snapshot content with its pinned digest",
       "providerStates": [
         {
