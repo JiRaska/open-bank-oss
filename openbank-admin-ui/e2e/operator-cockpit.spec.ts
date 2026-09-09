@@ -123,6 +123,12 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
 
   await page.goto('/regulatory')
   const finrep = page.locator('.card').filter({ hasText: 'CNB — Finanční výkazy (FINREP)' })
+  const disclosure = finrep.locator('button[aria-controls="regulatory-report-cnb-finrep"]')
+  await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
+  await disclosure.focus()
+  await page.keyboard.press('Enter')
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  await expect(finrep.getByText(/Datový zdroj:|Data source:/)).toBeVisible()
   await finrep.getByRole('button', { name: /Náhled exportu|Preview export/ }).click()
   await expect(page.getByText('Celková aktiva')).toBeVisible()
   await expect(page.getByTestId('export-readiness')).toContainText(/Připraveno pro interní export|Ready for internal export/)
