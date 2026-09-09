@@ -22,3 +22,33 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.documents.disclosure-snapshot.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+# Poison/transient records from the disclosure command consumer are parked rather than stopping
+# the channel. Explicit name prevents collision with another service using the same channel name.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.document.delegation-disclosure-commands-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete

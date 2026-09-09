@@ -208,7 +208,21 @@ mp:
         topic: openbank.documents.document.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      disclosure-snapshot-events-out:
+        connector: smallrye-kafka
+        client.id: document-disclosure-${quarkus.uuid}
+        topic: openbank.documents.disclosure-snapshot.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      delegation-disclosure-commands-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.document.delegation-disclosure-commands-in
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        group:
+          id: openbank-document-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # ADR-0162 D7: onboarding wiring — consumes account-service's own AccountCreated event
       # (same topic balance-service's BalanceInitConsumer already consumes) so document-service
       # stays off the synchronous account-opening path (ADR-0086) entirely.

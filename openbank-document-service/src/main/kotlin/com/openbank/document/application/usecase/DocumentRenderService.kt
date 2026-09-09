@@ -100,6 +100,6 @@ class DocumentRenderService(
     }
 
     companion object {
-        const val EVENT_DOCUMENT_GENERATED = "document.generated.v1"
+        const val EVENT_DOCUMENT_GENERATED = DocumentGenerated.EVENT_TYPE
     }
 }

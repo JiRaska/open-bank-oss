@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.dev/schemas/openbank-document-service/disclosure-snapshot-event.schema.json",
+  "title": "openbank.documents.disclosure-snapshot.event",
+  "description": "ADR-0232 D7 result of an mTLS-authenticated DisclosureSnapshotRequested command. The body discriminator is mandatory because this dedicated topic is consumed directly rather than through the document outbox header router.",
+  "oneOf": [
+    {
+      "title": "DisclosureSnapshotReady",
+      "type": "object",
+      "properties": {
+        "eventType": { "const": "DisclosureSnapshotReady" },
+        "requestId": { "type": "string", "format": "uuid" },
+        "snapshotId": { "type": "string", "format": "uuid" },
+        "sourceDocumentId": { "type": "string", "format": "uuid" },
+        "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sizeBytes": { "type": "integer", "minimum": 1 },
+        "occurredAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventType", "requestId", "snapshotId", "sourceDocumentId", "sourceSha256", "sha256", "sizeBytes", "occurredAt"],
+      "additionalProperties": false
+    },
+    {
+      "title": "DisclosureSnapshotRejected",
+      "type": "object",
+      "properties": {
+        "eventType": { "const": "DisclosureSnapshotRejected" },
+        "requestId": { "type": ["string", "null"], "format": "uuid" },
+        "reason": { "enum": ["INVALID_COMMAND", "SOURCE_NOT_FOUND", "SOURCE_NOT_ELIGIBLE"] }
+      },
+      "required": ["eventType", "requestId", "reason"],
+      "additionalProperties": false
+    }
+  ]
+}

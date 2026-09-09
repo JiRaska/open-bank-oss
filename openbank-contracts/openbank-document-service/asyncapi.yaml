@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Document Service — disclosure snapshot events
+  version: 1.0.0
+  description: |
+    Results of ADR-0232 D7 immutable disclosure-snapshot commands. The dedicated topic avoids
+    mixing body-discriminated events with the legacy document topic's ce-type header routing.
+    Schema evolution is BACKWARD-compatible; consumers must ignore unknown optional fields.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: Strimzi mTLS listener; per-service KafkaUser ACLs apply.
+channels:
+  documentEvents:
+    address: openbank.documents.document.event
+    description: |
+      Legacy document lifecycle stream, seven-day delete retention. Event type is carried in the
+      ce-type Kafka header; the payload schema records both supported branches. Aggregate id is the
+      partition key, preserving order within one document or ceremony only.
+    messages:
+      generated:
+        $ref: '#/components/messages/DocumentGenerated'
+      ceremonyCompleted:
+        $ref: '#/components/messages/SignatureCeremonyCompleted'
+  disclosureSnapshotEvents:
+    address: openbank.documents.disclosure-snapshot.event
+    description: |
+      Three partitions, RF 1 in sandbox, delete retention for seven days. This is a result stream,
+      not the source of truth: document-service's immutable snapshot row is authoritative.
+      Partitioning key is requestId so every result for one issuance request remains ordered when
+      the topic scales; no consumer may depend on ordering across request ids.
+    messages:
+      ready:
+        $ref: '#/components/messages/DisclosureSnapshotReady'
+      rejected:
+        $ref: '#/components/messages/DisclosureSnapshotRejected'
+operations:
+  publishDocumentLifecycle:
+    action: send
+    channel:
+      $ref: '#/channels/documentEvents'
+    summary: document-service publishes transactional-outbox lifecycle events.
+    messages:
+      - $ref: '#/channels/documentEvents/messages/generated'
+      - $ref: '#/channels/documentEvents/messages/ceremonyCompleted'
+  publishDisclosureSnapshotResult:
+    action: send
+    channel:
+      $ref: '#/channels/disclosureSnapshotEvents'
+    summary: document-service publishes a ready or rejected result.
+    messages:
+      - $ref: '#/channels/disclosureSnapshotEvents/messages/ready'
+      - $ref: '#/channels/disclosureSnapshotEvents/messages/rejected'
+  consumeDisclosureSnapshotResult:
+    action: receive
+    channel:
+      $ref: '#/channels/disclosureSnapshotEvents'
+    summary: delegation-service consumes the result to advance its disclosure lifecycle.
+    messages:
+      - $ref: '#/channels/disclosureSnapshotEvents/messages/ready'
+      - $ref: '#/channels/disclosureSnapshotEvents/messages/rejected'
+components:
+  messages:
+    DocumentGenerated:
+      name: document.generated.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DocumentGeneratedPayload'
+    SignatureCeremonyCompleted:
+      name: signature-ceremony.completed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SignatureCeremonyCompletedPayload'
+    DisclosureSnapshotReady:
+      name: DisclosureSnapshotReady
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DisclosureSnapshotReadyPayload'
+    DisclosureSnapshotRejected:
+      name: DisclosureSnapshotRejected
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DisclosureSnapshotRejectedPayload'
+  schemas:
+    DocumentGeneratedPayload:
+      type: object
+      required: [documentId, templateCode, templateVersion, sha256, occurredAt, sourceService]
+      properties:
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string }
+        templateVersion: { type: string }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, const: document-service }
+    SignatureCeremonyCompletedPayload:
+      type: object
+      required: [ceremonyId, documentId, occurredAt, sourceService]
+      properties:
+        ceremonyId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, const: document-service }
+    DisclosureSnapshotReadyPayload:
+      type: object
+      required: [eventType, requestId, snapshotId, sourceDocumentId, sourceSha256, sha256, sizeBytes, occurredAt]
+      properties:
+        eventType: { type: string, const: DisclosureSnapshotReady }
+        requestId: { type: string, format: uuid }
+        snapshotId: { type: string, format: uuid }
+        sourceDocumentId: { type: string, format: uuid }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        sizeBytes: { type: integer, minimum: 1 }
+        occurredAt: { type: string, format: date-time }
+    DisclosureSnapshotRejectedPayload:
+      type: object
+      required: [eventType, requestId, reason]
+      properties:
+        eventType: { type: string, const: DisclosureSnapshotRejected }
+        requestId: { type: [string, 'null'], format: uuid }
+        reason: { type: string, enum: [INVALID_COMMAND, SOURCE_NOT_FOUND, SOURCE_NOT_ELIGIBLE] }

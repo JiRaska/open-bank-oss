@@ -4,6 +4,7 @@
 
 package com.openbank.document.application.port.`in`
 
+import com.openbank.document.domain.model.DisclosureSnapshot
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.DocumentTemplate
@@ -53,6 +54,19 @@ data class OpenCeremonyCommand(
 )
 
 data class IssueOnboardingDocumentCommand(val accountId: UUID, val partyRef: String, val productId: UUID)
+
+data class IssueDisclosureSnapshotCommand(
+    val requestId: UUID,
+    val sourceDocumentId: UUID,
+    val expectedPartyRef: String,
+)
+
+interface DisclosureSnapshotUseCase {
+    /** Null means the source document or its stored bytes do not exist. */
+    suspend fun issue(cmd: IssueDisclosureSnapshotCommand): DisclosureSnapshot?
+    suspend fun getMetadata(id: UUID): DisclosureSnapshot?
+    suspend fun getContent(id: UUID): ByteArray?
+}
 
 /** Authoring and publication of document templates. */
 interface DocumentTemplateUseCase {
