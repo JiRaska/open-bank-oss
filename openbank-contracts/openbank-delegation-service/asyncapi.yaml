@@ -84,6 +84,14 @@ channels:
         $ref: '#/components/messages/SpendConfirmed'
       SpendReleased:
         $ref: '#/components/messages/SpendReleased'
+  approvalGroupRevisions:
+    address: openbank.delegation.approval-group-revisions
+    title: Immutable approval-group revision bootstrap stream
+    description: |
+      Compacted, unbounded-retention stream keyed by `groupId:revision`. Every immutable revision
+      therefore has its own compaction key and remains replayable after the lifecycle feed's
+      seven-day retention. Six partitions scale by group id without requiring cross-group order.
+    messages:
       ApprovalGroupCreated:
         $ref: '#/components/messages/ApprovalGroupCreated'
       ApprovalGroupRevised:
@@ -130,9 +138,18 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/SpendReserved'
       - $ref: '#/channels/delegationEvents/messages/SpendConfirmed'
       - $ref: '#/channels/delegationEvents/messages/SpendReleased'
-      - $ref: '#/channels/delegationEvents/messages/ApprovalGroupCreated'
-      - $ref: '#/channels/delegationEvents/messages/ApprovalGroupRevised'
-      - $ref: '#/channels/delegationEvents/messages/ApprovalGroupDeactivated'
+  publishApprovalGroupRevisions:
+    action: send
+    title: Publish immutable approval-group revisions
+    channel:
+      $ref: '#/channels/approvalGroupRevisions'
+    description: |
+      Produced from the same transactional outbox write as the append-only database history.
+      Consumers rebuild local operation-policy projections without a synchronous service call.
+    messages:
+      - $ref: '#/channels/approvalGroupRevisions/messages/ApprovalGroupCreated'
+      - $ref: '#/channels/approvalGroupRevisions/messages/ApprovalGroupRevised'
+      - $ref: '#/channels/approvalGroupRevisions/messages/ApprovalGroupDeactivated'
   publishSpendReservationState:
     action: send
     title: Publish delegated domestic-payment reservation snapshots
