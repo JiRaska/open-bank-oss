@@ -67,7 +67,7 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
         name = "savings_withdrawal_eligible_approvers",
         joinColumns = [JoinColumn(name = "proposal_id")],
     )
-    @Column(name = "party_id", nullable = false, updatable = false)
+    @Column(name = "party_id", nullable = false)
     var eligibleApproverIds: MutableSet<UUID> = linkedSetOf()
 
     @Column(name = "decided_by")
