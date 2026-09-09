@@ -10,6 +10,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -79,7 +80,9 @@ class CustomerDelegationResourceTest {
     fun `offer fills in the grantor when the client omits it`() {
         val upstream = mockk<UpstreamClient>()
         val body = slot<String>()
-        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(any(), any(), capture(body), any(), capture(headers)) } returns
+            Response.status(201).build()
 
         val response = resource(upstream).offer("""{"granteePartyId":"$stranger","resourceType":"ACCOUNT"}""")
 
@@ -88,6 +91,34 @@ class CustomerDelegationResourceTest {
         // The rest of the body is delegation-service's business and must survive untouched.
         assertThat(body.captured).contains("\"granteePartyId\":\"$stranger\"")
         assertThat(body.captured).contains("\"resourceType\":\"ACCOUNT\"")
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `organization offer preserves human actor separately from entity principal`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val principal = slot<String>()
+        val body = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(any(), capture(principal), capture(body), any(), capture(headers)) } returns
+            Response.status(201).build()
+
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk {
+                every { resolve(caller, entity.toString()) } returns entity
+            }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        val response = resource.offer("""{"granteePartyId":"$stranger"}""")
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(principal.captured).isEqualTo(entity.toString())
+        assertThat(body.captured).contains("\"grantorPartyId\":\"$entity\"")
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
     }
 
     @Test
@@ -95,7 +126,7 @@ class CustomerDelegationResourceTest {
         val upstream = mockk<UpstreamClient>()
         val url = slot<String>()
         val body = slot<String>()
-        every { upstream.post(capture(url), any(), capture(body), any()) } returns
+        every { upstream.post(capture(url), any(), capture(body), any(), any()) } returns
             Response.ok("{\"valid\":true}").build()
 
         val response = resource(upstream).preview(
@@ -118,7 +149,7 @@ class CustomerDelegationResourceTest {
         )
 
         assertThat(wrongGrantor.status).isEqualTo(403)
-        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
     }
 
     /**
@@ -131,7 +162,7 @@ class CustomerDelegationResourceTest {
     fun `preview forwards a cumulative ceiling to the authority that judges it`() {
         val upstream = mockk<UpstreamClient>()
         val body = slot<String>()
-        every { upstream.post(any(), any(), capture(body), any()) } returns Response.ok().build()
+        every { upstream.post(any(), any(), capture(body), any(), any()) } returns Response.ok().build()
 
         val response = resource(upstream).preview(
             """{"granteePartyId":"$stranger","capabilities":["ACCOUNT_INITIATE_PAYMENT"],""" +
@@ -150,13 +181,13 @@ class CustomerDelegationResourceTest {
 
         assertThat(response.status).isEqualTo(403)
         // Silently rewriting would issue a grant the user never asked for — nothing may reach upstream.
-        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `offer accepts a body that names the caller as grantor`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.post(any(), any(), any(), any()) } returns Response.status(201).build()
+        every { upstream.post(any(), any(), any(), any(), any()) } returns Response.status(201).build()
 
         val response = resource(upstream).offer("""{"grantorPartyId":"$caller","granteePartyId":"$stranger"}""")
 
@@ -178,7 +209,7 @@ class CustomerDelegationResourceTest {
     fun `offer forwards dailyLimit and monthlyLimit verbatim`() {
         val upstream = mockk<UpstreamClient>()
         val body = slot<String>()
-        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+        every { upstream.post(any(), any(), capture(body), any(), any()) } returns Response.status(201).build()
 
         val response = resource(upstream).offer(
             """{"granteePartyId":"$stranger","capabilities":["ACCOUNT_INITIATE_PAYMENT"],""" +
@@ -202,7 +233,7 @@ class CustomerDelegationResourceTest {
     fun `offer passes through a null ceiling and a perTransactionLimit`() {
         val upstream = mockk<UpstreamClient>()
         val body = slot<String>()
-        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+        every { upstream.post(any(), any(), capture(body), any(), any()) } returns Response.status(201).build()
 
         val response = resource(upstream).offer(
             """{"granteePartyId":"$stranger","dailyLimit":null,"monthlyLimit":null,""" +
@@ -219,7 +250,7 @@ class CustomerDelegationResourceTest {
 
         assertThat(resource(upstream).offer("[]").status).isEqualTo(400)
         assertThat(resource(upstream).offer("not json").status).isEqualTo(400)
-        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
     }
 
     @Test
