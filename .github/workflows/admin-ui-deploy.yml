@@ -40,6 +40,8 @@ on:
   # daily run is its recovery path when GitHub suppresses or delays an event. Both
   # use the same signed image and GitOps-PR path as source-triggered deploys.
   workflow_run:
+    # Reject PR-branch completions before allocating a workflow run (Refs #9031).
+    branches: [main]
     # Services CI produces fleet envelopes; CI produces the Admin UI envelope.  Subscribe
     # to both: refreshing after Services CI alone can snapshot a stale Admin UI verdict
     # before the same main commit's UI test artifact is available.
@@ -561,8 +563,8 @@ jobs:
           key: test-run-history-${{ github.run_id }}
 
       - name: Stage pitest mutation results from latest completed weekly run
-        # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
-        # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
+        # pitest.yml uploads one artifact per governed lane (30-day retention).
+        # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Do not filter to success: a failed/latest attempt must not disappear behind an
         # older green run. Best-effort absence stays visible as missing evidence.
@@ -594,13 +596,19 @@ jobs:
             [ -n "${art_id}" ] || continue
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
-              # The artifact is named pitest-<service>; its zip top-level is the pitest
+              # Each artifact zip's top-level is the pitest
               # report contents (mutations.xml, index.html, com.openbank.*/ …) because
-              # actions/upload-artifact@v7 strips the <service>/build/reports/pitest/
-              # prefix (pitest.yml uploads that dir as `path`). Reconstruct that exact
-              # path so collect-quality-report.mjs finds it — never `-d .`, which dumps
+              # actions/upload-artifact@v7 strips the <component>/build/reports/pitest/
+              # prefix (pitest.yml uploads that directory as `path`). Reconstruct that
+              # path so the report collectors find it — never `-d .`, which dumps
               # a full report into the repo root and gets it committed (#1104).
-              svc="${art_name#pitest-}"
+              # The enforced authz lane predates component-normalized artifact names.
+              # Preserve its retained `pitest-authz` contract while staging it under
+              # the internal module that owns the report and required control.
+              case "${art_name}" in
+                pitest-authz) svc="openbank-libs-runtime" ;;
+                *) svc="${art_name#pitest-}" ;;
+              esac
               dest="${svc}/build/reports/pitest"
               mkdir -p "${dest}"
               unzip -q "/tmp/${art_name}.zip" -d "${dest}" 2>/dev/null || true
