@@ -1,4 +1,4 @@
--- Review policy context for a grant. It never participates in authorisation; it records the
+-- Review policy context for a grant, additive after recertification cycles in V17. It records the
 -- grantor-selected cadence for a future periodic-review workflow.
 --
 -- COMPANY is intentionally not auto-classified as SME or CORPORATE: party-service has no safe

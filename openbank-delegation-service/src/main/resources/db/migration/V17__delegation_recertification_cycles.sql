@@ -1,4 +1,4 @@
--- Durable customer recertification evidence. The table is deliberately separate from the grant:
+-- Durable customer recertification evidence, additive after V16. The table is separate from the grant:
 -- confirming a review never changes capabilities, status or lifecycle_revision.
 --
 -- A cycle is tied to one exact lifecycle revision. A later suspend/revoke/reinstate makes an old
