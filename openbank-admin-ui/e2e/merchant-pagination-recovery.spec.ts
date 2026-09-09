@@ -32,7 +32,7 @@ test('keeps the current merchant page visible when its refresh is malformed', as
 
   await page.goto('/merchants')
   await expect(page.getByText('First merchant')).toBeVisible()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(page.getByText('Second merchant')).toBeVisible()
   await expect(page.getByText('Showing 51–51 of 51')).toBeVisible()
 
