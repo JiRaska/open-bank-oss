@@ -127,7 +127,7 @@ spec:
             # Principal type and active ADR-0284 PartyMandate. This is the authoritative
             # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
             - name: PARTY_SERVICE_URL
-              value: http://party-service.party.svc:8081
+              value: https://party-service.party.svc:8443
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit
@@ -186,6 +186,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: party-tls-trust
+              mountPath: /mnt/party-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -279,6 +282,10 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+            optional: false
+        - name: party-tls-trust
+          secret:
+            secretName: delegation-internal-tls
             optional: false
         - name: opa-tmp
           emptyDir: {}

@@ -79,6 +79,8 @@ spec:
           port: 8016
         - protocol: TCP
           port: 8111
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

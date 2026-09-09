@@ -174,6 +174,26 @@ mp:
     oidc:
       enabled: false
 
+"%prod":
+  quarkus:
+    # The authority read is a grant-issuance boundary. Production uses a named TLS bucket so
+    # trust, client identity and TLS version are one fail-closed unit; local/Pact HTTP fixtures
+    # do not need certificate material.
+    tls:
+      party-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      party-service:
+        tls-configuration-name: party-authority
+
 "%test":
   quarkus:
     datasource:
