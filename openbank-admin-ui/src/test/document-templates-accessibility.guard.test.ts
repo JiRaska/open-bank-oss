@@ -6,10 +6,12 @@ const page = readFileSync(path.resolve(__dirname, '../app/document-templates/pag
 
 describe('document template authoring accessibility', () => {
   it('exposes the authoring modal as a labelled modal dialog', () => {
-    expect(page).toContain('role="dialog"')
-    expect(page).toContain('aria-modal="true"')
-    expect(page).toContain('aria-labelledby="template-editor-title"')
-    expect(page).toContain('id="template-editor-title"')
+    expect(page).toContain("import * as Dialog from '@radix-ui/react-dialog'")
+    expect(page).toContain('<Dialog.Content')
+    expect(page).toContain('<Dialog.Title')
+    expect(page).toContain('onOpenAutoFocus={event =>')
+    expect(page).toContain('onCloseAutoFocus={event =>')
+    expect(page).toContain('onEscapeKeyDown={event =>')
     expect(page).toContain('aria-label={t(\'Zavřít editor šablony\'')
   })
 
