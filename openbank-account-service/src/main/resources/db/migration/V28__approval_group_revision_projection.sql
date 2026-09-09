@@ -1,4 +1,5 @@
--- ADR-0284 D3. Rollback: DROP TABLE approval_group_revisions;
+-- ADR-0284 D3.
+-- Rollback: DROP TABLE approval_group_revisions;
 CREATE TABLE approval_group_revisions (
     id UUID PRIMARY KEY,
     group_id UUID NOT NULL,

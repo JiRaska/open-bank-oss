@@ -1,4 +1,5 @@
--- ADR-0284 D3. Rollback: disable N_OF_M admission before dropping these additive structures.
+-- ADR-0284 D3.
+-- Rollback: disable N_OF_M admission before dropping these additive structures.
 ALTER TABLE account_delegation_projection
     ADD COLUMN approval_group_id UUID,
     ADD COLUMN approval_group_revision BIGINT,

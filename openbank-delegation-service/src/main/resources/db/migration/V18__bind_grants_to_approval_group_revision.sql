@@ -1,4 +1,5 @@
--- ADR-0284 D3. Rollback: drop the two nullable columns after N_OF_M admission is disabled.
+-- ADR-0284 D3.
+-- Rollback: drop the two nullable columns after N_OF_M admission is disabled.
 ALTER TABLE delegation_grants
     ADD COLUMN approval_group_id UUID,
     ADD COLUMN approval_group_revision BIGINT;
