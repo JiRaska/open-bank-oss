@@ -395,6 +395,76 @@ journeys:
     expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
   })
 
+  it('retains a fixed Pitest lane with the enforced PIT score in the required-control denominator', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-fixed-mutation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', 'version: 1\ncapabilities:\n  - id: probes\n    title: Independent probes\n    state: external-blocked\n    blocker: no external fleet\n    evidence: issue-1\n')
+    write(repo, '.github/workflows/pitest.yml', `jobs:
+  pitest-authz:
+    steps:
+      - name: Build mutation Test Intelligence envelope
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \\
+            --service "openbank-libs-runtime-authz" \\
+            --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \\
+            --mutation-threshold 63
+`)
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<mutations>
+  <mutation status="KILLED"/>
+  <mutation status="KILLED"/>
+  <mutation status="KILLED"/>
+  <mutation status="KILLED"/>
+  <mutation status="TIMED_OUT"/>
+  <mutation status="SURVIVED"/>
+  <mutation status="SURVIVED"/>
+  <mutation status="SURVIVED"/>
+</mutations>
+`)
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: {
+        id: 'mutation-authz-7', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Mutation testing',
+        url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/mutation-authz-7', observedAt: '2026-09-05T06:00:00Z',
+      },
+      component: 'openbank-libs-runtime-authz', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{
+        kind: 'mutation', state: 'failed', source: 'mutations.xml',
+        detail: '4/8 killed (50%, target 63%)',
+      }],
+    }))
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components.find(item => item.component === 'openbank-libs-runtime')).toMatchObject({
+      released: false,
+      evidence: [expect.objectContaining({ kind: 'mutation', state: 'passed', detail: '63% mutation score' })],
+    })
+    expect(report.mutations).toContainEqual(
+      expect.objectContaining({ component: 'openbank-libs-runtime', killed: 4, timedOut: 1, score: 63 }),
+    )
+    expect(report.requiredControls?.filter(control => control.kind === 'mutation')).toEqual([
+      expect.objectContaining({ id: 'openbank-libs-runtime:mutation', state: 'passed', source: 'Pitest:mutations.xml' }),
+    ])
+    expect(report.totals).toMatchObject({ requiredControls: 1, requiredControlGaps: 0 })
+
+    rmSync(path.join(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json'))
+    const missingEnvelopeOut = path.join(repo, 'report-without-envelope.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', missingEnvelopeOut, '--stale-after-days', '99999'])
+    const missingEnvelope = JSON.parse(readFileSync(missingEnvelopeOut, 'utf8')) as TestIntelligenceReport
+    expect(missingEnvelope.mutations).toContainEqual(
+      expect.objectContaining({ component: 'openbank-libs-runtime', state: 'unknown', score: 63 }),
+    )
+    expect(missingEnvelope.requiredControls?.find(control => control.id === 'openbank-libs-runtime:mutation')).toEqual(
+      expect.objectContaining({ state: 'unknown', source: 'Pitest:mutations.xml' }),
+    )
+  }, 15_000)
+
   it('does not project a malformed capability register as a partial platform matrix', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-capability-register-'))
     dirs.push(repo)

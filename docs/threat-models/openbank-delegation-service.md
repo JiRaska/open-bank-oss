@@ -141,6 +141,13 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-07** — Role-preset creation is now replay-safe (#8351, ADR-0292). A retried
+  `POST /api/v1/delegation-role-presets` stacked a duplicate catalog row; `create` now checks the
+  admin-supplied natural key (name, resourceType) first and replays the original, with
+  `uq_delegation_role_presets_name_type` (V15) as the race backstop. The grant-offer idempotency
+  (Berlin Group `X-Request-ID`, already enforced) is recorded in ADR-0292. No new caller, endpoint
+  or privilege. Rollback: revert + `DROP INDEX uq_delegation_role_presets_name_type`.
+
 - **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
   now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest
   rather than of the service: the deployed Rollout sets the variable to `"true"`, so the cluster

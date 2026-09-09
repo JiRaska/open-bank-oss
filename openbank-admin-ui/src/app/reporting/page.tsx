@@ -13,11 +13,13 @@
 // embedded in kiosk mode. A figure an operator acts on comes from the registry; a figure an
 // operator explores comes from Grafana.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
+import { ReportTrend } from '@/components/reporting/ReportTrend'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { BarChart3, ExternalLink, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
+import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
 
 // Shapes mirrored from /api/reporting/route.ts and /api/reporting/[queryId]/route.ts. The page
 // deliberately does NOT import the registry module: its SQL builders stay server-side.
@@ -52,21 +54,14 @@ interface ReportResult {
   error?: string
 }
 
-// Exploratory surface: the existing Grafana business-warehouse dashboard (dashboard ConfigMap uid
-// openbank-business-warehouse), embedded in kiosk mode. Auth is the operator's existing Keycloak
-// SSO session; the iframe fails soft into the fallback link below when Grafana is unreachable.
-const GRAFANA_BASE = process.env.NEXT_PUBLIC_GRAFANA_URL?.trim() || 'https://admin.open-bank.tech/tools/grafana'
-const GRAFANA_DASHBOARD_UID = process.env.NEXT_PUBLIC_GRAFANA_WAREHOUSE_DASHBOARD_UID?.trim() || 'openbank-business-warehouse'
-const GRAFANA_EMBED_URL = `${GRAFANA_BASE}/d/${GRAFANA_DASHBOARD_UID}?kiosk`
-
 function isoDay(d: Date) { return d.toISOString().slice(0, 10) }
 
-function formatCell(value: unknown, format: CatalogueColumn['format']): string {
+function formatCell(value: unknown, format: CatalogueColumn['format'], locale: string): string {
   if (value === null || value === undefined) return '—'
   const raw = String(value)
   if (format === 'number') {
     const n = Number(raw)
-    return Number.isFinite(n) ? new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 2 }).format(n) : raw
+    return Number.isFinite(n) ? new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(n) : raw
   }
   return raw
 }
@@ -75,6 +70,9 @@ export default function ReportingPage() {
   const { t, language } = useLanguage()
   const cs = language === 'cs'
 
+  const requestId = useRef(0)
+  const [page, setPage] = useState(0)
+  const [catalogueFailed, setCatalogueFailed] = useState(false)
   const [catalogue, setCatalogue] = useState<CatalogueReport[] | null>(null)
   const [catalogueDenied, setCatalogueDenied] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
@@ -83,17 +81,22 @@ export default function ReportingPage() {
   const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<'unauthorized' | 'not_found' | 'invalid' | null>(null)
 
+  useEffect(() => () => { requestId.current += 1 }, [])
+
   // Pre-fill parameter defaults when a report is selected; today/30d-ago for date params. Done in
   // the event handler, not an effect — setState-in-effect is an eslint error-level pattern here.
   const selectReport = useCallback((r: CatalogueReport) => {
+    requestId.current += 1
+    setLoading(false)
+    setPage(0)
     const defaults: Record<string, string> = {}
     const today = isoDay(new Date())
-    const thirtyAgo = isoDay(new Date(Date.now() - 30 * 864e5))
+    const thirtyAgo = isoDay(new Date(Date.now() - 29 * 864e5))
     for (const p of r.params) {
       defaults[p.name] = p.defaultValue ?? (p.type === 'date' ? (p.name === 'from' ? thirtyAgo : today) : '')
     }
     setSelected(r.id)
-    setParamValues(defaults)
+    setParamValues((previous) => ({ ...defaults, from: previous.from || defaults.from, to: previous.to || defaults.to }))
     setResult(null)
     setFailure(null)
   }, [])
@@ -103,11 +106,12 @@ export default function ReportingPage() {
       try {
         const res = await fetch('/api/reporting', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
         if (res.status === 401 || res.status === 403) { setCatalogueDenied(true); return }
-        if (!res.ok) { setCatalogue([]); return }
+        if (!res.ok) { setCatalogueFailed(true); setCatalogue([]); return }
         const body = (await res.json()) as { reports: CatalogueReport[] }
         setCatalogue(body.reports)
         if (body.reports.length > 0) selectReport(body.reports[0])
       } catch {
+        setCatalogueFailed(true)
         setCatalogue([])
       }
     })()
@@ -117,6 +121,10 @@ export default function ReportingPage() {
 
   const runReport = useCallback(async () => {
     if (!report) return
+    if (paramValues.from > paramValues.to) { setFailure('invalid'); return }
+    const id = ++requestId.current
+    setPage(0)
+    setResult(null)
     setLoading(true)
     setFailure(null)
     try {
@@ -128,14 +136,18 @@ export default function ReportingPage() {
       const res = await fetch(`/api/reporting/${encodeURIComponent(report.id)}?${qs}`, {
         cache: 'no-store', signal: AbortSignal.timeout(15_000),
       })
+      if (id !== requestId.current) return
       if (res.status === 401 || res.status === 403) { setFailure('unauthorized'); setResult(null); return }
       if (res.status === 404) { setFailure('not_found'); setResult(null); return }
       if (res.status === 400) { setFailure('invalid'); setResult(null); return }
-      setResult((await res.json()) as ReportResult)
+      if (!res.ok) throw new Error('report unavailable')
+      const body = (await res.json()) as ReportResult
+      if (id === requestId.current) setResult(body)
     } catch {
+      if (id !== requestId.current) return
       setResult({ available: false, reportId: report.id, columns: report.columns, rows: [], generatedAt: null, rowCount: 0, truncated: false })
     } finally {
-      setLoading(false)
+      if (id === requestId.current) setLoading(false)
     }
   }, [report, paramValues])
 
@@ -143,26 +155,26 @@ export default function ReportingPage() {
     <div>
       <PageHeader
         icon={<BarChart3 size={18} aria-hidden="true" />}
-        title={t('Reporting nad datovým skladem', 'Warehouse reporting')}
+        title={t('Reporting a analytika', 'Reporting and analytics')}
         subtitle={t(
-          'Autoritativní reporty přes governed query registry (gold marts) · explorace v Grafaně · ADR-0286',
-          'Authoritative reports via the governed query registry (gold marts) · exploration in Grafana · ADR-0286',
+          'Objemy, rizikové signály a kvalita dat. Vyberte report a období pro podrobný přehled.',
+          'Volumes, risk signals and data quality. Choose a report and period for a detailed view.',
         )}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Reporting', 'Reporting')}</span></div>}
       />
 
       {/* Registry reports */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 300px) 1fr', gap: '16px', marginBottom: '24px' }}>
+      <div className="grid items-start gap-4 mb-6 lg:grid-cols-[280px_minmax(0,1fr)]">
         <div className="card" style={{ padding: '16px', alignSelf: 'start' }}>
           <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '4px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <ShieldCheck size={14} aria-hidden="true" /> {t('Registry reportů', 'Report registry')}
+            <ShieldCheck size={14} aria-hidden="true" /> {t('Vyberte report', 'Choose a report')}
           </h3>
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
-            {t('Pojmenované dotazy nad gold vrstvou — browser nikdy neposílá SQL.', 'Named queries over the gold layer — the browser never sends SQL.')}
+            {t('Pět pohledů na obchodní aktivitu a kvalitu dat.', 'Five views of business activity and data quality.')}
           </div>
           {catalogueDenied && <DataUnavailable kind="unauthorized" service="Reporting" feature={t('reporting', 'reporting')} dense />}
           {catalogue && catalogue.length === 0 && !catalogueDenied && (
-            <DataUnavailable kind="no_data" feature={t('registry reportů', 'report registry')} dense />
+            <DataUnavailable kind={catalogueFailed ? "unreachable" : "no_data"} feature={t('seznam reportů', 'report catalogue')} dense />
           )}
           {catalogue?.map((r) => (
             <button
@@ -183,7 +195,7 @@ export default function ReportingPage() {
           ))}
         </div>
 
-        <div className="card" style={{ padding: '16px' }}>
+        <div className="card min-w-0" style={{ padding: '20px' }}>
           {!report && !catalogueDenied && (
             <DataUnavailable kind="no_data" feature={t('report', 'report')} dense />
           )}
@@ -192,7 +204,7 @@ export default function ReportingPage() {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{cs ? report.titleCs : report.titleEn}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>{report.id} · {report.permission}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{cs ? report.descriptionCs : report.descriptionEn}</div>
                 </div>
               </div>
 
@@ -204,7 +216,7 @@ export default function ReportingPage() {
                     {p.type === 'enum' ? (
                       <select
                         value={paramValues[p.name] ?? ''}
-                        onChange={(e) => setParamValues((v) => ({ ...v, [p.name]: e.target.value }))}
+                        onChange={(e) => { requestId.current += 1; setLoading(false); setResult(null); setFailure(null); setParamValues((v) => ({ ...v, [p.name]: e.target.value })) }}
                         style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '5px 8px', background: 'var(--surface-1)' }}
                       >
                         {!p.required && <option value="">{t('(vše)', '(all)')}</option>}
@@ -215,7 +227,7 @@ export default function ReportingPage() {
                         type={p.type === 'date' ? 'date' : 'text'}
                         inputMode={p.type === 'number' ? 'numeric' : undefined}
                         value={paramValues[p.name] ?? ''}
-                        onChange={(e) => setParamValues((v) => ({ ...v, [p.name]: e.target.value }))}
+                        onChange={(e) => { requestId.current += 1; setLoading(false); setResult(null); setFailure(null); setParamValues((v) => ({ ...v, [p.name]: e.target.value })) }}
                         style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '5px 8px', background: 'var(--surface-1)' }}
                       />
                     )}
@@ -240,30 +252,38 @@ export default function ReportingPage() {
                 result.available ? (
                   <>
                     {result.truncated && (
-                      <div role="status" style={{ padding: '8px 12px', marginBottom: '8px', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', fontSize: '12px' }}>
+                      <div role="status" style={{ padding: '8px 12px', marginBottom: '8px', color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '12px' }}>
                         {t(`Zobrazeno prvních ${result.rowCount} řádků — report je zkrácený. Zužte parametry.`, `Showing the first ${result.rowCount} rows — the report is truncated. Narrow the parameters.`)}
                       </div>
                     )}
                     {result.rows.length === 0 ? (
                       <DataUnavailable kind="no_data" feature={cs ? report.titleCs : report.titleEn} dense />
                     ) : (
-                      <div style={{ overflowX: 'auto' }}>
+                      <div>
+                        <ReportTrend reportId={result.reportId} rows={result.rows} truncated={result.truncated} />
+                        <div style={{ overflowX: 'auto' }}>
                         <table className="data-table" style={{ width: '100%' }}>
                           <thead>
                             <tr>{result.columns.map((c) => <th key={c.key}>{cs ? c.labelCs : c.labelEn}</th>)}</tr>
                           </thead>
                           <tbody>
-                            {result.rows.map((row, i) => (
+                            {result.rows.slice(page * 25, (page + 1) * 25).map((row, i) => (
                               <tr key={i}>
                                 {result.columns.map((c) => (
                                   <td key={c.key} style={{ fontSize: '12px', fontFamily: c.format === 'number' ? 'JetBrains Mono, monospace' : 'inherit', textAlign: c.format === 'number' ? 'right' : 'left' }}>
-                                    {formatCell(row[c.key], c.format)}
+                                    {formatCell(row[c.key], c.format, cs ? 'cs-CZ' : 'en-GB')}
                                   </td>
                                 ))}
                               </tr>
                             ))}
                           </tbody>
                         </table>
+                        </div>
+                        {result.rows.length > 25 && <div className="flex items-center justify-between gap-2 mt-3 text-sm">
+                          <button className="btn btn-secondary" disabled={page === 0} onClick={() => setPage((n) => n - 1)}>{t('Předchozí', 'Previous')}</button>
+                          <span>{page * 25 + 1}–{Math.min((page + 1) * 25, result.rows.length)} / {result.rows.length}</span>
+                          <button className="btn btn-secondary" disabled={(page + 1) * 25 >= result.rows.length} onClick={() => setPage((n) => n + 1)}>{t('Další', 'Next')}</button>
+                        </div>}
                       </div>
                     )}
                     <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
@@ -272,9 +292,10 @@ export default function ReportingPage() {
                     </div>
                   </>
                 ) : (
-                  <DataUnavailable kind="no_data" service="ClickHouse (analytics)" feature={cs ? report.titleCs : report.titleEn} dense />
+                  <DataUnavailable kind="unreachable" service="ClickHouse (analytics)" feature={cs ? report.titleCs : report.titleEn} dense />
                 )
               )}
+              {loading && <p role="status" className="text-sm text-[var(--text-secondary)]">{t('Načítání reportu…', 'Loading report…')}</p>}
               {!result && !failure && !loading && (
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <TableIcon size={13} aria-hidden="true" />
@@ -286,27 +307,7 @@ export default function ReportingPage() {
         </div>
       </div>
 
-      {/* Exploratory surface: embedded Grafana (kiosk) */}
-      <div className="card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          <div>
-            <h3 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <BarChart3 size={14} aria-hidden="true" /> {t('Explorativní analytika — Grafana', 'Exploratory analytics — Grafana')}
-            </h3>
-            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
-              {t('Trendy a ad-hoc pohledy nad warehouse. Autoritativní čísla vždy přes registry výše.', 'Trends and ad-hoc cuts over the warehouse. Authoritative figures always via the registry above.')}
-            </div>
-          </div>
-          <a href={`${GRAFANA_BASE}/d/${GRAFANA_DASHBOARD_UID}`} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ fontSize: '12px' }}>
-            <ExternalLink size={12} aria-hidden="true" /> {t('Otevřít v Grafaně', 'Open in Grafana')}
-          </a>
-        </div>
-        <iframe
-          src={GRAFANA_EMBED_URL}
-          title={t('Grafana — business warehouse dashboard', 'Grafana — business warehouse dashboard')}
-          style={{ width: '100%', height: '560px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--surface-2)' }}
-        />
-      </div>
+      {paramValues.from && paramValues.to && paramValues.from <= paramValues.to && <WarehouseDashboard from={paramValues.from} to={paramValues.to} />}
     </div>
   )
 }
