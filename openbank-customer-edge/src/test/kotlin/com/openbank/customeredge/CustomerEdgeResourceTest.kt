@@ -61,7 +61,19 @@ class CustomerEdgeResourceTest {
         "type":"TERM_DEPOSIT", "currency":"CZK", "status":"$status", "isPublic":$public,
         "minBalance":10000, "termDepositConfig":{"termMonths":6,"interestRateAnnual":0.058,
         "payoutFrequency":"AT_MATURITY","autoRenewEnabled":true,"earlyWithdrawalPenaltyPct":50.0,
-        "earlyWithdrawalNoticeDays":0}, "termsAndConditions":[]
+        "earlyWithdrawalNoticeDays":0},
+        "termsAndConditions":[{"version":"2026-01","url":"https://docs.example/td-2026-01.pdf",
+        "effectiveFrom":"2026-01-01","language":"cs"}]
+    }
+    """.trimIndent()
+
+    /** A product whose only terms document is not yet in force (#9044: unopenable). */
+    private fun termDepositProductWithoutCurrentTerms(id: UUID): String = """{
+        "id":"$id", "code":"TERM_DEPOSIT_6M_CZK", "name":"Termínovaný vklad 6 měsíců",
+        "type":"TERM_DEPOSIT", "currency":"CZK", "status":"ACTIVE", "isPublic":true,
+        "minBalance":10000, "termDepositConfig":{"termMonths":6,"interestRateAnnual":0.058},
+        "termsAndConditions":[{"version":"2999-01","url":"https://docs.example/td-2999.pdf",
+        "effectiveFrom":"2999-01-01","language":"cs"}]
     }
     """.trimIndent()
 
@@ -274,6 +286,57 @@ class CustomerEdgeResourceTest {
         assertThat(body.path("accountType").asText()).isEqualTo("TERM_DEPOSIT")
         assertThat(body.path("currencyCode").asText()).isEqualTo("CZK")
         assertThat(body.path("legalName").asText()).isEqualTo("Ada Customer")
+        // #9044: the deposit opens with the terms record resolved from the catalogue.
+        assertThat(body.path("termsVersion").asText()).isEqualTo("2026-01")
+        assertThat(body.path("termsUrl").asText()).isEqualTo("https://docs.example/td-2026-01.pdf")
+        assertThat(body.path("termsEffectiveFrom").asText()).isEqualTo("2026-01-01")
+    }
+
+    @Test
+    fun `term deposit opening matches a matching termsVersionShown and rejects a stale one`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        every { upstream.post(match { it.contains("/api/v1/accounts") }, any(), any(), any()) } returns
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}"}""").build()
+
+        val resource = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }
+        // The version the app rendered matches the catalogue's currently effective one → opens.
+        assertThat(
+            resource.openTermDeposit("""{"productId":"$product","termsVersionShown":"2026-01"}""", "k1").status,
+        ).isEqualTo(201)
+        // A stale rendered version (a terms rollout landed between display and tap) → 409,
+        // so the customer re-sees the governing document instead of being bound to another.
+        assertThat(
+            resource.openTermDeposit("""{"productId":"$product","termsVersionShown":"2025-06"}""", "k2").status,
+        ).isEqualTo(409)
+    }
+
+    @Test
+    fun `term deposit opening is refused when the product has no currently effective terms`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        // A FUTURE effectiveFrom is not yet in force — there is no terms document to open under.
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProductWithoutCurrentTerms(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit("""{"productId":"$product"}""", "no-terms")
+
+        assertThat(response.status).isEqualTo(409)
+        verify(exactly = 0) { upstream.post(match { it.contains("/api/v1/accounts") }, any(), any(), any()) }
     }
 
     @Test
