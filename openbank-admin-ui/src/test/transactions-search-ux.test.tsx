@@ -7,6 +7,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import TransactionsPage from '@/app/transactions/page'
 
+vi.mock('@/components/auth/AuthGuard', () => ({
+  Can: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 afterEach(() => {
   cleanup()
   localStorage.clear()
