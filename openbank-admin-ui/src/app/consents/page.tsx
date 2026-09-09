@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { parseConsentEvidenceList, type ConsentEvidence } from '@/lib/consents/consentContract'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
 // consentId, partyId or granteeId. So this is deliberately a LOOKUP page, not a table of everything:
@@ -22,20 +23,6 @@ import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
 // marketing consent right now" straight from the owning service, with no projection to drift.
 const MARKETING_GRANTEE = 'party-service:marketing-comms'
 
-interface Consent {
-  id: string
-  partyId: string
-  granteeId: string
-  granteeType: string
-  granteeName: string
-  scopes: string[]
-  accountIbans: string[] | null
-  status: string
-  validFrom: string
-  validTo: string
-  createdAt: string
-}
-
 type Lens = 'party' | 'grantee'
 
 export default function ConsentsPage() {
@@ -46,7 +33,7 @@ export default function ConsentsPage() {
   const [lens, setLens] = useState<Lens>('party')
   const [term, setTerm] = useState('')
   const [party, setParty] = useState<PartyHit | null>(null)
-  const [rows, setRows] = useState<Consent[] | null>(null)
+  const [rows, setRows] = useState<ConsentEvidence[] | null>(null)
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
@@ -81,9 +68,14 @@ export default function ConsentsPage() {
         setFailure(await classifyBffFailure(res))
         return
       }
-      const data = (await res.json()) as Consent[]
+      const raw = await res.json() as unknown
       if (gen !== generation.current) return
-      setRows(data)
+      try {
+        setRows(parseConsentEvidenceList(raw))
+      } catch {
+        setFailure('error')
+        return
+      }
       setLoadedQuery(queryKey)
       // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
       // said "the data source contains no records yet", which an operator cannot tell apart from a
