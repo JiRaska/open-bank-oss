@@ -198,6 +198,19 @@ Migration V12 is additive. Rollback stops the disclosure command producer and dr
 before reverting the image; the table, trigger and blobs remain as evidence. Dropping or mutating
 them is not an application rollback and requires the retention/erasure process.
 
+**D7 delegation lifecycle (2026-09-09).** An authenticated grantor can now prepare a disclosure
+from an `ACTIVE` `DOCUMENT` grant using a UUID `X-Request-ID`. Delegation-service atomically inserts
+the party/source-bound `REQUESTED` row and its `DisclosureSnapshotRequested` outbox command; the
+database repeats the active-grant checks inside the transaction so a concurrent revoke cannot mint
+new disclosure state. It consumes the contracted ready/rejected result over its unique Kafka mTLS
+principal and pins the immutable snapshot id, source digest, disclosure digest and size. Cross-topic
+delivery is treated as at-least-once: replay is idempotent and conflicting results fail closed into
+the explicit DLQ. The customer endpoint returns lifecycle metadata only—never object-store keys or
+PDF bytes. Public recipient proof, expiry, revocation and view counters remain the next slice.
+
+Migration V20 is additive. Before use it may be dropped only while empty; after use the rows are
+evidence and rollback disables producers/consumers while retaining data.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the

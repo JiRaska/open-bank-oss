@@ -22,6 +22,10 @@ import com.openbank.delegation.application.usecase.DelegationResourceOwnershipEx
 import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
 import com.openbank.delegation.application.usecase.DelegationUnsupportedConstraintException
+import com.openbank.delegation.application.usecase.DisclosureForbiddenException
+import com.openbank.delegation.application.usecase.DisclosureIdempotencyConflictException
+import com.openbank.delegation.application.usecase.DisclosureNotEligibleException
+import com.openbank.delegation.application.usecase.DisclosureNotFoundException
 import com.openbank.delegation.application.usecase.SpendReservationIdempotencyConflictException
 import com.openbank.delegation.application.usecase.SpendReservationNotFoundException
 import com.openbank.delegation.application.usecase.SpendReservationRefusedException
@@ -65,6 +69,33 @@ class ApprovalGroupScaMapper : ExceptionMapper<ApprovalGroupScaException> {
 }
 
 private const val UNPROCESSABLE_ENTITY = 422
+
+@Provider
+class DisclosureNotFoundMapper : ExceptionMapper<DisclosureNotFoundException> {
+    override fun toResponse(exception: DisclosureNotFoundException): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message)).build()
+}
+
+@Provider
+class DisclosureForbiddenMapper : ExceptionMapper<DisclosureForbiddenException> {
+    override fun toResponse(exception: DisclosureForbiddenException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message)).build()
+}
+
+@Provider
+class DisclosureConflictMapper : ExceptionMapper<DisclosureIdempotencyConflictException> {
+    override fun toResponse(exception: DisclosureIdempotencyConflictException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class DisclosureNotEligibleMapper : ExceptionMapper<DisclosureNotEligibleException> {
+    override fun toResponse(exception: DisclosureNotEligibleException): Response =
+        Response.status(UNPROCESSABLE_ENTITY).entity(errorBody(UNPROCESSABLE_ENTITY, exception.message)).build()
+}
 
 @Provider
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {

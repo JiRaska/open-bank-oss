@@ -51,3 +51,19 @@ spec:
   config:
     cleanup.policy: compact
     retention.ms: -1
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: openbank.dlq.delegation.disclosure-snapshot-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    cleanup.policy: delete
+    retention.ms: 1209600000

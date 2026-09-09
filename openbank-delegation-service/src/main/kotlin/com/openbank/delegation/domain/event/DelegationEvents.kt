@@ -57,6 +57,22 @@ data class DelegationOffered(
     override val version = 1L
 }
 
+data class DisclosureSnapshotRequested(
+    override val aggregateId: UUID,
+    val requestId: UUID,
+    val sourceDocumentId: UUID,
+    val expectedPartyRef: String,
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Disclosure"
+    override val eventType = EVENT_TYPE
+    override val version = 1L
+
+    companion object {
+        const val EVENT_TYPE = "DisclosureSnapshotRequested"
+    }
+}
+
 data class DelegationActivated(
     override val aggregateId: UUID,
     val lifecycleRevision: Long,

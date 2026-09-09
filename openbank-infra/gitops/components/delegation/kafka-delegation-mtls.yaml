@@ -48,3 +48,18 @@ spec:
           name: openbank.delegation.approval-group-revisions
           patternType: literal
         operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.documents.disclosure-snapshot.event
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-delegation-service
+          patternType: literal
+        operations: [Read]
+      - resource:
+          type: topic
+          name: openbank.dlq.delegation.disclosure-snapshot-events-in
+          patternType: literal
+        operations: [Write, Describe]

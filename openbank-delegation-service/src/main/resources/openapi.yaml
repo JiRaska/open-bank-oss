@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.15.0
+  version: 1.16.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -13,7 +13,52 @@ tags:
   - name: Approval groups
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
+  - name: Disclosures
 paths:
+  /api/v1/disclosures/delegations/{delegationId}:
+    post:
+      tags: [Disclosures]
+      summary: Prepare an immutable PDF snapshot for an active DOCUMENT delegation
+      parameters:
+        - name: delegationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: X-Request-ID
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: Snapshot preparation accepted or idempotently replayed
+          headers:
+            Location: { schema: { type: string, format: uri } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DisclosureResponse' }
+        '403': { description: Authenticated party is not the grantor }
+        '404': { description: Delegation not found }
+        '409': { description: X-Request-ID is bound to a different disclosure }
+        '422': { description: Delegation is not active or not a DOCUMENT grant }
+  /api/v1/disclosures/{id}:
+    get:
+      tags: [Disclosures]
+      summary: Read snapshot preparation status as the grantor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Disclosure lifecycle state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DisclosureResponse' }
+        '403': { description: Authenticated party is not the grantor }
+        '404': { description: Disclosure not found }
   /api/v1/delegations/approval-groups/sca-reference:
     post:
       tags: [Approval groups]
@@ -898,6 +943,20 @@ components:
         granted: { type: boolean }
         reason: { type: string }
         code: { type: string }
+    DisclosureResponse:
+      type: object
+      required: [id, requestId, delegationId, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        delegationId: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, READY, REJECTED] }
+        snapshotId: { type: [string, 'null'], format: uuid }
+        sha256: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        sizeBytes: { type: [integer, 'null'], format: int64, minimum: 1 }
+        rejectionReason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ReserveSpendRequest:
       type: object
       required: [amount, currency, idempotencyKey]
