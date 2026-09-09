@@ -35,6 +35,7 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   // correct for a smoke test: it never reports a resize, so charts render at their
   // default size — we assert the mount, not the layout.
   globalThis.ResizeObserver = class {
+    constructor(callback: ResizeObserverCallback) { void callback }
     observe() {}
     unobserve() {}
     disconnect() {}
