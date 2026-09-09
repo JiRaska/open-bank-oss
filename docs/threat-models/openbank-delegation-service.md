@@ -195,6 +195,18 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the grantee-response endpoints: `granteePartyId` on accept/decline/renounce and `scaSessionId` on accept. Both are authorization-relevant — `granteePartyId` names WHO is responding to the grant and `scaSessionId` is the SCA evidence for accepting it — so a null reaching the use case is a delegation transition with no identified actor. The `X-Customer-Party-Id` header stays nullable by design (its absence is what distinguishes a bank-initiated call). No new caller or boundary. Rollback: revert.
 - **2026-08-08** — Cumulative ceilings became a control (ADR-0249 D3). New inbound REST surface: reserve / confirm / release on `/delegations/{id}/reservations`, boundary 4 above, rows T14 and T15. `dailyLimit` / `monthlyLimit` stop being refused (#3613) because a place now exists where spend is observed *before* it happens. Two properties carry the row: concurrency is a `FOR UPDATE` row lock on the grant, not an in-JVM lock (which does nothing across replicas), and idempotency is a unique index on `(grant_id, idempotency_key)`, not a read-then-write. Windows are `AccountingClock.BANK_ZONE` per ADR-0207 D1 rather than a second hand-written `ZoneId.of("Europe/Prague")`. Residual, unchanged: no audit envelope on the new transitions (T4), no rail other than the edge's delegated-payment path asks the counter, and pre-#3613 grants still carry ceilings nobody counted. Rollback: revert — the reservation table is additive and no existing path reads it.
+## Approval-group history and projection recovery
+
+Every create, revise and deactivate now appends the full roster revision in the same database
+transaction as the mutable current row and transactional outbox message. The current table remains
+the fast management view; `delegation_approval_group_revisions` is the authoritative historical
+source for audit, bootstrap and disaster recovery after the seven-day Kafka feed expires. Rows are
+immutable and uniquely keyed by `(group_id, revision)`, while a deterministic primary key makes a
+duplicate write fail rather than create two histories. A later internal reconciliation endpoint
+must expose only authenticated service-to-service reads and page by a stable cursor; N-of-M remains
+off until that path and consumer health are proven. Rollback keeps the append-only table because
+dropping it would erase evidence even though no existing authorization path depends on it.
+
 # Client draft preview
 
 `POST /api/v1/delegations/preview` deliberately creates no authority. It repeats the caller,
