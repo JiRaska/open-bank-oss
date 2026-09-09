@@ -88,4 +88,27 @@ test.describe('Consent lookup recovery', () => {
     await expect(page.getByText(/Failed to load: Consents|Načtení selhalo: Souhlasy/)).toBeVisible()
     await expect(page.getByText('ALL_ACCESS')).toBeHidden()
   })
+
+  test('keeps valid siblings and discloses partial consent evidence', async ({ page }) => {
+    const valid = {
+      id: '11111111-1111-4111-8111-111111111111', partyId: '22222222-2222-4222-8222-222222222222',
+      granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE', granteeName: 'Verified Marketing Service',
+      scopes: ['MARKETING_COMMS_EMAIL'], accountIbans: null, status: 'ACTIVE',
+      validFrom: '2026-01-01T00:00:00Z', validTo: '2026-12-31T00:00:00Z', createdAt: '2026-01-01T00:00:00Z',
+    }
+    await page.route('**/api/svc/consent-service/api/v1/consents/grantee/**', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([valid, { ...valid, id: '33333333-3333-4333-8333-333333333333', scopes: ['ALL_ACCESS'] }]),
+    }))
+
+    await page.goto('/consents')
+    await page.getByLabel(/Consent lookup lens|Pohled souhlasů/).selectOption('grantee')
+    await page.getByRole('button', { name: /Look up|Vyhledat/, exact: true }).click()
+
+    await expect(page.getByText('Verified Marketing Service')).toBeVisible()
+    await expect(page.getByText('MARKETING_COMMS_EMAIL')).toBeVisible()
+    await expect(page.getByText('ALL_ACCESS')).toBeHidden()
+    await expect(page.locator('p[role="alert"]')).toContainText(/Invalid consents excluded: 1|Vyřazené neplatné souhlasy: 1/)
+    await expect(page.getByText(/Nalezeno|Found/, { exact: true }).locator('..')).toContainText('1')
+  })
 })

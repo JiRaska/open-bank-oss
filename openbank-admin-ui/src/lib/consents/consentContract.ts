@@ -29,6 +29,11 @@ export interface ConsentEvidence {
   createdAt: string
 }
 
+export interface ConsentEvidenceResult {
+  value: ConsentEvidence[] | null
+  excludedCount: number
+}
+
 const STATUSES = new Set<string>(CONSENT_STATUSES)
 const SCOPES = new Set<string>(CONSENT_SCOPES)
 const TYPES = new Set<string>(GRANTEE_TYPES)
@@ -87,7 +92,15 @@ function parseConsent(value: unknown): ConsentEvidence {
   }
 }
 
-export function parseConsentEvidenceList(raw: unknown): ConsentEvidence[] {
-  if (!Array.isArray(raw)) throw new Error('Invalid consent list')
-  return raw.map(parseConsent)
+export function parseConsentEvidenceList(raw: unknown): ConsentEvidenceResult {
+  if (!Array.isArray(raw)) return { value: null, excludedCount: 0 }
+  const value: ConsentEvidence[] = []
+  for (const candidate of raw) {
+    try {
+      value.push(parseConsent(candidate))
+    } catch {
+      // Keep independently valid consent evidence visible; the caller discloses every exclusion.
+    }
+  }
+  return { value, excludedCount: raw.length - value.length }
 }
