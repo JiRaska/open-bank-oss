@@ -79,27 +79,11 @@ class UpstreamClient {
     @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file")
     lateinit var tlsTrustCertificateFile: Optional<String>
 
-    // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
-    // URI.create() with no host check of its own — it relies entirely on callers building `url`
-    // from a fixed @ConfigProperty base + a validated path segment (true today, per review, but
-    // not enforced). This allowlist is the defense-in-depth backstop: reject any target whose
-    // host doesn't match a known-safe suffix before a request ever leaves the process.
-    // ".svc" covers every in-cluster upstream base URL (Kubernetes Service DNS, e.g.
-    // account-service.accounts.svc); 127.0.0.1/localhost cover UpstreamClientTest's throwaway
-    // loopback HTTP server. Adjust via config, not by loosening the check in code.
-    @ConfigProperty(
-        name = "openbank.upstream.allowed-host-suffixes",
-        defaultValue = ".svc,127.0.0.1,localhost",
-    )
-    var allowedHostSuffixes: String = ".svc,127.0.0.1,localhost"
-
     /**
-     * Rejects [url] unless it matches [allowedHostSuffixes], via a regex match against the raw
-     * string — CodeQL's java/ssrf query specifically recognizes a regex check as a sanitizing
-     * barrier (unlike a host check performed after URI.create()). URI.create() only runs once
-     * validation has already passed. A leading "." in an entry (e.g. ".svc") matches any host
-     * ending in that domain suffix; anything else (e.g. "127.0.0.1", "localhost") must match the
-     * whole host exactly.
+     * Rejects [url] unless it targets Kubernetes Service DNS or loopback. The allowlist is a
+     * compile-time constant rather than runtime configuration: a compromised ConfigMap cannot turn
+     * this shared HTTP primitive into an arbitrary network client. URI creation happens only after
+     * the complete raw URL passes the recognized SSRF barrier.
      *
      * `inline`: every caller (get/patch/put/delete/post) invokes this as a separate function,
      * and CodeQL's SSRF barrier recognition does not follow the sanitizer across that call
@@ -108,19 +92,7 @@ class UpstreamClient {
      * site, which is what the barrier recognition needs to see.
      */
     private inline fun validatedUri(url: String): URI {
-        val entries = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        val alternatives = entries.joinToString("|") { entry ->
-            if (entry.startsWith(".")) {
-                "[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*" + Regex.escape(entry)
-            } else {
-                Regex.escape(entry)
-            }
-        }
-        val pattern = Regex("^https?://(?:$alternatives)(?::\\d+)?(?:/.*)?$")
-        require(pattern.matches(url)) {
-            "refusing upstream call to disallowed host in url " +
-                "(configure openbank.upstream.allowed-host-suffixes to permit it)"
-        }
+        require(SAFE_UPSTREAM_URL.matches(url)) { "refusing upstream call to disallowed host" }
         return URI.create(url)
     }
 
@@ -128,6 +100,8 @@ class UpstreamClient {
         const val PARTY_HEADER = "X-Customer-Party-Id"
         const val IDEMPOTENCY_REPLAY_HEADER = "X-Idempotency-Replayed"
         private const val TOKEN_REFRESH_BUFFER_SECONDS = 60L
+        private val SAFE_UPSTREAM_URL =
+            Regex("^https?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.svc|127\\.0\\.0\\.1|localhost)(?::\\d+)?(?:/.*)?$")
         private val JSON = com.fasterxml.jackson.databind.ObjectMapper()
     }
 
