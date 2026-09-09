@@ -22,6 +22,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -42,6 +43,7 @@ class ApprovalGroupServiceTest {
     @BeforeEach
     fun setUp() {
         service = ApprovalGroupService(repository, eligibility, sca, clock)
+        coEvery { repository.findByScaSessionId(any()) } returns null
         listOf(memberA, memberB).forEach { member ->
             coEvery { eligibility.eligibilityOf(member) } returns PartyEligibility(member, true, "FULL")
         }
@@ -75,6 +77,51 @@ class ApprovalGroupServiceTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `exact create retry returns immutable original result without repeating side effects`(): Unit = runBlocking {
+        val original = group()
+        coEvery { repository.findByScaSessionId(scaId) } returns original
+
+        val replayed = service.create(createCommand())
+
+        assertThat(replayed).isEqualTo(original)
+        coVerify(exactly = 0) { eligibility.eligibilityOf(any()) }
+        coVerify(exactly = 0) { sca.getChallenge(any()) }
+        coVerify(exactly = 0) { sca.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.create(any(), any()) }
+    }
+
+    @Test
+    fun `SCA replay with altered authority is rejected without side effects`(): Unit = runBlocking {
+        coEvery { repository.findByScaSessionId(scaId) } returns group()
+
+        assertThatThrownBy {
+            runBlocking { service.create(createCommand().copy(threshold = 1)) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("already used for a different command")
+
+        coVerify(exactly = 0) { eligibility.eligibilityOf(any()) }
+        coVerify(exactly = 0) { sca.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.create(any(), any()) }
+    }
+
+    @Test
+    fun `concurrent identical create returns the committed winner`(): Unit = runBlocking {
+        val winner = group()
+        coEvery { repository.findByScaSessionId(scaId) } returnsMany listOf(null, winner)
+        coEvery { repository.create(any(), any()) } throws RuntimeException(
+            SQLException(
+                "duplicate key violates constraint delegation_approval_group_commands_pkey (23505)",
+                "23505",
+            ),
+        )
+
+        assertThat(service.create(createCommand())).isEqualTo(winner)
+
+        coVerify(exactly = 2) { repository.findByScaSessionId(scaId) }
+        coVerify(exactly = 1) { sca.consumeChallenge(any(), any(), any()) }
     }
 
     @Test

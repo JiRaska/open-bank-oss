@@ -18,7 +18,8 @@ paths:
     post:
       tags: [Approval groups]
       summary: Calculate the canonical reference that the management SCA must sign
-      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      parameters:
+        - { $ref: '#/components/parameters/CustomerPartyId' }
       requestBody:
         required: true
         content:
@@ -45,7 +46,8 @@ paths:
     post:
       tags: [Approval groups]
       summary: Create an SCA-bound approval group
-      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      parameters:
+        - { $ref: '#/components/parameters/CustomerPartyId' }
       requestBody:
         required: true
         content:

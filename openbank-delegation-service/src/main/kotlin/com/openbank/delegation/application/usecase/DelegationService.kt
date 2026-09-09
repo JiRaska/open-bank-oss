@@ -495,41 +495,7 @@ class DelegationService(
             ResolvedApproval(null, null, null)
         }
 
-        ApprovalPolicy.N_OF_M -> {
-            if (!nOfMEnabled) {
-                throw DelegationUnsupportedConstraintException(
-                    code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
-                    message = "N_OF_M admission is not enabled in this environment",
-                )
-            }
-            if (command.resourceType != com.openbank.delegation.domain.model.DelegationResourceType.SAVINGS_GOAL ||
-                command.capabilities != setOf(DelegationCapability.SAVINGS_PROPOSE_WITHDRAW)
-            ) {
-                throw DelegationUnsupportedConstraintException(
-                    code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
-                    message = "N_OF_M is currently enforced only for a SAVINGS_GOAL grant containing exactly " +
-                        "SAVINGS_PROPOSE_WITHDRAW; combining it with an unenforced capability is refused",
-                )
-            }
-            val groupId = command.approvalGroupId ?: throw IllegalArgumentException(
-                "N_OF_M approval requires approvalGroupId",
-            )
-            val group = approvalGroupRepository.findById(groupId)
-                ?: throw DelegationUnsupportedConstraintException(
-                    DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
-                    "approval group $groupId does not exist",
-                )
-            if (!group.active || group.ownerPartyId != command.grantorPartyId || group.threshold < 2) {
-                throw DelegationUnsupportedConstraintException(
-                    DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
-                    "approval group $groupId must be active, owned by the grantor, and require at least two actors",
-                )
-            }
-            if (command.requiredApprovals != null && command.requiredApprovals != group.threshold) {
-                throw IllegalArgumentException("requiredApprovals is server-derived from approvalGroupId")
-            }
-            ResolvedApproval(group.id, group.revision, group.threshold)
-        }
+        ApprovalPolicy.N_OF_M -> resolveNOfMApproval(command)
 
         else -> {
             throw DelegationUnsupportedConstraintException(
@@ -538,6 +504,32 @@ class DelegationService(
             )
         }
     }
+
+    private suspend fun resolveNOfMApproval(command: DelegationCandidate): ResolvedApproval {
+        if (!nOfMEnabled) unsupportedApproval("N_OF_M admission is not enabled in this environment")
+        if (command.resourceType != com.openbank.delegation.domain.model.DelegationResourceType.SAVINGS_GOAL ||
+            command.capabilities != setOf(DelegationCapability.SAVINGS_PROPOSE_WITHDRAW)
+        ) {
+            unsupportedApproval(
+                "N_OF_M is enforced only for a SAVINGS_GOAL grant containing exactly SAVINGS_PROPOSE_WITHDRAW",
+            )
+        }
+        val groupId = requireNotNull(command.approvalGroupId) { "N_OF_M approval requires approvalGroupId" }
+        val group = approvalGroupRepository.findById(groupId)
+            ?: unsupportedApproval("approval group $groupId does not exist")
+        if (!group.active || group.ownerPartyId != command.grantorPartyId || group.threshold < 2) {
+            unsupportedApproval("approval group $groupId must be active, owned by the grantor, and require two actors")
+        }
+        require(command.requiredApprovals == null || command.requiredApprovals == group.threshold) {
+            "requiredApprovals is server-derived from approvalGroupId"
+        }
+        return ResolvedApproval(group.id, group.revision, group.threshold)
+    }
+
+    private fun unsupportedApproval(message: String): Nothing = throw DelegationUnsupportedConstraintException(
+        DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+        message,
+    )
 
     /**
      * ADR-0232 threat model T1. The grant is authority in itself once it reaches a product

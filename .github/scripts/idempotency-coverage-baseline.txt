@@ -35,6 +35,8 @@ openbank-consent-service POST /api/v1/suppressions  # natural-key idempotency on
 openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegation-role-presets  # natural-key idempotency on (name,resourceType), check-first + uq_delegation_role_presets_name_type (V15) — ADR-0292 exception; burn-down #8351
 openbank-delegation-service POST /api/v1/delegations  # Berlin Group X-Request-ID replay enforced in code, key optional by contract — ADR-0292 exception; burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/approval-groups  # natural replay key is required dynamically-linked scaSessionId; immutable command ledger + primary key (V19) — ADR-0284 exception
+openbank-delegation-service POST /api/v1/delegations/approval-groups/sca-reference  # pure deterministic hash calculation with no persistence — inherently idempotent — ADR-0284 exception
 openbank-delegation-service POST /api/v1/delegations/approvals/{approvalId}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by terminal proposal state (isIdempotentReplay returns the recorded decision; a conflicting re-decision is a 409); verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/check  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/preview  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
