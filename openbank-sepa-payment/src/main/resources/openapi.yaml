@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
   # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.7.0
+  version: 1.7.1
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -95,6 +95,10 @@ paths:
     post:
       tags: [SEPA Payments]
       summary: Handle inbound pacs.004 payment return from clearing
+      description: >-
+        Idempotent (ADR-0300): the return is keyed on the pacs.004 OrgnlEndToEndId and guarded by
+        the RETURNED state — a re-delivered return message replays the already-returned payment
+        instead of posting a second ledger reversal.
       operationId: handleSepaPaymentReturn
       security:
         - bearerAuth: [ROLE_API, ROLE_ADMIN]
