@@ -203,6 +203,9 @@ mp:
 
 openbank:
   delegation:
+    # Expand/contract rollout: enable only after account-service has replayed approval-group
+    # revisions and its operation-snapshot/decision-ledger health checks are green.
+    n-of-m-enabled: ${DELEGATION_N_OF_M_ENABLED:false}
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.

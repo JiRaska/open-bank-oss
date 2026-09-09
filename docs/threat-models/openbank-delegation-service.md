@@ -226,3 +226,6 @@ pins the revision on the grant and lifecycle events. Admission is restricted to 
 grant containing exactly `SAVINGS_PROPOSE_WITHDRAW`, the only operation resolver with an immutable
 roster snapshot and atomic distinct-actor ledger. `ANY_ONE`, `ALL`, direct withdrawal and payment
 combinations remain refused rather than storing policy their execution paths would ignore.
+Admission is additionally guarded by `DELEGATION_N_OF_M_ENABLED=false` during the expand deploy.
+Operations enable it only after the account consumer has replayed group revisions and the new
+schema/decision-ledger path is healthy; rollback flips the flag before reverting either service.

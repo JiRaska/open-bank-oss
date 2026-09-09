@@ -68,6 +68,7 @@ class DelegationServiceTest {
             eligibilityClient,
             ownershipClient,
             approvalGroupRepository,
+            true,
             clock,
         )
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED

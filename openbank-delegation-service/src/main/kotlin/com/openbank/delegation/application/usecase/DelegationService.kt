@@ -40,6 +40,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Clock
@@ -93,6 +94,7 @@ class DelegationService(
     private val partyEligibilityClient: PartyEligibilityClient,
     private val resourceOwnershipClient: ResourceOwnershipClient,
     private val approvalGroupRepository: ApprovalGroupRepository,
+    private val nOfMEnabled: Boolean,
     private val clock: Clock,
 ) : OfferDelegationUseCase,
     PreviewDelegationUseCase,
@@ -108,12 +110,14 @@ class DelegationService(
         partyEligibilityClient: PartyEligibilityClient,
         resourceOwnershipClient: ResourceOwnershipClient,
         approvalGroupRepository: ApprovalGroupRepository,
+        @ConfigProperty(name = "openbank.delegation.n-of-m-enabled", defaultValue = "false") nOfMEnabled: Boolean,
     ) : this(
         delegationRepository,
         scaChallengeClient,
         partyEligibilityClient,
         resourceOwnershipClient,
         approvalGroupRepository,
+        nOfMEnabled,
         Clock.systemUTC(),
     )
 
@@ -492,6 +496,12 @@ class DelegationService(
         }
 
         ApprovalPolicy.N_OF_M -> {
+            if (!nOfMEnabled) {
+                throw DelegationUnsupportedConstraintException(
+                    code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+                    message = "N_OF_M admission is not enabled in this environment",
+                )
+            }
             if (command.resourceType != com.openbank.delegation.domain.model.DelegationResourceType.SAVINGS_GOAL ||
                 command.capabilities != setOf(DelegationCapability.SAVINGS_PROPOSE_WITHDRAW)
             ) {
