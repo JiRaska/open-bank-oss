@@ -3739,6 +3739,8 @@ paths:
               schema: {$ref: '#/components/schemas/DelegationPortfolio'}
         '400': {description: Missing idempotency key, name, or account scope}
         '403': {description: Caller attempted to provide ownerPartyId, or selected profile is not an active mandate}
+        '422': {description: An account is not owned by the active profile}
+        '503': {description: Authoritative account ownership cannot currently be established; safe to retry}
 
   /delegations/portfolios/{id}:
     get:

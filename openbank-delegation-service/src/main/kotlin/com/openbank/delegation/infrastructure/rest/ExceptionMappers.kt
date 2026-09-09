@@ -14,6 +14,7 @@ import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
 import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
 import com.openbank.delegation.application.usecase.DelegationPortfolioNotFound
+import com.openbank.delegation.application.usecase.DelegationPortfolioOwnershipUnavailable
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
@@ -85,6 +86,15 @@ class DelegationPortfolioAccessDeniedMapper : ExceptionMapper<DelegationPortfoli
     override fun toResponse(exception: DelegationPortfolioAccessDenied): Response =
         Response.status(Response.Status.FORBIDDEN)
             .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioOwnershipUnavailableMapper : ExceptionMapper<DelegationPortfolioOwnershipUnavailable> {
+    override fun toResponse(exception: DelegationPortfolioOwnershipUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message))
             .build()
 }
 

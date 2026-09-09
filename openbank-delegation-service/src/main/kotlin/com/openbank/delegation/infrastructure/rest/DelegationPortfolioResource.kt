@@ -5,6 +5,7 @@ package com.openbank.delegation.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.CallerPartyId
+import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
 import com.openbank.delegation.application.usecase.DelegationPortfolioService
 import com.openbank.delegation.domain.model.DelegationPortfolio
 import com.openbank.libs.authz.Authorize
@@ -67,6 +68,7 @@ class DelegationPortfolioResource(
         requireNotNull(request) { "request body is required" }
         val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "Idempotency-Key header is required" }
         val ownerPartyId = requireNotNull(request.ownerPartyId) { "ownerPartyId is required" }
+        if (customerPartyId != ownerPartyId) throw DelegationPortfolioAccessDenied()
         idempotencyStore.get(createKey(ownerPartyId, key))?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
@@ -81,7 +83,11 @@ class DelegationPortfolioResource(
             requireNotNull(request.accountIds) { "accountIds is required" },
         )
         val response = DelegationPortfolioResponse.from(created)
-        idempotencyStore.save(createKey(ownerPartyId, key), 201, objectMapper.writeValueAsString(response))
+        idempotencyStore.save(
+            createKey(ownerPartyId, key),
+            Response.Status.CREATED.statusCode,
+            objectMapper.writeValueAsString(response),
+        )
         return Response.status(Response.Status.CREATED).entity(response).build()
     }
 

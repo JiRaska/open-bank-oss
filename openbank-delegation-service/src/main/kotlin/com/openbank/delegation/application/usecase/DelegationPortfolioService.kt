@@ -5,7 +5,10 @@ package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.CallerPartyId
 import com.openbank.delegation.application.port.out.DelegationPortfolioRepository
+import com.openbank.delegation.application.port.out.OwnershipVerdict
+import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationPortfolio
+import com.openbank.delegation.domain.model.DelegationResourceType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -14,11 +17,20 @@ import java.util.UUID
 
 class DelegationPortfolioNotFound(id: UUID) : RuntimeException("delegation portfolio not found: $id")
 class DelegationPortfolioAccessDenied : RuntimeException("the authenticated active profile does not own this portfolio")
+class DelegationPortfolioOwnershipUnavailable(accountId: UUID) :
+    RuntimeException("ownership of account $accountId could not be established — refusing the portfolio")
 
 @ApplicationScoped
-class DelegationPortfolioService(private val repository: DelegationPortfolioRepository, private val clock: Clock) {
+class DelegationPortfolioService(
+    private val repository: DelegationPortfolioRepository,
+    private val resourceOwnershipClient: ResourceOwnershipClient,
+    private val clock: Clock,
+) {
     @Inject
-    constructor(repository: DelegationPortfolioRepository) : this(repository, Clock.systemUTC())
+    constructor(
+        repository: DelegationPortfolioRepository,
+        resourceOwnershipClient: ResourceOwnershipClient,
+    ) : this(repository, resourceOwnershipClient, Clock.systemUTC())
 
     suspend fun create(
         callerPartyId: CallerPartyId,
@@ -28,15 +40,15 @@ class DelegationPortfolioService(private val repository: DelegationPortfolioRepo
     ): DelegationPortfolio {
         requireOwner(callerPartyId, ownerPartyId)
         val now = OffsetDateTime.now(clock)
-        return repository.save(
-            DelegationPortfolio(
-                ownerPartyId = ownerPartyId,
-                name = name.trim(),
-                accountIds = accountIds,
-                createdAt = now,
-                updatedAt = now,
-            ),
+        val candidate = DelegationPortfolio(
+            ownerPartyId = ownerPartyId,
+            name = name.trim(),
+            accountIds = accountIds,
+            createdAt = now,
+            updatedAt = now,
         )
+        verifyAccountOwnership(ownerPartyId, candidate.accountIds)
+        return repository.save(candidate)
     }
 
     suspend fun list(callerPartyId: CallerPartyId, ownerPartyId: UUID): List<DelegationPortfolio> {
@@ -52,5 +64,17 @@ class DelegationPortfolioService(private val repository: DelegationPortfolioRepo
 
     private fun requireOwner(callerPartyId: CallerPartyId, ownerPartyId: UUID) {
         if (callerPartyId != ownerPartyId) throw DelegationPortfolioAccessDenied()
+    }
+
+    private suspend fun verifyAccountOwnership(ownerPartyId: UUID, accountIds: Set<UUID>) {
+        accountIds.forEach { accountId ->
+            when (resourceOwnershipClient.verifyOwnership(ownerPartyId, DelegationResourceType.ACCOUNT, accountId)) {
+                OwnershipVerdict.OWNED -> Unit
+                OwnershipVerdict.NOT_OWNED -> throw DelegationResourceOwnershipException(
+                    "active profile $ownerPartyId does not own account $accountId",
+                )
+                OwnershipVerdict.UNVERIFIABLE -> throw DelegationPortfolioOwnershipUnavailable(accountId)
+            }
+        }
     }
 }

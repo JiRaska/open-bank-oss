@@ -156,10 +156,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @POST
     @Path("/portfolios")
     @Blocking
-    fun createPortfolio(
-        body: String?,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
-    ): Response {
+    fun createPortfolio(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         val partyId = partyId()
         val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")

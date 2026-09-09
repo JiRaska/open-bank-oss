@@ -12,8 +12,8 @@ import java.util.UUID
  *
  * This is deliberately not an authorization grant and cannot itself release a payment. The
  * customer edge resolves an active statutory/internal mandate before forwarding the business
- * principal; this aggregate then makes the account scope durable and auditable instead of leaving
- * it as a client-side selection. Payment co-signing is added only with an enforcing money path.
+ * principal, and the application verifies every account against its authoritative owner before
+ * persisting this aggregate. Payment co-signing is added only with an enforcing money path.
  */
 data class DelegationPortfolio(
     val id: UUID = Ids.newId(),

@@ -4,7 +4,10 @@
 package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.out.DelegationPortfolioRepository
+import com.openbank.delegation.application.port.out.OwnershipVerdict
+import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationPortfolio
+import com.openbank.delegation.domain.model.DelegationResourceType
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -19,8 +22,9 @@ import java.util.UUID
 
 class DelegationPortfolioServiceTest {
     private val repository = mockk<DelegationPortfolioRepository>()
+    private val ownershipClient = mockk<ResourceOwnershipClient>()
     private val clock = Clock.fixed(Instant.parse("2026-09-08T12:00:00Z"), ZoneOffset.UTC)
-    private val service = DelegationPortfolioService(repository, clock)
+    private val service = DelegationPortfolioService(repository, ownershipClient, clock)
     private val owner = UUID.randomUUID()
 
     @Test
@@ -43,6 +47,50 @@ class DelegationPortfolioServiceTest {
                 updatedAt = OffsetDateTime.now(clock),
             )
         }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("at least one account")
+    }
+
+    @Test
+    fun `creation verifies every account against the active profile before persistence`(): Unit = runBlocking {
+        val accounts = setOf(UUID.randomUUID(), UUID.randomUUID())
+        coEvery { ownershipClient.verifyOwnership(owner, DelegationResourceType.ACCOUNT, any()) } returns
+            OwnershipVerdict.OWNED
+        coEvery { repository.save(any()) } answers { firstArg() }
+
+        service.create(owner, owner, " Treasury ", accounts)
+
+        accounts.forEach { accountId ->
+            coVerify(exactly = 1) {
+                ownershipClient.verifyOwnership(owner, DelegationResourceType.ACCOUNT, accountId)
+            }
+        }
+        coVerify(exactly = 1) { repository.save(match { it.name == "Treasury" && it.accountIds == accounts }) }
+    }
+
+    @Test
+    fun `creation refuses a foreign account without persisting the portfolio`(): Unit = runBlocking {
+        val foreignAccount = UUID.randomUUID()
+        coEvery {
+            ownershipClient.verifyOwnership(owner, DelegationResourceType.ACCOUNT, foreignAccount)
+        } returns OwnershipVerdict.NOT_OWNED
+
+        assertThatThrownBy { runBlocking { service.create(owner, owner, "Treasury", setOf(foreignAccount)) } }
+            .isInstanceOf(DelegationResourceOwnershipException::class.java)
+            .hasMessageContaining("does not own account")
+
+        coVerify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `creation fails closed when account ownership cannot be established`(): Unit = runBlocking {
+        val account = UUID.randomUUID()
+        coEvery { ownershipClient.verifyOwnership(owner, DelegationResourceType.ACCOUNT, account) } returns
+            OwnershipVerdict.UNVERIFIABLE
+
+        assertThatThrownBy { runBlocking { service.create(owner, owner, "Treasury", setOf(account)) } }
+            .isInstanceOf(DelegationPortfolioOwnershipUnavailable::class.java)
+            .hasMessageContaining("could not be established")
+
+        coVerify(exactly = 0) { repository.save(any()) }
     }
 
     @Test

@@ -96,9 +96,10 @@ class CustomerDelegationResourceTest {
     fun `portfolio creation rejects a forged owner before upstream`() {
         val upstream = mockk<UpstreamClient>()
 
-        val response = resource(
-            upstream,
-        ).createPortfolio("""{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""", "portfolio-create-1")
+        val response = resource(upstream).createPortfolio(
+            """{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""",
+            "portfolio-create-1",
+        )
 
         assertThat(response.status).isEqualTo(403)
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
