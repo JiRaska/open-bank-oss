@@ -100,6 +100,8 @@ data class DelegationGrant(
     val capabilities: Set<DelegationCapability>,
     val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
     val requiredApprovals: Int? = null,
+    val approvalGroupId: UUID? = null,
+    val approvalGroupRevision: Long? = null,
     val perTransactionLimit: Money? = null,
     val dailyLimit: Money? = null,
     val monthlyLimit: Money? = null,
@@ -141,6 +143,13 @@ data class DelegationGrant(
         }
         require(approvalPolicy != ApprovalPolicy.N_OF_M || (requiredApprovals != null && requiredApprovals >= 2)) {
             "N_OF_M approval policy requires requiredApprovals >= 2"
+        }
+        require(
+            approvalPolicy != ApprovalPolicy.N_OF_M ||
+                (approvalGroupId != null && approvalGroupRevision != null && approvalGroupRevision >= 1),
+        ) { "N_OF_M approval policy requires an approval group revision" }
+        require(approvalPolicy == ApprovalPolicy.N_OF_M || (approvalGroupId == null && approvalGroupRevision == null)) {
+            "approval group binding is only valid for N_OF_M"
         }
         require(validTo == null || validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
         require(lifecycleRevision >= 0) { "lifecycleRevision must not be negative" }

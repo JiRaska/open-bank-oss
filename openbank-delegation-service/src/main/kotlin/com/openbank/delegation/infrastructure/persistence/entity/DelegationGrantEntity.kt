@@ -69,6 +69,12 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "required_approvals")
     var requiredApprovals: Int? = null
 
+    @Column(name = "approval_group_id")
+    var approvalGroupId: UUID? = null
+
+    @Column(name = "approval_group_revision")
+    var approvalGroupRevision: Long? = null
+
     @Column(name = "per_tx_limit_amount", precision = 20, scale = 6)
     var perTxLimitAmount: BigDecimal? = null
 
@@ -149,6 +155,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
         capabilities = capabilities.toSet(),
         approvalPolicy = approvalPolicy,
         requiredApprovals = requiredApprovals,
+        approvalGroupId = approvalGroupId,
+        approvalGroupRevision = approvalGroupRevision,
         perTransactionLimit = toMoney(perTxLimitAmount, perTxLimitCurrency),
         dailyLimit = toMoney(dailyLimitAmount, dailyLimitCurrency),
         monthlyLimit = toMoney(monthlyLimitAmount, monthlyLimitCurrency),
@@ -213,6 +221,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
             capabilities = g.capabilities.toMutableSet()
             approvalPolicy = g.approvalPolicy
             requiredApprovals = g.requiredApprovals
+            approvalGroupId = g.approvalGroupId
+            approvalGroupRevision = g.approvalGroupRevision
             perTxLimitAmount = g.perTransactionLimit?.amount
             perTxLimitCurrency = g.perTransactionLimit?.currency?.code
             dailyLimitAmount = g.dailyLimit?.amount

@@ -5,10 +5,12 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.event.SavingsWithdrawalApproved
+import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.account.domain.model.SavingsDelegationIntent
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
@@ -37,6 +39,15 @@ data class ProposeWithdrawalCommand(
 
 data class ProposalCreated(val proposal: WithdrawalProposal, val approvalId: String)
 
+private data class ApprovalSnapshot(
+    val groupId: UUID?,
+    val revision: Long?,
+    val threshold: Int,
+    val members: Set<UUID>,
+)
+
+private const val APPROVAL_POLICY_N_OF_M = "N_OF_M"
+
 /**
  * The propose-only maker-checker flow (ADR-0232 D8 / AC8): a delegate holding
  * SAVINGS_PROPOSE_WITHDRAW creates a proposal; the owner's SCA-bound decision is
@@ -52,20 +63,22 @@ class SavingsProposalService(
     private val approvalStore: ApprovalStore,
     private val scaChallengeClient: ScaChallengeClient,
     private val partyMandateRepository: PartyMandateProjectionRepository,
+    private val approvalGroupRepository: ApprovalGroupRevisionRepository,
     private val clock: Clock,
 ) {
 
     suspend fun propose(command: ProposeWithdrawalCommand): ProposalCreated {
-        val allowed = savingsGuard.isAuthorized(
+        val authorization = savingsGuard.authorization(
             command.accountId,
             command.delegatePartyId,
             SavingsDelegationIntent.PROPOSE_WITHDRAW,
         )
-        if (!allowed) {
+        if (authorization == null) {
             throw ProposalForbiddenException(
                 "party ${command.delegatePartyId} holds no SAVINGS_PROPOSE_WITHDRAW grant on account ${command.accountId}",
             )
         }
+        val approvalSnapshot = approvalSnapshot(authorization, command.delegatePartyId)
         val now = OffsetDateTime.now(clock)
         // Idempotent replay (ADR-0295, #8351): a retried propose with the same natural key —
         // (account, delegate, amount, currency, note) — while the original is still PENDING and
@@ -92,6 +105,11 @@ class SavingsProposalService(
             amountMinor = command.amountMinor,
             currency = command.currency,
             note = command.note,
+            delegationGrantId = authorization.grant?.id,
+            approvalGroupId = approvalSnapshot.groupId,
+            approvalGroupRevision = approvalSnapshot.revision,
+            requiredApprovals = approvalSnapshot.threshold,
+            eligibleApproverIds = approvalSnapshot.members,
             createdAt = now,
             expiresAt = now.plus(PROPOSAL_TTL),
         )
@@ -103,6 +121,38 @@ class SavingsProposalService(
         return ProposalCreated(proposalRepository.save(proposal.copy(approvalId = approval.id)), approval.id)
     }
 
+    private suspend fun approvalSnapshot(
+        authorization: SavingsGoalDelegationGuard.Authorization,
+        makerPartyId: UUID,
+    ): ApprovalSnapshot {
+        val grant = authorization.grant ?: return ApprovalSnapshot(
+            groupId = null,
+            revision = null,
+            threshold = 1,
+            members = setOf(authorization.ownerPartyId),
+        )
+        if (grant.approvalPolicy == DelegatedAccessGrant.APPROVAL_POLICY_SOLO) {
+            return ApprovalSnapshot(null, null, 1, setOf(authorization.ownerPartyId))
+        }
+        require(grant.approvalPolicy == APPROVAL_POLICY_N_OF_M) {
+            "unsupported approval policy ${grant.approvalPolicy}"
+        }
+        val groupId = checkNotNull(grant.approvalGroupId) { "N_OF_M grant ${grant.id} has no approval group" }
+        val revision = checkNotNull(grant.approvalGroupRevision) { "N_OF_M grant ${grant.id} has no group revision" }
+        val group = approvalGroupRepository.findLatest(groupId)
+            ?: throw ProposalForbiddenException("approval group $groupId is unavailable")
+        if (!group.active || group.revision != revision || group.threshold != grant.requiredApprovals) {
+            throw ProposalForbiddenException("approval group $groupId changed; the grant must be reissued")
+        }
+        val eligibleMembers = group.members - makerPartyId
+        if (eligibleMembers.size < group.threshold) {
+            throw ProposalForbiddenException(
+                "approval group $groupId cannot meet its threshold without maker self-approval",
+            )
+        }
+        return ApprovalSnapshot(groupId, revision, group.threshold, eligibleMembers)
+    }
+
     suspend fun decide(
         accountId: UUID,
         proposalId: UUID,
@@ -112,11 +162,6 @@ class SavingsProposalService(
     ): WithdrawalProposal {
         val account = accountRepository.findById(accountId)
             ?: throw ProposalNotFoundException(proposalId)
-        if (account.partyId != decidedByPartyId) {
-            throw ProposalForbiddenException(
-                "only the account owner can decide a withdrawal proposal on account $accountId",
-            )
-        }
         val proposal = proposalRepository.findById(proposalId)
             ?: throw ProposalNotFoundException(proposalId)
         if (proposal.accountId != accountId) {
@@ -128,32 +173,28 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        val actorPartyId = verifyDecisionSca(account.partyId, scaSessionId)
+        val actorPartyId = verifyDecisionSca(account.partyId, proposal, decidedByPartyId, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
-        approvalStore.decide(approvalId, actorPartyId.toString(), approve)
-            ?: error("approval $approvalId not found")
-
         val now = OffsetDateTime.now(clock)
-        return if (approve) {
-            val approved = proposal.approve(actorPartyId, scaSessionId, now)
-            proposalRepository.save(
-                approved,
-                SavingsWithdrawalApproved(
-                    aggregateId = approved.id,
-                    accountId = approved.accountId,
-                    delegatePartyId = approved.delegatePartyId,
-                    amountMinor = approved.amountMinor,
-                    currency = approved.currency,
-                    approvalId = approvalId,
-                    scaSessionId = scaSessionId,
-                    occurredAt = clock.instant(),
-                    sourceService = "account-service",
-                ),
-            )
-        } else {
-            proposalRepository.save(proposal.reject(actorPartyId, now))
-        }
+        return proposalRepository.recordDecision(
+            proposalId = proposalId,
+            actorPartyId = actorPartyId,
+            approved = approve,
+            scaSessionId = scaSessionId,
+            decidedAt = now,
+            approvedEvent = SavingsWithdrawalApproved(
+                aggregateId = proposal.id,
+                accountId = proposal.accountId,
+                delegatePartyId = proposal.delegatePartyId,
+                amountMinor = proposal.amountMinor,
+                currency = proposal.currency,
+                approvalId = approvalId,
+                scaSessionId = scaSessionId,
+                occurredAt = clock.instant(),
+                sourceService = "account-service",
+            ),
+        ).proposal
     }
 
     suspend fun cancel(accountId: UUID, proposalId: UUID, delegatePartyId: UUID): WithdrawalProposal {
@@ -196,7 +237,12 @@ class SavingsProposalService(
     // Distinct failures deliberately preserve not-found, unavailable, wrong-purpose and
     // unauthorized-representative semantics at this security boundary.
     @Suppress("ThrowsCount")
-    private suspend fun verifyDecisionSca(ownerPartyId: UUID, scaSessionId: UUID): UUID {
+    private suspend fun verifyDecisionSca(
+        ownerPartyId: UUID,
+        proposal: WithdrawalProposal,
+        claimedPartyId: UUID,
+        scaSessionId: UUID,
+    ): UUID {
         val challenge = try {
             scaChallengeClient.getChallenge(scaSessionId)
         } catch (e: NotFoundException) {
@@ -208,7 +254,15 @@ class SavingsProposalService(
             throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
         }
         val actorPartyId = challenge.partyId
-        if (actorPartyId != ownerPartyId) {
+        if (proposal.approvalGroupId != null) {
+            if (actorPartyId != claimedPartyId || actorPartyId !in proposal.eligibleApproverIds) {
+                throw ProposalForbiddenException(
+                    "the SCA-authenticated actor is not in proposal ${proposal.id}'s immutable approval roster",
+                )
+            }
+        } else if (claimedPartyId != ownerPartyId) {
+            throw ProposalForbiddenException("only the account owner can decide proposal ${proposal.id}")
+        } else if (actorPartyId != ownerPartyId) {
             val soleAuthority = partyMandateRepository.findActive(ownerPartyId, actorPartyId)
                 .any { it.permitsSoleDecision() }
             if (!soleAuthority) {

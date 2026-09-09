@@ -35,6 +35,8 @@ data class DelegatedAccessGrant(
     /** Owner-selected workflow policy, projected verbatim; unknown values are never enforced. */
     val approvalPolicy: String = APPROVAL_POLICY_SOLO,
     val requiredApprovals: Int? = null,
+    val approvalGroupId: UUID? = null,
+    val approvalGroupRevision: Long? = null,
     val resourceType: String = RESOURCE_TYPE_ACCOUNT,
     val perTransactionLimitAmount: java.math.BigDecimal? = null,
     val perTransactionLimitCurrency: String? = null,

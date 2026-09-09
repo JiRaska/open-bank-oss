@@ -654,6 +654,26 @@ incomplete facts fail closed before the one-shot challenge is consumed. This pre
 evidence in `WithdrawalProposal.decidedBy` and `ApprovalStore` without falsely claiming that one
 signature satisfies a statutory quorum.
 
+## Immutable withdrawal-approval snapshots
+
+Each delegated withdrawal proposal copies the grant id, exact approval-group revision, threshold,
+and eligible party ids into account-service storage. Later group edits therefore cannot widen an
+already-open operation, and a changed or inactive group forces grant re-issuance before a new
+operation is admitted. The proposing delegate is removed from the snapshot; admission fails closed
+when the remaining roster cannot meet the threshold.
+
+Quorum truth is the PostgreSQL decision ledger, not the Redis inbox and not a caller-supplied count.
+The repository locks the proposal row, admits only a party in the immutable roster, and relies on
+unique `(proposal_id, party_id)` and globally unique `sca_session_id` constraints. A rejection is
+terminal; approvals keep the proposal PENDING until the configured number of distinct actors is
+present. The final state transition and `SavingsWithdrawalApproved` outbox insert share the same
+database transaction, preventing two concurrent final approvers from emitting twice.
+
+Residual rollout gate: SCA consumption is a separate service transaction. N_OF_M grant admission
+must remain disabled until retry recovery is explicitly reference-bound and proven for the
+"SCA spent, account transaction unavailable" window. The schema and consumer are additive so this
+gate can be held without changing existing SOLO behaviour.
+
 Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
 `party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
 partial projections. Projection failures retain the channel's bounded retry/DLQ behavior.

@@ -39,6 +39,7 @@ interface DelegationCandidate {
     val capabilities: Set<DelegationCapability>
     val approvalPolicy: ApprovalPolicy
     val requiredApprovals: Int?
+    val approvalGroupId: UUID?
     val perTransactionLimit: Money?
     val dailyLimit: Money?
     val monthlyLimit: Money?
@@ -55,6 +56,7 @@ data class PreviewDelegationCommand(
     override val capabilities: Set<DelegationCapability>,
     override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
     override val requiredApprovals: Int? = null,
+    override val approvalGroupId: UUID? = null,
     override val perTransactionLimit: Money? = null,
     override val dailyLimit: Money? = null,
     override val monthlyLimit: Money? = null,
@@ -71,6 +73,7 @@ data class OfferDelegationCommand(
     override val capabilities: Set<DelegationCapability>,
     override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
     override val requiredApprovals: Int? = null,
+    override val approvalGroupId: UUID? = null,
     override val perTransactionLimit: Money? = null,
     override val dailyLimit: Money? = null,
     override val monthlyLimit: Money? = null,

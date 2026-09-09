@@ -39,4 +39,8 @@ class ApprovalGroupRevisionRepositoryImpl :
     override suspend fun find(groupId: UUID, revision: Long): ApprovalGroupRevision? = Panache.withSession {
         find("groupId = ?1 and revision = ?2", groupId, revision).firstResult<ApprovalGroupRevisionEntity>()
     }.awaitSuspending()?.toDomain()
+
+    override suspend fun findLatest(groupId: UUID): ApprovalGroupRevision? = Panache.withSession {
+        find("groupId = ?1 order by revision desc", groupId).firstResult<ApprovalGroupRevisionEntity>()
+    }.awaitSuspending()?.toDomain()
 }

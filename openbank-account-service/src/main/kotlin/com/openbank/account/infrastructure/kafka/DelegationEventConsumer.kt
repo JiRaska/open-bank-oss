@@ -27,6 +27,8 @@ private data class DelegationEvent(
     val capabilities: Set<String>,
     val approvalPolicy: String,
     val requiredApprovals: Int?,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
     val perTxLimitAmount: java.math.BigDecimal?,
     val perTxLimitCurrency: String?,
     val validFrom: OffsetDateTime?,
@@ -104,6 +106,9 @@ class DelegationEventConsumer(
             capabilities = caps,
             approvalPolicy = node.path("approvalPolicy").asText(DelegatedAccessGrant.APPROVAL_POLICY_SOLO),
             requiredApprovals = node.path("requiredApprovals").takeIf { it.isIntegralNumber }?.intValue(),
+            approvalGroupId = node.path("approvalGroupId").asText(null)
+                ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            approvalGroupRevision = node.path("approvalGroupRevision").takeIf { it.isIntegralNumber }?.longValue(),
             perTxLimitAmount = node.path("perTransactionLimit").path("amount").asText(null)?.toBigDecimalOrNull(),
             perTxLimitCurrency = node.path("perTransactionLimit").path("currency").asText(null),
             validFrom = node.path("validFrom").asText(null)?.let {
@@ -153,6 +158,8 @@ class DelegationEventConsumer(
                 capabilities = event.capabilities,
                 approvalPolicy = event.approvalPolicy,
                 requiredApprovals = event.requiredApprovals,
+                approvalGroupId = event.approvalGroupId,
+                approvalGroupRevision = event.approvalGroupRevision,
                 resourceType = event.resourceType,
                 perTransactionLimitAmount = event.perTxLimitAmount,
                 perTransactionLimitCurrency = event.perTxLimitCurrency,

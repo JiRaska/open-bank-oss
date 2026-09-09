@@ -49,6 +49,12 @@ class DelegationProjectionEntity : PanacheEntityBase() {
     @Column(name = "required_approvals")
     var requiredApprovals: Int? = null
 
+    @Column(name = "approval_group_id")
+    var approvalGroupId: UUID? = null
+
+    @Column(name = "approval_group_revision")
+    var approvalGroupRevision: Long? = null
+
     @Column(name = "per_tx_limit_amount", precision = 20, scale = 6)
     var perTxLimitAmount: BigDecimal? = null
 
@@ -75,6 +81,8 @@ class DelegationProjectionEntity : PanacheEntityBase() {
         capabilities = capabilities.toSet(),
         approvalPolicy = approvalPolicy,
         requiredApprovals = requiredApprovals,
+        approvalGroupId = approvalGroupId,
+        approvalGroupRevision = approvalGroupRevision,
         resourceType = resourceType,
         perTransactionLimitAmount = perTxLimitAmount,
         perTransactionLimitCurrency = perTxLimitCurrency,
@@ -94,6 +102,8 @@ class DelegationProjectionEntity : PanacheEntityBase() {
                 capabilities = g.capabilities.toMutableSet()
                 approvalPolicy = g.approvalPolicy
                 requiredApprovals = g.requiredApprovals
+                approvalGroupId = g.approvalGroupId
+                approvalGroupRevision = g.approvalGroupRevision
                 perTxLimitAmount = g.perTransactionLimitAmount
                 perTxLimitCurrency = g.perTransactionLimitCurrency
                 validFrom = g.validFrom

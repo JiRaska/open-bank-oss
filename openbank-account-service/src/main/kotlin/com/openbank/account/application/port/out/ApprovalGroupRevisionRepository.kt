@@ -13,4 +13,5 @@ class ConflictingApprovalGroupRevisionException(groupId: UUID, revision: Long) :
 interface ApprovalGroupRevisionRepository {
     suspend fun store(value: ApprovalGroupRevision)
     suspend fun find(groupId: UUID, revision: Long): ApprovalGroupRevision?
+    suspend fun findLatest(groupId: UUID): ApprovalGroupRevision?
 }
