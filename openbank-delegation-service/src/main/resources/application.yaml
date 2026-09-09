@@ -177,6 +177,14 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      notification-requests-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-notifications-${quarkus.uuid}
+        topic: openbank.notification.requests
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       disclosure-snapshot-events-in:
         connector: smallrye-kafka
@@ -220,6 +228,11 @@ mp:
         tls-configuration-name: party-authority
 
 "%test":
+  mp:
+    messaging:
+      outgoing:
+        notification-requests-out:
+          connector: smallrye-in-memory
   quarkus:
     datasource:
       reactive:

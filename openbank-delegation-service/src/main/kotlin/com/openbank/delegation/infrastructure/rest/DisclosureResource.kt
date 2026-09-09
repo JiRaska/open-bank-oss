@@ -2,12 +2,17 @@
 package com.openbank.delegation.infrastructure.rest
 
 import com.openbank.delegation.application.port.`in`.GetDisclosureUseCase
+import com.openbank.delegation.application.port.`in`.IssueDisclosureRedemptionCommand
+import com.openbank.delegation.application.port.`in`.IssueDisclosureRedemptionUseCase
 import com.openbank.delegation.application.port.`in`.PrepareDisclosureCommand
 import com.openbank.delegation.application.port.`in`.PrepareDisclosureUseCase
 import com.openbank.delegation.infrastructure.rest.dto.DisclosureResponse
+import com.openbank.delegation.infrastructure.rest.dto.IssueDisclosureRedemptionRequest
+import com.openbank.delegation.infrastructure.rest.dto.IssueDisclosureRedemptionResponse
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -27,6 +32,7 @@ import java.util.UUID
 class DisclosureResource(
     private val prepareDisclosure: PrepareDisclosureUseCase,
     private val getDisclosure: GetDisclosureUseCase,
+    private val redemption: IssueDisclosureRedemptionUseCase,
 ) {
     @POST
     @Path("/delegations/{delegationId}")
@@ -50,4 +56,45 @@ class DisclosureResource(
         @PathParam("id") id: UUID,
         @HeaderParam("X-Customer-Party-Id") callerPartyId: UUID?,
     ): DisclosureResponse = DisclosureResponse.from(getDisclosure.get(id, callerPartyId))
+
+    @POST
+    @Path("/{id}/redemptions")
+    @Authorize(action = "delegation.disclosure.manage", resource = "#id")
+    suspend fun issueRedemption(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Customer-Party-Id") callerPartyId: UUID?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: IssueDisclosureRedemptionRequest,
+    ): Response {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        val issued = redemption.issue(
+            IssueDisclosureRedemptionCommand(
+                id,
+                callerPartyId,
+                request.recipient,
+                request.expiresAt,
+                request.maxViews,
+                idempotencyKey,
+            ),
+        )
+        return Response.status(Response.Status.CREATED).entity(
+            IssueDisclosureRedemptionResponse(
+                issued.redemptionId,
+                issued.magicToken,
+                issued.expiresAt,
+                issued.maxViews,
+            ),
+        ).build()
+    }
+
+    @DELETE
+    @Path("/{id}/redemption")
+    @Authorize(action = "delegation.disclosure.manage", resource = "#id")
+    suspend fun revokeRedemption(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Customer-Party-Id") callerPartyId: UUID?,
+    ): Response {
+        redemption.revoke(id, callerPartyId)
+        return Response.noContent().build()
+    }
 }

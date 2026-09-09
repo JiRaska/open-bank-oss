@@ -26,6 +26,7 @@ import com.openbank.delegation.application.usecase.DisclosureForbiddenException
 import com.openbank.delegation.application.usecase.DisclosureIdempotencyConflictException
 import com.openbank.delegation.application.usecase.DisclosureNotEligibleException
 import com.openbank.delegation.application.usecase.DisclosureNotFoundException
+import com.openbank.delegation.application.usecase.DisclosureRedemptionUnavailableException
 import com.openbank.delegation.application.usecase.SpendReservationIdempotencyConflictException
 import com.openbank.delegation.application.usecase.SpendReservationNotFoundException
 import com.openbank.delegation.application.usecase.SpendReservationRefusedException
@@ -95,6 +96,13 @@ class DisclosureConflictMapper : ExceptionMapper<DisclosureIdempotencyConflictEx
 class DisclosureNotEligibleMapper : ExceptionMapper<DisclosureNotEligibleException> {
     override fun toResponse(exception: DisclosureNotEligibleException): Response =
         Response.status(UNPROCESSABLE_ENTITY).entity(errorBody(UNPROCESSABLE_ENTITY, exception.message)).build()
+}
+
+@Provider
+class DisclosureRedemptionUnavailableMapper : ExceptionMapper<DisclosureRedemptionUnavailableException> {
+    override fun toResponse(exception: DisclosureRedemptionUnavailableException): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message)).build()
 }
 
 @Provider
