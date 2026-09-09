@@ -26,7 +26,8 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
     return () => observer.disconnect()
   }, [])
 
-  const params = new URLSearchParams({ kiosk: '', theme, from: String(Date.parse(`${from}T00:00:00Z`)), to: String(Date.parse(`${to}T23:59:59.999Z`)), timezone: 'utc' })
+  // Grafana 13 accepts `1` as the explicit full-kiosk value. Empty and `tv` values are ignored.
+  const params = new URLSearchParams({ kiosk: '1', theme, from: String(Date.parse(`${from}T00:00:00Z`)), to: String(Date.parse(`${to}T23:59:59.999Z`)), timezone: 'utc' })
   const url = `${DASHBOARD}?${params}`
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
       </div>
       <div className="flex gap-2">
         <button className="btn btn-secondary" onClick={() => { setState('loading'); setAttempt((n) => n + 1) }}><RefreshCw size={14} />{t('Obnovit grafy', 'Refresh charts')}</button>
-        <a href={url.replace('kiosk=&', '')} target="_blank" rel="noreferrer" className="btn btn-secondary"><ExternalLink size={14} />{t('Detail v Grafaně', 'Explore in Grafana')}</a>
+        <a href={url.replace('kiosk=1&', '')} target="_blank" rel="noreferrer" className="btn btn-secondary"><ExternalLink size={14} />{t('Detail v Grafaně', 'Explore in Grafana')}</a>
       </div>
     </div>
     {state === 'loading' && <div role="status" className="p-6 text-sm text-[var(--text-secondary)]">{t('Načítání grafů a ověření přihlášení…', 'Loading charts and verifying your session…')}</div>}
