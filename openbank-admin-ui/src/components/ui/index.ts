@@ -16,6 +16,7 @@
  * tranche and removed again for exactly that reason: nothing consumed them yet.)
  */
 export { PageHeader } from './PageHeader'
+export { Drawer } from './Drawer'
 export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
 export {
