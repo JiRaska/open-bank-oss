@@ -124,6 +124,10 @@ spec:
               value: http://sca-service.sca.svc:8110
             - name: PID_SERVICE_URL
               value: http://pid-service.pid.svc:8105
+            # Principal type and active ADR-0284 PartyMandate. This is the authoritative
+            # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8081
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit

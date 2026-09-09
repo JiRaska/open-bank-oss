@@ -70,11 +70,13 @@ class DelegationResource(
     suspend fun preview(
         request: PreviewDelegationRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationPreviewResponse {
         requireNotNull(request) { "request body is required" }
         previewDelegation.preview(
             PreviewDelegationCommand(
                 callerPartyId = customerPartyId,
+                actorPartyId = customerActorPartyId,
                 grantorPartyId = request.grantorPartyId,
                 granteePartyId = request.granteePartyId,
                 resourceType = request.resourceType,
@@ -115,6 +117,7 @@ class DelegationResource(
         request: OfferDelegationRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
         @Context uriInfo: UriInfo,
     ): Response {
         requireNotNull(request) { "request body is required" }
@@ -133,6 +136,7 @@ class DelegationResource(
         val grant = offerDelegation.offer(
             OfferDelegationCommand(
                 callerPartyId = customerPartyId,
+                actorPartyId = customerActorPartyId,
                 grantorPartyId = request.grantorPartyId,
                 granteePartyId = request.granteePartyId,
                 resourceType = request.resourceType,
@@ -169,6 +173,7 @@ class DelegationResource(
     suspend fun getById(
         @PathParam("id") id: UUID,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationResponse = DelegationResponse.from(getDelegation.getDelegation(id, customerPartyId))
 
     @Operation(summary = "List grants offered BY a party (Shared by me)")
@@ -335,5 +340,6 @@ class DelegationResource(
          * call with the caller's validated party id under this header.
          */
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        const val CUSTOMER_ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
     }
 }

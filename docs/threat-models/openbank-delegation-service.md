@@ -136,8 +136,15 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - **No notification on any lifecycle transition** (ADR-0232 D4 requires both parties be told).
 - **No sanctions/PEP screening at grant time** (ADR-0232 D5); the eligibility gate checks party
   status and KYC level only.
-- **The ADR-0232 D5 SME bridge is unimplemented**: nothing requires a LEGAL_ENTITY grantor's
-  acting person to hold `delegation.manage` on that entity.
+- **LEGAL_ENTITY grantors are bound to a human actor** (ADR-0232 D5 / ADR-0284): customer-edge
+  derives `X-Customer-Actor-Party-Id` from the authenticated token while keeping the selected
+  entity in `X-Customer-Party-Id`; delegation-service resolves the principal type in party-service
+  and requires that human to appear in its active `acting-for` mandate set. The same human owns
+  the consumed grant SCA challenge. Missing identity, a revoked/expired mandate, a non-active
+  principal, malformed data or either lookup being unavailable refuses preview and offer before
+  SCA is spent. Retail remains the degenerate case actor == principal. Residual: this proves a
+  statutory/owner mandate, not an employee delegation carrying `delegation.manage`; employee-level
+  sub-administration remains a later, explicitly capability-scoped grant.
 
 ## Change log
 

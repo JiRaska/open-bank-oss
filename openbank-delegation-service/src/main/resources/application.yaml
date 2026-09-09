@@ -65,7 +65,7 @@ quarkus:
       verification: none
 
   # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
-  # Every REST client here (sca, pid, account, card-issuance) targets an @RolesAllowed endpoint,
+  # Every REST client here (sca, pid, party, account, card-issuance) targets an @RolesAllowed endpoint,
   # so without this block the calls carry no Authorization header and 401 — surfacing as the
   # ownership gate's fail-closed "could not be established", never as an auth problem.
   # Same shape as party-service / document-service / sdd-service.
@@ -108,6 +108,10 @@ quarkus:
       read-timeout: 2000
     pid-service:
       url: ${PID_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 2000
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8081}
       connect-timeout: 2000
       read-timeout: 2000
     # Resource-ownership gate (ADR-0232 threat model T1): the only services that can answer
