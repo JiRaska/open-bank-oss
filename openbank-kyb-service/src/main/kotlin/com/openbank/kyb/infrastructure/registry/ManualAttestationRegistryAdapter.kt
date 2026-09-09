@@ -40,9 +40,19 @@ class ManualAttestationRegistryAdapter : RegistryAdapter {
             identifier = identifier,
             legalName = d.legalName.trim(),
             legalFormCode = null,
+            // #9038: an absent declaration maps to OTHER (nothing was claimed), but an
+            // UNPARSEABLE one used to silently become OTHER too — a typo in the applicant's
+            // legal form was persisted as a wrong fact. Strict: IllegalArgumentException,
+            // which libs-runtime maps to 400 at the REST boundary (#526).
             legalFormClass =
             d.legalFormClass?.let {
-                runCatching { LegalFormClass.valueOf(it) }.getOrNull()
+                runCatching { LegalFormClass.valueOf(it) }
+                    .getOrElse { _ ->
+                        throw IllegalArgumentException(
+                            "unknown legal form class '$it'; expected one of " +
+                                LegalFormClass.entries.joinToString(),
+                        )
+                    }
             } ?: LegalFormClass.OTHER,
             status = EntityStatus.UNKNOWN,
             registeredAddress = RegisteredAddress(d.addressLine1, d.city, d.postalCode, d.countryCode.uppercase()),
