@@ -156,6 +156,11 @@ class DocumentPactProviderVerificationTest {
     @State("an immutable disclosure snapshot with the expected digest exists")
     fun stateDisclosureSnapshotExists() = seedDisclosureSnapshot()
 
+    /**
+     * Seeds the same resource as the success case while the Pact deliberately omits caller
+     * identity. Replaying it against the real security layer must return 401, proving that an
+     * existing snapshot cannot be fetched anonymously.
+     */
     @State("an immutable disclosure snapshot exists but caller identity is missing")
     fun stateDisclosureSnapshotWithoutCallerIdentityExists() = seedDisclosureSnapshot()
 
