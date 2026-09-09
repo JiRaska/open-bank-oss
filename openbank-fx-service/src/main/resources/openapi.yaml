@@ -8,7 +8,7 @@ info:
   # Minor bump (1.7 -> 1.8): additive only — GET /fx/approvals (the checker's queue, issue #5679)
   # plus two additive fields on ApprovalResponse (makerId, createdAt), and a shared
   # ApprovalResponse schema now $ref'd from PATCH /approvals/{id} too. No breaking change.
-  version: 1.8.1
+  version: 1.8.2
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -179,6 +179,10 @@ paths:
     post:
       tags: [FX]
       summary: Ingest the ČNB fixing for a given day (idempotent)
+      description: >-
+        Inherently idempotent (ADR-0299): each currency rate is keyed by (source, validFrom)
+        check-first, so re-ingesting a day skips what is already stored and a retry recomputes
+        nothing twice.
       description: >-
         Pulls the ČNB central-bank fixing (kurz devizového trhu) and stores it. Idempotent — a
         repeated call for the same day does not double-book. Requires ROLE_OPERATOR or ROLE_ADMIN
