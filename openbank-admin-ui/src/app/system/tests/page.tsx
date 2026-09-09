@@ -12,7 +12,7 @@ import { useLanguage, type Language } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-triage'
 import type {
-  ComponentTestPosture, EvidenceKind, EvidenceState, TestCaseHistory, TestIntelligenceReport,
+  ComponentTestPosture, EvidenceKind, EvidenceState, RequiredTestControl, TestCaseHistory, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
@@ -23,6 +23,19 @@ import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Ton
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
 const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
+
+function requiredControlTab(kind: RequiredTestControl['kind']): Tab {
+  switch (kind) {
+    case 'contract': return 'contracts'
+    case 'mutation': return 'mutation'
+    case 'performance': return 'performance'
+    case 'synthetic': return 'synthetic'
+    case 'coverage': return 'coverage'
+    case 'runtime': return 'runtime'
+    case 'visual': return 'posture'
+    default: return 'execution'
+  }
+}
 
 function evidenceTone(state: EvidenceState): Tone {
   switch (state) {
@@ -73,10 +86,16 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
     'not-run',
   )
-  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
-    : report.totals.failingEvidence > 0 ? 'failed'
+  const componentCiState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
+  const requiredControlGaps = (report.requiredControls ?? []).filter(control => control.state !== 'passed')
+  const requiredControlState = aggregateEvidenceState([
+    ...requiredControlGaps.map(control => control.state),
+    ...((report.totals.requiredControlGaps ?? 0) > requiredControlGaps.length ? ['unknown' as const] : []),
+  ], 'passed')
+  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
+    : aggregateEvidenceState([componentCiState, requiredControlState])
   const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
     { tab: 'posture', title: t('CI důkazy', 'CI evidence'), eyebrow: t('deterministické gate', 'deterministic gates'), state: ciState, detail: t(`${report.totals.componentsWithExecutionEvidence}/${report.totals.components} komponent s důkazem běhu`, `${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with run evidence`) },
     { tab: 'runtime', title: t('Testcontainers runtime', 'Testcontainers runtime'), eyebrow: t('skutečná topologie', 'actual topology'), state: runtimeState, detail: t(`${runtimeRows.length} deklarovaných testovacích runtime`, `${runtimeRows.length} declared test runtimes`) },
@@ -103,6 +122,19 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
  */
 function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
+  const requiredControlGaps = (report.requiredControls ?? []).filter(control => control.state !== 'passed')
+  const unprojectedRequiredControlGaps = Math.max(0, (report.totals.requiredControlGaps ?? 0) - requiredControlGaps.length)
+  const queuedRequiredControlGaps = requiredControlGaps.filter(control => {
+    if (control.kind === 'synthetic') {
+      return !report.syntheticJourneys.some(journey => `synthetic:${journey.id}` === control.id
+        && (journey.status === 'planned' || journey.state !== 'passed'))
+    }
+    if (control.kind === 'performance') {
+      return !report.performance.some(row => row.component === control.component
+        && (row.state !== 'passed' || Boolean(row.plan?.blocker)))
+    }
+    return true
+  })
   // A component that has never emitted a particular test layer is not a green result.
   // Do not infer that every component *must* own every layer: this is a visibility and
   // prioritisation signal, while governed journey coverage remains the obligation source.
@@ -127,6 +159,19 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
   })
   const gaps: Array<{ id: string; tab: Tab; title: string; detail: string; state: EvidenceState }> = [
     ...layerVisibility,
+    ...queuedRequiredControlGaps.map(control => ({
+      id: `required-control-${control.id}`, tab: requiredControlTab(control.kind), state: control.state,
+      title: t(`Povinná kontrola: ${control.id}`, `Required control: ${control.id}`),
+      detail: control.blocker ?? control.reason,
+    })),
+    ...(unprojectedRequiredControlGaps > 0 ? [{
+      id: 'required-controls-unprojected', tab: 'posture' as const, state: 'unknown' as const,
+      title: t('Povinné kontroly', 'Required controls'),
+      detail: t(
+        `${unprojectedRequiredControlGaps} mezer povinných kontrol nemá v tomto snapshotu detailní řádek.`,
+        `${unprojectedRequiredControlGaps} required-control gaps have no detailed row in this snapshot.`,
+      ),
+    }] : []),
     ...report.performance.filter(row => row.state !== 'passed' || row.plan?.blocker).map(row => ({
       id: `performance-${row.id}`, tab: 'performance' as const, state: row.state,
       title: t(`Výkon: ${row.id}`, `Performance: ${row.id}`),
@@ -394,7 +439,7 @@ function Mutations({ report }: { report: TestIntelligenceReport }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>{report.mutations.map(row => <div key={row.component} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface-1)' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{row.component}</strong><StateBadge state={row.state} /></div>
     <div style={{ fontSize: 28, fontWeight: 750, margin: '12px 0' }}>{row.score ?? '—'}%</div>
-    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.killed} killed · {row.survived} survived · {row.noCoverage} no coverage</div>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.killed} killed · {row.timedOut ?? 0} timed out · {row.survived} survived · {row.noCoverage} no coverage</div>
     {row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 7 }}>run {row.run.id} · {row.run.commit.slice(0, 8)}</div>}
   </div>)}</div>
 }
