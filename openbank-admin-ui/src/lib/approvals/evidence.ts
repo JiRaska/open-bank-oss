@@ -30,12 +30,12 @@ export interface ApprovalInbox {
   sources: Record<string, ApprovalSourceState>
 }
 
-const DOMAINS = [
+export const APPROVAL_DOMAINS = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
   'delegation', 'agent',
 ] as const
-const DOMAIN_SET = new Set<string>(DOMAINS)
+const DOMAIN_SET = new Set<string>(APPROVAL_DOMAINS)
 const SOURCE_STATES = new Set<ApprovalSourceState>(['ok', 'forbidden', 'unavailable', 'not-configured'])
 
 function nonEmpty(value: unknown): value is string {
@@ -98,7 +98,7 @@ export function parseApprovalInbox(value: unknown): ApprovalInbox | null {
   const inbox = value as Record<string, unknown>
   if (!Array.isArray(inbox.items) || typeof inbox.sources !== 'object' || inbox.sources === null || Array.isArray(inbox.sources)) return null
   const sources = inbox.sources as Record<string, unknown>
-  if (Object.keys(sources).length !== DOMAINS.length || !DOMAINS.every(domain => SOURCE_STATES.has(sources[domain] as ApprovalSourceState))) return null
+  if (Object.keys(sources).length !== APPROVAL_DOMAINS.length || !APPROVAL_DOMAINS.every(domain => SOURCE_STATES.has(sources[domain] as ApprovalSourceState))) return null
   const items = inbox.items.map(parseInboxItem)
   if (items.some(item => item === null)) return null
   const valid = items as ApprovalInboxItem[]
