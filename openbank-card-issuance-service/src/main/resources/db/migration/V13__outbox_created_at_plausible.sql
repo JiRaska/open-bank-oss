@@ -1,10 +1,20 @@
--- #9081: fleet sweep of the guard proven on lending_outbox (#9003) and called for by #3272 —
--- an outbox row stamped 1970-01-01 (toEntity() assigning over the column DEFAULT) sorts ahead of
--- all real work in the dispatcher's ORDER BY created_at ASC and lands in the 1970-01 warehouse
--- partition. This service has no reported epoch-stamped rows (#3272 hit ledger, #9003 lending),
--- so this migration is the guard only; if the SELECT below ever answers non-zero, correct those
--- rows to NOW() before adding the constraint:
---   SELECT count(*) FROM card_outbox WHERE created_at < TIMESTAMPTZ '2020-01-01';
+-- #9081: fleet sweep of the guard proven on lending_outbox (#9003). Unlike the other services in
+-- the sweep, card-issuance DOES carry the defect live: CardOutboxRequeueIT persists DEAD rows
+-- stamped 1970-01-01 "so the test data is the shape actually stranded in the cluster" (#3272).
+-- So this migration is BOTH halves, in the lending V16 shape.
+--
+-- Data: the stranded rows are DEAD or requeued-SENT history, so correcting them changes no
+-- pending dispatch order; leaving them would keep epoch rows sorting ahead of real work forever
+-- (dispatcher claims ORDER BY created_at ASC). Their true business time is unrecoverable — the
+-- honest value is the correction instant, and this UPDATE is itself the audit trail of that.
+UPDATE card_outbox
+SET created_at = NOW(),
+    updated_at = NOW(),
+    sent_at = NOW()
+WHERE created_at < TIMESTAMPTZ '2020-01-01';
+
+-- Guard: no outbox row may be inserted with a created_at older than any plausible service
+-- lifetime. Would have caught #3272 at INSERT time.
 --
 -- Rollback: ALTER TABLE card_outbox DROP CONSTRAINT IF EXISTS card_outbox_created_at_plausible;
 ALTER TABLE card_outbox
