@@ -10,22 +10,16 @@ import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import type { JournalEntry, CursorPage } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
-
-const STATUS_PILL: Record<string, string> = {
-  POSTED:   'pill pill-success',
-  PENDING:  'pill pill-warning',
-  REVERSED: 'pill pill-neutral',
-  DRAFT:    'pill pill-info',
-}
+import { StatusBadge } from '@/components/ui'
+import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
 
 export default function LedgerPage() {
   const [fromDate, setFromDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 10) })
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
-  const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
+  const [result, setResult]     = useState<LedgerJournalPage | null>(null)
   const [loading, setLoading]   = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
@@ -42,7 +36,12 @@ export default function LedgerPage() {
       if (!res.ok) {
         throw new Error(await classifyBffFailure(res))
       }
-      return await res.json() as CursorPage<JournalEntry>
+      const raw = await res.json() as unknown
+      try {
+        return parseLedgerJournalPage(raw)
+      } catch {
+        throw new Error('unreachable')
+      }
     } catch (error) {
       throw error instanceof Error ? error : new Error('unreachable')
     }
@@ -146,19 +145,20 @@ export default function LedgerPage() {
                 <th>{t('Datum záznamu', 'Entry Date')}</th>
                 <th>{t('Datum valuty', 'Value Date')}</th>
                 <th>{t('Stav', 'Status')}</th>
+                <th>{t('Původ', 'Origin')}</th>
                 <th>{t('Řádky', 'Lines')}</th>
                 <th>{t('Popis', 'Description')}</th>
               </tr>
             </thead>
             <tbody>
               {!result && !loading && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
               )}
               {loading && !result && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
               )}
               {!loading && result && result.data.length === 0 && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
               )}
               {result?.data.map(entry => {
                 const isOpen = expanded === entry.id
@@ -174,7 +174,8 @@ export default function LedgerPage() {
                       <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.entryDate}</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.valueDate}</span></td>
-                      <td><span className={STATUS_PILL[entry.status] ?? 'pill pill-neutral'}>{entry.status}</span></td>
+                      <td><StatusBadge status={entry.status} /></td>
+                      <td><StatusBadge status={entry.synthetic ? 'SYNTHETIC' : 'BUSINESS'} tone={entry.synthetic ? 'info' : 'neutral'} label={entry.synthetic ? t('Canary', 'Canary') : t('Obchodní', 'Business')} /></td>
                       <td>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -193,7 +194,7 @@ export default function LedgerPage() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                        <td colSpan={9} style={{ padding: 0, background: 'var(--surface-2)' }}>
                           <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                               {t('Řádky deníku', 'Journal Lines')}
@@ -202,6 +203,7 @@ export default function LedgerPage() {
                               <thead>
                                 <tr style={{ color: 'var(--text-tertiary)' }}>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Účet HK', 'GL Account')}</th>
+                                  <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Podúčet', 'Sub-account')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Strana', 'Side')}</th>
                                   <th style={{ textAlign: 'right', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Částka', 'Amount')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>CCY</th>
@@ -214,6 +216,9 @@ export default function LedgerPage() {
                                   <tr key={line.id} style={{ borderTop: '1px solid var(--border)' }}>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span className="mono" style={{ fontSize: '11px' }}>{line.glAccountId.slice(0, 8)}…</span>
+                                    </td>
+                                    <td style={{ padding: '6px 12px 6px 0' }}>
+                                      <span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{line.subAccountId ? `${line.subAccountId.slice(0, 8)}…` : '—'}</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span style={{

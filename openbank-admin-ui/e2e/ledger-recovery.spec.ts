@@ -11,9 +11,10 @@ const journalPage = {
     description: 'Customer transfer settlement',
     status: 'POSTED',
     createdAt: '2026-08-31T12:00:00Z',
+    synthetic: false,
     lines: [
-      { id: 'line-debit', glAccountId: 'gl-debit-12345678', side: 'DEBIT', amount: 1250, currencyCode: 'EUR', baseAmount: 1250, baseCurrencyCode: 'EUR', sequence: 1 },
-      { id: 'line-credit', glAccountId: 'gl-credit-1234567', side: 'CREDIT', amount: 1250, currencyCode: 'EUR', baseAmount: 1250, baseCurrencyCode: 'EUR', sequence: 2 },
+      { id: 'line-debit', glAccountId: 'gl-debit-12345678', side: 'DEBIT', amount: 1250, currencyCode: 'EUR', baseAmount: 1250, baseCurrencyCode: 'EUR', sequence: 1, subAccountId: 'sub-account-12345678' },
+      { id: 'line-credit', glAccountId: 'gl-credit-1234567', side: 'CREDIT', amount: 1250, currencyCode: 'EUR', baseAmount: 1250, baseCurrencyCode: 'EUR', sequence: 2, subAccountId: null },
     ],
   }],
   pagination: { limit: 20, hasNextPage: false, nextCursor: null },
@@ -33,6 +34,7 @@ test('keeps balanced journal evidence visible after a repeated search fails', as
   await page.getByRole('button', { name: /Načíst záznamy|Load Entries/ }).click()
 
   await expect(page.getByText('Customer transfer settlement')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/Obchodní|Business/)).toBeVisible()
   await page.getByRole('button', { name: /Zobrazit řádky deníku|Show journal lines/ }).click()
   await expect(page.getByText('DEBIT', { exact: true })).toBeVisible()
   await expect(page.getByText('CREDIT', { exact: true })).toBeVisible()
