@@ -1,4 +1,4 @@
--- Named corporate account portfolios. Additive only: older binaries ignore these tables.
+-- Named personal and organization account portfolios. Additive only: older binaries ignore these tables.
 -- Rollback: revert application images; if permanent removal is required, use a new forward Flyway
 -- migration to drop both tables (never edit an applied migration checksum).
 CREATE TABLE delegation_portfolios (
