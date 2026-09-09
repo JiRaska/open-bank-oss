@@ -18,7 +18,14 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.MandateAuthority
+import com.openbank.party.domain.model.MandateRole
+import com.openbank.party.domain.model.MandateSource
+import com.openbank.party.domain.model.MandateStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyActor
+import com.openbank.party.domain.model.PartyEvents
+import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
@@ -163,6 +170,41 @@ class PartyPactFolderProviderVerificationTest {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
+    @State("no party exists for the KYB mandate principal")
+    fun noPartyForKybMandatePrincipal() {
+        // The pact uses a dedicated principal id no positive state inserts.
+    }
+
+    @State("an active company and natural person exist for a joint KYB mandate")
+    fun partiesExistForJointKybMandate() = runOnVertxContext {
+        seedMandateParty(KYB_MANDATE_PRINCIPAL_ID, PartyType.COMPANY, "Pact Joint Company a.s.")
+        seedMandateParty(KYB_MANDATE_AGENT_ID, PartyType.INDIVIDUAL, "Pact Joint Signatory")
+    }
+
+    private suspend fun seedMandateParty(id: UUID, type: PartyType, name: String) {
+        if (partyRepository.findById(id) != null) return
+        partyRepository.save(
+            Party(
+                id = id,
+                partyType = type,
+                status = PartyStatus.ACTIVE,
+                legalName = name,
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "$id@pact.openbank.invalid",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.CLEARED,
+            ),
+        )
+    }
+
     @State("a party has been created")
     fun partyHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
@@ -224,6 +266,52 @@ class PartyPactFolderProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    @State("a sole party mandate has been granted")
+    fun solePartyMandateHasBeenGranted() {
+        // Message produced deterministically below; no database state is required.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_GRANTED event")
+    fun producePartyMandateGrantedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateGranted(
+            pactMandate(MandateStatus.ACTIVE),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    @State("a party mandate has been revoked")
+    fun partyMandateHasBeenRevoked() {
+        // Revocation is the negative authorization fact: after consumption access crosses 403.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_REVOKED event")
+    fun producePartyMandateRevokedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateRevoked(
+            pactMandate(MandateStatus.REVOKED),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    private fun pactMandate(status: MandateStatus) = PartyMandate(
+        id = UUID.fromString("e1e1e1e1-f2f2-4a4a-8b8b-c1c1c1c1c1c1"),
+        principalPartyId = KYB_MANDATE_PRINCIPAL_ID,
+        agentPartyId = KYB_MANDATE_AGENT_ID,
+        role = MandateRole.LEGAL_REPRESENTATIVE,
+        authority = MandateAuthority.SOLE,
+        requiredSignatures = 1,
+        source = MandateSource.REGISTRY,
+        status = status,
+        evidenceRef = "pact:mandate",
+        validFrom = Instant.EPOCH,
+        validTo = null,
+        revokedAt = if (status == MandateStatus.REVOKED) Instant.EPOCH else null,
+        revokeReason = if (status == MandateStatus.REVOKED) "pact revocation" else null,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+    )
 
     @State("a party has been erased")
     fun partyHasBeenErased() {
@@ -315,5 +403,7 @@ class PartyPactFolderProviderVerificationTest {
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+        private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
+        private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
     }
 }

@@ -43,7 +43,8 @@ import java.util.UUID
  * - `DelegationActivated` — the event that CREATES an enforceable row.
  * - `DelegationRevoked`  — the event that CLOSES one. A revoke that fails to parse leaves a
  *   revoked grant enforceable, which the consumer's own KDoc calls the worst direction this
- *   projection can drift.
+ *   projection can drift. It is the asynchronous authorization equivalent of a 403 boundary:
+ *   after this message, the former delegate must no longer be authorized.
  *
  * `eventType` and `resourceType` are `stringValue`: the consumer dispatches on the exact strings
  * (`"DelegationActivated"`, and `resourceType in setOf("ACCOUNT", "SAVINGS_GOAL")`), so a type
@@ -122,6 +123,8 @@ class DelegationEventMessagePactConsumerTest {
                 o.stringValue("resourceType", "ACCOUNT")
                 o.uuid("resourceId")
                 o.array("capabilities") { caps -> caps.stringType("ACCOUNT_READ_BALANCES") }
+                o.stringValue("approvalPolicy", "N_OF_M")
+                o.integerType("requiredApprovals", 3)
                 o.datetime("validFrom", VALID_FROM_FORMAT, VALID_FROM_EXAMPLE, UTC)
                 o.`object`("perTransactionLimit") { limit ->
                     limit.decimalType("amount", 1500.00)
@@ -146,6 +149,8 @@ class DelegationEventMessagePactConsumerTest {
         assertThat(UUID.fromString(node.path("resourceId").asText())).isNotNull()
         assertThat(node.path("capabilities").isArray).isTrue()
         assertThat(node.path("capabilities")).isNotEmpty()
+        assertThat(node.path("approvalPolicy").asText()).isEqualTo("N_OF_M")
+        assertThat(node.path("requiredApprovals").asInt()).isEqualTo(3)
         assertThat(OffsetDateTime.parse(node.path("validFrom").asText())).isNotNull()
         // The ceiling is read as two flat leaves under perTransactionLimit — NOT as a Money
         // object. DelegationEvents.EventMoney exists precisely because `Money.currency` would
