@@ -161,14 +161,16 @@ class SavingsProposalServiceTest {
     }
 
     @Test
-    fun `decide by a non-owner is forbidden`(): Unit = runBlocking {
+    fun `missing proposal is not disclosed as an authorization decision`(): Unit = runBlocking {
         val account = mockk<Account>()
+        val missingProposalId = UUID.randomUUID()
         io.mockk.every { account.partyId } returns owner
         coEvery { accountRepository.findById(accountId) } returns account
+        coEvery { proposalRepository.findById(missingProposalId) } returns null
 
         assertThatThrownBy {
-            runBlocking { service.decide(accountId, UUID.randomUUID(), UUID.randomUUID(), true, UUID.randomUUID()) }
-        }.isInstanceOf(ProposalForbiddenException::class.java)
+            runBlocking { service.decide(accountId, missingProposalId, UUID.randomUUID(), true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalNotFoundException::class.java)
     }
 
     @Test
@@ -197,7 +199,7 @@ class SavingsProposalServiceTest {
             pendingApproval(delegate).copy(status = ApprovalStatus.APPROVED)
         coEvery { proposalRepository.save(any<WithdrawalProposal>(), any()) } answers { firstArg() }
 
-        val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+        val decided = service.decide(accountId, proposal.id, representative, true, UUID.randomUUID())
 
         assertThat(decided.decidedBy).isEqualTo(representative)
         coVerify { scaClient.consumeChallenge(any(), representative) }
@@ -214,7 +216,7 @@ class SavingsProposalServiceTest {
         )
 
         assertThatThrownBy {
-            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+            runBlocking { service.decide(accountId, proposal.id, representative, true, UUID.randomUUID()) }
         }.isInstanceOf(ProposalForbiddenException::class.java)
 
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
@@ -222,15 +224,30 @@ class SavingsProposalServiceTest {
     }
 
     @Test
-    fun `delegate deciding a proposal is stopped by the owner check`(): Unit = runBlocking {
+    fun `caller without an owner or representative identity is stopped before the decision`(): Unit = runBlocking {
         val proposal = proposal()
-        val account = mockk<Account>()
-        io.mockk.every { account.partyId } returns owner
-        coEvery { accountRepository.findById(accountId) } returns account
+        stubOwnerAndProposal(proposal, scaActor = delegate)
+        coEvery { partyMandateRepository.findActive(owner, delegate) } returns emptyList()
 
         assertThatThrownBy {
             runBlocking { service.decide(accountId, proposal.id, delegate, true, UUID.randomUUID()) }
         }.isInstanceOf(ProposalForbiddenException::class.java)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
+    }
+
+    @Test
+    fun `caller identity must match the actor authenticated by SCA`(): Unit = runBlocking {
+        val proposal = proposal()
+        val representative = UUID.randomUUID()
+        stubOwnerAndProposal(proposal, scaActor = representative)
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalForbiddenException::class.java)
+
+        coVerify(exactly = 0) { partyMandateRepository.findActive(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
