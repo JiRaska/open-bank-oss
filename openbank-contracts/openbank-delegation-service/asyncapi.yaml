@@ -453,7 +453,19 @@ components:
         requiredApprovals:
           type: integer
           minimum: 1
+          nullable: true
           description: Number of distinct approvals required by the policy.
+        approvalGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Group selected by the grantor; required only for N_OF_M.
+        approvalGroupRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: Exact immutable roster revision consumers must project and snapshot.
 
     # The enforceable window and the ceiling. Present on the events that make a grant enforceable
     # — Offered, Activated, Reinstated — and on no other, because nothing else changes them.

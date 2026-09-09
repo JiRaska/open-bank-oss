@@ -71,7 +71,13 @@ data class PreviewDelegationRequest(
     val validTo: OffsetDateTime? = null,
 )
 
-data class DelegationPreviewResponse(val valid: Boolean = true)
+data class DelegationPreviewResponse(
+    val valid: Boolean = true,
+    val scaReference: String,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
+    val requiredApprovals: Int?,
+)
 
 data class RevokeDelegationRequest(val reason: String)
 

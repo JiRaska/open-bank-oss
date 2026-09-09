@@ -114,8 +114,15 @@ interface OfferDelegationUseCase {
 
 interface PreviewDelegationUseCase {
     /** Validates the complete draft without consuming SCA or creating authority. */
-    suspend fun preview(command: PreviewDelegationCommand)
+    suspend fun preview(command: PreviewDelegationCommand): DelegationPreview
 }
+
+data class DelegationPreview(
+    val scaReference: String,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
+    val requiredApprovals: Int?,
+)
 
 interface RespondDelegationUseCase {
     suspend fun accept(

@@ -17,6 +17,7 @@ import com.openbank.delegation.application.port.`in`.RespondDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
+import com.openbank.delegation.application.port.out.ApprovalGroupRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
@@ -39,6 +40,8 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -89,6 +92,7 @@ class DelegationService(
     private val scaChallengeClient: ScaChallengeClient,
     private val partyEligibilityClient: PartyEligibilityClient,
     private val resourceOwnershipClient: ResourceOwnershipClient,
+    private val approvalGroupRepository: ApprovalGroupRepository,
     private val clock: Clock,
 ) : OfferDelegationUseCase,
     PreviewDelegationUseCase,
@@ -103,17 +107,19 @@ class DelegationService(
         scaChallengeClient: ScaChallengeClient,
         partyEligibilityClient: PartyEligibilityClient,
         resourceOwnershipClient: ResourceOwnershipClient,
+        approvalGroupRepository: ApprovalGroupRepository,
     ) : this(
         delegationRepository,
         scaChallengeClient,
         partyEligibilityClient,
         resourceOwnershipClient,
+        approvalGroupRepository,
         Clock.systemUTC(),
     )
 
     override suspend fun offer(command: OfferDelegationCommand): DelegationGrant {
         val now = OffsetDateTime.now(clock)
-        val parties = validateCandidate(command)
+        val candidate = validateCandidate(command)
         // SCA last of the three gates: it SPENDS the challenge, so a request that was going to be
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
@@ -121,6 +127,7 @@ class DelegationService(
             expectedPartyId = command.grantorPartyId,
             expectedPurpose = SCA_PURPOSE_GRANT,
             errorPrefix = "grant SCA",
+            reference = candidate.scaReference,
         )
 
         val grant = DelegationGrant(
@@ -128,13 +135,15 @@ class DelegationService(
             granteePartyId = command.granteePartyId,
             // Snapshotted from the eligibility lookup that just ran — no extra call, and no new
             // authority anywhere: this service is already permitted to read both parties (#3604).
-            grantorName = parties.grantorName,
-            granteeName = parties.granteeName,
+            grantorName = candidate.parties.grantorName,
+            granteeName = candidate.parties.granteeName,
             resourceType = command.resourceType,
             resourceId = command.resourceId,
             capabilities = command.capabilities,
             approvalPolicy = command.approvalPolicy,
-            requiredApprovals = command.requiredApprovals,
+            requiredApprovals = candidate.requiredApprovals,
+            approvalGroupId = candidate.approvalGroupId,
+            approvalGroupRevision = candidate.approvalGroupRevision,
             perTransactionLimit = command.perTransactionLimit,
             dailyLimit = command.dailyLimit,
             monthlyLimit = command.monthlyLimit,
@@ -158,6 +167,8 @@ class DelegationService(
                 capabilities = grant.capabilities,
                 approvalPolicy = grant.approvalPolicy,
                 requiredApprovals = grant.requiredApprovals,
+                approvalGroupId = grant.approvalGroupId,
+                approvalGroupRevision = grant.approvalGroupRevision,
                 validFrom = grant.validFrom,
                 validTo = grant.validTo,
                 perTransactionLimit = EventMoney.from(grant.perTransactionLimit),
@@ -166,18 +177,32 @@ class DelegationService(
         )
     }
 
-    override suspend fun preview(command: PreviewDelegationCommand) {
-        validateCandidate(command)
+    override suspend fun preview(
+        command: PreviewDelegationCommand,
+    ): com.openbank.delegation.application.port.`in`.DelegationPreview {
+        val candidate = validateCandidate(command)
         // Intentionally no SCA lookup/consume, repository write or event. Preview proves only that
         // this exact draft is currently offerable; offer repeats every authoritative check.
+        return com.openbank.delegation.application.port.`in`.DelegationPreview(
+            candidate.scaReference,
+            candidate.approvalGroupId,
+            candidate.approvalGroupRevision,
+            candidate.requiredApprovals,
+        )
     }
 
-    private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
+    private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         rejectUnenforcedCeilings(command)
-        rejectUnenforcedApprovalPolicy(command)
+        val approval = resolveApprovalPolicy(command)
         verifyResourceOwnership(command)
-        return verifyEligibility(command)
+        return ValidatedCandidate(
+            parties = verifyEligibility(command),
+            approvalGroupId = approval.groupId,
+            approvalGroupRevision = approval.revision,
+            requiredApprovals = approval.threshold,
+            scaReference = scaReference(command, approval),
+        )
     }
 
     override suspend fun accept(
@@ -207,6 +232,8 @@ class DelegationService(
                 capabilities = accepted.capabilities,
                 approvalPolicy = accepted.approvalPolicy,
                 requiredApprovals = accepted.requiredApprovals,
+                approvalGroupId = accepted.approvalGroupId,
+                approvalGroupRevision = accepted.approvalGroupRevision,
                 validFrom = accepted.validFrom,
                 validTo = accepted.validTo,
                 perTransactionLimit = EventMoney.from(accepted.perTransactionLimit),
@@ -325,6 +352,8 @@ class DelegationService(
                 capabilities = reinstated.capabilities,
                 approvalPolicy = reinstated.approvalPolicy,
                 requiredApprovals = reinstated.requiredApprovals,
+                approvalGroupId = reinstated.approvalGroupId,
+                approvalGroupRevision = reinstated.approvalGroupRevision,
                 validFrom = reinstated.validFrom,
                 validTo = reinstated.validTo,
                 perTransactionLimit = EventMoney.from(reinstated.perTransactionLimit),
@@ -452,14 +481,50 @@ class DelegationService(
      * projection and counting decisions where the money moves — in that order, or the counter is
      * a second unread field.
      */
-    private fun rejectUnenforcedApprovalPolicy(command: DelegationCandidate) {
-        if (command.approvalPolicy != ApprovalPolicy.SOLO) {
+    private suspend fun resolveApprovalPolicy(command: DelegationCandidate): ResolvedApproval = when (
+        command.approvalPolicy
+    ) {
+        ApprovalPolicy.SOLO -> {
+            require(command.approvalGroupId == null && command.requiredApprovals == null) {
+                "SOLO approval must not reference an approval group or threshold"
+            }
+            ResolvedApproval(null, null, null)
+        }
+
+        ApprovalPolicy.N_OF_M -> {
+            if (command.resourceType != com.openbank.delegation.domain.model.DelegationResourceType.SAVINGS_GOAL ||
+                command.capabilities != setOf(DelegationCapability.SAVINGS_PROPOSE_WITHDRAW)
+            ) {
+                throw DelegationUnsupportedConstraintException(
+                    code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+                    message = "N_OF_M is currently enforced only for a SAVINGS_GOAL grant containing exactly " +
+                        "SAVINGS_PROPOSE_WITHDRAW; combining it with an unenforced capability is refused",
+                )
+            }
+            val groupId = command.approvalGroupId ?: throw IllegalArgumentException(
+                "N_OF_M approval requires approvalGroupId",
+            )
+            val group = approvalGroupRepository.findById(groupId)
+                ?: throw DelegationUnsupportedConstraintException(
+                    DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+                    "approval group $groupId does not exist",
+                )
+            if (!group.active || group.ownerPartyId != command.grantorPartyId || group.threshold < 2) {
+                throw DelegationUnsupportedConstraintException(
+                    DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+                    "approval group $groupId must be active, owned by the grantor, and require at least two actors",
+                )
+            }
+            if (command.requiredApprovals != null && command.requiredApprovals != group.threshold) {
+                throw IllegalArgumentException("requiredApprovals is server-derived from approvalGroupId")
+            }
+            ResolvedApproval(group.id, group.revision, group.threshold)
+        }
+
+        else -> {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
-                message = "approvalPolicy ${command.approvalPolicy} cannot be accepted: no service counts " +
-                    "approvals against a grant, so a co-signing requirement set here would never be applied — " +
-                    "a single owner decision still releases the money. Only SOLO is enforced today. " +
-                    "Omit the field (ADR-0232 D8).",
+                message = "approvalPolicy ${command.approvalPolicy} has no enforcing operation resolver",
             )
         }
     }
@@ -507,10 +572,11 @@ class DelegationService(
         expectedPartyId: UUID,
         expectedPurpose: String,
         errorPrefix: String,
+        reference: String? = null,
     ) {
         val challenge = loadChallenge(sessionId, errorPrefix)
         requireChallengeMatches(challenge, expectedPartyId, expectedPurpose, errorPrefix)
-        spendChallenge(sessionId, expectedPartyId, errorPrefix)
+        spendChallenge(sessionId, expectedPartyId, errorPrefix, reference)
     }
 
     @Suppress("TooGenericExceptionCaught") // any failure to reach sca-service must refuse the act
@@ -549,9 +615,14 @@ class DelegationService(
     }
 
     @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
-    private suspend fun spendChallenge(sessionId: UUID, expectedPartyId: UUID, errorPrefix: String) {
+    private suspend fun spendChallenge(
+        sessionId: UUID,
+        expectedPartyId: UUID,
+        errorPrefix: String,
+        reference: String?,
+    ) {
         try {
-            scaChallengeClient.consumeChallenge(sessionId, expectedPartyId)
+            scaChallengeClient.consumeChallenge(sessionId, expectedPartyId, reference)
         } catch (e: Exception) {
             // The 409 is the replay this whole path exists to stop.
             throw DelegationScaException("$errorPrefix challenge $sessionId could not be spent", e)
@@ -596,6 +667,46 @@ class DelegationService(
 
     /** The two labels the eligibility lookup yields as a by-product (issue #3604). */
     private data class CounterpartyNames(val grantorName: String?, val granteeName: String?)
+
+    private data class ResolvedApproval(val groupId: UUID?, val revision: Long?, val threshold: Int?)
+
+    private data class ValidatedCandidate(
+        val parties: CounterpartyNames,
+        val approvalGroupId: UUID?,
+        val approvalGroupRevision: Long?,
+        val requiredApprovals: Int?,
+        val scaReference: String,
+    )
+
+    private fun scaReference(command: DelegationCandidate, approval: ResolvedApproval): String {
+        val fields = listOf(
+            "delegation-grant-v1",
+            command.grantorPartyId.toString(),
+            command.granteePartyId.toString(),
+            command.resourceType.name,
+            command.resourceId.toString(),
+            command.capabilities.map { it.name }.sorted().joinToString(","),
+            command.approvalPolicy.name,
+            approval.groupId?.toString().orEmpty(),
+            approval.revision?.toString().orEmpty(),
+            approval.threshold?.toString().orEmpty(),
+            command.perTransactionLimit.canonical(),
+            command.dailyLimit.canonical(),
+            command.monthlyLimit.canonical(),
+            command.exposure?.let {
+                listOf(it.redactionRules.sorted().joinToString(","), it.maxViews, it.watermark, it.allowDownload)
+                    .joinToString("|")
+            }.orEmpty(),
+            command.validTo?.toInstant()?.toString().orEmpty(),
+        )
+        val canonical = fields.joinToString("") { "${it.toByteArray(StandardCharsets.UTF_8).size}:$it" }
+        val digest = MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(StandardCharsets.UTF_8))
+        return "delegation-grant-v1:" + digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun com.openbank.libs.domain.money.Money?.canonical(): String = this?.let {
+        "${it.amount.stripTrailingZeros().toPlainString()}|${it.currency.code}"
+    }.orEmpty()
 
     private companion object {
         const val SCA_PURPOSE_GRANT = "DELEGATION_GRANT"

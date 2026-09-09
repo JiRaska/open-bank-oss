@@ -72,7 +72,7 @@ class DelegationResource(
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
     ): DelegationPreviewResponse {
         requireNotNull(request) { "request body is required" }
-        previewDelegation.preview(
+        val preview = previewDelegation.preview(
             PreviewDelegationCommand(
                 callerPartyId = customerPartyId,
                 grantorPartyId = request.grantorPartyId,
@@ -90,7 +90,12 @@ class DelegationResource(
                 validTo = request.validTo,
             ),
         )
-        return DelegationPreviewResponse()
+        return DelegationPreviewResponse(
+            scaReference = preview.scaReference,
+            approvalGroupId = preview.approvalGroupId,
+            approvalGroupRevision = preview.approvalGroupRevision,
+            requiredApprovals = preview.requiredApprovals,
+        )
     }
 
     // SecurityIdentity, not @Context SecurityContext: in a Kotlin `suspend` resource method the

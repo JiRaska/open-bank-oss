@@ -205,8 +205,8 @@ source for audit and reconciliation. Product services bootstrap from the dedicat
 calling delegation-service synchronously on an authorization path. Rows are
 immutable and uniquely keyed by `(group_id, revision)`, while a deterministic primary key makes a
 duplicate write fail rather than create two histories. A later internal reconciliation endpoint
-can repopulate that stream under an audited recovery procedure; N-of-M remains off until consumer
-health and operation snapshotting are proven. Rollback keeps the append-only table because
+can repopulate that stream under an audited recovery procedure. N-of-M admission is limited to the
+consumer and operation shape that proves immutable snapshot enforcement. Rollback keeps the append-only table because
 dropping it would erase evidence even though no existing authorization path depends on it.
 
 # Client draft preview
@@ -214,5 +214,15 @@ dropping it would erase evidence even though no existing authorization path depe
 `POST /api/v1/delegations/preview` deliberately creates no authority. It repeats the caller,
 constraint, resource-ownership and party-eligibility gates used by `offer`, but never reads or
 consumes SCA, writes a grant or publishes an event. `offer` repeats every check so a stale preview
-cannot become authorization. The response contains only `valid: true`: returning counterparty
-attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
+cannot become authorization. It returns no counterparty attributes, so the pre-SCA endpoint cannot
+become a party-directory oracle. It returns a SHA-256 reference over the complete authority-bearing
+draft and server-resolved group revision/threshold. The app signs that opaque value in the
+DELEGATION_GRANT challenge; `offer` recomputes it before compare-and-consume. Changing capability,
+resource, limit, validity, group or revision after SCA therefore fails closed.
+
+For `N_OF_M`, the client selects only `approvalGroupId`; it does not own the threshold or revision.
+The service loads the current active group, verifies grantor ownership, derives the threshold and
+pins the revision on the grant and lifecycle events. Admission is restricted to a `SAVINGS_GOAL`
+grant containing exactly `SAVINGS_PROPOSE_WITHDRAW`, the only operation resolver with an immutable
+roster snapshot and atomic distinct-actor ledger. `ANY_ONE`, `ALL`, direct withdrawal and payment
+combinations remain refused rather than storing policy their execution paths would ignore.

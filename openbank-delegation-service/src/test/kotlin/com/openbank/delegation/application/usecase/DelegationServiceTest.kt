@@ -8,6 +8,7 @@ import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
+import com.openbank.delegation.application.port.out.ApprovalGroupRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
@@ -17,6 +18,7 @@ import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalGroup
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
@@ -48,6 +50,7 @@ class DelegationServiceTest {
     private val scaClient: ScaChallengeClient = mockk()
     private val eligibilityClient: PartyEligibilityClient = mockk()
     private val ownershipClient: ResourceOwnershipClient = mockk()
+    private val approvalGroupRepository: ApprovalGroupRepository = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-07-31T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var service: DelegationService
@@ -59,9 +62,16 @@ class DelegationServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
+        service = DelegationService(
+            repository,
+            scaClient,
+            eligibilityClient,
+            ownershipClient,
+            approvalGroupRepository,
+            clock,
+        )
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
-        coEvery { scaClient.consumeChallenge(any(), any()) } answers {
+        coEvery { scaClient.consumeChallenge(any(), any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
         }
     }
@@ -398,22 +408,36 @@ class DelegationServiceTest {
      * cumulative ceilings: present at every layer except the enforcing one.
      */
     @Test
-    fun `offer refuses an N_OF_M approvalPolicy because no service counts approvals`(): Unit = runBlocking {
+    fun `offer derives N_OF_M threshold and revision from the owned active approval group`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
         eligibilityOk()
+        val groupId = UUID.randomUUID()
+        coEvery { approvalGroupRepository.findById(groupId) } returns ApprovalGroup(
+            id = groupId,
+            ownerPartyId = grantor,
+            name = "Family",
+            members = setOf(UUID.randomUUID(), UUID.randomUUID()),
+            threshold = 2,
+            revision = 7,
+            lastScaSessionId = UUID.randomUUID(),
+            createdAt = now,
+            updatedAt = now,
+        )
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
 
-        assertThatThrownBy {
-            runBlocking {
-                service.offer(
-                    offerCommand().copy(approvalPolicy = ApprovalPolicy.N_OF_M, requiredApprovals = 2),
-                )
-            }
-        }
-            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
-            .hasMessageContaining("approvalPolicy")
-            .hasMessageContaining("N_OF_M")
+        val grant = service.offer(
+            offerCommand().copy(
+                resourceType = DelegationResourceType.SAVINGS_GOAL,
+                capabilities = setOf(DelegationCapability.SAVINGS_PROPOSE_WITHDRAW),
+                approvalPolicy = ApprovalPolicy.N_OF_M,
+                approvalGroupId = groupId,
+            ),
+        )
 
-        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+        assertThat(grant.requiredApprovals).isEqualTo(2)
+        assertThat(grant.approvalGroupId).isEqualTo(groupId)
+        assertThat(grant.approvalGroupRevision).isEqualTo(7)
+        coVerify { scaClient.consumeChallenge(grant.grantScaSessionId!!, grantor, match { it.isNotBlank() }) }
     }
 
     @Test
@@ -506,7 +530,7 @@ class DelegationServiceTest {
 
         // Approval is still enforced — by consume, which owns it: it promotes the decision, refuses
         // an unapproved or already-spent challenge, and binds dynamic linking.
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), grantor) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), grantor, any()) }
         coVerify(exactly = 1) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -768,7 +792,7 @@ class DelegationServiceTest {
 
         service.offer(command)
 
-        coVerify(exactly = 1) { scaClient.consumeChallenge(command.grantScaSessionId, grantor) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(command.grantScaSessionId, grantor, any()) }
     }
 
     @Test
@@ -778,7 +802,8 @@ class DelegationServiceTest {
         // sca-service answers 409 on the second consume (compare-and-set on consumedAt). Reading
         // `status == COMPLETED` never expressed this: completion stays true forever, which is why
         // one ceremony used to authorise unlimited grants of arbitrary scope.
-        coEvery { scaClient.consumeChallenge(any(), any()) } throws IllegalStateException("409 already consumed")
+        coEvery { scaClient.consumeChallenge(any(), any(), any()) } throws
+            IllegalStateException("409 already consumed")
 
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationScaException::class.java)
