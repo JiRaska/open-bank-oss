@@ -101,6 +101,16 @@ describe('opsMessageApi — shipped notification-service contract', () => {
     expect(lastCall().body).toEqual({ approve: false })
   })
 
+  it('keeps a deep-linked approval id inside one URL path segment', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(404, { message: 'not found' })))
+
+    await expect(opsMessageApi.decide('../../messages?recipient=attacker', true)).rejects.toThrow('not found')
+
+    expect(lastCall().url).toBe(
+      '/api/svc/notification-service/api/v1/notifications/approvals/..%2F..%2Fmessages%3Frecipient%3Dattacker'
+    )
+  })
+
   it('exposes exactly the shipped OperatorMessageTemplate variable sets — no OPERATOR_ACCOUNT_NOTICE', () => {
     expect(OPERATOR_MESSAGE_TEMPLATE_VARS).toEqual({
       GENERIC_NOTICE: ['subject', 'note'],
