@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.`in`.CreateApprovalGroupCommand
 import com.openbank.delegation.application.port.`in`.ReviseApprovalGroupCommand
 import com.openbank.delegation.application.usecase.ApprovalGroupScaBinding
 import com.openbank.delegation.domain.model.ApprovalGroup
+import com.openbank.delegation.infrastructure.rest.DelegationResource.Companion.CUSTOMER_ACTOR_PARTY_HEADER
 import com.openbank.delegation.infrastructure.rest.DelegationResource.Companion.CUSTOMER_PARTY_HEADER
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
@@ -66,10 +67,11 @@ class ApprovalGroupResource(private val groups: ApprovalGroupUseCase) {
     suspend fun create(
         request: ApprovalGroupWriteRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
     ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val owner = requireNotNull(callerPartyId) { "$CUSTOMER_PARTY_HEADER header is required" }
-        val created = groups.create(body.toCreate(owner))
+        val created = groups.create(body.toCreate(owner, actorPartyId ?: owner))
         return Response.status(Response.Status.CREATED).entity(created.toResponse()).build()
     }
 
@@ -101,10 +103,11 @@ class ApprovalGroupResource(private val groups: ApprovalGroupUseCase) {
         @PathParam("id") id: UUID,
         request: ApprovalGroupWriteRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
     ): ApprovalGroupResponse {
         requireNotNull(request) { "request body is required" }
         val owner = requireNotNull(callerPartyId) { "$CUSTOMER_PARTY_HEADER header is required" }
-        return groups.revise(request.toRevise(id, owner)).toResponse()
+        return groups.revise(request.toRevise(id, owner, actorPartyId ?: owner)).toResponse()
     }
 
     @DELETE
@@ -114,9 +117,10 @@ class ApprovalGroupResource(private val groups: ApprovalGroupUseCase) {
     suspend fun deactivate(
         @PathParam("id") id: UUID,
         @HeaderParam(CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
     ): ApprovalGroupResponse {
         val owner = requireNotNull(callerPartyId) { "$CUSTOMER_PARTY_HEADER header is required" }
-        return groups.deactivate(id, owner, owner).toResponse()
+        return groups.deactivate(id, owner, owner, actorPartyId ?: owner).toResponse()
     }
 }
 
@@ -137,19 +141,21 @@ data class ApprovalGroupWriteRequest(
     val scaSessionId: UUID,
     val expectedRevision: Long? = null,
 ) {
-    fun toCreate(owner: UUID) = CreateApprovalGroupCommand(
+    fun toCreate(owner: UUID, actor: UUID) = CreateApprovalGroupCommand(
         ownerPartyId = owner,
         callerPartyId = owner,
+        actorPartyId = actor,
         name = name,
         members = validatedMembers(),
         threshold = threshold,
         scaSessionId = scaSessionId,
     )
 
-    fun toRevise(id: UUID, owner: UUID) = ReviseApprovalGroupCommand(
+    fun toRevise(id: UUID, owner: UUID, actor: UUID) = ReviseApprovalGroupCommand(
         id = id,
         ownerPartyId = owner,
         callerPartyId = owner,
+        actorPartyId = actor,
         expectedRevision = requireNotNull(expectedRevision) { "expectedRevision is required for replacement" },
         name = name,
         members = validatedMembers(),
