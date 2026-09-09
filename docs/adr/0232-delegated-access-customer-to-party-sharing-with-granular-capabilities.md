@@ -220,6 +220,21 @@ document id and never reveals the storage key. This is not a recipient endpoint:
 delegation-service slice remains responsible for one-time magic-link exchange, OTP attempts,
 expiry, revocation and atomic view consumption before it invokes this boundary.
 
+**D7 public redemption boundary (2026-09-09).** A grantor may issue one external redemption for a
+ready disclosure, bounded to seven days and one to ten views. The response reveals only a random
+256-bit magic token; a six-digit OTP is sent separately through notification-service. The database
+stores SHA-256 token/ticket digests and a salted PBKDF2-HMAC-SHA256 OTP digest, never plaintext
+credentials. Verification is single-use, locks after five failed attempts, and exchanges the two
+factors for a new 256-bit access ticket; the consumed magic/OTP hashes are erased immediately, and
+the ticket hash is erased on exhaustion or revocation. Revocation, expiry and exhaustion fail with the same public
+404 shape. Before consuming a view, delegation-service fetches the immutable snapshot through the
+authenticated document boundary and verifies its pinned digest again; only the request that then
+wins the conditional database update receives those bytes. Thus a provider outage does not burn a
+view and concurrent requests cannot both receive a view. Secret-bearing rows are separate from the
+immutable disclosure evidence so credential retention/erasure can evolve without weakening the
+evidence record. Migration V21 is additive; rollback disables issuance and public routes while
+retaining used rows until the applicable security/evidence retention process removes them.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the

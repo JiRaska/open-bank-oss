@@ -50,6 +50,11 @@ spec:
         operations: [Write, Describe]
       - resource:
           type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]
+      - resource:
+          type: topic
           name: openbank.documents.disclosure-snapshot.event
           patternType: literal
         operations: [Read, Describe]

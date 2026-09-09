@@ -107,8 +107,21 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
-- External disclosure links (D7b): OTP, expiry, watermark, view counting — threat model
-  update required when that lands (leaked-link = leaked-document analysis).
+- A leaked magic link alone is insufficient: public verification also requires the separately
+  emailed OTP, locks after five failures, and uses one generic not-found response. A leaked link
+  plus mailbox access is equivalent to a leaked document for the remaining validity/views; expiry,
+  grantor revocation and atomic view exhaustion bound but cannot undo content already received.
+- Plaintext magic tokens, OTPs and access tickets are never persisted or logged. Token/ticket
+  material is 256-bit random and SHA-256 hashed; OTPs use a random salt and 210k-iteration PBKDF2.
+  Used magic/OTP hashes are erased at verification or lock, and ticket hashes at revocation or
+  exhaustion. Public credentials travel in JSON bodies, not URLs, and responses are `no-store`.
+- Snapshot bytes are obtained only through document-service's authenticated snapshot-id-plus-digest
+  route and re-hashed locally before view consumption. A downstream outage therefore does not spend
+  the recipient's view; a conditional database update prevents concurrent over-delivery.
+- Residual: email OTP and a magic link forwarded into the same compromised mailbox/device do not
+  provide independent-channel assurance. High-assurance recipients require the planned datová
+  schránka/EUDI channel; rate limiting at ingress remains defence in depth beyond per-redemption
+  attempt locking.
 - EUDI verifiable-credential delivery channel (follow-up ADR on ADR-0094).
 - `AccountAuthorization` migration dual-run window (two grant sources for accounts).
 - ~~**Cumulative daily/monthly ceilings are REFUSED at the API, not silently accepted.**~~
@@ -143,6 +156,11 @@ gap closes only with a consumer pact or a run against a deployed stack.
   acting person to hold `delegation.manage` on that entity.
 
 ## Change log
+
+- **2026-09-09** — Added public sealed-disclosure redemption: hashed magic/access secrets, salted
+  PBKDF2 OTP, five-attempt lock, seven-day maximum validity, grantor revocation, and atomic one-to-ten
+  view consumption. The immutable snapshot is fetched and digest-verified before the winning view
+  transition, so provider failure does not consume a view and races cannot over-deliver.
 
 - **2026-09-09** — Added the D7 disclosure preparation lifecycle. Only the authenticated grantor
   of an active `DOCUMENT` grant can create a request, and creation plus the snapshot command is one

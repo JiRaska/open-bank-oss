@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.15.0
+  version: 1.16.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -59,6 +59,79 @@ paths:
               schema: { $ref: '#/components/schemas/DisclosureResponse' }
         '403': { description: Authenticated party is not the grantor }
         '404': { description: Disclosure not found }
+  /api/v1/disclosures/{id}/redemptions:
+    post:
+      tags: [Disclosures]
+      summary: Issue or rotate an unverified recipient redemption
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueDisclosureRedemptionRequest' }
+      responses:
+        '201':
+          description: Redemption issued; deliver the magic token separately from the emailed OTP
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssueDisclosureRedemptionResponse' }
+        '404': { description: Ready disclosure not found for this grantor }
+  /api/v1/disclosures/{id}/redemption:
+    delete:
+      tags: [Disclosures]
+      summary: Revoke an active disclosure redemption
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '204': { description: Redemption revoked }
+        '404': { description: Active redemption not found for this grantor }
+  /api/v1/public/disclosures/verify:
+    post:
+      tags: [Disclosures]
+      security: []
+      summary: Exchange a magic token and emailed OTP for a short-lived access ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyDisclosureRedemptionRequest' }
+      responses:
+        '200':
+          description: Credentials verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyDisclosureRedemptionResponse' }
+        '404': { description: Credentials invalid, expired, locked, revoked, or already exchanged }
+  /api/v1/public/disclosures/content:
+    post:
+      tags: [Disclosures]
+      security: []
+      summary: Consume one permitted view and return the sealed PDF
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DownloadDisclosureRequest' }
+      responses:
+        '200':
+          description: Immutable sealed disclosure content
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, example: 'private, no-store, max-age=0' } }
+            X-Disclosure-View: { schema: { type: string, example: '1/1' } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: Ticket invalid, expired, revoked, or exhausted }
   /api/v1/delegations/approval-groups/sca-reference:
     post:
       tags: [Approval groups]
@@ -940,6 +1013,44 @@ components:
         rejectionReason: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    IssueDisclosureRedemptionRequest:
+      type: object
+      required: [recipient, expiresAt, maxViews]
+      properties:
+        recipient: { type: string, format: email, maxLength: 255 }
+        expiresAt:
+          type: string
+          format: date-time
+          description: Must be in the future and no more than seven days from issuance.
+        maxViews: { type: integer, minimum: 1, maximum: 10 }
+    IssueDisclosureRedemptionResponse:
+      type: object
+      required: [redemptionId, magicToken, expiresAt, maxViews]
+      properties:
+        redemptionId: { type: string, format: uuid }
+        magicToken:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: Show once and deliver over a channel separate from the OTP email.
+        expiresAt: { type: string, format: date-time }
+        maxViews: { type: integer, minimum: 1, maximum: 10 }
+    VerifyDisclosureRedemptionRequest:
+      type: object
+      required: [magicToken, otp]
+      properties:
+        magicToken: { type: string, minLength: 43, maxLength: 43 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+    VerifyDisclosureRedemptionResponse:
+      type: object
+      required: [accessTicket]
+      properties:
+        accessTicket: { type: string, minLength: 43, maxLength: 43 }
+    DownloadDisclosureRequest:
+      type: object
+      required: [accessTicket]
+      properties:
+        accessTicket: { type: string, minLength: 43, maxLength: 43 }
     ReserveSpendRequest:
       type: object
       required: [amount, currency, idempotencyKey]

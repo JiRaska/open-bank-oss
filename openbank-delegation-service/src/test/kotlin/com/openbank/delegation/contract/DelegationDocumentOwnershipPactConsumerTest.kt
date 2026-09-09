@@ -29,6 +29,9 @@ class DelegationDocumentOwnershipPactConsumerTest {
     private companion object {
         const val DOCUMENT_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
         const val OWNER_PARTY_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
+        const val SNAPSHOT_ID = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
+        const val SNAPSHOT_SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        const val PDF = "%PDF-1.7 sealed disclosure"
     }
 
     @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
@@ -48,6 +51,25 @@ class DelegationDocumentOwnershipPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
+    fun getDisclosureSnapshotContentPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an immutable disclosure snapshot with the expected digest exists")
+        .uponReceiving("GET exact disclosure snapshot content with its pinned digest")
+        .path("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
+        .method("GET")
+        .headers("X-Expected-SHA256", SNAPSHOT_SHA256)
+        .willRespondWith()
+        .status(200)
+        .headers(
+            mapOf(
+                "Content-Type" to "application/pdf",
+                "Cache-Control" to "private, no-store",
+                "ETag" to "\"$SNAPSHOT_SHA256\"",
+            ),
+        )
+        .body(PDF)
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "getDocumentOwnerPact")
     fun `metadata exposes only the owner binding required by the gate`(mockServer: MockServer) {
@@ -60,5 +82,21 @@ class DelegationDocumentOwnershipPactConsumerTest {
 
         assertThat(body.getString("id")).isEqualTo(DOCUMENT_ID)
         assertThat(body.getString("partyRef")).isEqualTo(OWNER_PARTY_ID)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "getDisclosureSnapshotContentPact")
+    fun `content read pins snapshot id and expected digest`(mockServer: MockServer) {
+        val bytes = given()
+            .baseUri(mockServer.getUrl())
+            .header("X-Expected-SHA256", SNAPSHOT_SHA256)
+            .get("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
+            .then()
+            .statusCode(200)
+            .contentType("application/pdf")
+            .header("ETag", "\"$SNAPSHOT_SHA256\"")
+            .extract().asByteArray()
+
+        assertThat(bytes).isEqualTo(PDF.toByteArray())
     }
 }
