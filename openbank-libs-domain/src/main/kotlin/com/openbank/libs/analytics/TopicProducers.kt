@@ -46,6 +46,9 @@ object TopicProducers {
         "openbank.clearing.batch.event" to "clearing-service",
         "openbank.security.ict.incident" to "security-scanner",
         "openbank.cards.events" to "card-issuance-service",
+        // Declared on card-processing-service's `card-processing-events-out` channel — read off
+        // the module, not the topic (the topic's domain segment would not produce the name).
+        "openbank.card.processing.events" to "card-processing-service",
         "openbank.dispute.events" to "dispute-service",
         "openbank.domestic.payment.events" to "domestic-payment",
         "openbank.sepa.payment.events" to "sepa-payment",
