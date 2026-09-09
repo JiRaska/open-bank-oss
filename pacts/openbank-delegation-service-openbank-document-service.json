@@ -1,0 +1,40 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET document metadata for delegation ownership verification",
+      "providerStates": [
+        {
+          "name": "a document owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/documents/77777777-8888-4999-8aaa-bbbbbbbbbbbb"
+      },
+      "response": {
+        "body": {
+          "id": "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+          "partyRef": "88888888-9999-4aaa-8bbb-cccccccccccc"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-document-service"
+  }
+}

@@ -38,7 +38,7 @@ dependencies {
     implementation(libs.quarkus.oidc)
     // Outbound M2M bearer for every REST client this service owns. Without it the calls go out
     // UNAUTHENTICATED and every one of them 401s: sca-service, pid-service, account-service and
-    // card-issuance-service all sit behind @RolesAllowed. Found only against the deployed sandbox
+    // card-issuance-service and document-service all sit behind @RolesAllowed. Found only against the deployed sandbox
     // — every unit test mocks the client interface, so the missing Authorization header is
     // invisible to the whole suite. Same pattern as party-service / document-service / sdd-service.
     implementation(libs.quarkus.oidc.client.reactive.filter)
@@ -66,7 +66,7 @@ dependencies {
     // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
-    // Consumer-driven contracts for the four services delegation-service calls before it will
+    // Consumer-driven contracts for the services delegation-service calls before it will
     // mint a grant (sca, pid, account, card-issuance) — issue #2991.
     testImplementation(libs.pact.consumer)
     // Provider side: delegation-service is the provider of the `openbank.delegation.events`

@@ -31,6 +31,9 @@ data class AccountOwnerResponse(val id: UUID, val partyId: UUID)
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CardOwnerResponse(val id: UUID, val partyId: UUID)
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class DocumentOwnerResponse(val id: UUID, val partyRef: String?)
+
 @Path("/api/v1/accounts")
 /**
  * Carries the shared `openbank-services` client-credentials token. Every endpoint this client
@@ -71,6 +74,16 @@ interface CardIssuanceRestClient {
     suspend fun getCard(@PathParam("id") id: UUID): CardOwnerResponse
 }
 
+@Path("/api/v1/documents")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterRestClient(configKey = "document-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+interface DocumentServiceRestClient {
+    @GET
+    @Path("/{id}")
+    suspend fun getDocument(@PathParam("id") id: UUID): DocumentOwnerResponse
+}
+
 /**
  * Answers "does this grantor own that resource?" against the service that owns the resource,
  * because no other party to the grant can. See [ResourceOwnershipClient] for why this gate has
@@ -80,14 +93,15 @@ interface CardIssuanceRestClient {
  * account-service projection already relies on (a savings goal is account metadata, ADR-0153),
  * so both resource types resolve through the same account lookup.
  *
- * Object-level types (PAYMENT, STATEMENT, DOCUMENT — ADR-0232 D7) return [UNVERIFIABLE]: no
- * ownership lookup is wired for them yet, and D7 disclosure is not implemented. UNVERIFIABLE is
- * rejected by the caller, so an unimplemented resource type is refused rather than waved through.
+ * DOCUMENT ownership is resolved from document-service's immutable `partyRef`. PAYMENT and
+ * STATEMENT remain [UNVERIFIABLE] until their owning services expose an equally authoritative
+ * party binding; an unimplemented object type is refused rather than waved through.
  */
 @ApplicationScoped
 class RestResourceOwnershipClient @Inject constructor(
     @RestClient private val accountClient: AccountServiceRestClient,
     @RestClient private val cardClient: CardIssuanceRestClient,
+    @RestClient private val documentClient: DocumentServiceRestClient,
 ) : ResourceOwnershipClient {
 
     @Timeout(2000)
@@ -104,9 +118,13 @@ class RestResourceOwnershipClient @Inject constructor(
         DelegationResourceType.CARD ->
             verdictFor(grantorPartyId, resourceId) { cardClient.getCard(it).partyId }
 
+        DelegationResourceType.DOCUMENT ->
+            verdictFor(grantorPartyId, resourceId) { id ->
+                documentClient.getDocument(id).partyRef?.let(UUID::fromString)
+            }
+
         DelegationResourceType.PAYMENT,
         DelegationResourceType.STATEMENT,
-        DelegationResourceType.DOCUMENT,
         -> OwnershipVerdict.UNVERIFIABLE
     }
 
@@ -120,7 +138,7 @@ class RestResourceOwnershipClient @Inject constructor(
     private suspend fun verdictFor(
         grantorPartyId: UUID,
         resourceId: UUID,
-        lookupOwner: suspend (UUID) -> UUID,
+        lookupOwner: suspend (UUID) -> UUID?,
     ): OwnershipVerdict = try {
         if (lookupOwner(resourceId) == grantorPartyId) OwnershipVerdict.OWNED else OwnershipVerdict.NOT_OWNED
     } catch (e: NotFoundException) {

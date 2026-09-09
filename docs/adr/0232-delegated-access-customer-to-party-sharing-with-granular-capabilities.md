@@ -172,6 +172,16 @@ proof-of-payment / proof-of-balance credentials, incl. predicate
 proofs) are deliberately OUT of scope here and promoted to a follow-up
 ADR on top of ADR-0094.
 
+**D7 delivery note (measured 2026-09-09).** The first object-admission boundary is now real for
+`DOCUMENT`: delegation-service asks document-service for the artifact's immutable `partyRef` and
+offers `OBJECT_READ` only when it equals the authenticated grantor. A malformed owner reference,
+404, authentication failure or provider outage fails closed, and the consumer/provider Pact pins
+the exact route and field. This enables the KYC-party grant half to enter its existing dual-consent
+lifecycle; it does **not** claim that document download enforcement, redaction/watermark rendering,
+or external OTP redemption exists yet. `PAYMENT` and `STATEMENT` remain deliberately unofferable
+until their owning services expose an equivalent authoritative party binding. The next D7 slice is
+the sealed-artifact issuance/redemption lifecycle, not a public proxy to document content.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the
