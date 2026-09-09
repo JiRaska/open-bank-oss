@@ -332,6 +332,59 @@ class OnboardingEventConsumerTest {
         coVerify(exactly = 0) { projection.eraseParty(any()) }
         coVerify(exactly = 0) { projection.applyEvent(any()) }
     }
+
+    // ── Unparseable status on a RECOGNISED event type (#9038) ────────────────
+
+    /**
+     * The defect class: `runCatching { X.valueOf(raw) }.getOrNull() ?: return null` made a typo'd
+     * or renamed status indistinguishable from an event type we legitimately ignore — acked,
+     * counted UNRECOGNISED, gone. A recognised type with an unknown status is vocabulary drift
+     * between producer and consumer; it must be nacked so the DLQ keeps the record, and the
+     * projection must never see it.
+     */
+    @Test
+    fun `a recognised party status event with an unparseable status is nacked, never acked`() {
+        val payload = """{"eventType":"PARTY_STATUS_CHANGED","partyId":"${UUID.randomUUID()}","newStatus":"ACTVE"}"""
+
+        assertThatThrownBy {
+            runBlocking { consumer.consumePartyEvent(payload) }
+        }.isInstanceOf(UnparseableStatusException::class.java)
+
+        verify(exactly = 1) { metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.FAILED) }
+        verify(exactly = 0) {
+            metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.UNRECOGNISED)
+        }
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+    }
+
+    @Test
+    fun `a recognised kyc case event with an unparseable status is nacked, never acked`() {
+        val payload = """{"eventType":"KYC_CASE_STATUS_CHANGED","partyId":"${UUID.randomUUID()}",""" +
+            """"kycCaseId":"${UUID.randomUUID()}","status":"UNDER_REVEW"}"""
+
+        assertThatThrownBy {
+            runBlocking { consumer.consumeKycEvent(payload) }
+        }.isInstanceOf(UnparseableStatusException::class.java)
+
+        verify(exactly = 1) { metrics.record("kyc-events-in", ProjectionOutcomeMetrics.Outcome.FAILED) }
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+    }
+
+    /**
+     * The other half of the boundary: an event type this consumer does not care about is still a
+     * normal ack — only the status drift on a recognised type is an incident.
+     */
+    @Test
+    fun `an unrecognised event type remains acked and counted UNRECOGNISED`(): Unit = runBlocking {
+        consumer.consumePartyEvent(
+            """{"eventType":"PARTY_PREFERENCE_CHANGED","partyId":"${UUID.randomUUID()}"}""",
+        )
+
+        verify(exactly = 1) {
+            metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.UNRECOGNISED)
+        }
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+    }
 }
 
 /** A downstream dependency failing — the transient case, named so the tests read as intent. */
