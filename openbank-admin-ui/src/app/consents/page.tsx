@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { parseConsentEvidenceList, type ConsentEvidence } from '@/lib/consents/consentContract'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
 // consentId, partyId or granteeId. So this is deliberately a LOOKUP page, not a table of everything:
@@ -22,20 +23,6 @@ import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
 // marketing consent right now" straight from the owning service, with no projection to drift.
 const MARKETING_GRANTEE = 'party-service:marketing-comms'
 
-interface Consent {
-  id: string
-  partyId: string
-  granteeId: string
-  granteeType: string
-  granteeName: string
-  scopes: string[]
-  accountIbans: string[] | null
-  status: string
-  validFrom: string
-  validTo: string
-  createdAt: string
-}
-
 type Lens = 'party' | 'grantee'
 
 export default function ConsentsPage() {
@@ -46,10 +33,11 @@ export default function ConsentsPage() {
   const [lens, setLens] = useState<Lens>('party')
   const [term, setTerm] = useState('')
   const [party, setParty] = useState<PartyHit | null>(null)
-  const [rows, setRows] = useState<Consent[] | null>(null)
+  const [rows, setRows] = useState<ConsentEvidence[] | null>(null)
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
+  const [excludedCount, setExcludedCount] = useState(0)
 
   // Only the NEWEST lookup may commit its result. Clearing state when the lens changes is not
   // enough: an in-flight request settles afterwards and repopulates it, so a party lookup's rows
@@ -70,6 +58,7 @@ export default function ConsentsPage() {
     if (!canRetainSnapshot) {
       setRows(null)
       setLoadedQuery(null)
+      setExcludedCount(0)
     }
     try {
       // The lens is read ONCE, at request time — never from the closure after the await, where it
@@ -81,9 +70,15 @@ export default function ConsentsPage() {
         setFailure(await classifyBffFailure(res))
         return
       }
-      const data = (await res.json()) as Consent[]
+      const raw = await res.json() as unknown
       if (gen !== generation.current) return
-      setRows(data)
+      const parsed = parseConsentEvidenceList(raw)
+      if (!parsed.value || (parsed.value.length === 0 && parsed.excludedCount > 0)) {
+        setFailure('error')
+        return
+      }
+      setRows(parsed.value)
+      setExcludedCount(parsed.excludedCount)
       setLoadedQuery(queryKey)
       // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
       // said "the data source contains no records yet", which an operator cannot tell apart from a
@@ -118,6 +113,7 @@ export default function ConsentsPage() {
                 setRows(null)
                 setLoadedQuery(null)
                 setFailure(null)
+                setExcludedCount(0)
                 setParty(null)
                 setLoading(false)
               }}
@@ -223,6 +219,15 @@ export default function ConsentsPage() {
           lang={language === 'cs' ? 'cs' : 'en'}
           dense={rows !== null}
         />
+      )}
+
+      {!loading && rows !== null && excludedCount > 0 && (
+        <p role="alert" style={{ margin: '0 0 20px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>
+          {t(
+            `Vyřazené neplatné souhlasy: ${excludedCount}. Zobrazené souhrny používají pouze ověřené záznamy.`,
+            `Invalid consents excluded: ${excludedCount}. Displayed totals use validated records only.`,
+          )}
+        </p>
       )}
 
       {/* Answered, but empty for this key. Distinct from an unavailable service (above): the earlier

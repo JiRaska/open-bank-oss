@@ -15,6 +15,8 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
 import { PageHeader, StatusBadge, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 
 type InfraStatus = 'UP' | 'DOWN' | 'UNKNOWN'
 
@@ -190,6 +192,11 @@ export default function InfrastructurePage() {
           </button>
         </div>}
       />
+
+      <ContextualInsights dashboardUid="openbank-evb" panels={EVENT_INSIGHTS}
+        titleCs="Tok událostí" titleEn="Event processing"
+        descriptionCs="Spolehlivost předávání, dead letters a služby, ve kterých se práce hromadí."
+        descriptionEn="Delivery reliability, dead letters and services where work accumulates." />
 
       {unavailable && (
         <div style={{

@@ -108,10 +108,10 @@ private suspend fun authorizeDecisionActor(
     actor: UUID,
 ) {
     val denial = when {
-        proposal.approvalGroupId != null && (actor != claimed || actor !in proposal.eligibleApproverIds) ->
+        actor != claimed ->
+            "the SCA-authenticated actor does not match the caller identity"
+        proposal.approvalGroupId != null && actor !in proposal.eligibleApproverIds ->
             "the SCA-authenticated actor is not in the immutable approval roster"
-        proposal.approvalGroupId == null && claimed != owner ->
-            "only the account owner can decide proposal ${proposal.id}"
         proposal.approvalGroupId == null &&
             actor != owner &&
             mandates.findActive(owner, actor).none { it.permitsSoleDecision() } ->
@@ -228,10 +228,11 @@ class SavingsProposalService(
         }
     }
 
+    @Suppress("ThrowsCount") // preserves account/proposal absence, cross-account and expiry semantics
     suspend fun decide(
         accountId: UUID,
         proposalId: UUID,
-        decidedByPartyId: UUID,
+        callerPartyId: UUID,
         approve: Boolean,
         scaSessionId: UUID,
     ): WithdrawalProposalView {
@@ -243,7 +244,7 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        val actorPartyId = verifyDecisionSca(context.ownerPartyId, proposal, decidedByPartyId, approve, scaSessionId)
+        val actorPartyId = verifyDecisionSca(context.ownerPartyId, proposal, callerPartyId, approve, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
         val now = OffsetDateTime.now(clock)
@@ -359,7 +360,7 @@ class SavingsProposalService(
     private suspend fun verifyDecisionSca(
         ownerPartyId: UUID,
         proposal: WithdrawalProposal,
-        claimedPartyId: UUID,
+        callerPartyId: UUID,
         approve: Boolean,
         scaSessionId: UUID,
     ): UUID {
@@ -379,7 +380,7 @@ class SavingsProposalService(
             throw ProposalScaException("SCA challenge $scaSessionId is not linked to this exact proposal decision")
         }
         val actorPartyId = challenge.partyId
-        authorizeDecisionActor(partyMandateRepository, ownerPartyId, proposal, claimedPartyId, actorPartyId)
+        authorizeDecisionActor(partyMandateRepository, ownerPartyId, proposal, callerPartyId, actorPartyId)
         // A 409 is recoverable only after the signed amount/currency/reference above matched this
         // exact immutable proposal and decision. This closes the cross-service crash window: if
         // consume committed but this service failed before its DB transaction, retry completes
