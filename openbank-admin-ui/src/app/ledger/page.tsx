@@ -9,9 +9,11 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import type { JournalEntry, CursorPage } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
 
 const STATUS_PILL: Record<string, string> = {
   POSTED:   'pill pill-success',
@@ -80,6 +82,14 @@ export default function LedgerPage() {
     <AuthGuard permission="accounts:view">
     <div>
       <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span></div>} title={t('Hlavní kniha', 'General Ledger')} subtitle={t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')} />
+
+      <Can permission="system:view">
+        <ContextualInsights dashboardUid="openbank-ledger-int" panels={LEDGER_INSIGHTS}
+          titleCs="Integrita účetního toku" titleEn="Ledger flow integrity"
+          descriptionCs="Čekající předání, chybovost a rychlost zaúčtování bez zavádějících účetních závěrů."
+          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions."
+          from={fromDate} to={toDate} />
+      </Can>
 
       <div className="card">
         <div style={{
