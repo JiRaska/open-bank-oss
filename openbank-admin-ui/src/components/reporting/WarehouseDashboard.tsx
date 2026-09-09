@@ -45,7 +45,7 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
         const doc = frame.current?.contentDocument
         if (doc?.querySelector('[data-testid="data-testid Panel header"], [data-testid^="data-testid Panel header "], .react-grid-layout')) {
           sizeDashboard()
-          dashboardObserver = new ResizeObserver(sizeDashboard)
+          dashboardObserver = new ResizeObserver(() => sizeDashboard())
           dashboardObserver.observe(doc.documentElement)
           setState('ready')
           window.clearInterval(timer)
