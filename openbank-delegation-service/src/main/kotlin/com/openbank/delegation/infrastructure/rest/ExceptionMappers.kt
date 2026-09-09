@@ -4,7 +4,11 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.openbank.delegation.application.port.out.ApprovalGroupConcurrentUpdateException
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
+import com.openbank.delegation.application.usecase.ApprovalGroupForbiddenException
+import com.openbank.delegation.application.usecase.ApprovalGroupMemberIneligibleException
+import com.openbank.delegation.application.usecase.ApprovalGroupScaException
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
 import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalConflict
@@ -30,6 +34,35 @@ private fun errorBody(status: Int, message: String?): Map<String, Any?> = mapOf(
     "status" to status,
     "error" to message,
 )
+
+@Provider
+class ApprovalGroupConcurrentUpdateMapper : ExceptionMapper<ApprovalGroupConcurrentUpdateException> {
+    override fun toResponse(exception: ApprovalGroupConcurrentUpdateException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class ApprovalGroupForbiddenMapper : ExceptionMapper<ApprovalGroupForbiddenException> {
+    override fun toResponse(exception: ApprovalGroupForbiddenException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message)).build()
+}
+
+@Provider
+class ApprovalGroupMemberIneligibleMapper : ExceptionMapper<ApprovalGroupMemberIneligibleException> {
+    override fun toResponse(exception: ApprovalGroupMemberIneligibleException): Response =
+        Response.status(UNPROCESSABLE_ENTITY).entity(errorBody(UNPROCESSABLE_ENTITY, exception.message)).build()
+}
+
+@Provider
+class ApprovalGroupScaMapper : ExceptionMapper<ApprovalGroupScaException> {
+    override fun toResponse(exception: ApprovalGroupScaException): Response =
+        Response.status(Response.Status.BAD_REQUEST)
+            .entity(errorBody(Response.Status.BAD_REQUEST.statusCode, exception.message)).build()
+}
+
+private const val UNPROCESSABLE_ENTITY = 422
 
 @Provider
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {

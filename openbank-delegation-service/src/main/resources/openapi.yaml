@@ -5,14 +5,90 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.12.0
+  version: 1.13.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Approval groups
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
 paths:
+  /api/v1/delegations/approval-groups/sca-reference:
+    post:
+      tags: [Approval groups]
+      summary: Calculate the canonical reference that the management SCA must sign
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
+      responses:
+        '200':
+          description: Opaque, versioned SCA reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceResponse' }
+        '400': { description: Invalid create/revise shape }
+  /api/v1/delegations/approval-groups:
+    get:
+      tags: [Approval groups]
+      summary: List approval groups owned by the authenticated party
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      responses:
+        '200':
+          description: Versioned groups, including inactive history
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalGroupResponse' } }
+    post:
+      tags: [Approval groups]
+      summary: Create an SCA-bound approval group
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '201': { description: Approval group created }
+        '400': { description: Invalid roster or SCA }
+        '403': { description: Caller is not the group owner }
+  /api/v1/delegations/approval-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/CustomerPartyId'
+    get:
+      tags: [Approval groups]
+      summary: Get an owned approval group
+      responses:
+        '200':
+          description: Approval group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupResponse' }
+        '404': { description: Missing or owned by another party }
+    put:
+      tags: [Approval groups]
+      summary: Replace a roster under optimistic revision and a fresh SCA challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '200': { description: Approval group revised }
+        '400': { description: Invalid roster or SCA }
+        '409': { description: expectedRevision is stale }
+    delete:
+      tags: [Approval groups]
+      summary: Deactivate the group for future operation snapshots
+      responses:
+        '200': { description: Approval group deactivated }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -496,6 +572,59 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    ApprovalGroupScaReferenceRequest:
+      type: object
+      required: [name, members, threshold]
+      properties:
+        groupId: { type: string, format: uuid, description: Present only for revision }
+        expectedRevision: { type: integer, format: int64, minimum: 1, description: Required with groupId }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+    ApprovalGroupScaReferenceResponse:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          pattern: '^approval-group:v1:[0-9a-f]{64}$'
+          description: Pass as dynamicLinkingData.reference when initiating the SCA challenge.
+    ApprovalGroupWriteRequest:
+      type: object
+      required: [name, members, threshold, scaSessionId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+        scaSessionId: { type: string, format: uuid }
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required on PUT; prevents a stale client from overwriting a newer roster.
+    ApprovalGroupResponse:
+      type: object
+      required: [id, ownerPartyId, name, members, threshold, revision, active, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        members: { type: array, items: { type: string, format: uuid } }
+        threshold: { type: integer }
+        revision: { type: integer, format: int64 }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]

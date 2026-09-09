@@ -19,6 +19,7 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ApprovalGroup` rosters and thresholds used to select future corporate operation approvers.
 
 ## Lifecycle approval execution
 
@@ -75,6 +76,7 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T19 | A service account, maker, or replay decides a bank-side lifecycle proposal | Proposal/decision actions are human-only and exclude `service-account-*`; the domain rejects maker = checker. The proposal request key is unique in Postgres and terminal rejection is serialized by a row lock, preserving the original actor, reason and timestamps. The admin BFF exposes GET only. Residual: direct staff lifecycle endpoints are not routed through the inbox, so mutation activation remains prohibited until that authority is narrowed. |
 | T20 | Approval races a newer lifecycle transition and overwrites state or emits stale evidence | This first slice is fail-closed: `approve=true` returns 409 even if the dark mutation setting is enabled, so no grant row or outbox event is touched. Execution may land only on top of lifecycle V8-V10 through their expected-revision/CAS transition and revision-stamped event, proven by a real-Postgres race test. Emergency suspend remains only the existing fraud/AML safety path. |
 | T21 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
+| T22 | A compromised client changes an approval-group member or threshold after the owner completes SCA | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. Any changed field refuses the ceremony before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
 
 ## Outbound authentication (added 2026-08-06)
 

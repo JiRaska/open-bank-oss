@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "8ea206e8c2874589"
+    openbank.tech/policy-checksum: "a1bc63a76674a4e9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -632,6 +632,8 @@ data:
             "delegation.preview",
     		"delegation.read",
     		"delegation.list",
+            "delegation.approval-group.read",
+            "delegation.approval-group.manage",
     		"delegation.accept",
     		"delegation.decline",
     		"delegation.renounce",
