@@ -125,7 +125,7 @@ function SectionTitle({ icon, children, sub }: { icon: React.ReactNode; children
   return (
     <div style={{ marginBottom: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ color: '#6366f1' }}>{icon}</span>
+        <span style={{ color: 'var(--accent-text)' }}>{icon}</span>
         <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{children}</span>
       </div>
       {sub && <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '6px 0 0' }}>{sub}</p>}
@@ -135,8 +135,8 @@ function SectionTitle({ icon, children, sub }: { icon: React.ReactNode; children
 
 function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neutral' }) {
   const map = {
-    allow:   { color: '#16a34a', bg: '#dcfce7' },
-    deny:    { color: '#dc2626', bg: '#fee2e2' },
+    allow:   { color: 'var(--success-text)', bg: 'var(--success-bg)' },
+    deny:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
     neutral: { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
   }[tone]
   if (!items.length) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
@@ -195,7 +195,10 @@ function IAOpsContent() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   useEffect(() => {
     if (!data || typeof window === 'undefined') return
@@ -234,7 +237,9 @@ function IAOpsContent() {
     return <DataUnavailable kind={unavailable.kind} service="iaops" feature={t('AI governance', 'AI governance')} lang={language} />
   }
 
-  const planeColor = (p: string) => p === 'control' ? '#6366f1' : '#0891b2'
+  const planeTone = (p: string) => p === 'control'
+    ? { text: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' }
+    : { text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' }
   const planeLabel = (p: string) => p === 'control'
     ? t('Dohled a provoz', 'Oversight & operations')
     : p === 'development'
@@ -322,15 +327,15 @@ function IAOpsContent() {
           <AgentMeshExplainer language={language} />
 
           {/* ── A. Governance posture (hero) ── */}
-          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(8,145,178,0.04))',
+          <div style={{ background: 'linear-gradient(135deg, var(--accent-bg), color-mix(in srgb, var(--info-bg) 55%, var(--surface)))',
             border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '22px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              <Bot size={18} style={{ color: '#6366f1' }} />
+              <Bot size={18} style={{ color: 'var(--accent-text)' }} />
               <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
                 {t('Schválená governance roadmapa', 'Governance-approved roadmap')}
               </span>
               <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-                background: '#ede9fe', color: '#6366f1' }}>{data.adrRef} · {data.adrStatus}</span>
+                background: 'var(--accent-bg)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{data.adrRef} · {data.adrStatus}</span>
             </div>
 
             {/* Governing principle */}
@@ -343,10 +348,10 @@ function IAOpsContent() {
 
             <div className="grid-4">
               {[
-                { label: t('Fáze roadmapy (ADR-0031)', 'Roadmap phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: t(`${data.phaseLabel} · není živá runtime atestace`, `${data.phaseLabel} · not live runtime evidence`), color: '#6366f1' },
-                { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`), color: '#d97706' },
-                { label: t('Autonomní změnoví agenti', 'Autonomous state-changing agents'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno · není to živé počítadlo aktivity`, `${data.agentCount} charters defined · not a live activity count`), color: '#16a34a' },
-                { label: t('Governance kontroly', 'Governance controls'), value: `${data.controlMaturity.current}/${data.controlMaturity.total}`, sub: t('Kontroly, ne oprávnění k autonomní změně', 'Controls, not authority for autonomous change'), color: '#0891b2' },
+                { label: t('Fáze roadmapy (ADR-0031)', 'Roadmap phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: t(`${data.phaseLabel} · není živá runtime atestace`, `${data.phaseLabel} · not live runtime evidence`) },
+                { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`) },
+                { label: t('Autonomní změnoví agenti', 'Autonomous state-changing agents'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno · není to živé počítadlo aktivity`, `${data.agentCount} charters defined · not a live activity count`) },
+                { label: t('Governance kontroly', 'Governance controls'), value: `${data.controlMaturity.current}/${data.controlMaturity.total}`, sub: t('Kontroly, ne oprávnění k autonomní změně', 'Controls, not authority for autonomous change') },
               ].map(k => (
                 <div key={k.label} className="stat-card">
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>{k.value}</div>
@@ -356,7 +361,7 @@ function IAOpsContent() {
               ))}
             </div>
 
-            <div style={{ marginTop: '14px', padding: '12px 14px', borderRadius: '10px', background: 'rgba(8,145,178,0.06)', border: '1px solid rgba(8,145,178,0.18)' }}>
+            <div style={{ marginTop: '14px', padding: '12px 14px', borderRadius: '10px', background: 'var(--info-bg)', border: '1px solid var(--info-border)' }}>
               <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)' }}>
                 {t(
                   `${data.controlMaturity.current} z ${data.controlMaturity.total} ochranných pilířů je postavených.`,
@@ -379,7 +384,7 @@ function IAOpsContent() {
                 { h: t('Jak', 'How'), b: t('Každá akce agenta projde stejnými branami jako člověk: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.', 'Every agent action passes the same gates as a human: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.') },
               ].map(x => (
                 <div key={String(x.h)} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px 14px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#6366f1', marginBottom: '4px' }}>{x.h}</div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)', marginBottom: '4px' }}>{x.h}</div>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>{x.b}</div>
                 </div>
               ))}
@@ -394,10 +399,10 @@ function IAOpsContent() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
               {(data.phaseRoadmap ?? []).map(item => {
                 const tone: Record<PhaseStatus, { bg: string; border: string; text: string }> = {
-                  complete: { bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' },
-                  active: { bg: '#eef2ff', border: '#c7d2fe', text: '#4338ca' },
-                  blocked: { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
-                  planned: { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' },
+                  complete: { bg: 'var(--success-bg)', border: 'var(--success-border)', text: 'var(--success-text)' },
+                  active: { bg: 'var(--accent-bg)', border: 'var(--accent-border)', text: 'var(--accent-text)' },
+                  blocked: { bg: 'var(--warning-bg)', border: 'var(--warning-border)', text: 'var(--warning-text)' },
+                  planned: { bg: 'var(--surface-2)', border: 'var(--border)', text: 'var(--text-secondary)' },
                 }
                 const color = tone[item.status]
                 const label: Record<PhaseStatus, string> = {
@@ -459,8 +464,8 @@ function IAOpsContent() {
                     ['customer', t('Klientské služby', 'Customer services')],
                   ] as const).map(([filter, label]) => (
                     <button key={filter} onClick={() => setCrewFilter(filter)} aria-pressed={crewFilter === filter}
-                      style={{ padding: '6px 10px', borderRadius: '9px', border: crewFilter === filter ? '1px solid #818cf8' : '1px solid var(--border)',
-                        background: crewFilter === filter ? '#eef2ff' : 'var(--surface)', color: crewFilter === filter ? '#4338ca' : 'var(--text-secondary)',
+                      style={{ padding: '6px 10px', borderRadius: '9px', border: crewFilter === filter ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                        background: crewFilter === filter ? 'var(--accent-bg)' : 'var(--surface)', color: crewFilter === filter ? 'var(--accent-text)' : 'var(--text-secondary)',
                         fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
                       {label}
                     </button>
@@ -483,18 +488,19 @@ function IAOpsContent() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '16px' }}>
                 {visibleAgents.map(a => {
                   const persona = getAgentPersona(a.id, language)
+                  const plane = planeTone(a.plane)
                   const costEntry = agentCosts.find(c => c.agentId === a.id)
                   const budgetPct = costEntry?.budgetUsedPct ?? null
                   const budgetColor = budgetPct == null ? 'var(--text-tertiary)'
-                    : budgetPct > 100 ? '#dc2626'
-                    : budgetPct > 80  ? '#d97706'
-                    : '#16a34a'
+                    : budgetPct > 100 ? 'var(--danger-text)'
+                    : budgetPct > 80  ? 'var(--warning-text)'
+                    : 'var(--success-text)'
                   const isExceeded = costEntry?.burnRate === 'exceeded'
                   const isFinopsAgent = a.id === 'finops-agent'
                   return (
                     <article key={a.id}
                       style={{ position: 'relative', overflow: 'hidden', padding: '18px', borderRadius: '16px',
-                        border: `1px solid ${isExceeded ? '#fca5a5' : `${persona.accent}30`}`,
+                        border: `1px solid ${isExceeded ? 'var(--danger-border)' : `${persona.accent}30`}`,
                         background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`,
                         boxShadow: '0 6px 18px rgba(15,23,42,0.05)', transition: 'transform .15s ease, box-shadow .15s ease' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '14px' }}>
@@ -511,8 +517,8 @@ function IAOpsContent() {
                                 </Link>
                                 {isExceeded && (
                                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700,
-                                    padding: '2px 6px', borderRadius: '8px', background: '#fee2e2', color: '#dc2626' }}>
-                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+                                    padding: '2px 6px', borderRadius: '8px', background: 'var(--danger-bg)', color: 'var(--danger-text)', border: '1px solid var(--danger-border)' }}>
+                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--danger-text)', display: 'inline-block' }} />
                                     {t('Budget!', 'Budget!')}
                                   </span>
                                 )}
@@ -552,10 +558,10 @@ function IAOpsContent() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', marginBottom: costEntry ? '10px' : '12px' }}>
                         <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '10px',
-                          color: planeColor(a.plane), background: `${planeColor(a.plane)}16`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          color: plane.text, background: plane.bg, border: `1px solid ${plane.border}`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           {planeLabel(a.plane)}
                         </span>
-                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: '#fef9c3', color: '#92400e' }}>
+                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>
                           <Hand size={9} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
@@ -631,7 +637,7 @@ function IAOpsContent() {
                           <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Vyžaduje člověka', 'Requires human')}</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                             {a.requiresHuman.map(r => (
-                              <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: '#fef9c3', color: '#92400e' }}>{r}</span>
+                              <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>{r}</span>
                             ))}
                           </div>
                         </div>
@@ -684,13 +690,13 @@ function IAOpsContent() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success-text)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <CheckCircle2 size={13} /> {t('Živé', 'Live now')}
                 </div>
                 <ul style={{ margin: '0 0 12px', paddingLeft: '16px' }}>
                   {data.auditTrail.live.map(x => <li key={x} style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '3px' }}>{x}</li>)}
                 </ul>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <CircleDashed size={13} /> {t('Plánováno', 'Planned')}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '16px' }}>
@@ -742,8 +748,8 @@ function IAOpsContent() {
                 disabled={rcaLoading || !rcaAsk.trim()}
                 style={{
                   alignSelf: 'flex-end', padding: '8px 16px', borderRadius: '8px', border: 'none',
-                  background: rcaLoading || !rcaAsk.trim() ? 'var(--surface-2)' : '#6366f1',
-                  color: rcaLoading || !rcaAsk.trim() ? 'var(--text-tertiary)' : '#fff',
+                  background: rcaLoading || !rcaAsk.trim() ? 'var(--surface-2)' : 'var(--accent)',
+                  color: rcaLoading || !rcaAsk.trim() ? 'var(--text-tertiary)' : 'var(--text-inverse)',
                   fontSize: '12px', fontWeight: 700, cursor: rcaLoading || !rcaAsk.trim() ? 'default' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap',
                 }}
@@ -754,8 +760,8 @@ function IAOpsContent() {
               </button>
             </div>
             {rcaError && (
-              <div style={{ fontSize: '12px', color: '#dc2626', padding: '8px 12px',
-                background: '#fee2e2', borderRadius: '8px', border: '1px solid #fca5a5' }}>
+              <div role="alert" style={{ fontSize: '12px', color: 'var(--danger-text)', padding: '8px 12px',
+                background: 'var(--danger-bg)', borderRadius: '8px', border: '1px solid var(--danger-border)' }}>
                 {rcaError}
               </div>
             )}
@@ -789,7 +795,7 @@ function IAOpsContent() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {data.decisions.map(dec => (
                 <div key={dec.id} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, fontFamily: 'monospace', color: '#6366f1', minWidth: '28px' }}>{dec.id}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--accent-text)', minWidth: '28px' }}>{dec.id}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{dec.title}</span>
