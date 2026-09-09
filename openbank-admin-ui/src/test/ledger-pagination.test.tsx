@@ -9,6 +9,7 @@ import LedgerPage from '@/app/ledger/page'
 
 vi.mock('@/components/auth/AuthGuard', () => ({
   AuthGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Can: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 const firstPage = {
