@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { InvalidConsentPayloadError, parseConsentList, type Consent } from '@/lib/consents/consentLookup'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
 // consentId, partyId or granteeId. So this is deliberately a LOOKUP page, not a table of everything:
@@ -21,20 +22,6 @@ import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
 // `party-service:marketing-comms` (ADR-0205 D3's fixed internal grantee) answers "who has an ACTIVE
 // marketing consent right now" straight from the owning service, with no projection to drift.
 const MARKETING_GRANTEE = 'party-service:marketing-comms'
-
-interface Consent {
-  id: string
-  partyId: string
-  granteeId: string
-  granteeType: string
-  granteeName: string
-  scopes: string[]
-  accountIbans: string[] | null
-  status: string
-  validFrom: string
-  validTo: string
-  createdAt: string
-}
 
 type Lens = 'party' | 'grantee'
 
@@ -75,21 +62,34 @@ export default function ConsentsPage() {
       // The lens is read ONCE, at request time — never from the closure after the await, where it
       // may already describe a different query.
       const path = lensAtRequest === 'party' ? `party/${encodeURIComponent(q)}` : `grantee/${encodeURIComponent(q)}`
-      const res = await fetch(`/api/svc/consent-service/api/v1/consents/${path}`, { cache: 'no-store' })
+      const res = await fetch(`/api/svc/consent-service/api/v1/consents/${path}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(12_000),
+      })
       if (gen !== generation.current) return // superseded — a newer lookup or a lens switch won
       if (!res.ok) {
-        setFailure(await classifyBffFailure(res))
+        const nextFailure = await classifyBffFailure(res)
+        // A snapshot may survive a transient service failure, but never an authentication or
+        // authorization failure. Once access is gone, previously rendered customer consent data
+        // is removed in the same request cycle instead of lingering behind an error panel.
+        if (res.status === 401 || res.status === 403) {
+          setRows(null)
+          setLoadedQuery(null)
+        }
+        setFailure(res.status === 403 ? 'unauthorized' : nextFailure)
         return
       }
-      const data = (await res.json()) as Consent[]
+      const data = parseConsentList(await res.json())
       if (gen !== generation.current) return
       setRows(data)
       setLoadedQuery(queryKey)
       // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
       // said "the data source contains no records yet", which an operator cannot tell apart from a
       // broken page — and was false whenever any other party had a consent. Rendered below instead.
-    } catch {
-      if (gen === generation.current) setFailure('unreachable')
+    } catch (error) {
+      if (gen === generation.current) {
+        setFailure(error instanceof InvalidConsentPayloadError ? 'error' : 'unreachable')
+      }
     } finally {
       if (gen === generation.current) setLoading(false)
     }
@@ -210,9 +210,18 @@ export default function ConsentsPage() {
       )}
 
       {loading && (
-        <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>
+        <div role="status" aria-live="polite" style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>
           {t('Načítám…', 'Loading…')}
         </div>
+      )}
+
+      {!loading && failure && rows !== null && (
+        <p role="alert" style={{ margin: '0 0 12px', color: 'var(--warning)', fontSize: '12px', fontWeight: 600 }}>
+          {t(
+            'Aktualizace selhala. Níže zůstává poslední ověřený výsledek pro stejný dotaz; nejde o živý stav.',
+            'Refresh failed. The last verified result for this exact query remains below; it is not live state.',
+          )}
+        </p>
       )}
 
       {!loading && failure && (
