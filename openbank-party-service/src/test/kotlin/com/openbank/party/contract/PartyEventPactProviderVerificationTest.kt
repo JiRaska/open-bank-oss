@@ -144,7 +144,7 @@ class PartyEventPactProviderVerificationTest {
 
     @State("no party exists for the KYB mandate principal")
     fun noPartyForKybMandatePrincipal() {
-        // The pact uses a dedicated principal id no positive state inserts.
+        // The pact uses a dedicated principal id no positive state inserts; POST must answer 404.
     }
 
     @State("an active company and natural person exist for a joint KYB mandate")
