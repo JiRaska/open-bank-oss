@@ -36,6 +36,24 @@ interface InterestRateConfigRepository {
         date: LocalDate,
         currency: String? = null,
     ): Uni<InterestRateConfig?>
+
+    /**
+     * The already-persisted active config carrying the same natural key as a `createConfig`
+     * attempt — (productId, accountId-or-null, currency, effectiveFrom) — or null. A retried POST
+     * /api/v1/interest/rates with the same key must replay the ORIGINAL row, never mint a second
+     * identical active config (ADR-0291, burn-down #8351): two active rows for one
+     * (account/product, currency) silently shadow each other in `findEffectiveRate`'s
+     * `effectiveFrom DESC` ordering. For account overrides `ux_rate_active_account` (V11) is the
+     * race backstop; product-wide defaults have no DB backstop (see the ADR for why none was
+     * added), so the check-first read is the only dedup for them.
+     */
+    fun findActiveTwin(
+        productId: String,
+        accountId: UUID?,
+        currency: String,
+        effectiveFrom: LocalDate,
+    ): Uni<InterestRateConfig?>
+
     fun update(config: InterestRateConfig): Uni<InterestRateConfig>
 }
 
@@ -44,6 +62,21 @@ interface InterestAccrualRepository {
     fun save(accrual: InterestAccrual): Uni<InterestAccrual>
     fun findAll(): Uni<List<InterestAccrual>>
     fun findByAccountId(accountId: UUID, from: LocalDate?, to: LocalDate?): Uni<List<InterestAccrual>>
+
+    /**
+     * The accrual recorded for the natural key (accountId, accrualDate, productId, currency), or
+     * null. That quadruple IS the business identity of one day's accrual — backed by the
+     * `interest_accruals_account_date_product_currency_key` UNIQUE constraint (V12) — so a retried
+     * POST /api/v1/interest/accrue must replay the ORIGINAL row, never fail on the constraint or
+     * double-count the day (ADR-0291, burn-down #8351). The constraint is also the race backstop
+     * for two concurrent first attempts.
+     */
+    fun findByNaturalKey(
+        accountId: UUID,
+        accrualDate: LocalDate,
+        productId: String,
+        currency: String,
+    ): Uni<InterestAccrual?>
 
     /**
      * Pending (`ACCRUING`) accruals for one `(account, product)` up to [toDate]. Filtering by

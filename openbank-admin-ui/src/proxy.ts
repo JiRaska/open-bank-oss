@@ -28,7 +28,8 @@ function buildCsp(nonce: string): string {
     "font-src 'self'",
     "img-src 'self' data: blob:",
     `connect-src 'self' ${KC_URL} ${GLITCHTIP_ORIGIN}`,
-    "frame-src 'self'",
+    // Grafana OAuth navigates its frame to our identity provider before returning.
+    `frame-src 'self' ${new URL(KC_URL).origin}`,
     "frame-ancestors 'self'",
     "object-src 'none'",
     "base-uri 'self'",

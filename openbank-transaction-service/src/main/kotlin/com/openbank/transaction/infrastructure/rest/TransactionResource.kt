@@ -349,6 +349,13 @@ data class TransactionResponse(
  * and a head-office pin on a "where you spent" map would be fiction. [source] is always `ENRICHED`
  * here; the field exists so a client never has to infer whether a name is the bank's or the
  * acquirer's.
+ *
+ * [logoUrl] is ORIGIN-RELATIVE and always points back at whichever host served this response. That
+ * is the whole design: the catalogue also records where a logo was obtained from, and putting THAT
+ * URL here instead would make every statement render fire a request at a third-party CDN carrying
+ * the customer's IP address and the merchant they paid — a spending profile leaving the bank
+ * through an `<img>` tag. The bytes are ingested once and served from this bank's own origin, so
+ * the field is a path and never an external link.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class MerchantResponse(
@@ -361,9 +368,20 @@ data class MerchantResponse(
 
 data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
 
+/**
+ * How much of the content hash goes in the logo URL. A 64-bit prefix: the token only has to
+ * distinguish one merchant's successive logos from each other, and a full hash makes every
+ * statement row longer for nothing.
+ */
+private const val LOGO_VERSION_CHARS = 16
+
 private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
     cleanName = cleanName,
-    logoUrl = logoUrl,
+    // Null when no logo has been ingested — absence stays absence, and a client renders whatever
+    // it renders today. The hash makes the URL change whenever the bytes do, which is what lets
+    // the logo route answer with a year-long immutable cache and still correct a wrong logo the
+    // moment it is replaced.
+    logoUrl = logoEtag?.let { "/api/v1/merchants/$descriptorKey/logo?size=64&v=${it.take(LOGO_VERSION_CHARS)}" },
     category = category,
     // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
     // half-populated row can never become a pin at latitude 0.

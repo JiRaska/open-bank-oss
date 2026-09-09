@@ -1,7 +1,7 @@
 ---
 date: 2026-09-06
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: shipped
 authors: [Jiří Raška]
 supersedes: []
 superseded-by: []
@@ -181,6 +181,37 @@ Verified end-to-end on the sandbox environment on 2026-09-06/07:
   Keycloak login with `callbackUrl=/reporting`), confirming the route is registered and
   served in the sandbox build.
 
+Final rollout, verified 2026-09-08 with an authenticated session (minted Auth.js JWT) and
+in-pod reads:
+
+- Release cut: #8698 merged 2026-09-08, tag `admin-ui-v0.241.0`; the sandbox deployment
+  runs image `sandbox-6fbce4cc4-run34243836847` with `BUILD_VERSION=0.241.0` — the pod env
+  and the authenticated `/api/build-info` agree.
+- The Grafana embed initially rendered "refused to connect": Grafana's default
+  `allow_embedding = false` sets `X-Frame-Options: deny` on every response (issue #9062).
+  #9059 sets `security.allow_embedding: true` in the `kube-prometheus-stack` GitOps values;
+  after the ArgoCD sync the embed URL
+  `/tools/grafana/d/openbank-business-warehouse?kiosk` answers 302 → 200 with no
+  `X-Frame-Options` header at all, and `grafana.ini` in the pod carries the key.
+- Authenticated surface checks: `/reporting` 200 serving the real page, `/api/reporting`
+  returns the live catalogue (e.g. `risk-settlement-daily`), and
+  `/api/reporting/warehouse-event-volume` reads real ClickHouse rows.
+- The same rollout also flushed out two latent `main` drifts that blocked unrelated gates:
+  Kotlin 2.4.20 release artifacts unpinned in `gradle/verification-metadata.xml` (pinned in
+  #9059) and an MPL-2.0 header on `.github/workflows/edge-openapi-dispatch.yml` in the
+  Apache-2.0 tree (fixed in #9059).
+
+Follow-up (2026-09-08, #9216): the 302 → 200 embed check above stopped at the site boundary
+and missed the SSO hop. The iframe's OAuth dance crosses to Keycloak (`kc.open-bank.tech`),
+whose realm carried no `browserSecurityHeaders`, so the default `frame-ancestors 'self'`
+blocked the frame the moment Keycloak rendered its login form — the browser showed "This
+content is blocked" even with `allow_embedding` on. Fixed live via kcadm (realm `openbank`
+CSP now allowlists `https://admin.open-bank.tech` as a frame ancestor), with the desired
+state landed in `realm-template.json`, the cold-start import override and the docker dev
+realm; Grafana `auth.generic_oauth.auto_login: true` makes the bounce click-free when a
+portal SSO session exists. Lesson: a framing verdict must cover the WHOLE redirect chain,
+off-site hops included — "no X-Frame-Options on Grafana hops" was necessary, not sufficient.
+
 ## References
 
 - ADR-0022 — event-fed ClickHouse analytics layer (bronze/silver/gold, retention, consistency model)
@@ -191,3 +222,23 @@ Verified end-to-end on the sandbox environment on 2026-09-06/07:
 - `openbank-admin-ui/src/app/api/customer-360/[partyId]/route.ts` — the reference BFF implementation (validation-as-injection-boundary, always-200 degradation)
 - `openbank-admin-ui/src/app/regulatory/page.tsx` — the regulatory catalogue this ADR surrounds but does not re-source
 - `openbank-infra/gitops/components/analytics/clickhouse-grafana-network-policy.yaml` — the existing Grafana → ClickHouse path the embed reuses
+
+## Presentation and embedding contract
+
+The containing document's `frame-src` must allow the configured Keycloak origin as well as
+`self`: Grafana's OAuth flow navigates the frame through the identity provider. This policy
+also applies to documents from which client-side navigation can reach reporting. It does not
+change `frame-ancestors`, the tools ingress gate, or Grafana's own role mapping.
+
+The reporting frame uses the same-origin tools path, kiosk mode, the console's theme and an
+explicit UTC date range. Loading a frame alone is not evidence of a loaded dashboard; the UI
+waits for a rendered dashboard layout and offers sign-in in a separate tab plus retry if that
+cannot be established. Once ready, its height follows the same-origin dashboard document and
+suppresses nested scrolling so the embedded surface remains visually continuous with the console.
+This remains independent of the governed report results.
+
+Period-based dashboard queries use ClickHouse datasource time/date macros. Warehouse freshness
+is intentionally a current watermark independent of the selected period; an empty warehouse
+produces no freshness value. Native report charts aggregate additive counts only, preserve
+missing days as missing, and suppress totals for truncated results. Monetary values retain their
+currency in the detail table.
