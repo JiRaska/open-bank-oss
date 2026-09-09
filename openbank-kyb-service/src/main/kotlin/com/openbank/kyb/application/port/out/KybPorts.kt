@@ -83,6 +83,7 @@ data class MandateRequest(
     val agentPartyId: UUID,
     val role: String,
     val authority: String,
+    val requiredSignatures: Int,
     val source: String,
     val evidenceRef: String,
 )
