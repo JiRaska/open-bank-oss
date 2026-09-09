@@ -65,4 +65,20 @@ describe('system code quality accessibility', () => {
     expect(source).toContain('The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')
     expect(source).toContain('<StateBadge state="unknown" />')
   })
+
+  it('keeps operator-facing test evidence labels bilingual', () => {
+    const source = read()
+
+    expect(source).toContain("t('Inventarizované komponenty', 'Inventoried components')")
+    expect(source).toContain("t('Sledované definice testů', 'Tracked test definitions')")
+    expect(source).toContain("t('Míra selhání', 'Failure rate')")
+    expect(source).toContain("t('nenahlášeno', 'not reported')")
+    expect(source).toContain("t('První snapshot je dostupný; trend se zobrazí po dalším nasazení admin UI.', 'The first snapshot is present; a trend appears after the next admin deployment.')")
+    expect(source).toContain("language === 'cs' ? 'cs-CZ' : 'en-GB'")
+    expect(source).toContain("t('nikdy nepozorováno', 'never observed')")
+    expect(source).toContain("t('Poslední úspěšné naplánované spuštění:', 'Last scheduled success:')")
+    expect(source).not.toContain('<Stat label="Tracked test definitions"')
+    expect(source).not.toContain("['State', 'Test definition', 'Test source'")
+    expect(source).not.toContain("new Intl.DateTimeFormat('en-GB'")
+  })
 })
