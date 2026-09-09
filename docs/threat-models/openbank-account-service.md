@@ -630,6 +630,17 @@ fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. R
 consumer-first (account-service migration and consumer before delegation-service producer);
 rollback removes the producer fields first and may retain the additive projection columns.
 
+## Immutable approval-group revisions
+
+The delegation event consumer stores each complete approval-group roster under `(groupId, revision)`;
+an identical replay is a no-op and different content for the same identity fails to the configured
+DLQ. Operations will reference one revision and copy its eligible actors into their own immutable
+snapshot, so later membership changes cannot rewrite an in-flight decision. This consumer does not
+activate N-of-M by itself. Kafka remains a seven-day change feed: bootstrap and reconciliation must
+read delegation-service's append-only revision history before N-of-M is enabled. Missing history
+fails closed. Rollout is producer history first, then this projection, then operation enforcement;
+rollback disables enforcement first and leaves both additive history tables intact for evidence.
+
 ## SCA-derived representative identity
 
 An entity-owned savings proposal is still addressed under the entity subject, but the human
