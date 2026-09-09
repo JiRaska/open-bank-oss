@@ -56,9 +56,9 @@ interface InboxItem extends Omit<DomainApprovalItem, 'domain'> {
 type DecisionIntent = { proposal: Proposal; approve: boolean }
 
 const STATE_META: Record<string, { color: string; bg: string; border: string; Icon: React.ElementType; cs: string; en: string }> = {
-  PROPOSED: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
-  APPROVED: { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2, cs: 'Schváleno', en: 'Approved' },
-  REJECTED: { color: '#dc2626', bg: '#fef2f2', border: '#fca5a5', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
+  PROPOSED: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
+  APPROVED: { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2, cs: 'Schváleno', en: 'Approved' },
+  REJECTED: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
 }
 
 export default function ApprovalsPage() {
@@ -121,7 +121,10 @@ export default function ApprovalsPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   // Charter lookup is deliberately a separate read from the queue: a registry that cannot be
   // read must degrade the IDENTITY column only, never blank the queue itself.
@@ -236,7 +239,7 @@ export default function ApprovalsPage() {
       {domainLoadFailed && (
         <div className="card" role="alert" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+          color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
             'Doménovou schvalovací frontu se nepodařilo načíst. Případná zobrazená data jsou z posledního úspěšného načtení; prázdný seznam neznamená, že nic nečeká.',
@@ -247,7 +250,7 @@ export default function ApprovalsPage() {
       {unavailableSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+          color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
             `Fronta není úplná — nepodařilo se načíst: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
@@ -258,7 +261,7 @@ export default function ApprovalsPage() {
       {notConfiguredSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#475569', background: '#f8fafc', border: '1px solid #cbd5e1',
+          color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)',
         }}>
           {t(
             `Část fronty zatím není napojená: ${notConfiguredSources.join(', ')}. Rozhodnutí z těchto domén se zde nezobrazí, dokud jejich read endpoint nebude dostupný.`,
@@ -310,7 +313,7 @@ export default function ApprovalsPage() {
           return <div key={`${item.domain}:${item.id}`} data-testid={`domain-approval-${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{
               fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
-              color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', flexShrink: 0,
+              color: 'var(--info-text)', background: 'var(--info-bg)', border: '1px solid var(--info-border)', flexShrink: 0,
             }}>
               {item.domain}
             </span>
@@ -322,7 +325,7 @@ export default function ApprovalsPage() {
                 {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
               </div>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>
             {workbenchHref && <Link href={workbenchHref} className="btn btn-secondary" aria-label={t(`Otevřít řízenou kontrolu žádosti ${item.id}`, `Open governed review for approval ${item.id}`)} style={{ fontSize: 11, textDecoration: 'none' }}>
@@ -354,10 +357,10 @@ export default function ApprovalsPage() {
           const aiGenerated = p.agent ? p.agent.icon === 'bot' : /assistant|agent|\bai\b/i.test(p.proposedBy)
           const ProposerIcon = aiGenerated ? Bot : UserRound
           return (
-            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? '#d97706' : m.color}` }}>
+            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? 'var(--warning-text)' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? '#fffbeb' : 'var(--surface-2)', color: aiGenerated ? '#b45309' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
+                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? 'var(--warning-bg)' : 'var(--surface-2)', color: aiGenerated ? 'var(--warning-text)' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
                   {p.title}
                   <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
@@ -366,7 +369,7 @@ export default function ApprovalsPage() {
                 </span>
               </div>
               {cautionAi && !registryLoading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                   {t(
                     'Tento návrh vytvořila AI. Nezakládá žádnou autoritu — než schválíš, nezávisle ověř, že je legitimní a žádaný (ADR-0080).',
@@ -386,11 +389,11 @@ export default function ApprovalsPage() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Can permission="agent:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodování vyžaduje oprávnění agenta.', 'Decision access requires agent authorization.')}</span>}>
                   <button type="button" aria-label={t(`Zkontrolovat a schválit návrh ${p.title}`, `Review and approve proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, true, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--success-border)', background: 'var(--success-bg)', color: 'var(--success-text)', cursor: 'pointer' }}>
                     <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                   </button>
                   <button type="button" aria-label={t(`Zkontrolovat a zamítnout návrh ${p.title}`, `Review and reject proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, false, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--danger-border)', background: 'var(--danger-bg)', color: 'var(--danger-text)', cursor: 'pointer' }}>
                     <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                   </button>
                 </Can>
