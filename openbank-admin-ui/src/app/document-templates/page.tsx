@@ -18,7 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -34,7 +34,6 @@ const PREVIEW_PATH = `${TEMPLATES_PATH}/preview`
 const DOCUMENTS_PATH = '/api/v1/documents'
 
 const PAGE_SIZE = 25
-const CONTENT_TABS = ['templates', 'documents'] as const
 
 type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'RETIRED'
 
@@ -197,19 +196,6 @@ export default function DocumentTemplatesPage() {
   const canEdit = hasPermission(roles, 'templates:edit')
 
   const [tab, setTab] = useState<'templates' | 'documents'>('templates')
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let nextIndex: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % CONTENT_TABS.length
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + CONTENT_TABS.length) % CONTENT_TABS.length
-    if (event.key === 'Home') nextIndex = 0
-    if (event.key === 'End') nextIndex = CONTENT_TABS.length - 1
-    if (nextIndex === null) return
-    event.preventDefault()
-    setTab(CONTENT_TABS[nextIndex])
-    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
-  }
 
   // ── Templates list ──────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<DocumentTemplate[]>([])
@@ -480,21 +466,17 @@ export default function DocumentTemplatesPage() {
             </button>
           </div>} />
 
-        <div role="tablist" aria-label={t('Obsah šablon dokumentů', 'Document template content')} style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
-          {([
-            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} /> },
-            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} /> },
-          ]).map((tb, index) => (
-            <button key={tb.id} ref={element => { tabRefs.current[index] = element }} id={`document-${tb.id}-tab`} role="tab" tabIndex={tab === tb.id ? 0 : -1} aria-selected={tab === tb.id} aria-controls={`document-${tb.id}-panel`} onKeyDown={event => moveTabFocus(event, index)} onClick={() => setTab(tb.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '13px', fontWeight: 600,
-                border: 'none', borderBottom: tab === tb.id ? '2px solid var(--accent)' : '2px solid transparent',
-                background: 'none', cursor: 'pointer', color: tab === tb.id ? 'var(--accent)' : 'var(--text-secondary)',
-              }}>
-              <span aria-hidden="true">{tb.icon}</span>{tb.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          items={[
+            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} />, tabId: 'document-templates-tab', panelId: 'document-templates-panel' },
+            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} />, tabId: 'document-documents-tab', panelId: 'document-documents-panel' },
+          ] satisfies readonly TabItem<typeof tab>[]}
+          value={tab}
+          onChange={setTab}
+          label={t('Obsah šablon dokumentů', 'Document template content')}
+          idPrefix="document"
+          style={{ marginBottom: 18, borderBottom: '1px solid var(--border)' }}
+        />
 
         <section id="document-templates-panel" role="tabpanel" aria-labelledby="document-templates-tab" hidden={tab !== 'templates'}>
             {unavailable && (
