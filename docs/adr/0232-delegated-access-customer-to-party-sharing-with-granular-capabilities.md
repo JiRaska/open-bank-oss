@@ -2,7 +2,7 @@
 date: 2026-07-31
 decision-status: proposed
 delivery-status: partial
-followup: "complete D3 rail rollout beyond domestic payment and reconcile reservations to final clearing outcomes"
+followup: "#9355 — complete D3 rail rollout beyond domestic payment and reconcile reservations to final clearing outcomes"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
