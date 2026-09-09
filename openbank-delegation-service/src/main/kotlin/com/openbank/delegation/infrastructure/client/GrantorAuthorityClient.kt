@@ -57,6 +57,8 @@ interface PartyAuthorityRestClient {
 class RestGrantorAuthorityClient @Inject constructor(@RestClient private val client: PartyAuthorityRestClient) :
     GrantorAuthorityClient {
 
+    // Every transport or parse failure must become an explicit fail-closed verdict.
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority = try {
         val principal = client.getParty(principalPartyId)
         val authorized = when (principal.partyType) {

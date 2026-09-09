@@ -187,13 +187,7 @@ class DelegationService(
     }
 
     private suspend fun verifyGrantorAuthority(command: DelegationCandidate): String? {
-        val actor = if (command.callerPartyId != null) {
-            command.actorPartyId ?: throw DelegationGrantorAuthorityException(
-                "customer actor identity is required to issue a delegation",
-            )
-        } else {
-            command.actorPartyId ?: command.grantorPartyId
-        }
+        val actor = resolveGrantorActor(command)
         val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
         return when (authority.verdict) {
             GrantorAuthorityVerdict.AUTHORIZED -> authority.displayName
@@ -204,6 +198,14 @@ class DelegationService(
                 "authority for grantor ${command.grantorPartyId} could not be established",
             )
         }
+    }
+
+    private fun resolveGrantorActor(command: DelegationCandidate): UUID = if (command.callerPartyId != null) {
+        command.actorPartyId ?: throw DelegationGrantorAuthorityException(
+            "customer actor identity is required to issue a delegation",
+        )
+    } else {
+        command.actorPartyId ?: command.grantorPartyId
     }
 
     override suspend fun accept(

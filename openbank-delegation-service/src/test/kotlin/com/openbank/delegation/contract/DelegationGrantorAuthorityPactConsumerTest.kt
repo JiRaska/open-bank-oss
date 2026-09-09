@@ -63,6 +63,16 @@ class DelegationGrantorAuthorityPactConsumerTest {
         )
         .toPact()
 
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-party-service")
+    fun missingPrincipalPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no party exists for the id")
+        .uponReceiving("GET a delegation principal the bank does not hold")
+        .path("/api/v1/parties/$MISSING_PRINCIPAL_ID")
+        .method("GET")
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "organizationPact")
     fun `authority client reads organization identity and status`(mockServer: MockServer) {
@@ -87,9 +97,19 @@ class DelegationGrantorAuthorityPactConsumerTest {
         assertThat(body.getString("[0].partyId")).isEqualTo(PRINCIPAL_ID)
     }
 
+    @Test
+    @PactTestFor(pactMethod = "missingPrincipalPact")
+    fun `authority client preserves not found for an unknown principal`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get(ClientRoute.of(PartyAuthorityRestClient::class.java, "getParty", "id" to MISSING_PRINCIPAL_ID))
+            .then().statusCode(404)
+    }
+
     companion object {
         const val AUTHORITY_STATE = "an active human mandate exists for an active company"
         const val ACTOR_ID = "d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3"
         const val PRINCIPAL_ID = "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
+        const val MISSING_PRINCIPAL_ID = "f9f9f9f9-e8e8-4d4d-8c8c-b7b7b7b7b7b7"
     }
 }

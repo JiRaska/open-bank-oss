@@ -173,7 +173,6 @@ class DelegationResource(
     suspend fun getById(
         @PathParam("id") id: UUID,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationResponse = DelegationResponse.from(getDelegation.getDelegation(id, customerPartyId))
 
     @Operation(summary = "List grants offered BY a party (Shared by me)")

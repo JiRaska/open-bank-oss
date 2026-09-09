@@ -256,6 +256,11 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    @State("no party exists for the id")
+    fun noPartyExistsForId() {
+        // The pact uses an id no positive provider state seeds; the endpoint must preserve 404.
+    }
+
     /**
      * State for vop-service's `PartyNameLookupPactConsumerTest` (issue #2255): hop 2 of the ADR-0171
      * §4 VoP name resolution reads `legalName`/`tradingName` off `GET /api/v1/parties/{id}`, and the

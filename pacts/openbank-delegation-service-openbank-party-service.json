@@ -61,6 +61,21 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET a delegation principal the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/f9f9f9f9-e8e8-4d4d-8c8c-b7b7b7b7b7b7"
+      },
+      "response": {
+        "status": 404
+      }
     }
   ],
   "metadata": {
