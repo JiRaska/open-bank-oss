@@ -7,9 +7,9 @@ const read = () => fs.readFileSync(path.join(process.cwd(), 'src/app/security/in
 describe('ICT incident register truthfulness', () => {
   it('distinguishes an empty, successfully loaded register from every unavailable state', () => {
     const source = read()
-    expect(source).toContain("data.reason === 'unauthorized'")
-    expect(source).toContain("data.reason === 'not_deployed'")
-    expect(source).toContain("data.reason === 'unreachable'")
+    expect(source).toContain("unavailableReason === 'unauthorized'")
+    expect(source).toContain("unavailableReason === 'not_deployed'")
+    expect(source).toContain("unavailableReason === 'unreachable'")
     expect(source).toContain('This does not confirm that no incidents exist.')
     expect(source).toContain('contains no records.')
   })
