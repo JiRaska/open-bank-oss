@@ -52,12 +52,23 @@ function fmtDate(iso: string, locale: string): string {
   return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short' })
 }
 
+function safeReleaseNotesUrl(candidate: string | null): string | null {
+  if (!candidate) return null
+  try {
+    const url = new URL(candidate)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: CompLifecycle; name: string; t: T; dateLocale?: string }) {
   const [draft, setDraft] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
   const u = URGENCY[data.urgency]
   const lc = data.lifecycle
   const has = lc.available
   const running = data.running.version
+  const releaseNotesUrl = safeReleaseNotesUrl(data.upgrade.releaseNotesUrl)
 
   const planUpgrade = async () => {
     setDraft('busy')
@@ -158,10 +169,10 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       </div>
 
       {/* actions */}
-      {(showUpgrade || data.upgrade.releaseNotesUrl) && (
+      {(showUpgrade || releaseNotesUrl) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-          {data.upgrade.releaseNotesUrl && (
-            <a href={data.upgrade.releaseNotesUrl} target="_blank" rel="noreferrer"
+          {releaseNotesUrl && (
+            <a href={releaseNotesUrl} target="_blank" rel="noreferrer"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>
               <ExternalLink size={12} /> {data.upgrade.target ? `${t('Co je nového v', "What's new in")} ${data.upgrade.target}` : t('Release notes', 'Release notes')}
             </a>

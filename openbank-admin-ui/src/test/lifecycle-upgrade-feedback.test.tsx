@@ -71,4 +71,14 @@ describe('lifecycle upgrade proposal feedback', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Queued' })).toBeDisabled())
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('does not render an unsafe release-notes protocol', () => {
+    render(<LifecycleStrip
+      data={{ ...data, upgrade: { ...data.upgrade, patchAvailable: false, target: null, releaseNotesUrl: 'javascript:alert(1)' } }}
+      name="PostgreSQL"
+      t={t}
+    />)
+
+    expect(screen.queryByRole('link', { name: /Release notes/ })).not.toBeInTheDocument()
+  })
 })
