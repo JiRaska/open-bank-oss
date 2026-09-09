@@ -211,6 +211,15 @@ PDF bytes. Public recipient proof, expiry, revocation and view counters remain t
 Migration V20 is additive. Before use it may be dropped only while empty; after use the rows are
 evidence and rollback disables producers/consumers while retaining data.
 
+**D7 immutable content boundary (2026-09-09).** Document-service now exposes one authenticated
+service-to-service read for the exact disclosure snapshot only. The caller supplies both the
+snapshot id and the SHA-256 pinned by delegation-service; malformed, absent and mismatched requests
+all answer 404, and the response is `private, no-store`. The implementation reuses the snapshot
+use case, which re-hashes object-store bytes before returning them. It never accepts a source
+document id and never reveals the storage key. This is not a recipient endpoint: the following
+delegation-service slice remains responsible for one-time magic-link exchange, OTP attempts,
+expiry, revocation and atomic view consumption before it invokes this boundary.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the

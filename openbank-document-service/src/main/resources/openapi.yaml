@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -18,8 +18,39 @@ tags:
   - name: Templates
   - name: Documents
   - name: Signature Ceremonies
+  - name: Disclosure Snapshots
 
 paths:
+  /api/v1/documents/disclosure-snapshots/{id}/content:
+    get:
+      tags: [Disclosure Snapshots]
+      summary: Read verified bytes of an immutable disclosure snapshot
+      description: >-
+        Service-to-service boundary used by delegation redemption. It never resolves the mutable
+        source document and returns 404 for a missing snapshot, malformed digest, or digest mismatch.
+      operationId: getDisclosureSnapshotContent
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+        - name: X-Expected-SHA256
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      responses:
+        '200':
+          description: Exact immutable PDF snapshot bytes
+          headers:
+            ETag:
+              schema: { type: string }
+            Cache-Control:
+              schema: { type: string }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/documents/templates:
     post:
       tags: [Templates]

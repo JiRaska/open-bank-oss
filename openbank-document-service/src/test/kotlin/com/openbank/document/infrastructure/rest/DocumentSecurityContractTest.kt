@@ -70,6 +70,7 @@ class DocumentSecurityContractTest {
             "listByParty" to "document.list",
             "getDocument" to "document.read",
             "getContent" to "document.readContent",
+            "getDisclosureSnapshotContent" to "document.readContent",
         )
 
         partyScopedReads.forEach { (methodName, expectedAction) ->

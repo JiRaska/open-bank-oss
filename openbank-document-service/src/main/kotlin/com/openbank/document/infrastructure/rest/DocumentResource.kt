@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.rest
 
 import com.openbank.document.application.port.`in`.CreateTemplateCommand
+import com.openbank.document.application.port.`in`.DisclosureSnapshotUseCase
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
@@ -24,6 +25,7 @@ import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -46,6 +48,7 @@ class DocumentResource(
     private val renderUseCase: DocumentRenderUseCase,
     private val queryUseCase: DocumentQueryUseCase,
     private val onboardingUseCase: OnboardingDocumentUseCase,
+    private val disclosureSnapshots: DisclosureSnapshotUseCase,
 ) {
 
     /**
@@ -198,8 +201,34 @@ class DocumentResource(
         return Response.ok(bytes).build()
     }
 
+    /**
+     * Narrow service-to-service boundary for external disclosure redemption. It can read only the
+     * immutable snapshot, never the mutable source document or its object-store key. A digest
+     * mismatch deliberately answers like a missing row so callers cannot probe snapshot metadata.
+     */
+    @GET
+    @Path("/disclosure-snapshots/{id}/content")
+    @Produces("application/pdf")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "document.readContent", resource = "#id")
+    suspend fun getDisclosureSnapshotContent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Expected-SHA256") expectedSha256: String?,
+    ): Response {
+        val snapshot = expectedSha256?.takeIf(SHA256::matches)
+            ?.let { expected -> disclosureSnapshots.getMetadata(id)?.takeIf { it.sha256 == expected } }
+            ?: throw NotFoundException()
+        val bytes = disclosureSnapshots.getContent(id) ?: throw NotFoundException()
+        return Response.ok(bytes)
+            .header("Cache-Control", "private, no-store")
+            .header("ETag", "\"${snapshot.sha256}\"")
+            .header("Content-Disposition", "inline; filename=\"sealed-disclosure.pdf\"")
+            .build()
+    }
+
     private companion object {
         const val MAX_PREVIEW_BODY_LENGTH = 200_000
+        val SHA256 = Regex("^[0-9a-f]{64}$")
 
         /** A caller-supplied page size is a caller-supplied amount of work. */
         const val MAX_PAGE_SIZE = 200
