@@ -72,8 +72,9 @@ data:
           "panels": []
         },
         {
+          "id": 2,
           "type": "stat",
-          "title": "Outbox backlog (total)",
+          "title": "Ledger outbox backlog",
           "description": "LIVE metric",
           "datasource": {
             "type": "prometheus",
@@ -91,7 +92,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(openbank_outbox_backlog)",
+              "expr": "sum(openbank_outbox_backlog{service=\"ledger\"})",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -200,6 +201,7 @@ data:
           }
         },
         {
+          "id": 4,
           "type": "stat",
           "title": "Ledger error %",
           "description": "",
@@ -529,6 +531,7 @@ data:
           }
         },
         {
+          "id": 9,
           "type": "timeseries",
           "title": "Ledger posting p95 latency",
           "description": "",
@@ -654,6 +657,7 @@ data:
           }
         },
         {
+          "id": 11,
           "type": "timeseries",
           "title": "Payments submitted vs completed",
           "description": "openbank_* contract",
