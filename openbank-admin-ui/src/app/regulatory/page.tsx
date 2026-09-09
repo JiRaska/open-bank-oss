@@ -525,11 +525,11 @@ export default function RegulatoryPage() {
           const isSelected = selected === report.id
           return (
             <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
-              <div role="button" tabIndex={0} aria-expanded={isSelected}
-                aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
-                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
-                onClick={() => setSelected(s => s === report.id ? null : report.id)}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === report.id ? null : report.id) } }}>
+              <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
+                <button type="button" aria-expanded={isSelected} aria-controls={`regulatory-report-${report.id}`}
+                  aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
+                  style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flex: '1 1 520px', minWidth: 0, flexWrap: 'wrap', border: 0, background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left' }}
+                  onClick={() => setSelected(s => s === report.id ? null : report.id)}>
                 {/* Status */}
                 <span style={{ color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
 
@@ -554,10 +554,12 @@ export default function RegulatoryPage() {
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                </button>
+
+                {/* Actions remain a sibling of the disclosure button, never a nested interactive control. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, padding: '10px 16px 10px 0' }}>
                   {source === 'implemented' ? (
-                    <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
                       onClick={(e) => openPreview(report.id, e)}>
                       {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
                     </button>
@@ -571,7 +573,7 @@ export default function RegulatoryPage() {
 
               {/* Detail */}
               {isSelected && (
-                <div style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                <div id={`regulatory-report-${report.id}`} style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '12px' }}>
                     <div>
                       <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{t('Popis', 'Description')}</div>
