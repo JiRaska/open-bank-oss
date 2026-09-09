@@ -12,6 +12,7 @@ import java.util.UUID
 data class CreateApprovalGroupCommand(
     val ownerPartyId: UUID,
     val callerPartyId: CallerPartyId,
+    val actorPartyId: UUID,
     val name: String,
     val members: Set<UUID>,
     val threshold: Int,
@@ -22,6 +23,7 @@ data class ReviseApprovalGroupCommand(
     val id: UUID,
     val ownerPartyId: UUID,
     val callerPartyId: CallerPartyId,
+    val actorPartyId: UUID,
     val expectedRevision: Long,
     val name: String,
     val members: Set<UUID>,
@@ -32,7 +34,12 @@ data class ReviseApprovalGroupCommand(
 interface ApprovalGroupUseCase {
     suspend fun create(command: CreateApprovalGroupCommand): ApprovalGroup
     suspend fun revise(command: ReviseApprovalGroupCommand): ApprovalGroup
-    suspend fun deactivate(id: UUID, ownerPartyId: UUID, callerPartyId: CallerPartyId): ApprovalGroup
+    suspend fun deactivate(
+        id: UUID,
+        ownerPartyId: UUID,
+        callerPartyId: CallerPartyId,
+        actorPartyId: UUID,
+    ): ApprovalGroup
     suspend fun get(id: UUID, ownerPartyId: UUID, callerPartyId: CallerPartyId): ApprovalGroup
     suspend fun list(ownerPartyId: UUID, callerPartyId: CallerPartyId): List<ApprovalGroup>
 }

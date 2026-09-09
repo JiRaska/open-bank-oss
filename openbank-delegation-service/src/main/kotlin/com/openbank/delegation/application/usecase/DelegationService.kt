@@ -19,6 +19,8 @@ import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.application.port.out.ApprovalGroupRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
@@ -54,6 +56,8 @@ class DelegationNotGrantorException(id: UUID, partyId: UUID) :
     RuntimeException("Delegation $id is not granted by party $partyId")
 class DelegationScaException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class DelegationEligibilityException(message: String) : RuntimeException(message)
+class DelegationGrantorAuthorityException(message: String) : RuntimeException(message)
+class DelegationGrantorAuthorityUnavailableException(message: String) : RuntimeException(message)
 
 /** The authenticated customer is not the party they claim to be acting as. */
 class DelegationCallerMismatchException(callerPartyId: UUID, claimedPartyId: UUID) :
@@ -92,6 +96,7 @@ class DelegationService(
     private val delegationRepository: DelegationRepository,
     private val scaChallengeClient: ScaChallengeClient,
     private val partyEligibilityClient: PartyEligibilityClient,
+    private val grantorAuthorityClient: GrantorAuthorityClient,
     private val resourceOwnershipClient: ResourceOwnershipClient,
     private val approvalGroupRepository: ApprovalGroupRepository,
     private val nOfMEnabled: Boolean,
@@ -108,6 +113,7 @@ class DelegationService(
         delegationRepository: DelegationRepository,
         scaChallengeClient: ScaChallengeClient,
         partyEligibilityClient: PartyEligibilityClient,
+        grantorAuthorityClient: GrantorAuthorityClient,
         resourceOwnershipClient: ResourceOwnershipClient,
         approvalGroupRepository: ApprovalGroupRepository,
         @ConfigProperty(name = "openbank.delegation.n-of-m-enabled", defaultValue = "false") nOfMEnabled: Boolean,
@@ -115,6 +121,7 @@ class DelegationService(
         delegationRepository,
         scaChallengeClient,
         partyEligibilityClient,
+        grantorAuthorityClient,
         resourceOwnershipClient,
         approvalGroupRepository,
         nOfMEnabled,
@@ -128,7 +135,7 @@ class DelegationService(
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
             sessionId = command.grantScaSessionId,
-            expectedPartyId = command.grantorPartyId,
+            expectedPartyId = command.actorPartyId ?: command.grantorPartyId,
             expectedPurpose = SCA_PURPOSE_GRANT,
             errorPrefix = "grant SCA",
             reference = candidate.scaReference,
@@ -197,16 +204,39 @@ class DelegationService(
 
     private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
+        val grantorName = verifyGrantorAuthority(command)
         rejectUnenforcedCeilings(command)
         val approval = resolveApprovalPolicy(command)
         verifyResourceOwnership(command)
         return ValidatedCandidate(
-            parties = verifyEligibility(command),
+            parties = verifyEligibility(command, grantorName),
             approvalGroupId = approval.groupId,
             approvalGroupRevision = approval.revision,
             requiredApprovals = approval.threshold,
             scaReference = scaReference(command, approval),
         )
+    }
+
+    private suspend fun verifyGrantorAuthority(command: DelegationCandidate): String? {
+        val actor = resolveGrantorActor(command)
+        val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
+        return when (authority.verdict) {
+            GrantorAuthorityVerdict.AUTHORIZED -> authority.displayName
+            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
+                "actor $actor has no active authority for grantor ${command.grantorPartyId}",
+            )
+            GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
+                "authority for grantor ${command.grantorPartyId} could not be established",
+            )
+        }
+    }
+
+    private fun resolveGrantorActor(command: DelegationCandidate): UUID = if (command.callerPartyId != null) {
+        command.actorPartyId ?: throw DelegationGrantorAuthorityException(
+            "customer actor identity is required to issue a delegation",
+        )
+    } else {
+        command.actorPartyId ?: command.grantorPartyId
     }
 
     override suspend fun accept(
@@ -637,17 +667,13 @@ class DelegationService(
      * offers, never wave them through. KYC requirements: FULL for execution
      * capabilities (they move money), BASIC for everything read-only/propose-only.
      */
-    private suspend fun verifyEligibility(command: DelegationCandidate): CounterpartyNames {
-        val grantor = partyEligibilityClient.eligibilityOf(command.grantorPartyId)
-        if (!grantor.active) {
-            throw DelegationEligibilityException("grantor party ${command.grantorPartyId} is not active")
-        }
+    private suspend fun verifyEligibility(command: DelegationCandidate, grantorName: String?): CounterpartyNames {
         val grantee = partyEligibilityClient.eligibilityOf(command.granteePartyId)
         if (!grantee.active) {
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
         requireGranteeKyc(command, grantee)
-        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
+        return CounterpartyNames(grantorName = grantorName, granteeName = grantee.displayName)
     }
 
     /**

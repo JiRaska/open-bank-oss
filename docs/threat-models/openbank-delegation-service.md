@@ -50,6 +50,10 @@ and require a human operator plus OPA; client applications do not receive a bank
 6. delegation-service → compacted Kafka (`openbank.delegation.spend-reservation-state`) — complete
    domestic reservation snapshots. The stream is default-off for new domestic reservations until
    a compatible binding consumer is deployed; rail-neutral callers remain unchanged.
+7. delegation-service → party-service (`https://party-service.party.svc:8443`) — authoritative
+   principal status/type and live representation mandates. Mutual TLS uses the platform private CA
+   with per-service client identity and hostname verification; OIDC authenticates the application
+   principal and the network policy admits only the declared namespace/port edge.
 
 ## Threats and mitigations
 
@@ -75,14 +79,17 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T18 | A reservation is created without recoverable state, a stale grant is used after revoke, or a delayed publish makes a rebuild reopen headroom | The grant is re-read under `PESSIMISTIC_WRITE` in the same transaction as ceiling evaluation, reservation insertion and outbox insertion. New DOMESTIC_PAYMENT admission is default-off unless the state writer is enabled; exact retries remain replayable, while a key reused for another immutable tuple is 409. The compacted stream publishes no raw idempotency key and uses bounded `reservationId:v1`/`:v2` keys, so an ambiguous delayed v1 completion cannot replace terminal v2. Consumers must fold the greatest payload revision. Rollback must first stop creators and prove zero RESERVED domestic rows plus zero unsent state rows; turning the writer off alone is unsafe. |
 | T19 | A service account, maker, or replay decides a bank-side lifecycle proposal | Proposal/decision actions are human-only and exclude `service-account-*`; the domain rejects maker = checker. The proposal request key is unique in Postgres and terminal rejection is serialized by a row lock, preserving the original actor, reason and timestamps. The admin BFF exposes GET only. Residual: direct staff lifecycle endpoints are not routed through the inbox, so mutation activation remains prohibited until that authority is narrowed. |
 | T20 | Approval races a newer lifecycle transition and overwrites state or emits stale evidence | This first slice is fail-closed: `approve=true` returns 409 even if the dark mutation setting is enabled, so no grant row or outbox event is touched. Execution may land only on top of lifecycle V8-V10 through their expected-revision/CAS transition and revision-stamped event, proven by a real-Postgres race test. Emergency suspend remains only the existing fraud/AML safety path. |
-| T21 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
-| T22 | A compromised client changes an approval-group member or threshold after the owner completes SCA | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. Any changed field refuses the ceremony before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
+| T21 | A caller forges an entity profile, reuses a revoked mandate, or intercepts the authority lookup | The edge derives the human actor from the authenticated token; it is not accepted from the app. delegation-service re-checks the selected principal and the actor's currently active mandate at issuance time against party-service, before consuming SCA. Unknown, inactive, malformed and unavailable results fail closed. The new east-west call uses party-service's parallel private-CA mTLS listener on 8443: hostname verification authenticates the server, a namespace-local cert identifies delegation-service, and TLS 1.3 is pinned; OIDC and namespace/port NetworkPolicy remain independent controls. An event-only projection was rejected for this admission decision because bootstrap/replay lag and a revocation race would trade authorization freshness for availability. Residual: this establishes statutory/owner representation, not a delegated employee capability such as `delegation.manage`. |
+| T22 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
+| T23 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
 
 ## Outbound authentication (added 2026-08-06)
 
-Every REST client this service owns — sca-service, pid-service, account-service, card-issuance, document —
+Every REST client this service owns — sca-service, pid-service, party-service, account-service,
+card-issuance, document-service —
 carries the shared `openbank-services` client-credentials token via
-`OidcClientRequestReactiveFilter`. Before this, all four called out with **no Authorization header**
+`OidcClientRequestReactiveFilter`. Before the outbound-authentication fix, the original four called
+out with **no Authorization header**
 and every one 401'd, so the service could not complete a single ceremony: offers refused with the
 ownership gate's `UNVERIFIABLE`, accepts never reached the SCA read.
 
@@ -139,8 +146,15 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - **No notification on any lifecycle transition** (ADR-0232 D4 requires both parties be told).
 - **No sanctions/PEP screening at grant time** (ADR-0232 D5); the eligibility gate checks party
   status and KYC level only.
-- **The ADR-0232 D5 SME bridge is unimplemented**: nothing requires a LEGAL_ENTITY grantor's
-  acting person to hold `delegation.manage` on that entity.
+- **LEGAL_ENTITY grantors are bound to a human actor** (ADR-0232 D5 / ADR-0284): customer-edge
+  derives `X-Customer-Actor-Party-Id` from the authenticated token while keeping the selected
+  entity in `X-Customer-Party-Id`; delegation-service resolves the principal type in party-service
+  and requires that human to appear in its active `acting-for` mandate set. The same human owns
+  the consumed grant SCA challenge. Missing identity, a revoked/expired mandate, a non-active
+  principal, malformed data or either lookup being unavailable refuses preview and offer before
+  SCA is spent. Retail remains the degenerate case actor == principal. Residual: this proves a
+  statutory/owner mandate, not an employee delegation carrying `delegation.manage`; employee-level
+  sub-administration remains a later, explicitly capability-scoped grant.
 
 ## Change log
 
