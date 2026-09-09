@@ -3,7 +3,9 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.9.0
+  # 1.9.0 -> 1.10.0 (#9038): additive — the list operation declares the 400 it already answers
+  # for an unparseable ?status= filter.
+  version: 1.10.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -46,6 +48,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KycCasePage'
+        '400':
+          description: >-
+            The status filter is present but not one of the declared enum values — answered 400
+            since #9038; an unparseable filter never silently degrades to the unfiltered list.
     post:
       tags: [KYC]
       summary: Open a KYC case

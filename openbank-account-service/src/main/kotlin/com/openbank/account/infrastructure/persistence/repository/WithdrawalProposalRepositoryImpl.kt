@@ -135,7 +135,12 @@ private fun applyDecision(
 ): Uni<WithdrawalDecisionResult> {
     require(proposal.status == WithdrawalProposalStatus.PENDING) { "only a PENDING proposal can be decided" }
     require(command.decidedAt.isBefore(proposal.expiresAt)) { "proposal expired at ${proposal.expiresAt}" }
-    require(command.actor in proposal.eligibleApproverIds) { "party ${command.actor} is not in the approval roster" }
+    // N-of-M eligibility is frozen on the operation. SOLO proposals deliberately authorize the
+    // owner or an exact currently-active SOLE/1 representative in the application service, so a
+    // later mandate revocation takes effect immediately instead of being defeated by a snapshot.
+    require(proposal.approvalGroupId == null || command.actor in proposal.eligibleApproverIds) {
+        "party ${command.actor} is not in the approval roster"
+    }
     return session.find(
         WithdrawalApprovalDecisionEntity::class.java,
         WithdrawalApprovalDecisionId(proposal.id, command.actor),
