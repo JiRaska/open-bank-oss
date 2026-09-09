@@ -10,6 +10,9 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { PAYMENT_INSIGHTS } from '@/components/insights/catalog'
+import { Can } from '@/components/auth/AuthGuard'
 
 const TYPE_COLOR: Record<string, string> = {
   DEBIT:      'var(--danger)',
@@ -162,6 +165,14 @@ export default function TransactionsPage() {
         icon={<ArrowLeftRight size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Transakce', 'Transactions')}</span></div>}
       />
+
+      <Can permission="system:view">
+        <ContextualInsights dashboardUid="openbank-sla" panels={PAYMENT_INSIGHTS}
+          titleCs="Zdraví plateb" titleEn="Payment health"
+          descriptionCs="Úspěšnost, rychlost a SLA napříč platebními cestami."
+          descriptionEn="Success, speed and SLA across payment rails."
+          from={dateFrom || undefined} to={dateTo || undefined} />
+      </Can>
 
       <div className="card" style={{ marginBottom: '16px' }}>
         {/* Primary search bar */}
