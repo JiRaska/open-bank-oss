@@ -74,6 +74,15 @@ import java.util.UUID
  * disabled, which is Quarkus's default and the reason `validFrom` reaches Kafka as an ISO-8601
  * string the consumers can `OffsetDateTime.parse`. Do not let the two configurations drift — a
  * numeric timestamp would be a silent, total projection outage that this replay would then pass.
+ *
+ * ## Negative identity boundary
+ *
+ * Message Pact has no request on which an unauthorized producer could receive 401/403. The
+ * negative identity contract is therefore enforced one layer earlier by Kafka mTLS plus the exact
+ * Write ACL in `openbank-infra/gitops/components/delegation/kafka-delegation-mtls.yaml`; repository
+ * Kafka ACL gates make that boundary executable. This provider replay proves only the payload emitted
+ * after that identity check, rather than inventing an HTTP authorization interaction that production
+ * never serves.
  */
 @Provider("openbank-delegation-service")
 @PactFolder("../pacts")
