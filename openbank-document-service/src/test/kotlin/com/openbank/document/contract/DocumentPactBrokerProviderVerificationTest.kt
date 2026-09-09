@@ -11,9 +11,12 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.document.application.port.out.DisclosureSnapshotRepository
 import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.domain.model.DisclosureSnapshot
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
+import com.openbank.libs.storage.ObjectStorePort
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -79,6 +82,11 @@ class DocumentPactBrokerProviderVerificationTest {
     private companion object {
         val DISCLOSURE_DOCUMENT_ID: UUID = UUID.fromString("77777777-8888-4999-8aaa-bbbbbbbbbbbb")
         const val DISCLOSURE_OWNER_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
+        val DISCLOSURE_SNAPSHOT_ID: UUID = UUID.fromString("99999999-aaaa-4bbb-8ccc-dddddddddddd")
+        val DISCLOSURE_REQUEST_ID: UUID = UUID.fromString("99999999-aaaa-4bbb-8ccc-eeeeeeeeeeee")
+        const val DISCLOSURE_PDF = "%PDF-1.7 sealed disclosure"
+        const val DISCLOSURE_SHA256 = "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
+        const val DISCLOSURE_STORAGE_KEY = "pact/disclosure-snapshot.pdf"
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -86,6 +94,12 @@ class DocumentPactBrokerProviderVerificationTest {
 
     @Inject
     lateinit var documents: DocumentRepositoryPort
+
+    @Inject
+    lateinit var snapshots: DisclosureSnapshotRepository
+
+    @Inject
+    lateinit var objectStore: ObjectStorePort
 
     @Inject
     lateinit var vertx: Vertx
@@ -125,6 +139,31 @@ class DocumentPactBrokerProviderVerificationTest {
     @State("a document owned by a known party exists")
     fun stateOwnedDocumentExists() = runOnVertxContext {
         documents.save(disclosureDocument())
+    }
+
+    @State("an immutable disclosure snapshot with the expected digest exists")
+    fun stateDisclosureSnapshotExists() = seedDisclosureSnapshot()
+
+    @State("an immutable disclosure snapshot exists but caller identity is missing")
+    fun stateDisclosureSnapshotWithoutCallerIdentityExists() = seedDisclosureSnapshot()
+
+    private fun seedDisclosureSnapshot() = runOnVertxContext {
+        val bytes = DISCLOSURE_PDF.toByteArray()
+        objectStore.put(DISCLOSURE_STORAGE_KEY, bytes, "application/pdf")
+        snapshots.createOrFind(
+            DisclosureSnapshot(
+                id = DISCLOSURE_SNAPSHOT_ID,
+                requestId = DISCLOSURE_REQUEST_ID,
+                sourceDocumentId = DISCLOSURE_DOCUMENT_ID,
+                partyRef = DISCLOSURE_OWNER_ID,
+                sourceSha256 = DISCLOSURE_SHA256,
+                sha256 = DISCLOSURE_SHA256,
+                storageKey = DISCLOSURE_STORAGE_KEY,
+                contentType = "application/pdf",
+                sizeBytes = bytes.size.toLong(),
+                createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+            ),
+        )
     }
 
     private fun disclosureDocument() = Document(

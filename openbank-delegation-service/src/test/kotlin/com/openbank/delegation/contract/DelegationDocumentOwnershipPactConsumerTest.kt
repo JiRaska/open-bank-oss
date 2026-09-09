@@ -30,7 +30,7 @@ class DelegationDocumentOwnershipPactConsumerTest {
         const val DOCUMENT_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
         const val OWNER_PARTY_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
         const val SNAPSHOT_ID = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
-        const val SNAPSHOT_SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        const val SNAPSHOT_SHA256 = "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
         const val PDF = "%PDF-1.7 sealed disclosure"
     }
 

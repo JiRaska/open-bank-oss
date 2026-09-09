@@ -34,7 +34,7 @@
       ],
       "request": {
         "headers": {
-          "X-Expected-SHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "X-Expected-SHA256": "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
         },
         "method": "GET",
         "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
@@ -52,7 +52,7 @@
       ],
       "request": {
         "headers": {
-          "X-Expected-SHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "X-Expected-SHA256": "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
         },
         "method": "GET",
         "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
@@ -62,7 +62,7 @@
         "headers": {
           "Cache-Control": "private, no-store",
           "Content-Type": "application/pdf",
-          "ETag": "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+          "ETag": "\"397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399\""
         },
         "status": 200
       }
