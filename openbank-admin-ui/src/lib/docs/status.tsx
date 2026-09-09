@@ -13,6 +13,7 @@
 // encoding is what this module exists to keep from drifting.
 
 import { CheckCircle2, CircleDashed, Circle } from 'lucide-react'
+import type { Tone } from '@/components/ui/tone'
 
 export type Status = 'live' | 'partial' | 'planned'
 
@@ -23,19 +24,20 @@ export interface StatusLabel {
 
 export interface StatusMeta {
   label: StatusLabel
-  color: string
-  bg: string
+  tone: Tone
+  text: string
+  background: string
   border: string
   Icon: React.ElementType
 }
 
 export const STATUS_META: Record<Status, StatusMeta> = {
-  live:    { label: { cs: 'Live (běží dnes)',             en: 'Live (running today)' },         color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { label: { cs: 'Částečně (nasazeno, neúplné)', en: 'Partial (deployed, incomplete)' }, color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { label: { cs: 'Plánováno',                    en: 'Planned' },                      color: '#94a3b8', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
+  live:    { label: { cs: 'Live (běží dnes)',             en: 'Live (running today)' },           tone: 'success', text: 'var(--success-text)', background: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { label: { cs: 'Částečně (nasazeno, neúplné)', en: 'Partial (deployed, incomplete)' }, tone: 'warning', text: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  planned: { label: { cs: 'Plánováno',                    en: 'Planned' },                        tone: 'neutral', text: 'var(--text-secondary)', background: 'var(--surface-2)', border: 'var(--border-strong)', Icon: Circle },
 }
 
 export function StatusDot({ status, size = 13 }: { status: Status; size?: number }) {
   const m = STATUS_META[status]
-  return <m.Icon size={size} style={{ color: m.color, flexShrink: 0 }} />
+  return <m.Icon size={size} aria-hidden="true" style={{ color: m.text, flexShrink: 0 }} />
 }
