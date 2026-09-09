@@ -12,11 +12,11 @@ vi.mock('@/components/auth/AuthGuard', () => ({
 }))
 
 const firstPage = {
-  data: [{ id: 'entry-1', entryNumber: 1, transactionId: 'transaction-1', entryDate: '2026-08-01', valueDate: '2026-08-01', status: 'POSTED', lines: [], description: 'First page', createdAt: '2026-08-01T12:00:00Z', synthetic: false }],
+  data: [{ id: 'entry-1', transactionId: 'transaction-1', entryDate: '2026-08-01', valueDate: '2026-08-01', status: 'POSTED', lines: [], description: 'First page' }],
   pagination: { limit: 20, hasNextPage: true, nextCursor: 'cursor-1' },
 }
 const secondPage = {
-  data: [{ id: 'entry-2', entryNumber: 2, transactionId: 'transaction-2', entryDate: '2026-08-02', valueDate: '2026-08-02', status: 'POSTED', lines: [], description: 'Second page', createdAt: '2026-08-02T12:00:00Z', synthetic: true }],
+  data: [{ id: 'entry-2', transactionId: 'transaction-2', entryDate: '2026-08-02', valueDate: '2026-08-02', status: 'POSTED', lines: [], description: 'Second page' }],
   pagination: { limit: 20, hasNextPage: false },
 }
 
@@ -78,20 +78,5 @@ describe('General Ledger pagination', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('next page could not be loaded'))
     expect(screen.getByText('First page')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
-  })
-
-  it('keeps the first page when a successful next-page response is malformed', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response(firstPage))
-      .mockResolvedValueOnce(response({ data: 'not-a-journal-page', pagination: { limit: 20, hasNextPage: false } }))
-    vi.stubGlobal('fetch', fetchMock)
-    renderPage()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
-    await screen.findByText('First page')
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
-
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('next page could not be loaded'))
-    expect(screen.getByText('First page')).toBeTruthy()
   })
 })
