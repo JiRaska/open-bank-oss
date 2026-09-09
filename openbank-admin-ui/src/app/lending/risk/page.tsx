@@ -35,6 +35,9 @@ import {
   byJurisdiction, decisionsToCsv, outcomeTotals, overrideMatrix, overrideRate, portfolioMix,
   priceBandTotals, reasonPareto, ruleHits, threshold, vintage, weeklyOutcomes,
 } from '@/components/lending/risk/model'
+import { decisionSchema, outcomeSchema, portfolioSchema, policySchema, portfolioSummarySchema } from '@/components/lending/risk/contracts'
+import type { PortfolioSummary } from '@/components/lending/risk/contracts'
+import type { z } from 'zod'
 import { PolicyTables } from '@/components/lending/risk/PolicyTables'
 import { AffordabilityScatter, BucketBars, C_STAGE, OutcomeTrend, ReasonPareto, StageMixPie } from '@/components/lending/risk/charts'
 
@@ -47,11 +50,12 @@ const OUTCOME_TONE: Record<string, Tone> = { APPROVE: 'success', REFER: 'warning
 
 type Loaded<T> = { data: T; ok: true } | { data: null; ok: false }
 
-async function getJson<T>(url: string): Promise<Loaded<T>> {
+async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<Loaded<T>> {
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return { data: null, ok: false }
-    return { data: (await res.json()) as T, ok: true }
+    const parsed = schema.safeParse(await res.json())
+    return parsed.success ? { data: parsed.data, ok: true } : { data: null, ok: false }
   } catch {
     return { data: null, ok: false }
   }
@@ -89,18 +93,20 @@ function CreditRiskConsole() {
   const [policy, setPolicy] = useState<Loaded<Policy> | null>(null)
   const [loading, setLoading] = useState(true)
   const [jurisdiction, setJurisdiction] = useState<string>('')
-  const [totalDsti, setTotalDsti] = useState(false)
+  const [currency, setCurrency] = useState('')
+  const [book, setBook] = useState<Loaded<PortfolioSummary[]> | null>(null)
   const [tab, setTab] = useState<'decisions' | 'policy' | 'portfolio'>('decisions')
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [d, s, p, pol] = await Promise.all([
-      getJson<Decision[]>(svcUrl('lending-service', '/api/v1/lending/risk/decisions', { limit: String(DECISION_LIMIT) })),
-      getJson<OutcomeSummary[]>(svcUrl('lending-service', '/api/v1/lending/risk/decisions/summary')),
-      getJson<LoanRisk[]>(svcUrl('lending-service', '/api/v1/lending/risk/portfolio', { limit: String(PORTFOLIO_LIMIT) })),
-      getJson<Policy>(svcUrl('lending-service', '/api/v1/lending/risk/policy')),
+    const [d, s, p, pol, b] = await Promise.all([
+      getJson<Decision[]>(svcUrl('lending-service', '/api/v1/lending/risk/decisions', { limit: String(DECISION_LIMIT) }), decisionSchema),
+      getJson<OutcomeSummary[]>(svcUrl('lending-service', '/api/v1/lending/risk/decisions/summary'), outcomeSchema),
+      getJson<LoanRisk[]>(svcUrl('lending-service', '/api/v1/lending/risk/portfolio', { limit: String(PORTFOLIO_LIMIT) }), portfolioSchema),
+      getJson<Policy>(svcUrl('lending-service', '/api/v1/lending/risk/policy'), policySchema),
+      getJson<PortfolioSummary[]>(svcUrl('lending-service', '/api/v1/lending/risk/portfolio/summary'), portfolioSummarySchema),
     ])
-    setDecisions(d); setSummary(s); setPortfolio(p); setPolicy(pol)
+    setDecisions(d); setSummary(s); setPortfolio(p); setPolicy(pol); setBook(b)
     setLoading(false)
   }, [])
 
@@ -121,7 +127,7 @@ function CreditRiskConsole() {
     for (const d of visible) { if (d.engineOutcome in acc) acc[d.engineOutcome as 'APPROVE'] += 1; acc.total += 1 }
     return acc
   }, [visible])
-  const kpiSource = jurisdiction ? filteredTotals : totals
+  const kpiSource = jurisdiction ? (decisions?.ok ? filteredTotals : null) : totals
   const kpiHint = jurisdiction
     ? t(`z ${visible.length} načtených (filtr ${jurisdiction})`, `of ${visible.length} loaded (filter ${jurisdiction})`)
     : t('celá kniha (agregováno v DB)', 'whole book (DB-grouped)')
@@ -136,7 +142,18 @@ function CreditRiskConsole() {
   const dstiLimit = threshold(policy?.data ?? null, 'AFFORDABILITY', 'DSTI')
   const dtiLimit = threshold(policy?.data ?? null, 'AFFORDABILITY', 'DTI')
   const mixes = useMemo(() => portfolioMix(portfolio?.data ?? []), [portfolio])
-  const primary = mixes[0] ?? null
+  const selectedBook = book?.data?.find(row => row.currency === currency) ?? book?.data?.[0] ?? null
+  const complete = selectedBook && selectedBook.unassessed === 0 && selectedBook.stale === 0 && selectedBook.demonstration === 0 && selectedBook.pending === 0
+  const primary = selectedBook ? {
+    currency: selectedBook.currency,
+    assessed: selectedBook.loans - selectedBook.unassessed - selectedBook.stale,
+    unassessed: selectedBook.unassessed,
+    totalOutstanding: selectedBook.outstanding,
+    totalEcl: selectedBook.ecl,
+    stage23Share: complete && selectedBook.outstanding > 0 ? selectedBook.stage23Outstanding / selectedBook.outstanding : null,
+    coverage: complete && selectedBook.outstanding > 0 ? selectedBook.ecl / selectedBook.outstanding : null,
+    npl90Share: complete && selectedBook.outstanding > 0 ? selectedBook.over90Outstanding / selectedBook.outstanding : null,
+  } : null
   const vintages = useMemo(() => vintage(portfolio?.data ?? []), [portfolio])
   const unavailable = useMemo(() => {
     const parts: string[] = []
@@ -144,8 +161,9 @@ function CreditRiskConsole() {
     if (summary && !summary.ok) parts.push('/risk/decisions/summary')
     if (portfolio && !portfolio.ok) parts.push('/risk/portfolio')
     if (policy && !policy.ok) parts.push('/risk/policy')
+    if (book && !book.ok) parts.push('/risk/portfolio/summary')
     return parts
-  }, [decisions, summary, portfolio, policy])
+  }, [decisions, summary, portfolio, policy, book])
 
   const rate = (n: number) => (kpiSource && kpiSource.total > 0 ? pct(n / kpiSource.total, numberLocale) : UNKNOWN)
   const money = (v: number, ccy: string) => v.toLocaleString(numberLocale, { style: 'currency', currency: ccy, maximumFractionDigits: 0 })
@@ -204,8 +222,8 @@ function CreditRiskConsole() {
               : t(`Politika z governovaného úložiště: ${policy.data.source}.`, `Policy from the governed store: ${policy.data.source}.`)}
           </span>
           <span style={{ color: 'var(--text-tertiary)' }}>
-            {t('Bureau port je no-op → EXCLUSION nikdy nezasáhne. PD/LGD jsou placeholder konstanty (viz model version v portfoliu). ML (ADR-0142) nenasazeno.',
-               'Bureau port is a no-op → EXCLUSION can never fire. PD/LGD are placeholder constants (see model version under portfolio). ML (ADR-0142) not deployed.')}
+            {t('Nedostupná evidence registru vede k ručnímu posouzení. Demonstrační PD/LGD nejsou validovaný IFRS 9 model; účetní použití je ve výchozím stavu zakázáno.',
+               'Unavailable bureau evidence refers to manual review. Demonstration PD/LGD are not a validated IFRS 9 model; accounting use is disabled by default.')}
           </span>
         </div>
       )}
@@ -216,11 +234,21 @@ function CreditRiskConsole() {
         <StatCard label={t('Zamítnuto enginem', 'Engine decline rate')} value={kpiSource ? rate(kpiSource.DECLINE) : UNKNOWN} tone={kpiSource && kpiSource.DECLINE > 0 ? 'danger' : undefined} hint={kpiSource ? `${kpiSource.DECLINE.toLocaleString(numberLocale)} · ${kpiHint}` : t('čeká na data', 'waiting for data')} icon={<AlertTriangle size={13} />} />
         <StatCard label={t('Přebití člověkem', 'Human override rate')} value={decisions?.ok ? pct(overrides, numberLocale) : UNKNOWN} tone={overrides !== null && overrides > 0 ? 'warning' : undefined} hint={decisions?.ok ? t(`z ${visible.length} načtených, jen již rozhodnuté`, `of ${visible.length} loaded, disposed only`) : t('čeká na data', 'waiting for data')} icon={<Layers size={13} />} />
       </div>
+      {book?.ok && <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+        <label>{t('Měna portfolia', 'Portfolio currency')} <select aria-label={t('Měna portfolia', 'Portfolio currency')} value={selectedBook?.currency ?? ''} onChange={e => setCurrency(e.target.value)}>
+          {book.data.map(row => <option key={row.currency} value={row.currency}>{row.currency}</option>)}
+        </select></label>
+        <span> · {t('Celá účetní expozice podle měny, agregováno v DB', 'Whole outstanding book per currency, DB-grouped')} · {selectedBook?.asOf}</span>
+        {selectedBook && !complete && <p role="status">{t(
+          `Neúplné nebo nevalidované hodnocení: ${selectedBook.unassessed} bez posouzení, ${selectedBook.stale} zastaralých, ${selectedBook.demonstration} demonstračních, ${selectedBook.pending} čekajících na ledger. Rizikové poměry nejsou k dispozici.`,
+          `Incomplete or unvalidated assessment: ${selectedBook.unassessed} unassessed, ${selectedBook.stale} stale, ${selectedBook.demonstration} demonstration, ${selectedBook.pending} awaiting ledger. Risk ratios are unavailable.`,
+        )}</p>}
+      </div>}
       <div className="grid-4" style={{ marginBottom: 20 }}>
         <StatCard label={t('Stage 2+3 z expozice', 'Stage 2+3 share of exposure')} value={primary ? pct(primary.stage23Share, numberLocale) : UNKNOWN} tone={primary && (primary.stage23Share ?? 0) > 0 ? 'warning' : undefined} hint={primary ? `${primary.currency} · ${t(`${primary.assessed} posouzených úvěrů`, `${primary.assessed} assessed loans`)}` : t('čeká na data', 'waiting for data')} />
-        <StatCard label={t('ECL krytí', 'ECL coverage')} value={primary ? pct(primary.coverage, numberLocale) : UNKNOWN} hint={primary ? `${money(primary.totalEcl, primary.currency)} / ${money(primary.totalOutstanding, primary.currency)}` : t('čeká na data', 'waiting for data')} />
-        <StatCard label={t('90+ DPD z expozice', '90+ DPD share of exposure')} value={primary ? pct(primary.npl90Share, numberLocale) : UNKNOWN} tone={primary && (primary.npl90Share ?? 0) > 0 ? 'danger' : undefined} hint={primary ? t('podle posledního provisioning cyklu', 'per the latest provisioning cycle') : t('čeká na data', 'waiting for data')} />
-        <StatCard label={t('Nikdy neposouzeno', 'Never assessed')} value={portfolio?.ok ? (primary?.unassessed ?? 0).toLocaleString(numberLocale) : UNKNOWN} tone={primary && primary.unassessed > 0 ? 'warning' : undefined} hint={portfolio?.ok ? t('úvěrů bez provisioning záznamu', 'loans with no provisioning record') : t('čeká na data', 'waiting for data')} />
+        <StatCard label={t('ECL krytí', 'ECL coverage')} value={primary ? pct(primary.coverage, numberLocale) : UNKNOWN} hint={primary && complete ? `${money(primary.totalEcl, primary.currency)} / ${money(primary.totalOutstanding, primary.currency)}` : t('čeká na data', 'waiting for data')} />
+        <StatCard label={t('>90 DPD z expozice', '>90 DPD share of exposure')} value={primary ? pct(primary.npl90Share, numberLocale) : UNKNOWN} tone={primary && (primary.npl90Share ?? 0) > 0 ? 'danger' : undefined} hint={primary ? `${primary.currency} · ${selectedBook?.asOf}` : t('čeká na data', 'waiting for data')} />
+        <StatCard label={t('Nikdy neposouzeno', 'Never assessed')} value={book?.ok ? (primary?.unassessed ?? 0).toLocaleString(numberLocale) : UNKNOWN} tone={primary && primary.unassessed > 0 ? 'warning' : undefined} hint={book?.ok ? `${primary?.currency ?? ''} · ${t('úvěrů bez provisioning záznamu', 'loans with no provisioning record')}` : t('čeká na data', 'waiting for data')} />
       </div>
 
       <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -233,8 +261,10 @@ function CreditRiskConsole() {
         ))}
       </div>
 
-      {tab === 'decisions' && (
+      {tab === 'decisions' && !decisions?.ok && <div role="status" className="card" style={{ padding: 20 }}>{loading ? t('Načítání rozhodnutí…', 'Loading decisions…') : t('Rozhodnutí se nepodařilo načíst. Obnovte data.', 'Decisions could not be loaded. Refresh to retry.')}</div>}
+      {tab === 'decisions' && decisions?.ok && (
         <div style={{ display: 'grid', gap: 16 }}>
+          <p>{t(`Vzorek ${visible.length} načtených rozhodnutí (limit ${DECISION_LIMIT}). Historická rozhodnutí mají vlastní verze politiky.`, `Sample of ${visible.length} loaded decisions (limit ${DECISION_LIMIT}). Historical decisions have their own pinned policy versions.`)}</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
             <section className="card" style={{ padding: 14 }} aria-label={t('Vývoj výsledků po týdnech', 'Outcome trend by week')}>
               <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>{t('Výsledky enginu po týdnech', 'Engine outcomes by week')}</h3>
@@ -248,28 +278,25 @@ function CreditRiskConsole() {
           <section className="card" style={{ padding: 14 }} aria-label={t('Bonita proti politice', 'Affordability against policy')}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <h3 style={{ fontSize: 13, margin: 0 }}>
-                {t('DSTI × DTI, prahy čtené z politiky', 'DSTI × DTI, thresholds read from policy')}
+                {t('DSTI × DTI, aktuální prahy politiky', 'DSTI × DTI, current policy thresholds')}
                 {dstiLimit !== null && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}> · DSTI ≤ {dstiLimit.toLocaleString(numberLocale)}</span>}
                 {dtiLimit !== null && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}> · DTI ≤ {dtiLimit.toLocaleString(numberLocale)}</span>}
               </h3>
-              <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input type="checkbox" checked={totalDsti} onChange={e => setTotalDsti(e.target.checked)} />
-                {t('DSTI vč. stávající dluhové služby (ČNB definice; engine ji dnes NEČTE)', 'DSTI incl. existing debt service (CNB definition; the engine does NOT read it today)')}
-              </label>
+              <span style={{ fontSize: 12 }}>{t('Uložené celkové DSTI/DTI; historická rozhodnutí bez snapshotu mají —.', 'Stored total DSTI/DTI; historical decisions without a snapshot show —.')}</span>
             </div>
-            {visible.some(d => d.affordability) ? <AffordabilityScatter decisions={visible} dstiLimit={dstiLimit} dtiLimit={dtiLimit} includeExistingDebt={totalDsti} /> : <Empty />}
+            {visible.some(d => d.affordability) ? <AffordabilityScatter decisions={visible} dstiLimit={dstiLimit} dtiLimit={dtiLimit} includeExistingDebt={false} /> : <Empty />}
           </section>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Engine versus člověk', 'Engine versus human')}>
-              <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Engine × konečný stav', 'Engine × final disposition')}</h3>
+              <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Engine × doložené lidské rozhodnutí', 'Engine × evidenced human decision')}</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="override-matrix">
                 <thead><tr style={{ background: 'var(--surface-2)' }}>
-                  <th style={th}>{t('Engine', 'Engine')}</th><th style={th}>{t('Schváleno', 'Approved')}</th><th style={th}>{t('Zamítnuto', 'Declined')}</th><th style={th}>{t('Zaniklo', 'Lapsed')}</th><th style={th}>{t('V běhu', 'In flight')}</th><th style={th}>{t('Přebito', 'Overridden')}</th>
+                  <th style={th}>{t('Engine', 'Engine')}</th><th style={th}>{t('Schváleno', 'Approved')}</th><th style={th}>{t('Zamítnuto', 'Declined')}</th><th style={th}>{t('Přebito', 'Overridden')}</th>
                 </tr></thead>
                 <tbody>{matrix.map(r => (
                   <tr key={r.engine} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={td}><StatusBadge status={r.engine} tone={OUTCOME_TONE[r.engine]} /></td>
-                    <td style={td}>{r.approved}</td><td style={td}>{r.declined}</td><td style={td}>{r.lapsed}</td><td style={td}>{r.inFlight}</td>
+                    <td style={td}>{r.approved}</td><td style={td}>{r.declined}</td>
                     <td style={{ ...td, fontWeight: 700, color: r.overridden > 0 ? 'var(--warning-text)' : undefined }}>{r.overridden}</td>
                   </tr>
                 ))}</tbody>
@@ -331,7 +358,8 @@ function CreditRiskConsole() {
 
       {tab === 'portfolio' && (
         <div style={{ display: 'grid', gap: 16 }}>
-          {mixes.length === 0 && <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{portfolio?.ok ? t('Prázdná kniha', 'Empty book') : t('Portfolio nenačteno', 'Portfolio not loaded')}</div>}
+          <p>{t(`Diagnostický vzorek nejvýše ${PORTFOLIO_LIMIT} nejnovějších úvěrů. Poslední hodnocení mohou mít různá data a mohou být demonstrační. Nejde o účetní report.`, `Diagnostic sample of at most ${PORTFOLIO_LIMIT} newest loans. Latest assessments may have different dates and may be demonstration results. This is not an accounting report.`)}</p>
+          {mixes.length === 0 && <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{portfolio?.ok ? t('V načteném vzorku není otevřená expozice', 'No outstanding loans in the loaded sample') : t('Portfolio nenačteno', 'Portfolio not loaded')}</div>}
           {mixes.map(mix => (
             <div key={mix.currency} style={{ display: 'grid', gap: 16 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
@@ -363,7 +391,7 @@ function CreditRiskConsole() {
           ))}
           {vintages.length > 0 && (
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Vintage', 'Vintage')}>
-              <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Vintage: měsíc čerpání × aktuální stage', 'Vintage: disbursement month × current stage')}</h3>
+              <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Vzorek: měsíc čerpání × poslední známá stage', 'Sample: disbursement month × last recorded stage')}</h3>
               <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="vintage-table">
                 <thead><tr style={{ background: 'var(--surface-2)' }}><th style={th}>{t('Měsíc', 'Month')}</th><th style={th}>{t('Úvěry', 'Loans')}</th><th style={th}>Stage 1</th><th style={th}>Stage 2</th><th style={th}>Stage 3</th><th style={th}>{t('Neposouzeno', 'Unassessed')}</th></tr></thead>
                 <tbody>{vintages.map(v => (

@@ -55,7 +55,10 @@ class CreditRiskInsightServiceTest {
 
     @Test
     fun `decisions decode the pinned evidence and carry the engine's own affordability ratios`() {
-        val app = application(income = "50000.00", existingDebt = "5000.00")
+        val app = application(income = "50000.00", existingDebt = "5000.00").copy(
+            decisionDsti = BigDecimal("0.30877"),
+            decisionDti = BigDecimal("0.2"),
+        )
         every { applications.findEvaluated(any()) } returns Uni.createFrom().item(listOf(app))
 
         val view = service.decisions(10).await().indefinitely().single()
@@ -65,16 +68,14 @@ class CreditRiskInsightServiceTest {
         assertThat(view.matchedRuleIds).hasSize(5).contains("starter-pr-prime")
         assertThat(view.policyVersions).containsEntry("AFFORDABILITY", 1)
         val ratios = requireNotNull(view.affordability)
-        // The same number the ASSESSMENT leg read — one definition, not a console re-estimate.
-        val engine = requireNotNull(OriginationDecisionService.affordabilityRatios(app))
-        assertThat(ratios.dsti).isEqualByComparingTo(engine.dsti)
-        assertThat(ratios.dti).isEqualByComparingTo(BigDecimal("120000").divide(BigDecimal("600000")))
-        // Existing debt service widens the total-DSTI figure by exactly debt/income.
-        assertThat(ratios.dstiIncludingExistingDebt.subtract(ratios.dsti)).isEqualByComparingTo(BigDecimal("0.1"))
+        // The stored evidence wins even if current inputs or policy would calculate another ratio.
+        assertThat(ratios.dsti).isEqualByComparingTo("0.30877")
+        assertThat(ratios.dti).isEqualByComparingTo("0.2")
+        assertThat(ratios.dstiIncludingExistingDebt).isEqualByComparingTo(ratios.dsti)
     }
 
     @Test
-    fun `no verified income means no ratios, never a zero`() {
+    fun `historical decision without stored ratios is unknown, never recomputed`() {
         every { applications.findEvaluated(any()) } returns Uni.createFrom().item(listOf(application(income = null)))
         assertThat(service.decisions(10).await().indefinitely().single().affordability).isNull()
     }

@@ -51,6 +51,7 @@ import java.util.UUID
 class TerminationServiceTest {
 
     private val loans = mockk<LoanRepository>()
+    private val provisioning = mockk<com.openbank.lending.application.port.out.ProvisioningRepository>()
     private val applications = mockk<LoanApplicationRepository>()
     private val installments = mockk<InstallmentRepository>()
     private val collateral = mockk<CollateralRepository>()
@@ -62,6 +63,7 @@ class TerminationServiceTest {
 
     private val service = TerminationService(
         loans, applications, installments, collateral, ledger, events, guard, quotes, clock,
+        provisioning = provisioning,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -121,6 +123,11 @@ class TerminationServiceTest {
 
     @org.junit.jupiter.api.BeforeEach
     fun defaults() {
+        every { loans.withLocked<Any>(any(), any()) } answers {
+            loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
+        }
+        every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
+
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)

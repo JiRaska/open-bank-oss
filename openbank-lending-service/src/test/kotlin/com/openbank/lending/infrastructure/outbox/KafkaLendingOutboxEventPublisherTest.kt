@@ -48,7 +48,11 @@ class KafkaLendingOutboxEventPublisherTest {
             lastError = null,
         )
 
-        KafkaLendingOutboxEventPublisher(emitter).publish(entry)
+        KafkaLendingOutboxEventPublisher(
+            emitter,
+            mockk(),
+            com.fasterxml.jackson.databind.ObjectMapper(),
+        ).publish(entry)
 
         val message = messageSlot.captured
         assertThat(message.payload).isEqualTo(entry.payload)

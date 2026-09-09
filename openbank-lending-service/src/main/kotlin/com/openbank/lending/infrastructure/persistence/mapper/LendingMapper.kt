@@ -46,6 +46,9 @@ class LendingMapper {
         it.packVersion = a.packVersion
         it.verifiedIncomeMonthly = a.verifiedIncomeMonthly?.amount
         it.existingDebtServiceMonthly = a.existingDebtServiceMonthly?.amount
+        it.existingDebtOutstanding = a.existingDebtOutstanding?.amount
+        it.decisionDsti = a.decisionDsti
+        it.decisionDti = a.decisionDti
         it.ageYears = a.ageYears
         it.residency = a.residency
         it.employmentTenureMonths = a.employmentTenureMonths
@@ -73,6 +76,9 @@ class LendingMapper {
         packVersion = e.packVersion,
         verifiedIncomeMonthly = e.verifiedIncomeMonthly?.let { Money.of(it, e.currency) },
         existingDebtServiceMonthly = e.existingDebtServiceMonthly?.let { Money.of(it, e.currency) },
+        existingDebtOutstanding = e.existingDebtOutstanding?.let { Money.of(it, e.currency) },
+        decisionDsti = e.decisionDsti,
+        decisionDti = e.decisionDti,
         ageYears = e.ageYears, residency = e.residency, employmentTenureMonths = e.employmentTenureMonths,
         decisionOutcome = e.decisionOutcome, decisionPriceBand = e.decisionPriceBand,
         decisionReasons = e.decisionReasons, decisionMatchedRules = e.decisionMatchedRules,

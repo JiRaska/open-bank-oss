@@ -187,8 +187,11 @@ export function overrideMatrix(decisions: Decision[]): OverrideRow[] {
   for (const o of OUTCOMES) rows.set(o, { engine: o, approved: 0, declined: 0, lapsed: 0, inFlight: 0, overridden: 0 })
   for (const d of decisions) {
     const row = rows.get(d.engineOutcome)
-    if (!row) continue
-    const disp = disposition(d.status)
+    // A lifecycle status alone does not establish a human credit decision.
+    if (!row || !d.humanDecidedBy?.trim() || !d.humanDecidedAt?.trim()) continue
+    // Approval evidence survives later expiry/withdrawal of the offer. The backend
+    // records a human rejection as DECLINED and every other evidenced decision as approval.
+    const disp = d.status === 'DECLINED' ? 'declined' : 'approved'
     row[disp] += 1
     if ((d.engineOutcome === 'APPROVE' && disp === 'declined') || (d.engineOutcome === 'DECLINE' && disp === 'approved')) row.overridden += 1
   }
@@ -250,10 +253,17 @@ export type PortfolioMix = {
   modelVersions: string[]
 }
 
+// Settlement removes the exposure before CLOSED; withdrawal retains it until UNWOUND.
+// Unknown future states remain visible rather than silently removing potential exposure.
+const DERECOGNIZED_STATES = new Set(['CLOSED', 'WRITTEN_OFF', 'UNWOUND', 'SETTLED'])
+
 /** Money is per currency; a book with two currencies gets two mixes, never one summed number. */
 export function portfolioMix(loans: LoanRisk[]): PortfolioMix[] {
   const byCcy = new Map<string, LoanRisk[]>()
-  for (const l of loans) byCcy.set(l.currency, [...(byCcy.get(l.currency) ?? []), l])
+  for (const l of loans) {
+    if (DERECOGNIZED_STATES.has(l.status)) continue
+    byCcy.set(l.currency, [...(byCcy.get(l.currency) ?? []), l])
+  }
   return [...byCcy.entries()].map(([currency, rows]) => {
     const assessed = rows.filter(r => r.assessment !== null)
     const stages: StageRow[] = STAGES.map(stage => {
@@ -288,10 +298,11 @@ export function portfolioMix(loans: LoanRisk[]): PortfolioMix[] {
 
 export type VintageRow = { month: string; loans: number; STAGE_1: number; STAGE_2: number; STAGE_3: number; unassessed: number }
 
-/** Disbursement month × current stage. The classic vintage read, on whatever the book holds. */
+/** Disbursement month × latest stage for loans retaining exposure. */
 export function vintage(loans: LoanRisk[]): VintageRow[] {
   const m = new Map<string, VintageRow>()
   for (const l of loans) {
+    if (DERECOGNIZED_STATES.has(l.status)) continue
     const month = l.disbursedAt.slice(0, 7)
     const row = m.get(month) ?? { month, loans: 0, STAGE_1: 0, STAGE_2: 0, STAGE_3: 0, unassessed: 0 }
     row.loans += 1

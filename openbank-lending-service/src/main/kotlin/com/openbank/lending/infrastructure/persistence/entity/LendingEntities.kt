@@ -94,6 +94,15 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "existing_debt_service_monthly", precision = 20, scale = 2)
     var existingDebtServiceMonthly: BigDecimal? = null
 
+    @Column(name = "existing_debt_outstanding", precision = 20, scale = 2)
+    var existingDebtOutstanding: BigDecimal? = null
+
+    @Column(name = "decision_dsti", precision = 38, scale = 18)
+    var decisionDsti: BigDecimal? = null
+
+    @Column(name = "decision_dti", precision = 38, scale = 18)
+    var decisionDti: BigDecimal? = null
+
     @Column(name = "age_years")
     var ageYears: Int? = null
 
@@ -326,7 +335,7 @@ class LoanProvisioningEntity : PanacheEntityBase() {
     @Column(name = "loan_id", columnDefinition = "uuid")
     var loanId: UUID = Ids.newId()
 
-    @Column(name = "period", length = 7)
+    @Column(name = "period", length = 10)
     var period: String = ""
 
     @Column(name = "as_of")
