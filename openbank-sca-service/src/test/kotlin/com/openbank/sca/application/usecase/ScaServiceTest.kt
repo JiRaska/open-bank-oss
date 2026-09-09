@@ -897,6 +897,30 @@ class ScaServiceTest {
     }
 
     @Test
+    fun `consume binds an opaque operation reference exactly`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(
+            dynamicLinkingData = DynamicLinkingData(null, null, null, null, "approval-group:v1:signed"),
+        )
+        coEvery { repository.findById(ch.id) } returns ch
+
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        null,
+                        null,
+                        null,
+                        reference = "approval-group:v1:changed",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
+
+    @Test
     fun `consume throws ScaChallengeAlreadyConsumedException on concurrent double-spend`(): Unit = runBlocking {
         val ch = challenge(status = ScaStatus.COMPLETED)
         coEvery { repository.findById(ch.id) } returns ch

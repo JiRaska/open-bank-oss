@@ -71,6 +71,7 @@ data class ConsumeScaCommand(
     val amount: String?,
     val currency: String?,
     val creditor: String?,
+    val reference: String? = null,
     val documentSha256: String? = null,
     val ceremonyId: String? = null,
     val cardId: String? = null,

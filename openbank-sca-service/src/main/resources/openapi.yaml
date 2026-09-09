@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -233,6 +233,7 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
+                 DELEGATION_APPROVAL_GROUP,
                  SAVINGS_WITHDRAW_APPROVAL]
         contextData:
           type: object
