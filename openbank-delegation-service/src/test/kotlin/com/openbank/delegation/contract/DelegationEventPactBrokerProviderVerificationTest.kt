@@ -64,6 +64,8 @@ import java.util.UUID
  * broker replay is missing fails with `MissingStateChangeMethod` and publishes a **FAILURE**, which
  * blocks an otherwise-healthy pair — strictly worse than publishing nothing. When you add an
  * interaction to one class, add it to both in the same commit.
+ * The `DelegationRevoked` interaction is the negative authorization case: after consumption the
+ * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
 @PactBroker

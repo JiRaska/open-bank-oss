@@ -49,6 +49,8 @@ import java.util.UUID
  * the [PactVerifyProvider] methods below do: they serialize the genuine [DelegationActivated] and
  * [DelegationRevoked] data classes, so renaming `granteePartyId` in `DelegationEvents.kt` turns
  * this red on the PR that does it.
+ * The revoked interaction is also the negative authorization case: consuming it must remove the
+ * grant, the asynchronous equivalent of a subsequent request crossing a 403 boundary.
  *
  * ## No Quarkus, no Testcontainer
  *
