@@ -9,9 +9,11 @@ import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.PartyMandateProjection
 import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.delay
@@ -28,6 +30,10 @@ private data class PartyEvent(
     val partyType: String,
     val legalName: String,
     val status: String,
+    val mandateId: UUID?,
+    val agentPartyId: UUID?,
+    val authority: String?,
+    val requiredSignatures: Int?,
 )
 
 /**
@@ -91,6 +97,7 @@ class PartyEventConsumer(
     @ConfigProperty(name = "openbank.welcome-bonus.currency", defaultValue = "CZK")
     private val welcomeBonusCurrency: String,
     private val notificationRequestPort: NotificationRequestPort,
+    private val partyMandateRepository: PartyMandateProjectionRepository,
 ) {
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -131,6 +138,12 @@ class PartyEventConsumer(
             partyType = node.path("partyType").asText(""),
             legalName = node.path("legalName").asText("").trim(),
             status = node.path("status").asText(""),
+            mandateId = node.path("mandateId").takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            agentPartyId = node.path("agentPartyId").takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            authority = node.path("authority").takeUnless { it.isMissingNode || it.isNull }?.asText(),
+            requiredSignatures = node.path("requiredSignatures").takeUnless { it.isMissingNode || it.isNull }?.asInt(),
         )
     }
 
@@ -141,8 +154,28 @@ class PartyEventConsumer(
             // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
             "PARTY_UPDATED", "KYC_STATUS_CHANGED" -> reconcileToPartyStatus(event.partyId, event.status)
             "PARTY_ERASED" -> handleErased(event.partyId)
+            "PARTY_MANDATE_GRANTED" -> projectMandate(event)
+            "PARTY_MANDATE_REVOKED" -> partyMandateRepository.revoke(
+                requireNotNull(event.mandateId) { "PARTY_MANDATE_REVOKED is missing mandateId" },
+            )
             else -> Unit // a type we don't project — nothing to do, ack.
         }
+    }
+
+    private suspend fun projectMandate(event: PartyEvent) {
+        partyMandateRepository.upsert(
+            PartyMandateProjection(
+                id = requireNotNull(event.mandateId) { "PARTY_MANDATE_GRANTED is missing mandateId" },
+                principalPartyId = event.partyId,
+                agentPartyId = requireNotNull(event.agentPartyId) {
+                    "PARTY_MANDATE_GRANTED is missing agentPartyId"
+                },
+                authority = requireNotNull(event.authority) { "PARTY_MANDATE_GRANTED is missing authority" },
+                // Null is retained deliberately: historic/incomplete facts can never authorize.
+                requiredSignatures = event.requiredSignatures,
+                active = event.status == "ACTIVE",
+            ),
+        )
     }
 
     /**
