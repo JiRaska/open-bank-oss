@@ -10,14 +10,10 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { formatAuditPayload, parseAuditTrail, type AuditTrailEntry } from '@/lib/audit/auditTrailContract'
 
 const AUDIT_SERVICE = '/api/svc/audit-service'
-
-interface AuditEntry {
-  id: string; aggregateId: string; aggregateType: string
-  eventType: string; actorId?: string; actorType?: string
-  payload?: Record<string, unknown>; occurredAt: string
-}
+const EVIDENCE_LIMIT = 500
 
 const EVENT_COLOR: Record<string, string> = {
   CREATED: 'var(--green)', UPDATED: 'var(--accent)', DELETED: 'var(--red)',
@@ -28,7 +24,7 @@ const EVENT_COLOR: Record<string, string> = {
 export default function AuditPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [entries, setEntries]   = useState<AuditEntry[]>([])
+  const [entries, setEntries]   = useState<AuditTrailEntry[]>([])
   const [loading, setLoading]   = useState(false)
   // Instead of a raw "HTTP 404" string, hold a typed reason that renders as a
   // calm <DataUnavailable> panel. audit-service isn't deployed in every
@@ -43,7 +39,7 @@ export default function AuditPage() {
     if (!query) return
     setLoading(true); setUnavailable(null)
     try {
-      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${query}?limit=100`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${query}?limit=${EVIDENCE_LIMIT}`, { signal: AbortSignal.timeout(5000) })
       if (!res.ok) {
         if (loadedAggregateId !== query) {
           setEntries([])
@@ -52,8 +48,18 @@ export default function AuditPage() {
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json()
-      setEntries(Array.isArray(data) ? data : data.entries ?? [])
+      let data: AuditTrailEntry[]
+      try {
+        data = parseAuditTrail(await res.json() as unknown, EVIDENCE_LIMIT)
+      } catch {
+        if (loadedAggregateId !== query) {
+          setEntries([])
+          setLoadedAggregateId(null)
+        }
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setEntries(data)
       setLoadedAggregateId(query)
     } catch {
       // fetch threw (timeout/abort/network) — the BFF or audit-service didn't
@@ -117,7 +123,9 @@ export default function AuditPage() {
       {entries.length > 0 && (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            {entries.length} {t('událostí pro', 'events for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
+            {entries.length === EVIDENCE_LIMIT
+              ? t(`Nejnovějších ${EVIDENCE_LIMIT} událostí; starší mohou existovat`, `Newest ${EVIDENCE_LIMIT} events; older evidence may exist`)
+              : t(`${entries.length} událostí`, `${entries.length} events`)} {t('pro', 'for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
           </div>
           <table className="data-table">
             <thead>
@@ -152,7 +160,7 @@ export default function AuditPage() {
                     <tr key={`${e.id}-payload`}>
                       <td colSpan={5} style={{ background: 'var(--surface-2)', padding: '12px 16px' }}>
                         <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {JSON.stringify(e.payload, null, 2)}
+                          {formatAuditPayload(e.payload)}
                         </pre>
                       </td>
                     </tr>
