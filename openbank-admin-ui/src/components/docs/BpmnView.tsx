@@ -23,6 +23,7 @@ import { useState } from 'react'
 import { GitBranch, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { StatusBadge } from '@/components/ui'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const LANE_BG: Record<string, string> = {
@@ -272,10 +273,10 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
                   return (
                     <div key={svc} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                       <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{svc}</div>
-                      {status === 'up' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#16a34a', fontWeight: 600, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}><CheckCircle2 size={12} aria-hidden="true" /> {t('AKTIVNÍ', 'UP')}</span>}
-                      {status === 'down' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#dc2626', fontWeight: 600, background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}><XCircle size={12} aria-hidden="true" /> {t('NEDOSTUPNÉ', 'DOWN')}</span>}
-                      {status === 'loading' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#d97706', fontWeight: 600, background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}><RefreshCw size={12} aria-hidden="true" className="animate-spin" /> {t('OVĚŘUJI', 'CHECKING')}</span>}
-                      {status === 'unknown' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6b7280', fontWeight: 600, background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}><AlertCircle size={12} aria-hidden="true" /> {t('N/A', 'N/A')}</span>}
+                      {status === 'up' && <StatusBadge status="up" label={t('AKTIVNÍ', 'UP')} leading={<CheckCircle2 size={12} />} className="badge-sm" />}
+                      {status === 'down' && <StatusBadge status="down" label={t('NEDOSTUPNÉ', 'DOWN')} leading={<XCircle size={12} />} className="badge-sm" />}
+                      {status === 'loading' && <StatusBadge status="loading" tone="warning" label={t('OVĚŘUJI', 'CHECKING')} leading={<RefreshCw size={12} className="animate-spin" />} className="badge-sm" />}
+                      {status === 'unknown' && <StatusBadge status="unknown" label={t('N/A', 'N/A')} leading={<AlertCircle size={12} />} className="badge-sm" />}
                     </div>
                   )
                 }) : <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Služba není namapována', 'No service mapped')}</div>}
@@ -370,8 +371,8 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             { shape: 'rect', color: '#fde68a', label: 'Task (PSD2)' },
             { shape: 'event', color: ASYNC_COLOR, label: 'Message event (catch/throw)' },
             { shape: 'async', color: ASYNC_COLOR, label: 'Async event / outbox (Kafka)' },
-            { shape: 'status-up', color: '#16a34a', label: 'Service UP' },
-            { shape: 'status-down', color: '#dc2626', label: 'Service DOWN' },
+            { shape: 'status-up', color: 'var(--success-text)', label: 'Service UP' },
+            { shape: 'status-down', color: 'var(--danger-text)', label: 'Service DOWN' },
           ].map((item) => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
               {item.shape.startsWith('status-') ? (
