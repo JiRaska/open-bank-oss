@@ -3,13 +3,40 @@
 // pending (query-error / no-provider-main-version / pending-verification), distinct from a
 // real 'passed' or 'failed' verdict — never flattened to one unexplained "unavailable", and
 // never leaking the broker response body or credentials into the classification text.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enrichWithVerification, fetchPairVerification } from '../../scripts/collect-quality-report.mjs'
+import { collectMutations, enrichWithVerification, fetchPairVerification } from '../../scripts/collect-quality-report.mjs'
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-afterEach(() => vi.unstubAllGlobals())
+const dirs: string[] = []
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+describe('collect-quality-report mutation scoring', () => {
+  it('counts timed-out mutants as detected using PIT integer rounding', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-report-mutation-'))
+    dirs.push(repo)
+    const reportDir = path.join(repo, 'openbank-ledger-service', 'build', 'reports', 'pitest')
+    mkdirSync(reportDir, { recursive: true })
+    writeFileSync(path.join(reportDir, 'mutations.xml'), `<mutations>
+      <mutation status="KILLED"/><mutation status="KILLED"/>
+      <mutation status="KILLED"/><mutation status="KILLED"/>
+      <mutation status="TIMED_OUT"/>
+      <mutation status="SURVIVED"/><mutation status="SURVIVED"/><mutation status="SURVIVED"/>
+    </mutations>`)
+
+    await expect(collectMutations(['openbank-ledger-service'], repo)).resolves.toEqual([
+      expect.objectContaining({ totalMutants: 8, killed: 4, timedOut: 1, survived: 3, score: 63 }),
+    ])
+  })
+})
 
 describe('collect-quality-report contract classification (#7544)', () => {
   it('classifies a broker query error (e.g. HTTP 400) as query-error, without echoing the body', async () => {
