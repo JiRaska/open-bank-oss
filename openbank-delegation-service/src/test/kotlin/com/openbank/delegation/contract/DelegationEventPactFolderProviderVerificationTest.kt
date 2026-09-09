@@ -18,6 +18,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import org.junit.jupiter.api.BeforeEach
@@ -118,6 +119,8 @@ class DelegationEventPactFolderProviderVerificationTest {
             resourceType = DelegationResourceType.ACCOUNT,
             resourceId = RESOURCE,
             capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            approvalPolicy = ApprovalPolicy.N_OF_M,
+            requiredApprovals = 3,
             validFrom = VALID_FROM,
             validTo = null,
             perTransactionLimit = EventMoney(BigDecimal("1500.00"), "CZK"),
