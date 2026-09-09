@@ -23,6 +23,8 @@ import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { AI_INSIGHTS } from '@/components/insights/catalog'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
@@ -272,6 +274,11 @@ function IAOpsContent() {
           </button>
         </div>}
       />
+
+      <ContextualInsights dashboardUid="openbank-ai" panels={AI_INSIGHTS}
+        titleCs="Cena a spolehlivost AI" titleEn="AI cost and reliability"
+        descriptionCs="Kolik agentní provoz stojí, jak rychle odpovídá a kdy se požadavky neprovedly."
+        descriptionEn="What agent operations cost, how quickly they respond and when requests were not executed." />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
