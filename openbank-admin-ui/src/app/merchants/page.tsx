@@ -22,26 +22,13 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
+import { parseMerchantCataloguePage, parseUnmatchedMerchantDescriptors, type MerchantCatalogueRow, type UnmatchedMerchantDescriptor } from '@/lib/merchants/merchantCatalogueContract'
 
 const SERVICE = 'transaction-service'
 const CATALOGUE = '/api/v1/merchants'
 
-type Merchant = {
-  descriptorKey: string
-  cleanName: string
-  /** Provenance — where the stored bitmap came from. NOT the URL a customer app is given. */
-  logoUrl?: string | null
-  /** Null exactly when no logo has been ingested, which is what "Upload" vs "Replace" turns on. */
-  logoContentHash?: string | null
-  category?: string | null
-  lat?: number | null
-  lon?: number | null
-  city?: string | null
-  country?: string | null
-  updatedAt?: string
-}
-
-type Unmatched = { descriptorKey: string; occurrences: number }
+type Merchant = MerchantCatalogueRow
+type Unmatched = UnmatchedMerchantDescriptor
 
 type Draft = {
   descriptorKey: string
@@ -56,12 +43,15 @@ type Draft = {
 type PendingRemoval = { kind: 'entry' | 'logo'; merchant: Merchant }
 
 const EMPTY_DRAFT: Draft = { descriptorKey: '', cleanName: '', category: '', city: '', country: '', lat: '', lon: '' }
+const PAGE_SIZE = 50
 
 export default function MerchantsPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<Merchant[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const loadedPage = useRef<number | null>(null)
   const [unmatched, setUnmatched] = useState<Unmatched[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -72,23 +62,29 @@ export default function MerchantsPage() {
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
   const [removing, setRemoving] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedPage: number) => {
+    const canRetainSnapshot = loadedPage.current === requestedPage
     setLoading(true)
+    if (!canRetainSnapshot) { setRows([]); setTotal(0); loadedPage.current = null }
     try {
       const [listRes, unmatchedRes] = await Promise.all([
-        fetch(svcUrl(SERVICE, CATALOGUE, { size: '100' }), { cache: 'no-store' }),
+        fetch(svcUrl(SERVICE, CATALOGUE, { page: String(requestedPage), size: String(PAGE_SIZE) }), { cache: 'no-store' }),
         fetch(svcUrl(SERVICE, `${CATALOGUE}/unmatched`, { limit: '25' }), { cache: 'no-store' }),
       ])
       if (!listRes.ok) {
         setUnavailable({ kind: await classifyBffFailure(listRes) })
         return
       }
-      const page = await listRes.json() as { data?: Merchant[]; total?: number }
-      setRows(Array.isArray(page.data) ? page.data : [])
-      setTotal(typeof page.total === 'number' ? page.total : 0)
+      let nextPage
+      try { nextPage = parseMerchantCataloguePage(await listRes.json() as unknown, PAGE_SIZE) } catch { setUnavailable({ kind: 'error' }); return }
+      const lastPage = nextPage.total === 0 ? 0 : Math.floor((nextPage.total - 1) / PAGE_SIZE)
+      if (requestedPage > lastPage) { setPage(lastPage); return }
+      setRows(nextPage.data); setTotal(nextPage.total); loadedPage.current = requestedPage
       // The worklist failing must not blank the catalogue: they are separate reads, and a stale
       // or empty worklist is a smaller loss than losing the rows an operator is editing.
-      setUnmatched(unmatchedRes.ok ? (await unmatchedRes.json() as Unmatched[]) : [])
+      if (unmatchedRes.ok) {
+        try { setUnmatched(parseUnmatchedMerchantDescriptors(await unmatchedRes.json() as unknown)) } catch { /* independent worklist drift must not blank catalogue */ }
+      }
       setUnavailable(null)
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -97,7 +93,7 @@ export default function MerchantsPage() {
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(page) }, [load, page])
 
   const save = async () => {
     if (!draft) return
@@ -124,7 +120,7 @@ export default function MerchantsPage() {
         return
       }
       setDraft(null)
-      await load()
+      await load(page)
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
     } finally {
@@ -142,7 +138,7 @@ export default function MerchantsPage() {
         setActionError(t('Smazání selhalo', 'Delete failed'))
         return false
       }
-      await load()
+      await load(page)
       return true
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
@@ -180,7 +176,7 @@ export default function MerchantsPage() {
         setActionError(body?.message ?? t('Nahrání loga selhalo', 'The logo upload failed'))
         return
       }
-      await load()
+      await load(page)
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
     } finally {
@@ -199,7 +195,7 @@ export default function MerchantsPage() {
         setActionError(t('Smazání loga selhalo', 'Deleting the logo failed'))
         return false
       }
-      await load()
+      await load(page)
       return true
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
@@ -230,7 +226,7 @@ export default function MerchantsPage() {
         )}
         icon={<Store size={20} style={{ color: 'var(--accent)' }} />}
         actions={<button
-          onClick={load}
+          onClick={() => void load(page)}
           disabled={loading}
           type="button"
           aria-busy={loading}
@@ -253,7 +249,7 @@ export default function MerchantsPage() {
         dense={rows.length > 0}
       />}
 
-      {!unavailable && <>
+      {(!unavailable || rows.length > 0) && <>
         <section className="card" style={{ marginBottom: 18 }}>
           <h2 style={{ fontSize: 14, margin: '0 0 4px' }}>{t('Nespárované descriptory', 'Unmatched descriptors')}</h2>
           <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
@@ -394,6 +390,15 @@ export default function MerchantsPage() {
               )}
             </tbody>
           </table>
+          <nav aria-label={t('Stránkování katalogu obchodníků', 'Merchant catalogue pagination')} style={{ padding: '12px 14px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span aria-live="polite" style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
+              {total === 0 ? t('Žádné záznamy', 'No entries') : t(`Zobrazeno ${page * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE + rows.length, total)} z ${total}`, `Showing ${page * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE + rows.length, total)} of ${total}`)}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={loading || unavailable !== null || page === 0} onClick={() => setPage(current => Math.max(0, current - 1))}>{t('Předchozí', 'Previous')}</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={loading || unavailable !== null || (page + 1) * PAGE_SIZE >= total} onClick={() => setPage(current => current + 1)}>{t('Další', 'Next')}</button>
+            </div>
+          </nav>
         </div>
       </>}
       {pendingRemoval && <MerchantRemovalDialog
