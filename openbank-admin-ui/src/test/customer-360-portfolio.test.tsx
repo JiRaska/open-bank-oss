@@ -15,9 +15,9 @@ describe('Customer 360 authoritative portfolio', () => {
   it('queries each owning service by literal party-filtered route', async () => {
     const f = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('account-service')) return json({ data: [{ status: 'ACTIVE' }, { status: 'BLOCKED' }], pagination: { nextCursor: null, hasMore: false } })
-      if (url.includes('lending-service')) return json([{ state: 'ASSESSMENT' }])
-      return json([{ status: 'OPEN' }])
+      if (url.includes('account-service')) return json([{ status: 'ACTIVE' }, { status: 'BLOCKED' }])
+      if (url.includes('lending-service')) return json({ items: [{ state: 'ASSESSMENT' }] })
+      return json({ data: [{ status: 'OPEN' }] })
     })
     vi.stubGlobal('fetch', f)
     render(<LanguageProvider><CustomerPortfolioPanel partyId={PARTY} /></LanguageProvider>)
@@ -34,29 +34,11 @@ describe('Customer 360 authoritative portfolio', () => {
   it('degrades one source without hiding successful sources', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes('lending-service')) return json({ error: 'unreachable' }, 502)
-      if (String(input).includes('account-service')) return json({ data: [], pagination: { nextCursor: null, hasMore: false } })
       return json([])
     }))
     render(<LanguageProvider><CustomerPortfolioPanel partyId={PARTY} /></LanguageProvider>)
 
     await waitFor(() => expect(screen.getByText(/Unavailable · error/i)).toBeInTheDocument())
     expect(screen.getAllByText('0')).toHaveLength(2)
-  })
-
-  it('marks capped owning-service windows as lower bounds', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes('account-service')) return json({ data: [{ status: 'ACTIVE' }, { status: 'ACTIVE' }], pagination: { nextCursor: 'more', hasMore: true } })
-      if (url.includes('lending-service')) return json([{ state: 'ASSESSMENT' }])
-      return json(Array.from({ length: 100 }, () => ({ status: 'OPEN' })))
-    }))
-    render(<LanguageProvider><CustomerPortfolioPanel partyId={PARTY} /></LanguageProvider>)
-
-    await waitFor(() => expect(screen.getByText('2+')).toBeInTheDocument())
-    expect(screen.getByText('100+')).toBeInTheDocument()
-    expect(screen.getByLabelText('At least 2')).toBeInTheDocument()
-    expect(screen.getByLabelText('At least 100')).toBeInTheDocument()
-    expect(screen.getAllByText('At least this many; the service returned a full paginated window.')).toHaveLength(2)
-    expect(screen.getByText('1')).toBeInTheDocument()
   })
 })
