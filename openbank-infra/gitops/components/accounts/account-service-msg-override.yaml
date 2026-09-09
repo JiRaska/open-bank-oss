@@ -50,3 +50,5 @@ data:
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=openbank-account-service
     mp.messaging.incoming.delegation-events-in.group.id=openbank-account-service
+    mp.messaging.incoming.approval-group-revisions-in.group.id=openbank-account-service-approval-groups
+    mp.messaging.incoming.approval-group-revisions-in.auto.offset.reset=earliest

@@ -51,6 +51,23 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-account-service :: channel `approval-group-revisions-in`
+# Compacted source records are replayable indefinitely; malformed/conflicting values are retained
+# here for 30 days for investigation without wedging the projection bootstrap.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.approval-group-revisions-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 6
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-account-service :: channel `party-events-in`
 # #5752. `party-events-in` is declared by eight services; account-service was the last one still
 # on the implicit `dead-letter-topic-party-events-in`. The AccountPartyEventDeadLettered alert in

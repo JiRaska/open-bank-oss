@@ -54,6 +54,11 @@ class DelegationEventConsumer(
     private val log = Logger.getLogger(DelegationEventConsumer::class.java)
 
     @Incoming("delegation-events-in")
+    suspend fun consumeDelegation(payload: String) = consume(payload)
+
+    @Incoming("approval-group-revisions-in")
+    suspend fun consumeApprovalGroupRevision(payload: String) = consume(payload)
+
     suspend fun consume(payload: String) {
         val node = runCatching { objectMapper.readTree(payload) }.getOrNull()
         if (node == null) {
