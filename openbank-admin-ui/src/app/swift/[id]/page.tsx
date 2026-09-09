@@ -14,23 +14,8 @@ import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
-
-interface SwiftMessage {
-  id: string
-  messageType?: string
-  senderBic?: string
-  receiverBic?: string
-  amount?: number
-  currency?: string
-  status?: string
-  reference?: string
-  createdAt?: string
-  [k: string]: unknown
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--success)', PROCESSING: 'var(--info-text)', PENDING: 'var(--warning)', FAILED: 'var(--danger)',
-}
+import { StatusBadge } from '@/components/ui'
+import { parseSwiftMessages, swiftStatusTone, type SwiftMessage } from '@/lib/swift/swiftMessageContract'
 
 export default function SwiftDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -46,7 +31,8 @@ export default function SwiftDetailPage() {
     const stashed = readStashedRow<SwiftMessage>('swift', id)
     if (stashed) { setMessage(stashed); setUnavailable(null) }
     try {
-      // No by-id backend endpoint — re-fetch the list and pick this id out.
+      // The by-id endpoint exposes the domain model rather than this list response contract, so
+      // re-fetch the validated queue shape and select the requested message.
       const res = await fetch(svcUrl('swift-service', '/api/v1/swift/messages'), { signal: AbortSignal.timeout(10_000), cache: 'no-store' })
       if (!res.ok) {
         if (!stashed) setUnavailable({ kind: await classifyBffFailure(res) })
@@ -54,7 +40,7 @@ export default function SwiftDetailPage() {
         return
       }
       const body = (await res.json()) as unknown
-      const items = (Array.isArray(body) ? body : ((body as { messages?: unknown[] }).messages ?? [])) as SwiftMessage[]
+      const items = parseSwiftMessages(body)
       const found = items.find(m => m.id === id)
       if (found) { setMessage(found); setUnavailable(null) }
       else if (!stashed) setUnavailable({ kind: 'not_found' })
@@ -75,7 +61,7 @@ export default function SwiftDetailPage() {
         subtitle={t('Detail SWIFT zprávy — ISO 20022', 'SWIFT message detail — ISO 20022')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/swift" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('SWIFT zprávy', 'SWIFT')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {message?.status && <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>{message.status}</span>}
+          {message?.status && <StatusBadge status={message.status} tone={swiftStatusTone(message.status)} />}
           <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
           <button
             className="btn btn-secondary"
