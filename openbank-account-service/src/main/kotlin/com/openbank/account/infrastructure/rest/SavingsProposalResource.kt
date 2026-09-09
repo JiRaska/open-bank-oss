@@ -86,8 +86,8 @@ data class ProposalResponse(
 
 /**
  * Propose-only withdrawal flow (ADR-0232 D8 / AC8): the delegate proposes, the owner
- * decides with their own SCA, the approval emits the executable event. The delegate
- * can never decide (store-enforced) and never executes.
+ * is decided by the owner or an exact SOLE representative with their own SCA, then the approval
+ * emits the executable event. The proposing delegate can never self-approve and never executes.
  *
  * ## Who the caller is comes from the edge, never from the request
  *
@@ -150,7 +150,7 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     @Path("/{proposalId}/decide")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.authorize", resource = "#accountId")
-    @Operation(summary = "Owner decides a proposal — SCA-bound; approval emits SavingsWithdrawalApproved")
+    @Operation(summary = "Owner or sole representative decides — identity- and SCA-bound")
     suspend fun decide(
         @PathParam("accountId") accountId: UUID,
         @PathParam("proposalId") proposalId: UUID,
