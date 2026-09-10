@@ -19,61 +19,67 @@ import { PageHeader } from '@/components/ui/PageHeader'
 
 type Pillar = { icon: React.ReactNode; name: string; tag: string; store: string; color: string }
 
+const ACCENT = 'var(--accent)'
+const INFO = 'var(--info)'
+const SUCCESS = 'var(--success)'
+const WARNING = 'var(--warning)'
+const DANGER = 'var(--danger)'
+
 export default function ObservabilityStackPage() {
   const { t } = useLanguage()
 
   const pillars: Pillar[] = [
     {
       icon: <Database size={18} />, name: 'Prometheus', store: 'Prometheus',
-      color: '#e6522c',
+      color: DANGER,
       tag: t('Metriky — rate/error/latence, business čítače, exempláry do trace.',
              'Metrics — rate/error/latency, business counters, exemplars into traces.'),
     },
     {
       icon: <ScrollText size={18} />, name: 'Loki', store: t('Loki 3.6 · S3', 'Loki 3.6 · S3'),
-      color: '#f5a623',
+      color: WARNING,
       tag: t('Logy — strukturované JSON s trace_id; trvanlivé v S3, retence 7 dní (DORA).',
              'Logs — structured JSON with trace_id; durable in S3, 7-day retention (DORA).'),
     },
     {
       icon: <Zap size={18} />, name: 'Tempo', store: t('Tempo · S3', 'Tempo · S3'),
-      color: '#6366f1',
+      color: ACCENT,
       tag: t('Traces — celá cesta requestu; RED metriky + service mapa; trvanlivé v S3 (7 d).',
              'Traces — full request path; RED metrics + service map; durable in S3 (7 d).'),
     },
     {
       icon: <Flame size={18} />, name: 'Pyroscope', store: 'Pyroscope',
-      color: '#059669',
+      color: SUCCESS,
       tag: t('Profily — CPU/alloc flame-graph; skok ze span do profilu.',
              'Profiles — CPU/alloc flame graph; jump from a span to its profile.'),
     },
     {
       icon: <Target size={18} />, name: 'Pyrra', store: t('Pyrra · SLO-as-code', 'Pyrra · SLO-as-code'),
-      color: '#0ea5e9',
+      color: INFO,
       tag: t('SLO jako kód — deklarativní cíle generují multi-window burn-rate pravidla + error budget.',
              'SLO as code — declarative objectives generate multi-window burn-rate rules + error budget.'),
     },
     {
       icon: <BellRing size={18} />, name: t('On-call', 'On-call'), store: t('GoAlert + ntfy', 'GoAlert + ntfy'),
-      color: '#3b82f6',
+      color: INFO,
       tag: t('Eskalace, ack a dedup nad alerty; rozvrhy on-call; page doručí self-hosted ntfy.',
              'Escalation, ack & dedup over alerts; on-call schedules; pages delivered by self-hosted ntfy.'),
     },
     {
       icon: <Smartphone size={18} />, name: t('Mobil', 'Mobile'), store: t('GlitchTip + OTel RUM', 'GlitchTip + OTel RUM'),
-      color: '#ef4444',
+      color: DANGER,
       tag: t('Pády (GlitchTip, Sentry-protokol) + RUM výkon (OpenTelemetry) — sdílený trace_id, tap→ledger.',
              'Crashes (GlitchTip, Sentry protocol) + RUM performance (OpenTelemetry) — shared trace_id, tap→ledger.'),
     },
     {
       icon: <Globe size={18} />, name: t('Syntetika', 'Synthetics'), store: t('Blackbox + k6', 'Blackbox + k6'),
-      color: '#0891b2',
+      color: INFO,
       tag: t('Black-box proby veřejných endpointů (admin/customer/kc/api.open-bank.tech) + scriptované k6 cesty (p95 < 2 s) — dostupnost a SLA zvenčí, do Promethea.',
              'Black-box probes of public endpoints (admin/customer/kc/api.open-bank.tech) + scripted k6 journeys (p95 < 2 s) — availability & SLA from the outside, into Prometheus.'),
     },
     {
       icon: <Bot size={18} />, name: t('AI RCA', 'AI RCA'), store: t('HolmesGPT', 'HolmesGPT'),
-      color: '#7c3aed',
+      color: ACCENT,
       tag: t('Při alertu zkoumá metriky, logy, traces i stav k8s a navrhne pravděpodobnou příčinu — zkracuje MTTR.',
              'On an alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause — shortens MTTR.'),
     },
@@ -128,7 +134,7 @@ export default function ObservabilityStackPage() {
         {pillars.map((p) => (
           <div key={p.name} className="card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-              <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: `${p.color}1a`, color: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: `color-mix(in srgb, ${p.color} 12%, transparent)`, color: p.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {p.icon}
               </div>
               <div>
@@ -153,41 +159,41 @@ export default function ObservabilityStackPage() {
               <path d="M0,0 L7,3 L0,6" fill="none" stroke="var(--text-secondary)" strokeWidth="1.4" />
             </marker>
             <marker id="ob-at" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-              <path d="M0,0 L7,3 L0,6" fill="none" stroke="#0d9488" strokeWidth="1.6" />
+              <path d="M0,0 L7,3 L0,6" fill="none" stroke={INFO} strokeWidth="1.6" />
             </marker>
             <marker id="ob-aa" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-              <path d="M0,0 L7,3 L0,6" fill="none" stroke="#ef6c00" strokeWidth="1.6" />
+              <path d="M0,0 L7,3 L0,6" fill="none" stroke={WARNING} strokeWidth="1.6" />
             </marker>
           </defs>
 
           {/* Sources */}
           <SvgBox x={90} y={30} w={320} h={62} title={t('Backend — Quarkus flotila', 'Backend — Quarkus fleet')}
-                  sub={t('OTLP traces · metriky · JSON logy', 'OTLP traces · metrics · JSON logs')} accent="#6366f1" />
+                  sub={t('OTLP traces · metriky · JSON logy', 'OTLP traces · metrics · JSON logs')} accent={ACCENT} />
           <SvgBox x={590} y={30} w={320} h={62} title={t('Mobilní app (KMP)', 'Mobile app (KMP)')}
-                  sub={t('Sentry-KMP crash · OTel RUM', 'Sentry-KMP crash · OTel RUM')} accent="#ef4444" />
+                  sub={t('Sentry-KMP crash · OTel RUM', 'Sentry-KMP crash · OTel RUM')} accent={DANGER} />
 
           {/* Ingest */}
           <SvgBox x={90} y={150} w={320} h={62} title={t('OTel Collector / Alloy', 'OTel Collector / Alloy')}
-                  sub={t('tail-sampling · PII redakce', 'tail-sampling · PII redaction')} accent="#6366f1" />
+                  sub={t('tail-sampling · PII redakce', 'tail-sampling · PII redaction')} accent={ACCENT} />
           <SvgBox x={590} y={150} w={155} h={62} title="GlitchTip"
-                  sub={t('crash · in-cluster', 'crash · in-cluster')} accent="#ef4444" small />
+                  sub={t('crash · in-cluster', 'crash · in-cluster')} accent={DANGER} small />
           <SvgBox x={755} y={150} w={155} h={62} title={t('RUM brána', 'RUM gateway')}
-                  sub={t('OIDC · ADR-0089', 'OIDC · ADR-0089')} accent="#ef4444" small dashed />
+                  sub={t('OIDC · ADR-0089', 'OIDC · ADR-0089')} accent={DANGER} small dashed />
 
           {/* Stores */}
-          <SvgBox x={70} y={270} w={195} h={58} title="Prometheus" sub={t('metriky + exempláry', 'metrics + exemplars')} accent="#e6522c" small />
-          <SvgBox x={285} y={270} w={195} h={58} title="Loki 3.6" sub={t('logy + trace_id · S3', 'logs + trace_id · S3')} accent="#f5a623" small />
-          <SvgBox x={500} y={270} w={195} h={58} title="Tempo" sub={t('traces + span-metrics · S3', 'traces + span-metrics · S3')} accent="#6366f1" small />
-          <SvgBox x={715} y={270} w={195} h={58} title="Pyroscope" sub={t('profily', 'profiles')} accent="#059669" small />
+          <SvgBox x={70} y={270} w={195} h={58} title="Prometheus" sub={t('metriky + exempláry', 'metrics + exemplars')} accent={DANGER} small />
+          <SvgBox x={285} y={270} w={195} h={58} title="Loki 3.6" sub={t('logy + trace_id · S3', 'logs + trace_id · S3')} accent={WARNING} small />
+          <SvgBox x={500} y={270} w={195} h={58} title="Tempo" sub={t('traces + span-metrics · S3', 'traces + span-metrics · S3')} accent={ACCENT} small />
+          <SvgBox x={715} y={270} w={195} h={58} title="Pyroscope" sub={t('profily', 'profiles')} accent={SUCCESS} small />
 
           {/* Grafana */}
           <SvgBox x={90} y={380} w={820} h={58} title={t('Grafana — single pane', 'Grafana — single pane')}
-                  sub={t('dashboardy · Explore · SLO (Pyrra)', 'dashboards · Explore · SLO (Pyrra)')} accent="#0d9488" filled />
+                  sub={t('dashboardy · Explore · SLO (Pyrra)', 'dashboards · Explore · SLO (Pyrra)')} accent={INFO} filled />
 
           {/* On-call lane */}
-          <SvgBox x={90} y={498} w={240} h={56} title="Alertmanager" sub={t('critical route', 'critical route')} accent="#ef6c00" small />
-          <SvgBox x={380} y={498} w={240} h={56} title="GoAlert" sub={t('eskalace · ack · dedup', 'escalation · ack · dedup')} accent="#ef6c00" small />
-          <SvgBox x={670} y={498} w={240} h={56} title="ntfy" sub={t('page on-call', 'page on-call')} accent="#ef6c00" small />
+          <SvgBox x={90} y={498} w={240} h={56} title="Alertmanager" sub={t('critical route', 'critical route')} accent={WARNING} small />
+          <SvgBox x={380} y={498} w={240} h={56} title="GoAlert" sub={t('eskalace · ack · dedup', 'escalation · ack · dedup')} accent={WARNING} small />
+          <SvgBox x={670} y={498} w={240} h={56} title="ntfy" sub={t('page on-call', 'page on-call')} accent={WARNING} small />
 
           {/* structural arrows */}
           <line x1={250} y1={92} x2={250} y2={148} stroke="var(--text-secondary)" strokeWidth={1.4} markerEnd="url(#ob-ah)" />
@@ -201,21 +207,21 @@ export default function ObservabilityStackPage() {
           ))}
           {/* stores -> grafana (teal = correlated) */}
           {[167, 382, 597, 812].map((x, i) => (
-            <line key={i} x1={x} y1={328} x2={x} y2={378} stroke="#0d9488" strokeWidth={1.6} strokeDasharray="5 3" markerEnd="url(#ob-at)" />
+            <line key={i} x1={x} y1={328} x2={x} y2={378} stroke={INFO} strokeWidth={1.6} strokeDasharray="5 3" markerEnd="url(#ob-at)" />
           ))}
           {/* glitchtip -> grafana (teal L) */}
-          <path d="M667,212 L667,238 L958,238 L958,360 L820,360 L820,378" fill="none" stroke="#0d9488" strokeWidth={1.6} strokeDasharray="5 3" markerEnd="url(#ob-at)" />
+          <path d="M667,212 L667,238 L958,238 L958,360 L820,360 L820,378" fill="none" stroke={INFO} strokeWidth={1.6} strokeDasharray="5 3" markerEnd="url(#ob-at)" />
           {/* on-call path (amber): Prometheus -> Alertmanager -> GoAlert -> ntfy, routed down the left margin to avoid Grafana */}
-          <path d="M150,328 L40,328 L40,526 L88,526" fill="none" stroke="#ef6c00" strokeWidth={1.6} markerEnd="url(#ob-aa)" />
-          <line x1={330} y1={526} x2={378} y2={526} stroke="#ef6c00" strokeWidth={1.6} markerEnd="url(#ob-aa)" />
-          <line x1={620} y1={526} x2={668} y2={526} stroke="#ef6c00" strokeWidth={1.6} markerEnd="url(#ob-aa)" />
+          <path d="M150,328 L40,328 L40,526 L88,526" fill="none" stroke={WARNING} strokeWidth={1.6} markerEnd="url(#ob-aa)" />
+          <line x1={330} y1={526} x2={378} y2={526} stroke={WARNING} strokeWidth={1.6} markerEnd="url(#ob-aa)" />
+          <line x1={620} y1={526} x2={668} y2={526} stroke={WARNING} strokeWidth={1.6} markerEnd="url(#ob-aa)" />
 
           {/* legend */}
-          <line x1={90} y1={578} x2={116} y2={578} stroke="#0d9488" strokeWidth={1.6} strokeDasharray="5 3" />
+          <line x1={90} y1={578} x2={116} y2={578} stroke={INFO} strokeWidth={1.6} strokeDasharray="5 3" />
           <text x={124} y={582} fontSize={12} fill="var(--text-secondary)">
             {t('Teal = klikací korelace (trace_id + X-Correlation-ID)', 'Teal = click-through correlation (trace_id + X-Correlation-ID)')}
           </text>
-          <line x1={560} y1={578} x2={586} y2={578} stroke="#ef6c00" strokeWidth={1.6} />
+          <line x1={560} y1={578} x2={586} y2={578} stroke={WARNING} strokeWidth={1.6} />
           <text x={594} y={582} fontSize={12} fill="var(--text-secondary)">
             {t('Oranžová = alert → on-call (GoAlert → ntfy)', 'Amber = alert → on-call (GoAlert → ntfy)')}
           </text>
@@ -247,7 +253,7 @@ export default function ObservabilityStackPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {flow.map((s) => (
               <div key={s.n} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--accent, #6366f1)', color: '#fff', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{s.n}</div>
+                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{s.n}</div>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 700 }}>{s.title}</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px', lineHeight: 1.5 }}>{s.detail}</div>
@@ -260,7 +266,7 @@ export default function ObservabilityStackPage() {
 
       {/* Back link */}
       <div style={{ marginTop: '24px' }}>
-        <Link href="/observability" style={{ fontSize: '13px', color: 'var(--accent, #6366f1)', fontWeight: 600, textDecoration: 'none' }}>
+        <Link href="/observability" style={{ fontSize: '13px', color: 'var(--accent-text)', fontWeight: 600, textDecoration: 'none' }}>
           {t('← Zpět na metriky', '← Back to metrics')}
         </Link>
       </div>
@@ -274,7 +280,7 @@ function SvgBox({ x, y, w, h, title, sub, accent, small, filled, dashed }: {
   return (
     <g>
       <rect x={x} y={y} width={w} height={h} rx={8}
-            fill={filled ? `${accent}1a` : 'var(--surface)'} stroke={accent} strokeWidth={filled ? 2 : 1.4}
+            fill={filled ? `color-mix(in srgb, ${accent} 12%, var(--surface))` : 'var(--surface)'} stroke={accent} strokeWidth={filled ? 2 : 1.4}
             strokeDasharray={dashed ? '5 3' : undefined} />
       <text x={x + w / 2} y={y + (small ? 24 : 26)} textAnchor="middle" fontSize={small ? 13 : 14} fontWeight={700} fill="var(--text-primary)">{title}</text>
       <text x={x + w / 2} y={y + (small ? 42 : 46)} textAnchor="middle" fontSize={11} fill="var(--text-secondary)">{sub}</text>
