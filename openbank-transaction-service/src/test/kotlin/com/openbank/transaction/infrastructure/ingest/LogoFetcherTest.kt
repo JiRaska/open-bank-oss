@@ -179,7 +179,6 @@ class LogoFetcherTest {
             .hasMessageNotContaining("not in the configured allowlist")
     }
 
-
     /**
      * The body cap is enforced by READING at most the cap, not by trusting `Content-Length`. A source
      * that lies about the header is precisely the one you least want to allocate for, so the test

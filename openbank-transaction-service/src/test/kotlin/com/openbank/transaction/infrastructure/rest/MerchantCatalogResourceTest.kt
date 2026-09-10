@@ -584,7 +584,6 @@ class MerchantCatalogResourceTest {
         assertThat((response.entity as MerchantPage).data.single().logoContentHash).isNull()
     }
 
-
     /**
      * The ingest route's own behaviour, with the download stubbed. What matters here is that a
      * refusal from the fetcher and a rejection from the image decoder both reach the operator as a
@@ -597,7 +596,11 @@ class MerchantCatalogResourceTest {
             LogoFetcher.RefusedException("host 'evil.example.com' is not in the configured allowlist")
 
         val response = runBlocking {
-            logoResource.fetchLogo("ALZACZ", operator(), MerchantLogoFetchRequest(sourceUrl = "https://evil.example.com/x.png"))
+            logoResource.fetchLogo(
+                "ALZACZ",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://evil.example.com/x.png"),
+            )
         }
 
         assertThat(response.status).isEqualTo(400)
@@ -612,7 +615,11 @@ class MerchantCatalogResourceTest {
             LogoFetcher.Fetched("<svg/>".toByteArray(), "https://upload.example.org/x.svg", "image/svg+xml")
 
         val response = runBlocking {
-            logoResource.fetchLogo("ALZACZ", operator(), MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.svg"))
+            logoResource.fetchLogo(
+                "ALZACZ",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.svg"),
+            )
         }
 
         assertThat(response.status).isEqualTo(400)
@@ -660,7 +667,11 @@ class MerchantCatalogResourceTest {
             LogoFetcher.Fetched(pngBytes(), "https://upload.example.org/x.png", "image/png")
 
         val response = runBlocking {
-            logoResource.fetchLogo("NEVERSEEN", operator(), MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.png"))
+            logoResource.fetchLogo(
+                "NEVERSEEN",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.png"),
+            )
         }
 
         assertThat(response.status).isEqualTo(404)
@@ -679,7 +690,6 @@ class MerchantCatalogResourceTest {
         assertThat(body.enabled).isTrue()
         assertThat(body.allowedHosts).containsExactly("upload.example.org")
     }
-
 
     /**
      * The catalogue page an operator actually reads, including the two fields the screen decides
