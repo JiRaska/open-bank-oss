@@ -75,3 +75,13 @@ authz:
       enabled: false
     oidc:
       enabled: false
+  # No OPA sidecar in a bare @QuarkusTest, so the PDP is unresolvable; enforce=false makes
+  # AuthorizeInterceptor proceed advisory instead of failing 503 (matches the fleet-wide default
+  # every non-agent service ships in production too — mine only deviates for
+  # authz.four-eyes.enforce, D3's own mandate, not for the general allow/deny gate). The domain
+  # maker!=checker check in CommunicationStyleService.publish is unconditional regardless, so an
+  # IT still exercises the real security-relevant branch; it does not exercise the OPA-mediated
+  # 202/X-Approval-Id pause, which is the shared AuthorizeInterceptor's own tested mechanism, not
+  # this service's.
+  authz:
+    enforce: false
