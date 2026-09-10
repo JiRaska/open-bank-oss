@@ -241,6 +241,46 @@ fleet supplies one** — card authorisations carry MCC and country and nothing e
 is `CITY`, and the honest per-purchase location a POS or ATM identifier would give is not yet
 reachable. The column exists so a fact can land without a schema change; it does not pretend one has.
 
+## 4g. Logo ingest from an operator-named URL — STRIDE supplement
+
+`POST /api/v1/merchants/{descriptorKey}/logo/fetch` downloads a logo instead of having an operator
+upload the file, and `GET /api/v1/merchants/logo-sources` reports whether that is configured.
+
+**This is the only place this service reaches out to the internet, and it is a server-side request
+forgery primitive by construction.** An operator names a URL and the service fetches it, from inside
+the cluster, with the cluster's network position. The URL an attacker wants is not a logo: it is the
+cloud instance metadata service, an internal admin port, or something that trusts callers on the pod
+network. **The response never has to come back** — a request that *reached* one of those has already
+done the damage, and the 400 that follows reads as a rejected logo.
+
+Why it exists at all: without it the catalogue is filled one file at a time, and a catalogue filled
+by hand is one that stays at thirty rows. That is not a hypothetical — it is `merchant_catalog`'s
+actual history (§4d, #8573).
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **I**nfo disclosure | The service is made to fetch cloud metadata or an internal endpoint and the attacker learns credentials or internal state | Four fences, each load-bearing alone: a host **allowlist that is empty by default** (unconfigured, the endpoint refuses everything, so no deployment acquires this by upgrading); **https only**; **every resolved address must be publicly routable**, so an allowlisted name answering `127.0.0.1`, `169.254.169.254`, `10/8`, `100.64/10` or `fd00::/7` is refused; and **redirects refused, never followed** — the allowlisted host answering `302` to the metadata service is the standard bypass |
+| **I**nfo disclosure | Even a refused fetch confirms whether an internal host exists (timing, error text) | Bounded: the allowlist is checked before any resolution, so an unlisted host produces no lookup and no connection at all. A listed host is one the bank chose |
+| **T**ampering | Fetched bytes are trusted because the service fetched them itself | They are not. The body goes through exactly the same decode / dimension-check / re-encode as an upload (§4e): SVG and polyglots refused, metadata stripped, a declared oversize refused before allocation |
+| **D**oS | A source streams gigabytes, or a slow-loris fetch holds the pod | Read capped at 512 kB and **streamed**, not trusted from `Content-Length` — a source that lies about the header is the one you least want to allocate for. Connect and request timeouts are 5 s and 10 s |
+| **E**oP | A viewer triggers ingest | `Roles.OPERATOR`/`ADMIN` plus OPA `merchant.update`, the same gate as the upload it replaces |
+| **R**epudiation | No record of where a trademark came from | `source_url` is stored **as fetched** rather than as typed, with `licence`, `attribution` and `uploaded_by` |
+
+**Residual risk, stated rather than papered over.** Between the address check and the connection the
+name is resolved again by the JDK's own connect, so an attacker who controls an **allowlisted** name
+can still steer that second lookup (DNS rebinding). Closing it needs connecting to a pinned IP with
+SNI and Host preserved, which `java.net.http.HttpClient` does not expose. The allowlist is what
+bounds it: the attacker must already own a name this bank chose to trust, which is a materially
+different position from "any URL an operator can be talked into pasting".
+
+**DFD update:** one NEW outbound edge — transaction-service to a public host on 443, egress-limited
+by the allowlist. Nothing else in this service makes an internet call, so a NetworkPolicy that
+permits none is the environment-level backstop, and an environment that has not configured the
+allowlist needs no policy change at all.
+**Risk class:** SSRF, bounded by configuration that is absent by default.
+**Rollback:** revert, or simply unset the allowlist — with no hosts configured the endpoint refuses
+every URL and the upload path is unaffected.
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -278,6 +318,8 @@ reachable. The column exists so a fact can land without a schema change; it does
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-08** — Logo ingest from an operator-named URL (`POST …/logo/fetch`), plus `GET …/logo-sources` so the operator screen can tell "off by design" from "broken" (§4g). This is the service's only outbound internet call and an SSRF primitive by construction; it is fenced by an allowlist that is **empty by default**, https-only, a publicly-routable check on every resolved address, and refusal (not following) of redirects. Fetched bytes get the same re-encode as an upload. Residual DNS-rebinding risk is recorded in §4g rather than claimed closed. Rollback: unset the allowlist and the endpoint refuses everything.
 
 - **2026-09-07** — Per-town merchant locations (`merchant_location`, `…/locations[/{cityToken}]`) and a `precision` field on `MerchantGeo` (§4f). The seeded catalogue pinned each chain at one Prague coordinate, so a Billa purchase in Brno rendered 185 km from where it happened; coordinates now say whether they are `EXACT` (the place the money was spent) or `CITY` (representative for the town), and `EXACT` is refused without the device id that would justify it — in the API and in a `CHECK` constraint. No new caller, role or network edge. Rollback: revert; geo falls back to the catalogue pin.
 

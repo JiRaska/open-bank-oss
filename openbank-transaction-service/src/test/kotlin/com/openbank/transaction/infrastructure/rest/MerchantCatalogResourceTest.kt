@@ -5,6 +5,7 @@
 package com.openbank.transaction.infrastructure.rest
 
 import com.openbank.transaction.infrastructure.image.LogoImages
+import com.openbank.transaction.infrastructure.ingest.LogoFetcher
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLogoEntity
@@ -42,6 +43,8 @@ class MerchantCatalogResourceTest {
     private lateinit var logos: MerchantLogoRepository
     private lateinit var locations: MerchantLocationRepository
     private lateinit var locationResource: MerchantLocationResource
+    private lateinit var fetcher: LogoFetcher
+    private lateinit var logoResource: MerchantLogoResource
     private lateinit var resource: MerchantCatalogResource
 
     @BeforeEach
@@ -50,7 +53,13 @@ class MerchantCatalogResourceTest {
         transactions = mockk()
         logos = mockk()
         locations = mockk()
-        resource = MerchantCatalogResource(catalog, transactions, logos)
+        // Fetching OFF, which is the default everywhere: these tests are about the catalogue, and a
+        // configured allowlist would put a real network call behind them.
+        fetcher = mockk(relaxed = true)
+        every { fetcher.isEnabled() } returns true
+        every { fetcher.allowedHosts() } returns setOf("upload.example.org")
+        resource = MerchantCatalogResource(catalog, transactions)
+        logoResource = MerchantLogoResource(logos, fetcher)
         locationResource = MerchantLocationResource(locations)
         coEvery { catalog.upsert(any()) } returns true
         coEvery { catalog.findByKey(any()) } returns null
@@ -216,7 +225,7 @@ class MerchantCatalogResourceTest {
     fun `a raw descriptor resolves to the same logo as its normalised key`() {
         coEvery { logos.findByKey("ALZACZ") } returns logoEntity("ALZACZ", "a".repeat(64))
 
-        val response = runBlocking { resource.logo("ALZA.CZ A.S. PRAHA 4", 64, unconditionalRequest()) }
+        val response = runBlocking { logoResource.logo("ALZA.CZ A.S. PRAHA 4", 64, unconditionalRequest()) }
 
         assertThat(response.status).isEqualTo(200)
         coVerify { logos.findByKey("ALZACZ") }
@@ -230,7 +239,7 @@ class MerchantCatalogResourceTest {
      */
     @Test
     fun `an unsupported size is a 400, not a served variant`() {
-        val response = runBlocking { resource.logo("ALZACZ", 512, unconditionalRequest()) }
+        val response = runBlocking { logoResource.logo("ALZACZ", 512, unconditionalRequest()) }
 
         assertThat(response.status).isEqualTo(400)
     }
@@ -239,8 +248,8 @@ class MerchantCatalogResourceTest {
     fun `the two supported sizes serve the two stored variants`() {
         coEvery { logos.findByKey("ALZACZ") } returns logoEntity("ALZACZ", "b".repeat(64))
 
-        val small = runBlocking { resource.logo("ALZACZ", 64, unconditionalRequest()) }
-        val large = runBlocking { resource.logo("ALZACZ", 128, unconditionalRequest()) }
+        val small = runBlocking { logoResource.logo("ALZACZ", 64, unconditionalRequest()) }
+        val large = runBlocking { logoResource.logo("ALZACZ", 128, unconditionalRequest()) }
 
         assertThat(small.entity as ByteArray).hasSize(3)
         assertThat(large.entity as ByteArray).hasSize(4)
@@ -260,7 +269,7 @@ class MerchantCatalogResourceTest {
                 Response.notModified()
         }
 
-        val response = runBlocking { resource.logo("ALZACZ", 64, conditional) }
+        val response = runBlocking { logoResource.logo("ALZACZ", 64, conditional) }
 
         assertThat(response.status).isEqualTo(304)
         assertThat(response.entity).isNull()
@@ -272,7 +281,7 @@ class MerchantCatalogResourceTest {
     fun `a merchant with no stored logo is a 404, never a placeholder image`() {
         coEvery { logos.findByKey(any()) } returns null
 
-        val response = runBlocking { resource.logo("ALZACZ", 64, unconditionalRequest()) }
+        val response = runBlocking { logoResource.logo("ALZACZ", 64, unconditionalRequest()) }
 
         assertThat(response.status).isEqualTo(404)
     }
@@ -289,7 +298,7 @@ class MerchantCatalogResourceTest {
         coEvery { logos.upsert(capture(saved)) } returns true
 
         val response = runBlocking {
-            resource.putLogo("ALZA.CZ A.S.", null, "trademark", null, operator(), upload)
+            logoResource.putLogo("ALZA.CZ A.S.", null, "trademark", null, operator(), upload)
         }
 
         assertThat(response.status).isEqualTo(201)
@@ -308,7 +317,7 @@ class MerchantCatalogResourceTest {
      */
     @Test
     fun `a missing request body is a 400, not a 500`() {
-        val response = runBlocking { resource.putLogo("ALZACZ", null, null, null, operator(), null) }
+        val response = runBlocking { logoResource.putLogo("ALZACZ", null, null, null, operator(), null) }
 
         assertThat(response.status).isEqualTo(400)
     }
@@ -316,7 +325,7 @@ class MerchantCatalogResourceTest {
     @Test
     fun `an upload that is not a raster image is refused with the reason`() {
         val response = runBlocking {
-            resource.putLogo("ALZACZ", null, null, null, operator(), "<svg/>".toByteArray())
+            logoResource.putLogo("ALZACZ", null, null, null, operator(), "<svg/>".toByteArray())
         }
 
         assertThat(response.status).isEqualTo(400)
@@ -333,7 +342,7 @@ class MerchantCatalogResourceTest {
         coEvery { logos.upsert(any()) } returns null
 
         val response = runBlocking {
-            resource.putLogo("NEVERSEEN", null, null, null, operator(), pngBytes())
+            logoResource.putLogo("NEVERSEEN", null, null, null, operator(), pngBytes())
         }
 
         assertThat(response.status).isEqualTo(404)
@@ -343,7 +352,7 @@ class MerchantCatalogResourceTest {
     fun `deleting a logo that is not there is a 404`() {
         coEvery { logos.deleteByKey(any()) } returns false
 
-        val response = runBlocking { resource.deleteLogo("ALZACZ") }
+        val response = runBlocking { logoResource.deleteLogo("ALZACZ") }
 
         assertThat(response.status).isEqualTo(404)
     }
@@ -573,5 +582,112 @@ class MerchantCatalogResourceTest {
         val response = runBlocking { resource.list(0, 50) }
 
         assertThat((response.entity as MerchantPage).data.single().logoContentHash).isNull()
+    }
+
+    /**
+     * The ingest route's own behaviour, with the download stubbed. What matters here is that a
+     * refusal from the fetcher and a rejection from the image decoder both reach the operator as a
+     * 400 carrying the reason — the fetcher's guards are tested in LogoFetcherTest, and this is the
+     * wiring that would otherwise turn a precise refusal into a 500.
+     */
+    @Test
+    fun `a refused fetch is a 400 carrying the fetcher's reason`() {
+        every { fetcher.fetch(any()) } throws
+            LogoFetcher.RefusedException("host 'evil.example.com' is not in the configured allowlist")
+
+        val response = runBlocking {
+            logoResource.fetchLogo(
+                "ALZACZ",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://evil.example.com/x.png"),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(400)
+        @Suppress("UNCHECKED_CAST")
+        assertThat((response.entity as Map<String, String>)["message"]).contains("not in the configured allowlist")
+    }
+
+    /** Fetching it ourselves does not make the bytes an image. */
+    @Test
+    fun `content that is not a raster image is refused after the fetch`() {
+        every { fetcher.fetch(any()) } returns
+            LogoFetcher.Fetched("<svg/>".toByteArray(), "https://upload.example.org/x.svg", "image/svg+xml")
+
+        val response = runBlocking {
+            logoResource.fetchLogo(
+                "ALZACZ",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.svg"),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(400)
+        @Suppress("UNCHECKED_CAST")
+        assertThat((response.entity as Map<String, String>)["message"]).contains("rejected")
+    }
+
+    /**
+     * The URL stored is the one that ANSWERED, not the one that was typed — it is licence evidence,
+     * so it has to be the thing that actually served the bytes.
+     */
+    @Test
+    fun `an ingested logo records the URL as fetched`() {
+        val saved = slot<MerchantLogoEntity>()
+        coEvery { logos.upsert(capture(saved)) } returns true
+        every { fetcher.fetch(any()) } returns
+            LogoFetcher.Fetched(pngBytes(), "https://upload.example.org/final.png", "image/png")
+
+        val response = runBlocking {
+            logoResource.fetchLogo(
+                "ALZA.CZ A.S.",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.png", licence = "CC-BY-4.0"),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(saved.captured.descriptorKey).isEqualTo("ALZACZ")
+        assertThat(saved.captured.sourceUrl).isEqualTo("https://upload.example.org/final.png")
+        assertThat(saved.captured.licence).isEqualTo("CC-BY-4.0")
+        assertThat(saved.captured.uploadedBy).isEqualTo("op-1")
+    }
+
+    @Test
+    fun `an ingest with no sourceUrl is a 400, not a 500`() {
+        val response = runBlocking { logoResource.fetchLogo("ALZACZ", operator(), null) }
+
+        assertThat(response.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `an ingest for a merchant the catalogue does not hold is a 404`() {
+        coEvery { logos.upsert(any()) } returns null
+        every { fetcher.fetch(any()) } returns
+            LogoFetcher.Fetched(pngBytes(), "https://upload.example.org/x.png", "image/png")
+
+        val response = runBlocking {
+            logoResource.fetchLogo(
+                "NEVERSEEN",
+                operator(),
+                MerchantLogoFetchRequest(sourceUrl = "https://upload.example.org/x.png"),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(404)
+    }
+
+    /**
+     * The operator screen decides whether to offer the action from this, so "off" has to be a
+     * reportable state rather than something inferred from a 400.
+     */
+    @Test
+    fun `the ingest configuration is reported, allowlist included`() {
+        val response = logoResource.logoSources()
+
+        assertThat(response.status).isEqualTo(200)
+        val body = response.entity as MerchantLogoSources
+        assertThat(body.enabled).isTrue()
+        assertThat(body.allowedHosts).containsExactly("upload.example.org")
     }
 }
