@@ -26,6 +26,7 @@ test.describe('term-deposit account opening', () => {
           type: 'TERM_DEPOSIT',
           currency: 'CZK',
           status: 'ACTIVE',
+          termsAndConditions: [{ version: '2.1', url: 'https://example.test/terms/2.1', effectiveFrom: '2026-01-01' }],
         },
       ]),
     }))
@@ -39,7 +40,17 @@ test.describe('term-deposit account opening', () => {
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({ id: accountId }),
+        body: JSON.stringify({
+          id: accountId,
+          accountNumber: 'TEST-ACCOUNT-0003',
+          accountType: 'TERM_DEPOSIT',
+          partyId,
+          productId,
+          currencyCode: 'CZK',
+          status: 'ACTIVE',
+          openedAt: '2026-09-10T08:00:00Z',
+          closedAt: null,
+        }),
       })
     })
 
@@ -66,6 +77,40 @@ test.describe('term-deposit account opening', () => {
       accountType: 'TERM_DEPOSIT',
       currencyCode: 'CZK',
       legalName: 'Test Customer',
+      termsVersion: '2.1',
+      termsUrl: 'https://example.test/terms/2.1',
+      termsEffectiveFrom: '2026-01-01',
     })
+  })
+
+  test('does not claim success when the service returns an unverified account', async ({ page }) => {
+    await page.route('**/api/svc/product-catalog/api/v1/products?status=ACTIVE', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([{
+        id: productId,
+        code: 'TERM_DEPOSIT_6M_CZK',
+        name: 'Termínovaný vklad 6 měsíců',
+        type: 'TERM_DEPOSIT',
+        currency: 'CZK',
+        status: 'ACTIVE',
+        termsAndConditions: [{ version: '2.1', url: 'https://example.test/terms/2.1', effectiveFrom: '2026-01-01' }],
+      }]),
+    }))
+    await page.route('**/api/svc/account-service/api/v1/accounts', route => route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: accountId }),
+    }))
+
+    await page.goto('/accounts/new')
+    await page.locator('#account-party-id').fill(partyId)
+    await page.locator('#account-product-id').selectOption(productId)
+    await page.locator('#account-legal-name').fill('Test Customer')
+    await page.getByRole('button', { name: /Otevřít účet|Open Account/ }).click()
+
+    await expect(page).toHaveURL('/accounts/new')
+    await expect(page.getByRole('alert').filter({
+      hasText: /Účet mohl vzniknout; obnovte seznam|The account may exist; refresh the list/,
+    })).toBeVisible()
   })
 })

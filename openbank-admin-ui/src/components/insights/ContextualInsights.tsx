@@ -142,7 +142,7 @@ function GrafanaPanel({ src, title, tall }: { src: string; title: string; tall: 
       <Activity size={18} aria-hidden="true" />
       <span>{t('Panel teď není dostupný', 'Panel is unavailable right now')}</span>
     </div>}
-    <iframe ref={frame} src={src} title={title} loading="lazy" scrolling="no"
+    <iframe ref={frame} src={src} title={title} scrolling="no" onLoad={() => setState('ready')}
       className={state === 'ready' ? styles.frameReady : styles.frameHidden} />
   </div>
 }

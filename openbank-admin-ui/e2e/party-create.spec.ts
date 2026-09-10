@@ -2,6 +2,8 @@
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
+const CREATED_PARTY_ID = '00000000-0000-4000-8000-000000000042'
+
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
 })
@@ -20,13 +22,17 @@ test('registers a party responsively and retries the same command safely', async
     payloads.push(request.postDataJSON())
     if (idempotencyKeys.length === 1) {
       await new Promise<void>(resolve => { releaseFirstResponse = resolve })
-      await route.fulfill({ status: 503, body: '' })
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'ACTIVE' }),
+      })
       return
     }
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ id: 'party-42' }),
+      body: JSON.stringify({ id: CREATED_PARTY_ID }),
     })
   })
 
@@ -57,13 +63,13 @@ test('registers a party responsively and retries the same command safely', async
   await expect.poll(() => Boolean(releaseFirstResponse)).toBe(true)
   releaseFirstResponse?.()
   await firstSubmit
-  await expect(page.getByRole('alert').filter({ hasText: /selhalo|failed/i })).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: /nelze ověřit|could not be verified/i })).toBeVisible()
   await expect(submit).toBeEnabled()
   expect(idempotencyKeys).toHaveLength(1)
   expect(idempotencyKeys[0]).not.toBe('')
 
   await submit.click()
-  await expect(page).toHaveURL(/\/parties\/party-42$/)
+  await expect(page).toHaveURL(`/parties/${CREATED_PARTY_ID}`)
   expect(idempotencyKeys).toHaveLength(2)
   expect(idempotencyKeys[1]).toBe(idempotencyKeys[0])
   expect(payloads[1]).toEqual(payloads[0])
