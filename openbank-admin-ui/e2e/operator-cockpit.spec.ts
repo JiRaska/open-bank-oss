@@ -48,7 +48,7 @@ test('KYC resolves a customer name before loading that customer’s cases', asyn
 
 test('Customer 360 joins authoritative portfolio and documents to the name-selected party', async ({ page }) => {
   await json(page, '**/api/svc/party-service/api/v1/parties/search**', { data: [{ id: PARTY_ID, legalName: 'Anna Nováková', status: 'ACTIVE', kycStatus: 'VERIFIED' }] })
-  await json(page, `**/api/customer-360/${PARTY_ID}`, { available: true, partyId: PARTY_ID, asOf: '2026-08-22 08:00:00', partyState: {}, accountIds: ['account-1'], domains: [{ aggregateType: 'party', events: 2, lastEventType: 'PARTY_UPDATED', lastOccurredAt: '2026-08-22 08:00:00' }], consents: [] })
+  await json(page, `**/api/customer-360/${PARTY_ID}`, { available: true, partyId: PARTY_ID, asOf: '2026-08-22 08:00:00', accountIds: ['account-1'], domains: [{ aggregateType: 'party', events: 2, lastEventType: 'PARTY_UPDATED', lastOccurredAt: '2026-08-22 08:00:00' }], consents: [], excludedCount: 0 })
   await json(page, '**/api/svc/account-service/api/v1/accounts**', [{ id: 'account-1', status: 'ACTIVE' }])
   await json(page, '**/api/svc/lending-service/api/v1/lending/applications**', [{ id: 'loan-1', status: 'APPROVED' }])
   await json(page, '**/api/svc/aml-service/api/v1/aml/cases**', [{ id: 'aml-1', status: 'OPEN' }])

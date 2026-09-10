@@ -120,6 +120,8 @@ export function useServiceResource<T = unknown>(
             scheduleRetry(kind, res.status)
             return
           }
+          // Never retain privileged data after the session expires or access is revoked.
+          if (kind === 'unauthorized') setData(null)
           setUnavailable({ kind, status: res.status })
           setWaking(false)
           setLoading(false)
