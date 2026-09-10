@@ -394,15 +394,24 @@ test('role deletion explains impact and recovers from a failed request before re
 
   await page.goto('/delegations')
   await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
-  await page.getByRole('button', { name: `Smazat ${ROLE_PRESET.name}` }).click()
+  const deleteTrigger = page.getByRole('button', { name: `Smazat ${ROLE_PRESET.name}` })
+  await deleteTrigger.click()
 
-  const dialog = page.getByRole('alertdialog', { name: `Smazat roli „${ROLE_PRESET.name}“?` })
+  let dialog = page.getByRole('alertdialog', { name: `Smazat roli „${ROLE_PRESET.name}“?` })
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('Již udělená práva se nezmění ani neodvolají.')
+  await expect(dialog.getByRole('button', { name: 'Ponechat roli' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(deleteTrigger).toBeFocused()
+
+  await deleteTrigger.click()
+  dialog = page.getByRole('alertdialog', { name: `Smazat roli „${ROLE_PRESET.name}“?` })
 
   await dialog.getByRole('button', { name: 'Smazat preset' }).click()
   await expect(dialog.getByRole('alert')).toContainText('Nic se nezměnilo; zkuste to znovu.')
-  await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
+  await expect(dialog).toContainText(ROLE_PRESET.name)
+  await expect(dialog.getByRole('button', { name: 'Smazat preset' })).toBeEnabled()
 
   await dialog.getByRole('button', { name: 'Smazat preset' }).click()
   await expect(dialog).toBeHidden()
@@ -432,8 +441,10 @@ test('role creation stays editable after failure and retries without a duplicate
   })
 
   await page.goto('/delegations')
-  await page.getByRole('button', { name: 'Přidat roli' }).click()
+  const addRole = page.getByRole('button', { name: 'Přidat roli' })
+  await addRole.click()
   const editor = page.getByRole('dialog', { name: 'Nastavení dispoziční role' })
+  await expect(editor.getByRole('textbox', { name: 'Název' })).toBeFocused()
   await editor.getByRole('textbox', { name: 'Název' }).fill(ROLE_PRESET.name)
   await editor.getByRole('textbox', { name: 'Popis' }).fill(ROLE_PRESET.description)
   await editor.getByRole('checkbox').first().check()
@@ -444,6 +455,7 @@ test('role creation stays editable after failure and retries without a duplicate
 
   await editor.getByRole('button', { name: 'Uložit' }).click()
   await expect(editor).toBeHidden()
+  await expect(addRole).toBeFocused()
   await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
   expect(createAttempts).toBe(2)
 })
