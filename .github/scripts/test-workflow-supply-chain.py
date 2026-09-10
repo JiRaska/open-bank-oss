@@ -91,6 +91,20 @@ class SupplyChainTest(unittest.TestCase):
         bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = []
         self.assertTrue(guard.steward_scope_findings(prompt, bad_rules, workflow))
 
+    def test_services_ci_dispatch_and_fail_closed_contract(self):
+        original = yaml.safe_load((guard.ROOT / '.github/workflows/services-ci.yml').read_text())
+        self.assertFalse(guard.findings('services-ci.yml', original))
+        for mutation in ('missing-plan-output', 'unbounded-verifier', 'detector-failure-passes'):
+            doc = copy.deepcopy(original)
+            if mutation == 'missing-plan-output':
+                doc['jobs']['changes']['outputs'].pop('verification-modules')
+            elif mutation == 'unbounded-verifier':
+                doc['jobs']['verification-metadata']['if'] = 'always()'
+            else:
+                doc['jobs']['all-green']['steps'][0]['run'] = 'echo green'
+            with self.subTest(mutation=mutation):
+                self.assertTrue(guard.findings('services-ci.yml', doc))
+
 
 if __name__ == '__main__':
     unittest.main()

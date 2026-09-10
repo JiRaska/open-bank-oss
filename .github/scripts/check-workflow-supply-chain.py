@@ -47,6 +47,20 @@ def findings(name, doc):
         if name == 'agent-issue-worker.yml':
             if worker.get('needs') != 'admission' or "needs.admission.outputs.proceed == 'true'" not in worker.get('if', ''):
                 errors.append('issue worker must depend on successful queue admission')
+    if name == 'services-ci.yml':
+        changes = jobs.get('changes', {})
+        verification = jobs.get('verification-metadata', {})
+        aggregate = jobs.get('all-green', {})
+        output = changes.get('outputs', {}).get('verification-modules', '')
+        if 'steps.detect.outputs.verification-modules' not in output:
+            errors.append('changes must export the module verification plan from its detector')
+        verification_if = verification.get('if', '')
+        if ("needs.changes.result == 'success'" not in verification_if
+                or "needs.changes.outputs.verification-modules != ''" not in verification_if):
+            errors.append('verification metadata must allocate a runner only for a successful non-empty plan')
+        aggregate_run = '\n'.join(step.get('run', '') for step in aggregate.get('steps', []))
+        if ('needs.changes.result' not in aggregate_run or 'scope is unknown' not in aggregate_run):
+            errors.append('all-green must fail closed when changed-service detection has no verdict')
     return errors
 
 
