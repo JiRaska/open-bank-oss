@@ -21,12 +21,12 @@ const A = { id: '05a02ef1-381c-40e7-b73f-d6855eead42e', legalName: 'Jan Novák',
 const B = { id: 'ec28276d-28b9-4cdb-ac03-097afca855b9', legalName: 'Nováková Petra', email: 'petra@example.test', status: 'ACTIVE', kycStatus: 'PENDING' }
 
 const A_360 = {
-  available: true, partyId: A.id, asOf: '2026-07-26 09:14:22', partyState: {}, accountIds: ['acc-1'],
+  available: true, partyId: A.id, asOf: '2026-07-26 09:14:22', accountIds: ['acc-1'],
   domains: [{ aggregateType: 'party', events: 12, lastEventType: 'PARTY_UPDATED', lastOccurredAt: '2026-07-26 09:14:22' }],
-  consents: [],
+  consents: [], excludedCount: 0,
 }
 // A party that exists but has no projected events: available (ClickHouse answered), zero domains.
-const B_360 = { available: true, partyId: B.id, asOf: null, partyState: null, domains: [], accountIds: [], consents: [] }
+const B_360 = { available: true, partyId: B.id, asOf: null, domains: [], accountIds: [], consents: [], excludedCount: 0 }
 
 const A_CONSENTS = [{
   id: '11111111-1111-4111-8111-111111111111', partyId: A.id, granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
@@ -69,6 +69,43 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await expect(page.getByText(/nemá žádné analytické události|has no analytics events/)).toBeVisible()
     // The copy that made a working page read as broken. It described the SOURCE, not the query.
     await expect(page.getByText(/neobsahuje žádné záznamy|does not contain any records/)).toHaveCount(0)
+  })
+
+  test('discloses excluded projection evidence without hiding valid summaries', async ({ page }) => {
+    await stubSearch(page)
+    await page.route(`**/api/customer-360/${A.id}`, r => r.fulfill({
+      status: 200,
+      body: JSON.stringify({ ...A_360, excludedCount: 2 }),
+    }))
+
+    await page.goto('/customer-360')
+    await page.getByRole('textbox').fill('Novák')
+    await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+    await page.getByRole('button', { name: /Vybrat|Select/ }).first().click()
+
+    await expect(page.getByText(/Domains and recency|Domény a aktuálnost/)).toBeVisible()
+    await expect(page.getByRole('status')).toContainText(/Invalid projection records excluded: 2|Vyloučeno neplatných projekčních záznamů: 2/)
+  })
+
+  test('authorization loss clears the selected party and every mounted detail panel', async ({ page }) => {
+    await stubSearch(page)
+    await page.route(`**/api/customer-360/${A.id}`, r => r.fulfill({ status: 200, body: JSON.stringify(A_360) }))
+    await page.route(`**/api/customer-360/${B.id}`, r => r.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: '{"error":"forbidden"}',
+    }))
+
+    await page.goto('/customer-360')
+    await page.getByRole('textbox').fill('Novák')
+    await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+    await page.getByRole('button', { name: /Vybrat Jan Novák|Select Jan Novák/ }).click()
+    await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toBeVisible()
+
+    await page.getByRole('button', { name: /Vybrat Nováková Petra|Select Nováková Petra/ }).click()
+    await expect(page.getByText(/Vypršela relace|Session expired/)).toBeVisible()
+    await expect(page.getByText(/Začněte člověkem, ne UUID|Start with a person, not a UUID/)).toBeVisible()
+    await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toHaveCount(0)
   })
 
   test('/consents defaults to the party lens, so an operator lands on name search', async ({ page }) => {
