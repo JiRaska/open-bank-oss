@@ -18,6 +18,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { useSingleFlight, useIdempotencyKey, wasSkipped } from '@/lib/mutations/singleFlight'
+import { parseVopEvidence } from '@/lib/payments/vopEvidence'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -162,6 +163,7 @@ function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 
 function VopSection({ formData, setFormData }: { formData: SepaFormData; setFormData: React.Dispatch<React.SetStateAction<SepaFormData>> }) {
   const { t } = useLanguage()
+  const requestRef = useRef(0)
   const vopTone: Record<VopStatus, { text: string; bg: string; border: string }> = {
     idle: { text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)' },
     loading: { text: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)' },
@@ -199,29 +201,38 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
           value={formData.creditorName} onChange={e => setFormData({ ...formData, vopStatus: 'idle', vopResult: null, creditorName: e.target.value })} />
         <button type="button" className="btn btn-secondary btn-sm" disabled={!formData.creditorIban || !formData.creditorName || formData.vopStatus === 'loading'}
           onClick={async () => {
+            const request = ++requestRef.current
+            const verifiedIban = formData.creditorIban
+            const verifiedName = formData.creditorName
             setFormData(prev => ({ ...prev, vopStatus: 'loading', vopResult: null }))
             try {
               const res = await fetch(`${VOP_API}/api/v1/vop/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ creditorIban: formData.creditorIban, creditorName: formData.creditorName }),
+                body: JSON.stringify({ creditorIban: verifiedIban, creditorName: verifiedName }),
+                signal: AbortSignal.timeout(8000),
               })
               if (!res.ok) {
                 // The service answered, but not with a verdict. That is not a payee mismatch —
                 // never render it as no_match, which would tell the operator the payee is wrong
                 // when we never actually checked.
-                setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+                setFormData(prev => request === requestRef.current && prev.creditorIban === verifiedIban && prev.creditorName === verifiedName
+                  ? { ...prev, vopStatus: 'no_data', vopResult: null }
+                  : prev)
                 return
               }
-              const body = await res.json() as { status: VopStatus; matchedName?: string | null }
-              // matchedName is only ever populated for close_match (ADR-0171 §6) — the backend
-              // will not echo a name on no_match, so there is nothing to guard here beyond
-              // rendering what we are given.
-              setFormData(prev => ({ ...prev, vopStatus: body.status, vopResult: body.matchedName ?? body.status }))
+              const evidence = parseVopEvidence(await res.json())
+              setFormData(prev => {
+                if (request !== requestRef.current || prev.creditorIban !== verifiedIban || prev.creditorName !== verifiedName) return prev
+                if (!evidence) return { ...prev, vopStatus: 'no_data', vopResult: null }
+                return { ...prev, vopStatus: evidence.status, vopResult: evidence.matchedName ?? evidence.status }
+              })
             } catch {
               // VoP is fail-open (ADR-0171 §3): an unreachable service must not block the payment,
               // but it must never look like a successful verification either.
-              setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+              setFormData(prev => request === requestRef.current && prev.creditorIban === verifiedIban && prev.creditorName === verifiedName
+                ? { ...prev, vopStatus: 'no_data', vopResult: null }
+                : prev)
             }
           }}>
           <ShieldCheck size={12} />{t('Ověřit', 'Verify')}
@@ -906,14 +917,14 @@ function PaymentsContent() {
                     <label htmlFor="sepa-creditor-iban" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN příjemce', 'Creditor IBAN')}</label>
                     <input id="sepa-creditor-iban" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
                       placeholder="CZ65 0800 0000 1920 0014 5399" value={sepaForm.creditorIban}
-                      onChange={e => setSepaForm({ ...sepaForm, creditorIban: e.target.value })} required />
+                      onChange={e => setSepaForm({ ...sepaForm, creditorIban: e.target.value, vopStatus: 'idle', vopResult: null })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
                     <label htmlFor="sepa-creditor-name" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
                     <input id="sepa-creditor-name" className="input" style={{ width: '100%' }} placeholder="John Doe" value={sepaForm.creditorName}
-                      onChange={e => setSepaForm({ ...sepaForm, creditorName: e.target.value })} required />
+                      onChange={e => setSepaForm({ ...sepaForm, creditorName: e.target.value, vopStatus: 'idle', vopResult: null })} required />
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>
                       {t('Max 70 znaků. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (bez diakritiky)', 'Max 70 chars. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (no diacritics)')}
                     </div>
