@@ -4,22 +4,32 @@
 
 'use client'
 
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import type { JournalEntry, CursorPage } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge } from '@/components/ui'
+import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
 
-const STATUS_PILL: Record<string, string> = {
-  POSTED:   'pill pill-success',
-  PENDING:  'pill pill-warning',
-  REVERSED: 'pill pill-neutral',
-  DRAFT:    'pill pill-info',
+const PAGE_SIZE = 20
+const BFF_FAILURES = new Set<UnavailableKind>([
+  'not_deployed',
+  'scaled_to_zero',
+  'unauthorized',
+  'unreachable',
+  'not_found',
+  'error',
+])
+
+function unavailableKind(error: unknown): UnavailableKind {
+  return error instanceof Error && BFF_FAILURES.has(error.message as UnavailableKind)
+    ? error.message as UnavailableKind
+    : 'unreachable'
 }
 
 export default function LedgerPage() {
@@ -27,7 +37,8 @@ export default function LedgerPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
-  const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
+  const [result, setResult]     = useState<LedgerJournalPage | null>(null)
+  const [resultWindow, setResultWindow] = useState<{ from: string; to: string } | null>(null)
   const [loading, setLoading]   = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
@@ -35,47 +46,90 @@ export default function LedgerPage() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [moreError, setMoreError] = useState<string | null>(null)
+  const activeRequest = useRef<AbortController | null>(null)
+  const queryChanged = resultWindow !== null && (resultWindow.from !== fromDate || resultWindow.to !== toDate)
 
-  async function loadPage(cursor?: string) {
+  useEffect(() => () => {
+    const controller = activeRequest.current
+    activeRequest.current = null
+    controller?.abort()
+  }, [])
+
+  function updateWindow(setter: (value: string) => void, value: string) {
+    const controller = activeRequest.current
+    activeRequest.current = null
+    controller?.abort()
+    setLoading(false)
+    setLoadingMore(false)
+    setter(value)
+  }
+
+  async function loadPage(from: string, to: string, signal: AbortSignal, cursor?: string) {
     try {
-      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate, toDate, limit: '20', ...(cursor ? { cursor } : {}) }), {
-        signal: AbortSignal.timeout(8000),
+      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate: from, toDate: to, limit: String(PAGE_SIZE), ...(cursor ? { cursor } : {}) }), {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
       })
       if (!res.ok) {
         throw new Error(await classifyBffFailure(res))
       }
-      return await res.json() as CursorPage<JournalEntry>
+      try {
+        return parseLedgerJournalPage(await res.json(), PAGE_SIZE)
+      } catch {
+        throw new Error('error')
+      }
     } catch (error) {
-      throw error instanceof Error ? error : new Error('unreachable')
+      throw new Error(unavailableKind(error))
     }
   }
 
   async function search() {
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setLoadingMore(false)
+    const requestedWindow = { from: fromDate, to: toDate }
     setLoading(true); setUnavailable(null); setMoreError(null)
     try {
-      const next = await loadPage()
+      const next = await loadPage(requestedWindow.from, requestedWindow.to, controller.signal)
+      if (controller.signal.aborted) return
       setResult(next)
+      setResultWindow(requestedWindow)
       setExpanded(null)
     } catch (error) {
       // Timeout / abort / network — the BFF or ledger-service didn't answer.
-      setUnavailable({ kind: (error as Error).message as UnavailableKind || 'unreachable' })
-    } finally { setLoading(false) }
+      if (!controller.signal.aborted) setUnavailable({ kind: unavailableKind(error) })
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        setLoading(false)
+      }
+    }
   }
 
   async function loadMore() {
+    if (queryChanged || !resultWindow) return
     const cursor = result?.pagination.nextCursor
     if (!cursor) return
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setLoading(false)
     setLoadingMore(true); setMoreError(null)
     try {
-      const next = await loadPage(cursor)
-      setResult(previous => previous ? {
-        data: [...previous.data, ...next.data],
-        pagination: next.pagination,
-      } : next)
+      const next = await loadPage(resultWindow.from, resultWindow.to, controller.signal, cursor)
+      if (controller.signal.aborted) return
+      const existing = new Set(result?.data.map(entry => entry.id) ?? [])
+      if (next.data.some(entry => existing.has(entry.id))) throw new Error('Duplicate ledger page')
+      setResult(previous => previous ? { data: [...previous.data, ...next.data], pagination: next.pagination } : next)
     } catch {
       // Keep already-read ledger records visible; a failed next page must not erase evidence.
-      setMoreError(t('Další stránku se nepodařilo načíst. Zkuste to znovu.', 'The next page could not be loaded. Try again.'))
-    } finally { setLoadingMore(false) }
+      if (!controller.signal.aborted) setMoreError(t('Další stránku se nepodařilo načíst. Zkuste to znovu.', 'The next page could not be loaded. Try again.'))
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        setLoadingMore(false)
+      }
+    }
   }
 
   return (
@@ -100,9 +154,9 @@ export default function LedgerPage() {
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
         }}>
           <label htmlFor="ledger-from-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
-          <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => updateWindow(setFromDate, e.target.value)} />
           <label htmlFor="ledger-to-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
-          <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
+          <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => updateWindow(setToDate, e.target.value)} />
           <button type="button" className="btn btn-primary" onClick={search} disabled={loading} aria-busy={loading}>
             <Search size={13} aria-hidden="true" />
             {loading ? t('Načítání…', 'Loading…') : t('Načíst záznamy', 'Load Entries')}
@@ -113,6 +167,15 @@ export default function LedgerPage() {
             </span>
           )}
         </div>
+
+        {queryChanged && resultWindow && (
+          <div role="status" aria-live="polite" style={{ margin: '10px 16px', padding: '10px 12px', borderRadius: 8, background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', color: 'var(--warning-text)', fontSize: 12 }}>
+            {t(
+              `Zobrazený snapshot patří období ${resultWindow.from}–${resultWindow.to}. Pro nové období načtěte záznamy znovu; stránkování je do té doby uzamčeno.`,
+              `The visible snapshot belongs to ${resultWindow.from}–${resultWindow.to}. Load entries for the new period; pagination is locked until then.`,
+            )}
+          </div>
+        )}
 
         {/* Calm, explained unavailable state — never a raw HTTP status. */}
         {unavailable && !result && (
@@ -156,19 +219,20 @@ export default function LedgerPage() {
                 <th>{t('Datum záznamu', 'Entry Date')}</th>
                 <th>{t('Datum valuty', 'Value Date')}</th>
                 <th>{t('Stav', 'Status')}</th>
+                <th>{t('Původ', 'Origin')}</th>
                 <th>{t('Řádky', 'Lines')}</th>
                 <th>{t('Popis', 'Description')}</th>
               </tr>
             </thead>
             <tbody>
               {!result && !loading && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
               )}
               {loading && !result && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
               )}
               {!loading && result && result.data.length === 0 && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
               )}
               {result?.data.map(entry => {
                 const isOpen = expanded === entry.id
@@ -184,7 +248,8 @@ export default function LedgerPage() {
                       <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.entryDate}</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.valueDate}</span></td>
-                      <td><span className={STATUS_PILL[entry.status] ?? 'pill pill-neutral'}>{entry.status}</span></td>
+                      <td><StatusBadge status={entry.status} /></td>
+                      <td><StatusBadge status={entry.synthetic ? 'SYNTHETIC' : 'BUSINESS'} tone={entry.synthetic ? 'info' : 'neutral'} label={entry.synthetic ? t('Canary', 'Canary') : t('Obchodní', 'Business')} /></td>
                       <td>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -203,7 +268,7 @@ export default function LedgerPage() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                        <td colSpan={9} style={{ padding: 0, background: 'var(--surface-2)' }}>
                           <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                               {t('Řádky deníku', 'Journal Lines')}
@@ -212,6 +277,7 @@ export default function LedgerPage() {
                               <thead>
                                 <tr style={{ color: 'var(--text-tertiary)' }}>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Účet HK', 'GL Account')}</th>
+                                  <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Podúčet', 'Sub-account')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Strana', 'Side')}</th>
                                   <th style={{ textAlign: 'right', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Částka', 'Amount')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>CCY</th>
@@ -224,6 +290,9 @@ export default function LedgerPage() {
                                   <tr key={line.id} style={{ borderTop: '1px solid var(--border)' }}>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span className="mono" style={{ fontSize: '11px' }}>{line.glAccountId.slice(0, 8)}…</span>
+                                    </td>
+                                    <td style={{ padding: '6px 12px 6px 0' }}>
+                                      <span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{line.subAccountId ? `${line.subAccountId.slice(0, 8)}…` : '—'}</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span style={{
@@ -260,7 +329,7 @@ export default function LedgerPage() {
         {result?.pagination.hasNextPage && (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
             {moreError && <p role="alert" style={{ margin: '0 0 8px', fontSize: '12px', color: 'var(--danger-text)' }}>{moreError}</p>}
-            <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore} aria-busy={loadingMore}>
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore || queryChanged} aria-busy={loadingMore}>
               {loadingMore ? t('Načítám…', 'Loading…') : t('Načíst další', 'Load more')}
             </button>
           </div>
