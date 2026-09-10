@@ -17,13 +17,17 @@ import {
   type SanctionsList,
   type SanctionsListChangeError,
 } from '@/components/sanctions/SanctionsListChangeDialog'
+import {
+  SanctionsApprovalDecisionDialog,
+  type ApprovalDecisionIntent,
+  type PendingApprovalItem,
+} from '@/components/sanctions/SanctionsApprovalDecisionDialog'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { readApprovalId } from '@/lib/approvals/triage'
 
 interface SanctionCheck {
@@ -61,20 +65,6 @@ interface PendingApprovalResponse {
 }
 
 // One row of the checker's queue (GET /api/v1/sanctions/approvals, #3472).
-interface PendingApprovalItem {
-  id: string
-  action: string
-  resourceId?: string | null
-  status: string
-  makerId?: string | null
-  createdAt?: string | null
-}
-
-interface ApprovalDecisionIntent {
-  approval: PendingApprovalItem
-  approve: boolean
-}
-
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
 const DAY_LABELS_CS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
 const DAY_LABELS_EN: Record<string,string> = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' }
@@ -1186,56 +1176,4 @@ export default function SanctionsPage() {
       />}
     </AuthGuard>
   )
-}
-
-function SanctionsApprovalDecisionDialog({ intent, busy, message, onCancel, onConfirm }: {
-  intent: ApprovalDecisionIntent
-  busy: boolean
-  message: string
-  onCancel: () => void
-  onConfirm: () => Promise<void>
-}) {
-  const { t } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `sanctions-approval-${intent.approval.id}-title`
-  const impactId = `sanctions-approval-${intent.approval.id}-impact`
-  const action = intent.approve ? t('Schválit žádost', 'Approve request') : t('Zamítnout žádost', 'Reject request')
-
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
-  ><div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
-    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-      <AlertTriangle aria-hidden="true" size={19} style={{ color: intent.approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
-      <div>
-        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}</h2>
-        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-          {intent.approve
-            ? t('Potvrdíte rozhodnutí jiného operátora. Maker pak může znovu odeslat řízenou sankční dispozici; toto schválení ji samo neprovede.', 'You are confirming another operator’s decision. The maker may then retry the governed sanctions disposition; this approval does not execute it.')
-            : t('Žádost odmítnete. Maker toto schválení nemůže použít a sankční dispozice se neprovede.', 'You are refusing the request. The maker cannot use this approval and the sanctions disposition will not execute.')}
-        </p>
-      </div>
-    </div>
-    <div style={{ marginTop: 14, padding: '11px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5 }}>
-      <div><strong>{t('Akce', 'Action')}:</strong> {intent.approval.action}</div>
-      <div style={{ marginTop: 5 }}><strong>{t('Požádal', 'Requested by')}:</strong> {intent.approval.makerId ?? t('neuvedeno', 'not provided')}</div>
-      <div style={{ marginTop: 5, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}><strong>{t('ID žádosti', 'Approval ID')}:</strong> {intent.approval.id}</div>
-    </div>
-    {message && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{message}</p>}
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-      <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
-      <button type="button" className={intent.approve ? 'btn btn-primary' : 'btn btn-danger'} disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}>
-        {busy ? t('Ukládám rozhodnutí…', 'Recording decision…') : intent.approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
-      </button>
-    </div>
-  </div></div>
 }

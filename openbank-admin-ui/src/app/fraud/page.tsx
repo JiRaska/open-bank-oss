@@ -14,19 +14,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-
-type ScoredRecord = {
-  scoreId: string
-  amount: number
-  currency: string
-  rail: string
-  accountId: string | null
-  counterpartyId: string | null
-  verdict: string
-  score: number
-  ruleVersion: string
-  createdAt: string
-}
+import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
 
 function scoreTone(score: number): Tone {
   if (score >= 80) return 'danger'
@@ -37,7 +25,7 @@ function scoreTone(score: number): Tone {
 export default function FraudPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [rows, setRows] = useState<ScoredRecord[]>([])
+  const [rows, setRows] = useState<FraudReviewEvidence[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [hasSnapshot, setHasSnapshot] = useState(false)
@@ -51,8 +39,15 @@ export default function FraudPage() {
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json() as unknown
-      setRows(Array.isArray(data) ? data as ScoredRecord[] : [])
+      const raw = await res.json() as unknown
+      let nextRows: FraudReviewEvidence[]
+      try {
+        nextRows = parseFraudReviewQueue(raw)
+      } catch {
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setRows(nextRows)
       setHasSnapshot(true)
       setLastUpdatedAt(new Date())
       setUnavailable(null)

@@ -15,6 +15,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.domain.identifiers.Ids
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -24,6 +25,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -79,6 +81,8 @@ class SavingsProposalServiceTest {
     @Test
     fun `propose creates a PENDING proposal and an approval record`(): Unit = runBlocking {
         coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
+            emptyList()
         coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
@@ -90,6 +94,59 @@ class SavingsProposalServiceTest {
         coVerify {
             approvalStore.create("savings.withdraw.execute", created.proposal.id.toString(), delegate.toString())
         }
+    }
+
+    @Test
+    fun `propose replays the still-pending identical proposal instead of stacking a duplicate (ADR-0295)`(): Unit =
+        runBlocking {
+            val original = WithdrawalProposal(
+                id = Ids.newId(),
+                accountId = accountId,
+                delegatePartyId = delegate,
+                amountMinor = 150_000,
+                currency = "CZK",
+                note = "kolo",
+                approvalId = "approval-orig",
+                createdAt = now.minusSeconds(60),
+                expiresAt = now.plus(Duration.ofHours(47)),
+            )
+            coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+            coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
+                listOf(original)
+
+            val created = service.propose(command())
+
+            assertThat(created.proposal).isEqualTo(original)
+            assertThat(created.approvalId).isEqualTo("approval-orig")
+            // No second approval record, no second row.
+            coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { proposalRepository.save(any<WithdrawalProposal>()) }
+        }
+
+    @Test
+    fun `propose persists a fresh proposal when the identical one already expired`(): Unit = runBlocking {
+        val expired = WithdrawalProposal(
+            id = Ids.newId(),
+            accountId = accountId,
+            delegatePartyId = delegate,
+            amountMinor = 150_000,
+            currency = "CZK",
+            note = "kolo",
+            approvalId = "approval-old",
+            createdAt = now.minus(Duration.ofDays(3)),
+            expiresAt = now.minus(Duration.ofDays(1)),
+        )
+        coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+        // The sweep may not have flipped it yet — it is still PENDING but expired.
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
+            listOf(expired)
+        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
+
+        val created = service.propose(command())
+
+        assertThat(created.proposal.id).isNotEqualTo(expired.id)
+        coVerify(exactly = 1) { proposalRepository.save(any<WithdrawalProposal>()) }
     }
 
     @Test

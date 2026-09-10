@@ -139,7 +139,15 @@ private fun OnboardingEntity.toDomain() = OnboardingRecord(
     email = email,
     partyStatus = PartyStage.valueOf(partyStatus),
     kycCaseId = kycCaseId,
-    kycStatus = kycStatus?.let { runCatching { KycStage.valueOf(it) }.getOrNull() },
+    // Read-back must fail fast, never coerce to null (#9038): a kycStatus the enum no longer
+    // knows means the stored vocabulary drifted from the code — silently returning null would
+    // report the case as "no KYC status" and the funnel would quietly lose the party. The two
+    // siblings already throw via valueOf; this one now does too.
+    kycStatus = kycStatus?.let {
+        runCatching { KycStage.valueOf(it) }.getOrElse { e ->
+            throw IllegalStateException("onboarding.kycStatus '$it' not present in KycStage", e)
+        }
+    },
     scaEnrolled = scaEnrolled,
     deviceCount = deviceCount,
     funnelStage = FunnelStage.valueOf(funnelStage),
