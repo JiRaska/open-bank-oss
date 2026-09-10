@@ -85,7 +85,9 @@ class FeatureCatalogueCoverageTest {
         val declared = declaredFeatures()
         assertTrue(declared.size >= 2, "parsed only ${declared.size} features — the probe is broken")
 
-        val reachable = (FeatureCatalogues.ONLINE_SERVED_FEATURES + MONEY_FLOW_FEATURES).map { it.name }.toSet()
+        val reachable = (FeatureCatalogues.ONLINE_SERVED_FEATURES + MONEY_FLOW_FEATURES + ENGAGEMENT_FEATURES).map {
+            it.name
+        }.toSet()
         assertTrue(
             reachable.size >= declared.size,
             "declared ${declared.size} feature(s) in source but only ${reachable.size} are reachable " +
@@ -97,7 +99,7 @@ class FeatureCatalogueCoverageTest {
     /** Two features sharing a store key would overwrite each other in the online store. */
     @Test
     fun `feature names are unique across every catalogue`() {
-        val all = FeatureCatalogues.ONLINE_SERVED_FEATURES + MONEY_FLOW_FEATURES
+        val all = FeatureCatalogues.ONLINE_SERVED_FEATURES + MONEY_FLOW_FEATURES + ENGAGEMENT_FEATURES
         val dupes = all.map { it.name }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         assertTrue(dupes.isEmpty(), "duplicate feature names: $dupes")
     }
