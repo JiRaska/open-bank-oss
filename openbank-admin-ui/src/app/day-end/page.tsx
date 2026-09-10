@@ -33,6 +33,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
+import {
+  parseCloseFailures, parseCloseRun, parseCloseRuns, parseReconciliationReport,
+  type CloseFailure, type CloseRun, type ReconciliationReport,
+} from '@/lib/closings/evidence'
 
 const POLL = 30_000
 // A healthy daily tie-out (23:30) is at most ~24h old; past 25h the day's close likely
@@ -105,24 +109,6 @@ function ClosingsContent() {
 // EoD — daily ledger ⇄ sub-ledger tie-out (unchanged behaviour)
 // ---------------------------------------------------------------------------
 
-interface CurrencyReconciliation {
-  currency: string
-  ledgerControlBalance: number | string
-  subLedgerBookedSum: number | string
-  difference: number | string
-  withinTolerance: boolean
-  // ADR-0178 Phase 3 — future-value-dated pipeline (posted, not yet effective). Optional: reports
-  // recorded before the field existed omit it, so render 0 rather than NaN.
-  futureValueDatedPipeline?: number | string
-}
-
-interface ReconciliationReport {
-  asOf: string
-  generatedAt: string
-  tolerance: number | string
-  currencies: CurrencyReconciliation[]
-}
-
 function num(v: number | string): number {
   return typeof v === 'number' ? v : Number(v)
 }
@@ -134,6 +120,7 @@ function EodPanel() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [excludedCurrencies, setExcludedCurrencies] = useState(0)
   const busyRef = useRef(false)
 
   const refresh = useCallback(async (spinner = false) => {
@@ -151,20 +138,30 @@ function EodPanel() {
         // service (404 "Unknown service" → not_deployed) via the classifier.
         const kind = await classifyBffFailure(res)
         setReport(null)
+        setExcludedCurrencies(0)
         setUnavailable({ kind: kind === 'not_found' ? 'no_data' : kind })
         return
       }
       if (!res.ok) {
         setReport(null)
+        setExcludedCurrencies(0)
         setUnavailable({ kind: await classifyBffFailure(res) as BffFailure })
         return
       }
-      const data = (await res.json()) as ReconciliationReport
-      setReport(data)
+      const parsed = parseReconciliationReport(await res.json())
+      if (!parsed.value) {
+        setReport(null)
+        setExcludedCurrencies(0)
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setReport(parsed.value)
+      setExcludedCurrencies(parsed.excludedCount)
       setUnavailable(null)
       setLastRefreshed(new Date())
     } catch {
       setReport(null)
+      setExcludedCurrencies(0)
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -174,9 +171,9 @@ function EodPanel() {
   }, [])
 
   useEffect(() => {
-    refresh()
+    const initial = window.setTimeout(() => { void refresh() }, 0)
     const id = setInterval(() => refresh(), POLL)
-    return () => clearInterval(id)
+    return () => { window.clearTimeout(initial); clearInterval(id) }
   }, [refresh])
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -242,6 +239,7 @@ function EodPanel() {
         </div>
       ) : report ? (
         <>
+          {excludedCurrencies > 0 && <EvidenceWarning count={excludedCurrencies} subject={t('měnových řádků', 'currency rows')} />}
           {/* Staleness warning — a report exists but the last tie-out is older than the daily SLA,
               so today's close likely didn't run. The report below is then a stale prior day. */}
           {(() => {
@@ -390,32 +388,6 @@ function EodPanel() {
 // EoM — monthly statement close runs (ADR-0069 D3 / issue #470)
 // ---------------------------------------------------------------------------
 
-interface CloseRun {
-  id: string
-  trigger: 'SCHEDULED' | 'MANUAL'
-  status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_FAILURES'
-  periodFrom: string | null
-  periodTo: string | null
-  accountsEnumerated: number
-  pocketsClosed: number
-  pocketsFailed: number
-  pocketsSkipped: number
-  startedAt: string
-  finishedAt: string | null
-}
-
-interface CloseFailure {
-  id: string
-  runId: string
-  accountId: string
-  pocketCurrency: string
-  periodFrom: string
-  periodTo: string
-  reason: 'RECONCILIATION' | 'UPSTREAM' | 'UNKNOWN'
-  detail: string | null
-  failedAt: string
-}
-
 type FailuresState = 'loading' | 'error' | CloseFailure[]
 
 /**
@@ -432,6 +404,7 @@ function EomPanel() {
   const canTrigger = hasPermission(roles, 'closings:run')
 
   const [runs, setRuns] = useState<CloseRun[]>([])
+  const [excludedRuns, setExcludedRuns] = useState(0)
   const [empty, setEmpty] = useState(false)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -443,6 +416,7 @@ function EomPanel() {
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
+  const [excludedFailures, setExcludedFailures] = useState<Record<string, number>>({})
   const busyRef = useRef(false)
   // Operator-local check trail — survives reloads and (crucially) statement-service
   // outages, so a later operator/agent can see WHEN the close was checked and what
@@ -459,16 +433,24 @@ function EomPanel() {
       })
       if (!res.ok) {
         setRuns([]); setEmpty(false)
+        setExcludedRuns(0)
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const list = (await res.json()) as CloseRun[]
-      setRuns(list)
-      setEmpty(list.length === 0)
+      const parsed = parseCloseRuns(await res.json())
+      if (!parsed.value) {
+        setRuns([]); setEmpty(false); setExcludedRuns(0)
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setRuns(parsed.value)
+      setExcludedRuns(parsed.excludedCount)
+      setEmpty(parsed.value.length === 0)
       setUnavailable(null)
       setLastRefreshed(new Date())
     } catch {
       setRuns([]); setEmpty(false)
+      setExcludedRuns(0)
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -481,9 +463,9 @@ function EomPanel() {
   const latest = runs[0] ?? null
   const running = latest?.status === 'RUNNING'
   useEffect(() => {
-    load()
+    const initial = window.setTimeout(() => { void load() }, 0)
     const id = setInterval(() => load(), running ? RUNNING_POLL : POLL)
-    return () => clearInterval(id)
+    return () => { window.clearTimeout(initial); clearInterval(id) }
   }, [load, running])
 
   // Record each distinct observed state (deduped by signature) so the check trail
@@ -518,7 +500,12 @@ function EomPanel() {
         return
       }
       // Optimistic: show the accepted run immediately, then refresh the history.
-      const acceptedRun = (await res.json()) as CloseRun
+      const acceptedRun = parseCloseRun(await res.json())
+      if (!acceptedRun) {
+        setNotice({ ok: false, text: t('Služba přijala požadavek, ale vrátila neplatné potvrzení běhu. Ověřte historii před dalším spuštěním.', 'The service accepted the request but returned invalid run evidence. Check history before triggering again.') })
+        void load()
+        return
+      }
       setRuns(prev => [acceptedRun, ...prev.filter(r => r.id !== acceptedRun.id)])
       setEmpty(false)
       setNotice({ ok: true, text: t('Catch-up uzávěrka přijata.', 'Catch-up close run accepted.') })
@@ -554,8 +541,13 @@ function EomPanel() {
         setFailures(prev => ({ ...prev, [run.id]: 'error' }))
         return
       }
-      const data = (await res.json().catch(() => [])) as CloseFailure[]
-      setFailures(prev => ({ ...prev, [run.id]: Array.isArray(data) ? data : [] }))
+      const parsed = parseCloseFailures(await res.json().catch(() => null), run.id)
+      if (!parsed.value) {
+        setFailures(prev => ({ ...prev, [run.id]: 'error' }))
+        return
+      }
+      setFailures(prev => ({ ...prev, [run.id]: parsed.value! }))
+      setExcludedFailures(prev => ({ ...prev, [run.id]: parsed.excludedCount }))
     } catch {
       setFailures(prev => ({ ...prev, [run.id]: 'error' }))
     }
@@ -669,6 +661,8 @@ function EomPanel() {
         </div>
       )}
 
+      {excludedRuns > 0 && <EvidenceWarning count={excludedRuns} subject={t('běhů uzávěrky', 'close runs')} />}
+
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton" style={{ height: '96px' }} />)}
@@ -761,6 +755,7 @@ function EomPanel() {
                         expandable={expandable}
                         isOpen={isOpen}
                         fState={fState}
+                        excludedCount={excludedFailures[run.id] ?? 0}
                         onToggle={() => void toggleFailures(run)}
                         statusPill={statusPill}
                         reasonLabel={reasonLabel}
@@ -871,11 +866,12 @@ function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCance
   </div>
 }
 
-function RunRows({ run, expandable, isOpen, fState, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
+function RunRows({ run, expandable, isOpen, fState, excludedCount, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
   run: CloseRun
   expandable: boolean
   isOpen: boolean
   fState: FailuresState | undefined
+  excludedCount: number
   onToggle: () => void
   statusPill: (s: CloseRun['status']) => React.ReactNode
   reasonLabel: (r: CloseFailure['reason']) => string
@@ -913,6 +909,7 @@ function RunRows({ run, expandable, isOpen, fState, onToggle, statusPill, reason
       {expandable && isOpen && (
         <tr style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
           <td colSpan={9} style={{ padding: '10px 16px 14px 38px' }}>
+            {excludedCount > 0 && <EvidenceWarning count={excludedCount} subject={t('detailů selhání', 'failure details')} compact />}
             {fState === 'loading' || fState === undefined ? (
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítání chyb…', 'Loading failures…')}</span>
             ) : fState === 'error' ? (
@@ -971,6 +968,18 @@ function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; val
         <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '1px' }}>{label}</div>
       </div>
     </div>
+  )
+}
+
+function EvidenceWarning({ count, subject, compact = false }: { count: number; subject: string; compact?: boolean }) {
+  const { t } = useLanguage()
+  return (
+    <p role="alert" style={{ margin: compact ? '0 0 10px' : '0 0 16px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>
+      {t(
+        `Vyřazená neplatná data (${subject}): ${count}. Zobrazené souhrny používají pouze ověřená data.`,
+        `Invalid evidence excluded (${subject}): ${count}. Displayed totals use validated evidence only.`,
+      )}
+    </p>
   )
 }
 

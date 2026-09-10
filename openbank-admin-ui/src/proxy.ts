@@ -6,6 +6,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { hasPermission, permissionForPath } from "@/lib/auth/roles"
 import { isPublicSurface } from "@/lib/auth/publicSurface"
+import { scriptSourceDirective } from "@/lib/security/contentSecurityPolicy"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
@@ -23,7 +24,7 @@ const GLITCHTIP_ORIGIN = (() => {
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    scriptSourceDirective(nonce, process.env.NODE_ENV === 'development'),
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob:",
