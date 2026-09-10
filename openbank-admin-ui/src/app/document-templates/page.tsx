@@ -18,7 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -34,7 +34,6 @@ const PREVIEW_PATH = `${TEMPLATES_PATH}/preview`
 const DOCUMENTS_PATH = '/api/v1/documents'
 
 const PAGE_SIZE = 25
-const CONTENT_TABS = ['templates', 'documents'] as const
 
 type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'RETIRED'
 
@@ -197,19 +196,6 @@ export default function DocumentTemplatesPage() {
   const canEdit = hasPermission(roles, 'templates:edit')
 
   const [tab, setTab] = useState<'templates' | 'documents'>('templates')
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let nextIndex: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % CONTENT_TABS.length
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + CONTENT_TABS.length) % CONTENT_TABS.length
-    if (event.key === 'Home') nextIndex = 0
-    if (event.key === 'End') nextIndex = CONTENT_TABS.length - 1
-    if (nextIndex === null) return
-    event.preventDefault()
-    setTab(CONTENT_TABS[nextIndex])
-    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
-  }
 
   // ── Templates list ──────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<DocumentTemplate[]>([])
@@ -222,6 +208,8 @@ export default function DocumentTemplatesPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
 
   const [modalOpen, setModalOpen] = useState(false)
+  const modalCloseRef = useRef<HTMLButtonElement>(null)
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<DocumentTemplate | null>(null)
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
@@ -374,7 +362,8 @@ export default function DocumentTemplatesPage() {
     previewRequestIdRef.current++
   }
 
-  const openCreateModal = () => {
+  const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(null)
     setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
     setActionError(null)
@@ -382,7 +371,8 @@ export default function DocumentTemplatesPage() {
     setModalOpen(true)
   }
 
-  const openEditModal = (tpl: DocumentTemplate) => {
+  const openEditModal = (event: React.MouseEvent<HTMLButtonElement>, tpl: DocumentTemplate) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(tpl)
     setFormData({ ...tpl })
     setActionError(null)
@@ -476,21 +466,17 @@ export default function DocumentTemplatesPage() {
             </button>
           </div>} />
 
-        <div role="tablist" aria-label={t('Obsah šablon dokumentů', 'Document template content')} style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
-          {([
-            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} /> },
-            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} /> },
-          ]).map((tb, index) => (
-            <button key={tb.id} ref={element => { tabRefs.current[index] = element }} id={`document-${tb.id}-tab`} role="tab" tabIndex={tab === tb.id ? 0 : -1} aria-selected={tab === tb.id} aria-controls={`document-${tb.id}-panel`} onKeyDown={event => moveTabFocus(event, index)} onClick={() => setTab(tb.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '13px', fontWeight: 600,
-                border: 'none', borderBottom: tab === tb.id ? '2px solid var(--accent)' : '2px solid transparent',
-                background: 'none', cursor: 'pointer', color: tab === tb.id ? 'var(--accent)' : 'var(--text-secondary)',
-              }}>
-              <span aria-hidden="true">{tb.icon}</span>{tb.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          items={[
+            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} />, tabId: 'document-templates-tab', panelId: 'document-templates-panel' },
+            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} />, tabId: 'document-documents-tab', panelId: 'document-documents-panel' },
+          ] satisfies readonly TabItem<typeof tab>[]}
+          value={tab}
+          onChange={setTab}
+          label={t('Obsah šablon dokumentů', 'Document template content')}
+          idPrefix="document"
+          style={{ marginBottom: 18, borderBottom: '1px solid var(--border)' }}
+        />
 
         <section id="document-templates-panel" role="tabpanel" aria-labelledby="document-templates-tab" hidden={tab !== 'templates'}>
             {unavailable && (
@@ -574,7 +560,7 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
+                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={event => openEditModal(event, tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
@@ -608,15 +594,33 @@ export default function DocumentTemplatesPage() {
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" role="dialog" aria-modal="true" aria-labelledby="template-editor-title" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <Dialog.Root open onOpenChange={open => { if (!open && !saving) setModalOpen(false) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.65)' }} />
+            <Dialog.Content
+              className="card"
+              aria-busy={saving}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                const codeInput = document.getElementById('template-code') as HTMLInputElement | null
+                if (codeInput && !codeInput.disabled) codeInput.focus()
+                else modalCloseRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                if (modalReturnFocusRef.current?.isConnected) modalReturnFocusRef.current.focus()
+              }}
+              onEscapeKeyDown={event => { if (saving) event.preventDefault() }}
+              onPointerDownOutside={event => { if (saving) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(920px, calc(100% - 40px))', maxHeight: '92vh', overflowY: 'auto' }}
+            >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 id="template-editor-title" style={{ fontSize: '15px', fontWeight: 700 }}>
+              <Dialog.Title style={{ fontSize: '15px', fontWeight: 700 }}>
                 {!canEdit
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
-              </h2>
-              <button type="button" aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              </Dialog.Title>
+              <button ref={modalCloseRef} type="button" disabled={saving} aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -803,8 +807,9 @@ export default function DocumentTemplatesPage() {
                 )}
               </div>
             </form>
-          </div>
-        </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Inline confirm for publish/retire — never a raw browser confirm()/alert() */}
