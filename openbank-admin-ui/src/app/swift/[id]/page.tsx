@@ -4,33 +4,18 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
-import { readStashedRow } from '@/lib/services/rowHandoff'
+import { clearStashedRow, readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
-
-interface SwiftMessage {
-  id: string
-  messageType?: string
-  senderBic?: string
-  receiverBic?: string
-  amount?: number
-  currency?: string
-  status?: string
-  reference?: string
-  createdAt?: string
-  [k: string]: unknown
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--success)', PROCESSING: 'var(--info-text)', PENDING: 'var(--warning)', FAILED: 'var(--danger)',
-}
+import { StatusBadge } from '@/components/ui'
+import { parseSwiftMessages, swiftStatusTone, type SwiftMessage } from '@/lib/swift/swiftMessageContract'
 
 export default function SwiftDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -40,32 +25,68 @@ export default function SwiftDetailPage() {
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [showRaw, setShowRaw] = useState(false)
+  const requestRef = useRef<AbortController | null>(null)
 
-  async function load() {
+  const load = useCallback(async (readHandoff = false) => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     setLoading(true)
-    const stashed = readStashedRow<SwiftMessage>('swift', id)
-    if (stashed) { setMessage(stashed); setUnavailable(null) }
+    if (readHandoff) setMessage(null)
+    const stashed = readHandoff ? readStashedRow<SwiftMessage>('swift', id) : null
+    if (stashed) {
+      try {
+        setMessage(parseSwiftMessages([stashed])[0] ?? null)
+        setUnavailable(null)
+      } catch {
+        clearStashedRow('swift', id)
+      }
+    }
+    const deadline = setTimeout(() => controller.abort(), 8_000)
     try {
-      // No by-id backend endpoint — re-fetch the list and pick this id out.
-      const res = await fetch(svcUrl('swift-service', '/api/v1/swift/messages'), { signal: AbortSignal.timeout(10_000), cache: 'no-store' })
+      // The by-id endpoint exposes the domain model rather than this list response contract, so
+      // re-fetch the validated queue shape and select the requested message.
+      const res = await fetch(svcUrl('swift-service', '/api/v1/swift/messages'), { signal: controller.signal, cache: 'no-store' })
+      if (requestRef.current !== controller) return
       if (!res.ok) {
-        if (!stashed) setUnavailable({ kind: await classifyBffFailure(res) })
-        setLoading(false)
+        const kind = await classifyBffFailure(res)
+        if (requestRef.current !== controller) return
+        if (kind === 'unauthorized') {
+          clearStashedRow('swift', id)
+          setMessage(null)
+        }
+        setUnavailable({ kind })
         return
       }
       const body = (await res.json()) as unknown
-      const items = (Array.isArray(body) ? body : ((body as { messages?: unknown[] }).messages ?? [])) as SwiftMessage[]
+      if (requestRef.current !== controller) return
+      const items = parseSwiftMessages(body)
       const found = items.find(m => m.id === id)
       if (found) { setMessage(found); setUnavailable(null) }
-      else if (!stashed) setUnavailable({ kind: 'not_found' })
+      else {
+        clearStashedRow('swift', id)
+        setMessage(null)
+        setUnavailable({ kind: 'not_found' })
+      }
     } catch {
-      if (!stashed) setUnavailable({ kind: 'unreachable' })
+      if (requestRef.current === controller) setUnavailable({ kind: 'unreachable' })
     } finally {
-      setLoading(false)
+      clearTimeout(deadline)
+      if (requestRef.current === controller) {
+        requestRef.current = null
+        setLoading(false)
+      }
     }
-  }
+  }, [id])
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id])
+  useEffect(() => {
+    void load(true)
+    return () => {
+      const activeRequest = requestRef.current
+      requestRef.current = null
+      activeRequest?.abort()
+    }
+  }, [load])
 
   return (
     <AuthGuard permission="payment-rails:view">
@@ -75,12 +96,12 @@ export default function SwiftDetailPage() {
         subtitle={t('Detail SWIFT zprávy — ISO 20022', 'SWIFT message detail — ISO 20022')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/swift" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('SWIFT zprávy', 'SWIFT')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {message?.status && <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>{message.status}</span>}
+          {message?.status && <StatusBadge status={message.status} tone={swiftStatusTone(message.status)} />}
           <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
           <button
             className="btn btn-secondary"
             type="button"
-            onClick={load}
+            onClick={() => void load(false)}
             disabled={loading}
             aria-busy={loading}
             aria-label={t('Obnovit SWIFT zprávu', 'Refresh SWIFT message')}
@@ -89,6 +110,13 @@ export default function SwiftDetailPage() {
           </button>
         </div>}
       />
+
+      {message && unavailable && <div role="status" aria-live="polite" style={{ marginBottom: 14 }}>
+        <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('Aktualizace SWIFT zprávy', 'SWIFT message refresh')} lang={language} dense />
+        <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Zobrazen je poslední ověřený snapshot; stav zprávy se mohl změnit.', 'Showing the last verified snapshot; the message status may have changed.')}
+        </p>
+      </div>}
 
       {loading && !message ? (
         <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -24,7 +24,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { RefreshCw, TrendingUp, Layers, Wallet, AlertTriangle, Clock } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -93,8 +93,14 @@ export default function LendingPage() {
    *  refresh must not turn a previously-confirmed figure into a dash, and a stale-but-confirmed
    *  figure is more useful than a placeholder (#7918). */
   const [loaded, setLoaded] = useState(false)
+  // Own one load at a time. A route change or a newer refresh aborts the old four-request batch,
+  // so a late response can neither overwrite fresher evidence nor update React after unmount.
+  const activeLoad = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
+    activeLoad.current?.abort()
+    const controller = new AbortController()
+    activeLoad.current = controller
     setLoading(true)
     try {
       // The lists still load: the rows are the drill-down, and the summaries carry no identities.
@@ -103,16 +109,18 @@ export default function LendingPage() {
       // take the console with it.
       const okJson = (r: Response) => (r.ok ? r.json() : null)
       const [appsRes, loansRes, appSum, loanSum] = await Promise.all([
-        fetch(svcUrl('lending-service', '/api/v1/lending/applications/recent', { limit: String(LIMIT) }), { cache: 'no-store' }),
-        fetch(svcUrl('lending-service', '/api/v1/lending/loans/active', { limit: String(LIMIT) }), { cache: 'no-store' }),
-        fetch(svcUrl('lending-service', '/api/v1/lending/applications/summary'), { cache: 'no-store' })
+        fetch(svcUrl('lending-service', '/api/v1/lending/applications/recent', { limit: String(LIMIT) }), { cache: 'no-store', signal: controller.signal }),
+        fetch(svcUrl('lending-service', '/api/v1/lending/loans/active', { limit: String(LIMIT) }), { cache: 'no-store', signal: controller.signal }),
+        fetch(svcUrl('lending-service', '/api/v1/lending/applications/summary'), { cache: 'no-store', signal: controller.signal })
           .then(okJson).catch(() => null),
-        fetch(svcUrl('lending-service', '/api/v1/lending/loans/summary'), { cache: 'no-store' })
+        fetch(svcUrl('lending-service', '/api/v1/lending/loans/summary'), { cache: 'no-store', signal: controller.signal })
           .then(okJson).catch(() => null),
       ])
+      if (controller.signal.aborted) return
       if (!appsRes.ok || !loansRes.ok) throw new Error(`${appsRes.status}/${loansRes.status}`)
       const apps = await appsRes.json()
       const ln = await loansRes.json()
+      if (controller.signal.aborted) return
       setApplications(Array.isArray(apps) ? apps : [])
       setLoans(Array.isArray(ln) ? ln : [])
       setAppSummary(Array.isArray(appSum) ? appSum : null)
@@ -120,13 +128,24 @@ export default function LendingPage() {
       setError(null)
       setLoaded(true)
     } catch {
+      if (controller.signal.aborted) return
       setError('unreachable')
     } finally {
-      setLoading(false)
+      if (activeLoad.current === controller) {
+        activeLoad.current = null
+        setLoading(false)
+      }
     }
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => {
+      const controller = activeLoad.current
+      activeLoad.current = null
+      controller?.abort()
+    }
+  }, [load])
 
   const label = (s: string) => {
     const l = STATE_LABELS[s]
