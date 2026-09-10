@@ -71,3 +71,17 @@ paths:
         - {name: q, in: query, required: true, schema: {type: string}}
         - {name: limit, in: query, required: false, schema: {type: integer}}
       responses: {"200": {description: Ranked hits, possibly empty}}
+  /api/v1/personas/{personaKey}/golden-set:
+    post:
+      summary: Create a golden-set entry (D4) — CRUD only, no replay/publish gate wired yet
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"201": {description: Created}, "400": {description: Validation failed}}
+    get:
+      summary: List a persona's golden-set entries
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: Golden-set entries, possibly empty}}
+  /api/v1/personas/golden-set/{id}:
+    delete:
+      summary: Delete a golden-set entry
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"204": {description: Deleted}, "404": {description: No such entry}}
