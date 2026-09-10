@@ -81,6 +81,5 @@ class PanacheGoldenSetRepository :
         find("personaId", personaId).list<GoldenSetEntryEntity>()
     }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun delete(id: UUID): Boolean =
-        Panache.withTransaction { delete("id", id) }.awaitSuspending() > 0
+    override suspend fun delete(id: UUID): Boolean = Panache.withTransaction { delete("id", id) }.awaitSuspending() > 0
 }
