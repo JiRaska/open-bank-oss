@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.0...sdd-service-v0.13.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **sdd:** replay-safe collection authorisation + ADR-0285 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8978](https://github.com/JiRaska/open-bank-oss/issues/8978)) ([b776e59](https://github.com/JiRaska/open-bank-oss/commit/b776e59c52cccc30cbf1ad0506f2fac1beac1d04))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.12.0...sdd-service-v0.13.0) (2026-09-01)
 
 
