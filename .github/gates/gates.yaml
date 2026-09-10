@@ -3872,7 +3872,7 @@ gates:
       customer reported it (#4348). Baseline is empty by measurement, so this gate is prevention
       only — recheck whether the fleet still has no occurrences, not whether debt was paid down.
     review_after: '2027-02-22'
-    min_subjects: 1500
+    min_subjects: 1510
     selftest: python3 .github/scripts/check-noop-not-success.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-noop-not-success.py"]
@@ -5060,7 +5060,9 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    # The semantic-token migration deliberately reduced this corpus to 1591 by 2026-09-10.
+    # Keep a 5% no-op margin: large enough for normal cleanup, small enough to catch a lost source tree.
+    min_subjects: 1500
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
