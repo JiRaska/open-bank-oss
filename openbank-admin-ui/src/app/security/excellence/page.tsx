@@ -30,6 +30,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
+import { parseIctIncidentEnvelope, summarizeIctIncidents } from '@/lib/security/ictIncidentContract'
 
 // ── Doménové stavy ───────────────────────────────────────────────────────────
 
@@ -123,16 +124,19 @@ async function fetchPosture(): Promise<Patch> {
 async function fetchIncidents(): Promise<Patch> {
   const { ok, body } = await safeJson('/api/security/incidents')
   if (!ok) return unavailable('unreachable')
-  const env = body as { available?: boolean; reason?: string; incidents?: Array<{ severity: string; status: string; reportedToRegulator: boolean }> }
-  if (!env.available || !env.incidents) return unavailable(env.reason ?? 'not_deployed')
-  const open = env.incidents.filter(i => !/closed|resolved/i.test(i.status))
-  const openCritical = open.filter(i => /critical|high/i.test(i.severity)).length
-  const unreported = open.filter(i => !i.reportedToRegulator).length
+  let env
+  try {
+    env = parseIctIncidentEnvelope(body)
+  } catch {
+    return unavailable('invalid_evidence')
+  }
+  if (!env.available) return unavailable(env.reason)
+  const summary = summarizeIctIncidents(env.incidents)
   return {
-    status: openCritical > 0 ? 'critical' : open.length > 0 ? 'degraded' : 'ok',
-    score: Math.max(0, 100 - openCritical * 30 - (open.length - openCritical) * 10 - unreported * 5),
-    metricCs: `${open.length} otevřených (${openCritical} kritických) · ${unreported} nenahlášených`,
-    metricEn: `${open.length} open (${openCritical} critical) · ${unreported} unreported`,
+    status: summary.status,
+    score: summary.score,
+    metricCs: `${summary.open} otevřených (${summary.openCritical} kritických) · ${summary.unreported} nenahlášených`,
+    metricEn: `${summary.open} open (${summary.openCritical} critical) · ${summary.unreported} unreported`,
   }
 }
 
@@ -446,6 +450,7 @@ export default function SecurityExcellencePage() {
       case 'not_deployed': return t('Nenasazeno v tomto prostředí', 'Not deployed in this environment')
       case 'unauthorized': return t('Role bez oprávnění', 'Role lacks permission')
       case 'unreachable':  return t('Služba neodpovídá', 'Service unreachable')
+      case 'invalid_evidence': return t('Neplatná evidence — skóre zadrženo', 'Invalid evidence — score withheld')
       default:             return t('Nedostupné', 'Unavailable')
     }
   }
