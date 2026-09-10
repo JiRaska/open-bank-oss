@@ -91,8 +91,8 @@ export const accountApi = {
   get: (id: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}`),
   getBalance: (id: string) => apiFetchSimple<AccountBalance>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}/balance`),
   getByIban: (iban: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/iban/${pathSegment(iban)}`),
-  open: (data: { partyId: string; productId: string; accountType: string; currencyCode: string; legalName: string }, idempotencyKey: string) =>
-    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts`, {
+  open: (data: { partyId: string; productId: string; accountType: string; currencyCode: string; legalName: string; termsVersion?: string; termsUrl?: string; termsEffectiveFrom?: string }, idempotencyKey: string) =>
+    apiFetchSimple<unknown>(`${ACCOUNT_SERVICE}/api/v1/accounts`, {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(data),
