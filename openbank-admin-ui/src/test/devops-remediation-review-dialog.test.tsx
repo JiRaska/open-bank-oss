@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -65,6 +65,32 @@ function DialogHarness({ finding, outcome }: { finding: DevOpsFinding; outcome?:
       )}
     </LanguageProvider>
   )
+}
+
+function FocusHarness() {
+  const [open, setOpen] = useState(false)
+  const [showTrigger, setShowTrigger] = useState(true)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const restore = () => {
+    const trigger = triggerRef.current
+    if (trigger?.isConnected && !trigger.disabled) trigger.focus()
+    else workspaceRef.current?.focus()
+  }
+  return <LanguageProvider>
+    <div ref={workspaceRef} tabIndex={-1} aria-label="DevOps findings workspace">
+      {showTrigger ? <button ref={triggerRef} type="button" onClick={() => setOpen(true)}>Open decision</button> : null}
+    </div>
+    {open ? <RemediationReviewDialog
+      finding={FINDING}
+      approve
+      busy={false}
+      failed={false}
+      onCancel={() => setOpen(false)}
+      onConfirm={() => { setShowTrigger(false); setOpen(false) }}
+      onRestoreFocus={restore}
+    /> : null}
+  </LanguageProvider>
 }
 
 describe('devops remediation review dialog (#7895)', () => {
@@ -172,12 +198,26 @@ describe('devops remediation review dialog (#7895)', () => {
     expect(screen.getByRole('button', { name: 'Recording decision…' })).toBeDisabled()
   })
 
-  it('moves focus into the dialog on open, since there is no field to carry autoFocus', async () => {
+  it('moves focus to the safe cancel action on open', async () => {
     render(
       <LanguageProvider>
         <RemediationReviewDialog finding={FINDING} approve busy={false} failed={false} onCancel={vi.fn()} onConfirm={vi.fn()} />
       </LanguageProvider>,
     )
-    await waitFor(() => expect(screen.getByRole('alertdialog')).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to review' })).toHaveFocus())
+  })
+
+  it('restores the surviving trigger on cancel and the stable workspace after success removes it', async () => {
+    const user = userEvent.setup()
+    render(<FocusHarness />)
+    const trigger = screen.getByRole('button', { name: 'Open decision' })
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Back to review' }))
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Confirm approval' }))
+    await waitFor(() => expect(screen.getByLabelText('DevOps findings workspace')).toHaveFocus())
   })
 })

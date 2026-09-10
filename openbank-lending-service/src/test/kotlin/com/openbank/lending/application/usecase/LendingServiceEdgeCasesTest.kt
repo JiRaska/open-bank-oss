@@ -406,6 +406,7 @@ class LendingServiceEdgeCasesTest {
         val loanId = LoanId.random()
         val saved: CapturingSlot<Collateral> = slot()
         every { valuation.revalue("REAL_ESTATE", eur("250000.00")) } returns Uni.createFrom().item(eur("230000.00"))
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
         every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
 
         val result = service.register(

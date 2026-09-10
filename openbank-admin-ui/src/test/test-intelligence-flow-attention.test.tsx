@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TestIntelligenceFlow, testIntelligenceCollectionNeedsAttention,
   testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
 import type { ComponentTestPosture, TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import TestIntelligencePage from '@/app/system/tests/page'
 
 vi.mock('@/lib/i18n/LanguageContext', () => ({
   useLanguage: () => ({ language: 'en', t: (_cs: string, en: string) => en }),
 }))
+
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: null, status: 'unauthenticated' }),
+}))
+
+afterEach(() => vi.unstubAllGlobals())
 
 const healthyComponent: ComponentTestPosture = {
   component: 'openbank-example-service',
@@ -267,5 +274,98 @@ describe('Test Intelligence flow attention', () => {
 
     const health = screen.getByText('NEEDS ATTENTION').closest('.ti-health')
     expect(health).toHaveTextContent(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+  })
+
+  it('keeps a skipped required mutation control out of a green CI card and exactly once in the gap queue', async () => {
+    const report = reportFixture({ totals: { requiredControls: 1, requiredControlGaps: 1 } })
+    report.requiredControls = [{
+      id: 'openbank-libs-runtime:mutation', component: 'openbank-libs-runtime', kind: 'mutation',
+      state: 'skipped', reason: 'The mutation sidecar was empty, so no authoritative result exists.',
+      source: null, observedAt: null,
+    }]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input) === '/api/test-intelligence'
+        ? report
+        : { findings: [], available: false },
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    render(<TestIntelligencePage />)
+
+    const ciCard = (await screen.findByText('CI evidence')).closest('button')
+    expect(ciCard).toHaveTextContent('skipped')
+    const health = screen.getByText('NEEDS ATTENTION').closest('.ti-health')
+    expect(health).toHaveTextContent(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+    const titles = screen.getAllByText('Required control: openbank-libs-runtime:mutation')
+    expect(titles).toHaveLength(1)
+    const gap = titles[0].closest('button')
+    expect(gap).toHaveTextContent('skipped')
+    expect(gap).toHaveTextContent('The mutation sidecar was empty, so no authoritative result exists.')
+  })
+
+  it('does not count a required mutation gap again when matching component evidence already represents it', () => {
+    const report = reportFixture({
+      components: [{
+        ...healthyComponent,
+        component: 'openbank-libs-runtime',
+        released: false,
+        evidence: [{
+          kind: 'mutation', state: 'skipped', observedAt: '2026-09-01T00:00:00.000Z',
+          source: 'Pitest:mutations.xml', environment: 'ci',
+        }],
+      }],
+      totals: { requiredControls: 1, requiredControlGaps: 1 },
+    })
+    report.requiredControls = [{
+      id: 'openbank-libs-runtime:mutation', component: 'openbank-libs-runtime', kind: 'mutation',
+      state: 'skipped', reason: 'The mutation sidecar was empty, so no authoritative result exists.',
+      source: 'Pitest:mutations.xml', observedAt: '2026-09-01T00:00:00.000Z',
+    }]
+
+    render(<TestIntelligenceFlow report={report} />)
+
+    const health = screen.getByText('NEEDS ATTENTION').closest('.ti-health')
+    expect(health).toHaveTextContent(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+  })
+
+  it('queues each synthetic and performance claim once while retaining a separate mutation obligation', async () => {
+    const report = reportFixture({
+      syntheticJourneys: [{
+        id: 'sandbox-login', title: 'Sandbox login', status: 'planned', state: 'blocked', severity: 'high',
+        schedule: null, environment: null, covers: [], falsifies: 'The sandbox login remains unproven.',
+        blocker: 'No isolated sandbox target is available.',
+      }],
+      totals: { requiredControls: 3, requiredControlGaps: 3 },
+    })
+    report.performance = [{
+      id: 'latency-smoke', component: 'openbank-example-service', state: 'blocked', observedAt: null,
+      source: 'perf/k6/latency-smoke.js', thresholds: 0,
+      plan: {
+        executionMode: 'planned-read-only-sandbox', safetyBoundary: 'Read-only sandbox only.',
+        targetSchedule: null, baselineReport: null, blocker: 'No safe performance target is available.',
+      },
+    }]
+    report.requiredControls = [{
+      id: 'openbank-example-service:performance', component: 'openbank-example-service', kind: 'performance',
+      state: 'blocked', reason: 'A governed k6 scenario exists for this component.', source: null, observedAt: null,
+    }, {
+      id: 'synthetic:sandbox-login', component: null, kind: 'synthetic', state: 'blocked',
+      reason: 'The sandbox login remains unproven.', source: null, observedAt: null,
+      blocker: 'No isolated sandbox target is available.',
+    }, {
+      id: 'openbank-libs-runtime:mutation', component: 'openbank-libs-runtime', kind: 'mutation',
+      state: 'skipped', reason: 'The mutation sidecar was empty.', source: null, observedAt: null,
+    }]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    render(<TestIntelligencePage />)
+
+    const queue = within(await screen.findByRole('region', { name: 'Evidence gap queue' }))
+    expect(queue.getAllByText('Performance: latency-smoke')).toHaveLength(1)
+    expect(queue.queryByText('Required control: openbank-example-service:performance')).not.toBeInTheDocument()
+    expect(queue.getAllByText('Synthetic: Sandbox login')).toHaveLength(1)
+    expect(queue.queryByText('Required control: synthetic:sandbox-login')).not.toBeInTheDocument()
+    expect(queue.getAllByText('Required control: openbank-libs-runtime:mutation')).toHaveLength(1)
   })
 })

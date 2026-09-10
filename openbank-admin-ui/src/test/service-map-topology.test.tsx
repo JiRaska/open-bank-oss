@@ -62,7 +62,7 @@ function mockFetch() {
     if (url.includes('/api/auth/session')) return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
     if (url.includes('/api/catalog/graph')) return json(GRAPH)
     if (url.includes('/api/services/health')) return json({ services: [] })
-    if (url.includes('/api/services/governance')) return json({ byService: {} })
+    if (url.includes('/api/services/governance')) return json({ available: true, byService: {} })
     return json({})
   })
 }
@@ -110,5 +110,105 @@ describe('service-map data-flow tiers', () => {
     const apnsParticles = [...container.querySelectorAll('animateMotion')]
       .filter(m => (m.querySelector('mpath')?.getAttribute('href') ?? '').includes('apple-apns'))
     expect(apnsParticles.length).toBe(0)
+  })
+
+  it('keeps successful topology visible when health evidence is malformed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/graph')) return json(GRAPH)
+      if (url.includes('/api/services/health')) return json({ services: 'invalid' })
+      return json({ available: true, byService: {} })
+    }))
+    render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
+    expect(await screen.findByText('PostgreSQL')).toBeInTheDocument()
+    expect(screen.getByTestId('map-evidence-health')).toHaveTextContent(/Invalid evidence/i)
+    expect(screen.getByTestId('map-evidence-topology')).toHaveTextContent(/Verified/i)
+  })
+
+  it('shows an unavailable graph snapshot instead of claiming verified empty topology', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/graph')) return json({ available: false, nodes: [], edges: [], infraNodes: [], externalNodes: [], infraEdges: [], externalEdges: [] })
+      if (url.includes('/api/services/health')) return json({ services: [] })
+      return json({ available: true, byService: {} })
+    }))
+    render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
+    expect(await screen.findByText(/Snapshot not deployed/i)).toBeInTheDocument()
+    expect(screen.getByTestId('map-evidence-topology')).not.toHaveTextContent(/Verified/)
+  })
+
+  it('retains the last verified graph when its refresh response is malformed', async () => {
+    let graphReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/graph')) return json(++graphReads === 1 ? GRAPH : { available: true, nodes: 'invalid', edges: [] })
+      if (url.includes('/api/services/health')) return json({ services: [] })
+      return json({ available: true, byService: {} })
+    }))
+    render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
+    expect(await screen.findByText('PostgreSQL')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Refresh Status|Obnovit stav/ }))
+    await waitFor(() => expect(screen.getByTestId('map-evidence-topology')).toHaveTextContent(/Invalid evidence.*last verified data/i))
+    expect(screen.getByText('PostgreSQL')).toBeInTheDocument()
+  })
+
+  it('purges every previously verified source when any refresh returns unauthorized', async () => {
+    let governanceReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/catalog/graph')) return json(GRAPH)
+      if (url.includes('/api/services/health')) return json({ services: [] })
+      if (url.includes('/api/services/governance')) {
+        governanceReads += 1
+        return governanceReads === 1
+          ? json({ available: true, byService: {} })
+          : json({ error: 'unauthorized' }, 401)
+      }
+      return json({})
+    }))
+    render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
+    expect(await screen.findByText('PostgreSQL')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('PostgreSQL'))
+    expect(screen.getByText(/CONNECTED SERVICES/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Refresh Status|Obnovit stav/ }))
+    await waitFor(() => expect(screen.getByTestId('map-evidence-health')).toHaveTextContent(/Session expired/i))
+    expect(screen.getByTestId('map-evidence-governance')).toHaveTextContent(/Session expired/i)
+    expect(screen.getByTestId('map-evidence-topology')).toHaveTextContent(/Session expired/i)
+    expect(screen.queryByText('PostgreSQL')).not.toBeInTheDocument()
+    expect(screen.queryByText(/CONNECTED SERVICES/i)).not.toBeInTheDocument()
+  })
+
+  it('ignores an older refresh that resolves after a newer verified response', async () => {
+    let graphReads = 0
+    let releaseOlder: (() => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+      if (url.includes('/api/auth/session')) return new Response('null')
+      if (url.includes('/api/services/health')) return json({ services: [] })
+      if (url.includes('/api/services/governance')) return json({ available: true, byService: {} })
+      if (url.includes('/api/catalog/graph')) {
+        graphReads += 1
+        const read = graphReads
+        if (read === 1) await new Promise<void>(resolve => { releaseOlder = resolve })
+        return json(read === 1 ? { available: true, nodes: 'invalid', edges: [] } : GRAPH)
+      }
+      return json({})
+    }))
+    render(React.createElement(React.StrictMode, null, React.createElement(Providers, null, React.createElement(ServiceMapPage))))
+    await waitFor(() => expect(graphReads).toBe(2))
+    releaseOlder?.()
+
+    await waitFor(() => expect(screen.getByTestId('map-evidence-topology')).toHaveTextContent(/Verified/i))
+    expect(screen.getByText('PostgreSQL')).toBeInTheDocument()
   })
 })
