@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { Map, Plus, Search, RefreshCw, Fingerprint, Clock, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -12,20 +12,11 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
+import { parsePidRecords, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
-interface PidRecord {
-  id: string
-  personId: string
-  identifierType: string
-  identifierValue: string
-  issuingCountry: string
-  status: string
-  verified: boolean
-  createdAt: string
-  validUntil?: string
-}
+type PidRecord = PidRecordEvidence
 
 interface BankIdSyncPayload {
   readonly bankIdSub: string
@@ -94,32 +85,41 @@ export default function PidPage() {
   // values edited after the non-idempotent POST /parties began.
   const [pendingBankIdSync, setPendingBankIdSync] = useState<PendingBankIdSync | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
     setLoading(true); setError(null); setUnavailable(null)
     try {
       const res = await fetch(`${PID_SERVICE}/api/v1/pids`, { signal: AbortSignal.timeout(5000) })
+      if (generation !== loadGeneration.current) return
       if (!res.ok) {
-        // 404/405 usually mean the list endpoint isn't implemented yet, so treat
-        // those as an empty list; everything else is classified for the panel.
-        if (res.status === 404 || res.status === 405) {
-          setRecords([])
-        } else {
-          setRecords([])
-          setUnavailable({ kind: await classifyBffFailure(res) })
-        }
+        // The service publishes no PID-list route today. A 404 is therefore an unavailable
+        // capability, not a missing record; 405 proves the path cannot serve this read either.
+        const kind: UnavailableKind = res.status === 404
+          ? 'not_deployed'
+          : res.status === 405 ? 'error' : await classifyBffFailure(res)
+        if (generation !== loadGeneration.current) return
+        setRecords([])
+        setUnavailable({ kind })
         return
       }
-      const data = await res.json()
-      setRecords(Array.isArray(data) ? data : data.items ?? data.content ?? [])
+      const data = parsePidRecords(await res.json() as unknown)
+      if (generation === loadGeneration.current) setRecords(data)
     } catch {
       // Timeout / abort / network — the BFF or pid-service didn't answer.
+      if (generation !== loadGeneration.current) return
       setRecords([])
       setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoadId = window.setTimeout(load, 0)
+    return () => clearTimeout(initialLoadId)
+  }, [load])
 
   const filtered = records.filter(r =>
     !search || r.identifierValue?.toLowerCase().includes(search.toLowerCase()) ||
@@ -268,7 +268,7 @@ export default function PidPage() {
           </div>}
         />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {!loading && !unavailable && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Záznamů celkem', 'Total Records'), value: records.length, icon: <Fingerprint size={16} />, color: 'var(--accent)' },
             { label: t('Aktivní', 'Active'), value: records.filter(r => r.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
@@ -282,7 +282,7 @@ export default function PidPage() {
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="card" style={{ marginBottom: '24px', padding: '20px' }}>
           <h2 style={{ fontSize: '16px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
