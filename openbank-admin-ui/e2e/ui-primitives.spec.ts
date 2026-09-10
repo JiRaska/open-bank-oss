@@ -63,7 +63,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/governance', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ items: [
+        body: JSON.stringify({ available: true, timestamp: '2026-09-10T03:00:00Z', items: [
           { serviceName: 'account-service', dataDomain: 'core' },
           { serviceName: 'ledger-service', dataDomain: 'core' },
           { serviceName: 'aml-service', dataDomain: 'compliance' },

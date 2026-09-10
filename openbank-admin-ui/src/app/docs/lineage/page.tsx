@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
@@ -13,6 +13,13 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import {
+  parseGovernanceLineage,
+  type GovernanceLineageService as GovService,
+  type LineageDomain as Domain,
+  type LineageRelation as Rel,
+  type LineageRole as Role,
+} from '@/lib/governance/lineage-evidence'
 
 // ---------------------------------------------------------------------------
 // Data-lineage flow (ADR-0071). Companion to the service map, but the graph here
@@ -23,17 +30,6 @@ import { layoutBands } from '@/components/topology/layout'
 // data flowing producer → consumer. Honest-by-construction (code-derived), like
 // the service map — NOT hand-authored.
 // ---------------------------------------------------------------------------
-
-type Role = 'producer' | 'consumer' | 'both' | 'internal'
-type Domain = 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
-type Rel = 'api' | 'topic' | 'datastore' | 'unknown'
-type LinkNode = { serviceName: string; relationType: Rel; description?: string }
-type GovService = {
-  serviceName: string
-  dataDomain: Domain | null
-  dataLineageRole: Role | null
-  lineage?: { upstream?: LinkNode[]; downstream?: LinkNode[]; interfaces?: { apis?: string[]; topics?: string[]; datastores?: string[] } }
-}
 
 const DOMAIN_META: Record<Domain, { color: string; cs: string; en: string }> = {
   core:           { color: '#2563eb', cs: 'Jádro',         en: 'Core' },
@@ -75,23 +71,47 @@ export default function LineageFlowPage() {
   const [relFilter, setRelFilter] = useState<'all' | Rel>('all')
   const [domFilter, setDomFilter] = useState<'all' | Domain>('all')
   const [flow, setFlow] = useFlowAnimation()
-  const [isChecking, setIsChecking] = useState(false)
+  const [isChecking, setIsChecking] = useState(true)
+  const [hasVerifiedSnapshot, setHasVerifiedSnapshot] = useState(false)
+  const requestRef = useRef(0)
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const request = ++requestRef.current
     setIsChecking(true)
     setUnavailable(null)
     try {
-      const res = await fetch('/api/catalog/governance', { cache: 'no-store' })
-      if (!res.ok) { setServices([]); setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' }); return }
-      const data = await res.json() as { services?: GovService[]; available?: boolean }
-      const list = Array.isArray(data.services) ? data.services : []
-      setServices(list)
-      if (!list.length) setUnavailable({ kind: 'no_data' })
+      const res = await fetch('/api/catalog/governance', { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+      if (request !== requestRef.current) return
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          setServices([])
+          setSelected(null)
+          setHasVerifiedSnapshot(false)
+        }
+        setUnavailable({ kind: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable' })
+        return
+      }
+      const evidence = parseGovernanceLineage(await res.json())
+      if (request !== requestRef.current) return
+      if (!evidence) { setUnavailable({ kind: 'error' }); return }
+      if (!evidence.available) { setUnavailable({ kind: 'not_deployed' }); return }
+      setServices(evidence.services)
+      setSelected(current => current && evidence.services.some(service => service.serviceName === current) ? current : null)
+      setHasVerifiedSnapshot(true)
+      if (!evidence.services.length) setUnavailable({ kind: 'no_data' })
     } catch {
-      setServices([]); setUnavailable({ kind: 'unreachable' })
-    } finally { setIsChecking(false) }
-  }
-  useEffect(() => { load() }, [])
+      if (request === requestRef.current) setUnavailable({ kind: 'unreachable' })
+    } finally {
+      if (request === requestRef.current) setIsChecking(false)
+    }
+  }, [])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => {
+      window.clearTimeout(initialLoad)
+      requestRef.current += 1
+    }
+  }, [load])
 
   const byId = Object.fromEntries(services.map(s => [s.serviceName, s]))
   const known = new Set(services.map(s => s.serviceName))
@@ -143,10 +163,25 @@ export default function LineageFlowPage() {
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
 
-      {unavailable ? (
+      {isChecking && !hasVerifiedSnapshot && !unavailable ? (
+        <div className="card" role="status" aria-live="polite" data-testid="lineage-loading" style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>
+          <RefreshCw aria-hidden="true" size={15} className="animate-spin" />{' '}{t('Načítám ověřenou datovou lineage…', 'Loading verified data lineage…')}
+        </div>
+      ) : unavailable && !services.length ? (
         <DataUnavailable kind={unavailable.kind} service="governance" feature={t('datová lineage', 'data lineage')} dense />
       ) : (
         <>
+          {unavailable ? (
+            <div className="card" style={{ padding: 0, marginBottom: 16 }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service="governance"
+                feature={t('Aktualizace datové lineage', 'Data lineage refresh')}
+                detail={t('Zobrazuje se poslední ověřená mapa; novější vztahy mohou chybět.', 'Showing the last verified map; newer relationships may be missing.')}
+                dense
+              />
+            </div>
+          ) : null}
           {/* Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div role="group" aria-label={t('Filtrování domén', 'Domain filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>

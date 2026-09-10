@@ -13,11 +13,11 @@ vi.mock('@/components/auth/AuthGuard', () => ({
 }))
 
 const firstPage = {
-  data: [{ id: 'entry-1', transactionId: 'transaction-1', entryDate: '2026-08-01', valueDate: '2026-08-01', status: 'POSTED', lines: [], description: 'First page' }],
+  data: [{ id: 'entry-1', entryNumber: 1, transactionId: 'transaction-1', entryDate: '2026-08-01', valueDate: '2026-08-01', status: 'POSTED', lines: [], description: 'First page', createdAt: '2026-08-01T12:00:00Z', synthetic: false }],
   pagination: { limit: 20, hasNextPage: true, nextCursor: 'cursor-1' },
 }
 const secondPage = {
-  data: [{ id: 'entry-2', transactionId: 'transaction-2', entryDate: '2026-08-02', valueDate: '2026-08-02', status: 'POSTED', lines: [], description: 'Second page' }],
+  data: [{ id: 'entry-2', entryNumber: 2, transactionId: 'transaction-2', entryDate: '2026-08-02', valueDate: '2026-08-02', status: 'POSTED', lines: [], description: 'Second page', createdAt: '2026-08-02T12:00:00Z', synthetic: true }],
   pagination: { limit: 20, hasNextPage: false },
 }
 
@@ -79,5 +79,52 @@ describe('General Ledger pagination', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('next page could not be loaded'))
     expect(screen.getByText('First page')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
+  })
+
+  it('maps an unknown network failure to the reachable-service recovery state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new TypeError('network down')))
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Ledger-service is not responding'))
+  })
+
+  it('rejects a duplicate next page without erasing the verified snapshot', async () => {
+    const duplicatePage = { data: [firstPage.data[0]], pagination: { limit: 20, hasNextPage: false } }
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(firstPage)).mockResolvedValueOnce(response(duplicatePage))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+    await screen.findByText('First page')
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('next page could not be loaded'))
+    expect(screen.getAllByText('First page')).toHaveLength(1)
+  })
+
+  it('labels a retained snapshot after the operator changes the date window and locks pagination', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response(firstPage)))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+    await screen.findByText('First page')
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-01-01' } })
+    expect(screen.getByRole('status').textContent).toContain('visible snapshot belongs to')
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeDisabled()
+  })
+
+  it('does not commit a search superseded by a date-window change', async () => {
+    let resolveFetch!: (value: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockReturnValueOnce(new Promise<Response>(resolve => { resolveFetch = resolve })))
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-01-01' } })
+    resolveFetch(response(firstPage))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load Entries' })).not.toBeDisabled())
+    expect(screen.queryByText('First page')).toBeNull()
   })
 })
