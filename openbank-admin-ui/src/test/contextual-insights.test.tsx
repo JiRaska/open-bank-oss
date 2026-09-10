@@ -53,6 +53,17 @@ it('recovers when Grafana becomes ready after the slow-connection warning', () =
   expect(screen.queryByText('Connection is taking longer; still trying…')).not.toBeInTheDocument()
 })
 
+it('reveals a panel when its Grafana frame finishes loading', () => {
+  render(<LanguageProvider initialLanguage="en">
+    <ContextualInsights dashboardUid="openbank-slo" panels={PAYMENT_INSIGHTS.slice(0, 1)}
+      titleCs="Dopad" titleEn="Impact" descriptionCs="Stav" descriptionEn="Health" defaultOpen />
+  </LanguageProvider>)
+  const panel = screen.getByTitle('Payment success rate')
+  fireEvent.load(panel)
+  expect(panel).toBeVisible()
+  expect(screen.queryByText('Loading data…')).not.toBeInTheDocument()
+})
+
 it('keeps optional operational context collapsed until requested', () => {
   render(<LanguageProvider initialLanguage="en">
     <ContextualInsights dashboardUid="openbank-evb" panels={PAYMENT_INSIGHTS.slice(0, 1)}
