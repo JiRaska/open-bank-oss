@@ -30,6 +30,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
+import { parseSecurityKpis, type SecurityKpis } from '@/lib/security/kpiContract'
 
 // ── Doménové stavy ───────────────────────────────────────────────────────────
 
@@ -53,9 +54,16 @@ interface Domain {
   unavailableReason?: string
 }
 
-const GRADE_COLORS: Record<string, string> = {
-  'A+': '#059669', A: '#10b981', B: '#3b82f6', C: '#f59e0b', D: '#ef4444', F: '#991b1b',
+const GRADE_TONES: Record<string, { text: string; bg: string; border: string }> = {
+  'A+': { text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  A: { text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  B: { text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
+  C: { text: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  D: { text: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
+  F: { text: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
 }
+
+const gradeTone = (grade: string) => GRADE_TONES[grade] ?? { text: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)' }
 
 function gradeFor(score: number): string {
   if (score >= 95) return 'A+'
@@ -66,12 +74,12 @@ function gradeFor(score: number): string {
   return 'F'
 }
 
-const STATUS_TONE: Record<DomainStatus, { color: string; bg: string }> = {
-  ok:          { color: '#059669', bg: '#ecfdf5' },
-  degraded:    { color: '#d97706', bg: '#fffbeb' },
-  critical:    { color: '#b91c1c', bg: '#fef2f2' },
-  unavailable: { color: 'var(--text-tertiary, #6b7280)', bg: 'var(--surface-3, #f3f4f6)' },
-  loading:     { color: 'var(--text-tertiary, #6b7280)', bg: 'var(--surface-3, #f3f4f6)' },
+const STATUS_TONE: Record<DomainStatus, { color: string; bg: string; border: string }> = {
+  ok:          { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  degraded:    { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  critical:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
+  unavailable: { color: 'var(--text-tertiary)', bg: 'var(--surface-3)', border: 'var(--border)' },
+  loading:     { color: 'var(--text-tertiary)', bg: 'var(--surface-3)', border: 'var(--border)' },
 }
 
 // ── Fan-out fetchery — každý vrací partial update domény, nikdy nehodí ───────
@@ -227,26 +235,19 @@ async function fetchSbom(): Promise<Patch> {
 
 // ── ADR-0279 KPI domény: čtou jeden CI-generovaný snapshot (/api/security/kpis) ──
 
-interface KpisSnapshot {
-  netpol?: { available?: boolean; coveragePct?: number; covered?: number; total?: number }
-  freshness?: { available?: boolean; fleetScore?: number; unknownModules?: number }
-  credentials?: { available?: boolean; staticSecrets?: number; withDeadline?: number; overdue?: number }
-  fuzz?: { available?: boolean; inScope?: number; tested?: number; coveragePct?: number; totalExercised?: number; excludedCount?: number; runDate?: string }
-  threatModels?: { available?: boolean; moneyPathTotal?: number; withModel?: number; staleCount?: number; oldestDays?: number }
-  mttr?: { available?: boolean; fixedCount?: number; medianFixDays?: number | null; openCount?: number; oldestOpenDays?: number }
-}
+type KpisSnapshot = SecurityKpis
 
 async function fetchKpis(): Promise<KpisSnapshot | null> {
   const { ok, body } = await safeJson('/api/security/kpis')
   if (!ok) return null
-  const env = body as { available?: boolean; kpis?: KpisSnapshot }
-  return env.available && env.kpis ? env.kpis : null
+  const env = body as { available?: unknown; kpis?: unknown }
+  if (env.available !== true) return null
+  try { return parseSecurityKpis(env.kpis) } catch { return null }
 }
 
-async function fetchSegmentation(): Promise<Patch> {
+async function fetchSegmentation(snap: KpisSnapshot | null): Promise<Patch> {
   // NetworkPolicy coverage KPI (gate netpol-coverage-kpi): na CNI bez audit módu
   // je podíl komponent se zvolenou ingress policy = postoj segmentace.
-  const snap = await fetchKpis()
   const n = snap?.netpol
   if (!n?.available || n.coveragePct == null) return unavailable('not_deployed')
   return {
@@ -257,8 +258,7 @@ async function fetchSegmentation(): Promise<Patch> {
   }
 }
 
-async function fetchFreshness(): Promise<Patch> {
-  const snap = await fetchKpis()
+async function fetchFreshness(snap: KpisSnapshot | null): Promise<Patch> {
   const f = snap?.freshness
   if (!f?.available || f.fleetScore == null) return unavailable('not_deployed')
   return {
@@ -269,10 +269,9 @@ async function fetchFreshness(): Promise<Patch> {
   }
 }
 
-async function fetchCredentials(): Promise<Patch> {
+async function fetchCredentials(snap: KpisSnapshot | null): Promise<Patch> {
   // Long-lived credentials: skóre = podíl statických secretů s rotačním deadlinem;
   // overdue deadline je critical, ne degraded — prošlá rotace je aktivní dluh.
-  const snap = await fetchKpis()
   const c = snap?.credentials
   if (!c?.available || c.staticSecrets == null) return unavailable('not_deployed')
   const declared = c.withDeadline ?? 0
@@ -285,10 +284,9 @@ async function fetchCredentials(): Promise<Patch> {
   }
 }
 
-async function fetchFuzz(): Promise<Patch> {
+async function fetchFuzz(snap: KpisSnapshot | null): Promise<Patch> {
   // DAST coverage (ADR-0279 #2): podíl in-scope služeb, které poslední api-fuzz běh
   // skutečně profuzzoval (exercised-surface záznam), ne jen zobrazil v job listu.
-  const snap = await fetchKpis()
   const z = snap?.fuzz
   if (!z?.available || z.coveragePct == null) return unavailable('not_deployed')
   return {
@@ -300,11 +298,10 @@ async function fetchFuzz(): Promise<Patch> {
 }
 
 
-async function fetchThreatModels(): Promise<Patch> {
+async function fetchThreatModels(snap: KpisSnapshot | null): Promise<Patch> {
   // Threat-model stáří (ADR-0279 #23): money-path služba bez modelu je critical
   // (governance pravidlo), model > 90 dní bez změny je stale — prose, které nikdo
   // nepřepočítal proti kódu.
-  const snap = await fetchKpis()
   const m = snap?.threatModels
   if (!m?.available || m.moneyPathTotal == null) return unavailable('not_deployed')
   const pct = Math.round(100 * (m.withModel ?? 0) / m.moneyPathTotal)
@@ -317,11 +314,10 @@ async function fetchThreatModels(): Promise<Patch> {
   }
 }
 
-async function fetchMttr(): Promise<Patch> {
+async function fetchMttr(snap: KpisSnapshot | null): Promise<Patch> {
   // CVE remediation (SLO S1 proxy přes Dependabot alerts, critical+high): otevřená
   // kritická zranitelnost > 14 dní je critical postoj; median fix čas se ukáže,
   // jakmile historie existuje.
-  const snap = await fetchKpis()
   const v = snap?.mttr
   if (!v?.available) return unavailable('not_deployed')
   const open = v.openCount ?? 0
@@ -395,12 +391,19 @@ export default function SecurityExcellencePage() {
   const load = useCallback(async () => {
     setLoading(true)
     setPatches({})
+    // All KPI-derived cards must describe one coherent CI snapshot. Sharing this promise also
+    // collapses six identical BFF requests into one without serialising the wider fan-out.
+    const kpisSnapshot = fetchKpis()
     const fetchers: Record<string, () => Promise<Patch>> = {
       posture: fetchPosture, incidents: fetchIncidents, fraud: fetchFraud, aml: fetchAml,
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
-      sbom: fetchSbom, segmentation: fetchSegmentation, freshness: fetchFreshness,
-      credentials: fetchCredentials, fuzz: fetchFuzz,
-      threatmodels: fetchThreatModels, mttr: fetchMttr,
+      sbom: fetchSbom,
+      segmentation: async () => fetchSegmentation(await kpisSnapshot),
+      freshness: async () => fetchFreshness(await kpisSnapshot),
+      credentials: async () => fetchCredentials(await kpisSnapshot),
+      fuzz: async () => fetchFuzz(await kpisSnapshot),
+      threatmodels: async () => fetchThreatModels(await kpisSnapshot),
+      mttr: async () => fetchMttr(await kpisSnapshot),
     }
     // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
     await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
@@ -411,7 +414,10 @@ export default function SecurityExcellencePage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   const domains: Domain[] = DOMAIN_DEFS.map(d => ({ ...d, status: patches[d.id]?.status ?? 'loading', ...patches[d.id] }))
 
@@ -465,18 +471,18 @@ export default function SecurityExcellencePage() {
 
         {/* ── Hero: skóre excelence ─────────────────────────────────────── */}
         <section aria-label={t('Skóre Security Excellence', 'Security Excellence score')}
-          style={{ display: 'flex', gap: 24, alignItems: 'center', margin: '20px 0 28px', padding: '24px 28px', border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, background: 'var(--surface-2, #fafafa)' }}>
+          style={{ display: 'flex', gap: 24, alignItems: 'center', margin: '20px 0 28px', padding: '24px 28px', border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface-2)' }}>
           <div style={{ textAlign: 'center', minWidth: 120 }}>
-            <div style={{ fontSize: 52, fontWeight: 700, lineHeight: 1, color: grade ? GRADE_COLORS[grade] : 'var(--text-tertiary)' }}
+            <div style={{ fontSize: 52, fontWeight: 700, lineHeight: 1, color: grade ? gradeTone(grade).text : 'var(--text-tertiary)' }}
               aria-live="polite">
               {score != null ? score : '—'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>/ 100</div>
-            {grade && <div style={{ marginTop: 6, display: 'inline-block', padding: '2px 12px', borderRadius: 999, fontWeight: 700, color: '#fff', background: GRADE_COLORS[grade] }}>{grade}</div>}
+            {grade && <div style={{ marginTop: 6, display: 'inline-block', padding: '2px 12px', borderRadius: 999, fontWeight: 700, color: gradeTone(grade).text, background: gradeTone(grade).bg, border: `1px solid ${gradeTone(grade).border}` }}>{grade}</div>}
           </div>
           <div style={{ flex: 1 }}>
             <strong>{t('Skóre excelence platformy', 'Platform excellence score')}</strong>
-            <p style={{ margin: '6px 0 0', color: 'var(--text-secondary, #4b5563)', fontSize: 14 }}>
+            <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 14 }}>
               {t(
                 `Vážený průměr ${answered} z ${total} domén, které odpověděly. Domény označené „Nedostupné" skóre nesnižují — degradace je vidět na kartách, ne skrytá v čísle.`,
                 `Weighted average of ${answered} of ${total} responding domains. Domains marked “Unavailable” do not drag the score down — degradation is visible on the cards, not hidden in the number.`,
@@ -499,11 +505,11 @@ export default function SecurityExcellencePage() {
             return (
               <Link key={d.id} href={d.href} style={{ textDecoration: 'none', color: 'inherit' }}
                 aria-label={`${language === 'cs' ? d.nameCs : d.nameEn} — ${statusLabel(d.status)}`}>
-                <article style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--surface-1, #fff)' }}>
+                <article style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--surface-1)' }}>
                   <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Icon size={18} aria-hidden="true" />
                     <strong style={{ flex: 1 }}>{language === 'cs' ? d.nameCs : d.nameEn}</strong>
-                    <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 999, color: tone.color, background: tone.bg }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 999, color: tone.color, background: tone.bg, border: `1px solid ${tone.border}` }}>
                       {statusLabel(d.status)}
                     </span>
                   </header>
@@ -517,8 +523,8 @@ export default function SecurityExcellencePage() {
                       <span style={{ fontSize: 13, color: tone.color }} role="status">{t('Načítám…', 'Loading…')}</span>
                     ) : (
                       <>
-                        <span style={{ fontSize: 22, fontWeight: 700, color: GRADE_COLORS[gradeFor(d.score ?? 0)] }}>{d.score}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary, #4b5563)', flex: 1 }}>
+                        <span style={{ fontSize: 22, fontWeight: 700, color: gradeTone(gradeFor(d.score ?? 0)).text }}>{d.score}</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1 }}>
                           {language === 'cs' ? d.metricCs : d.metricEn}
                         </span>
                       </>

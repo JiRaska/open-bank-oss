@@ -11,6 +11,7 @@
 // author) is enforced by the agent.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import Link from 'next/link'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
@@ -20,7 +21,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import {
   approvalWorkbenchHref,
   filterAndSortDomainApprovals,
@@ -458,33 +458,29 @@ function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
 }) {
   const { t } = useLanguage()
   const [reason, setReason] = useState('')
-  const dialogRef = useRef<HTMLDivElement>(null)
   const action = intent.approve ? t('Schválit návrh', 'Approve proposal') : t('Zamítnout návrh', 'Reject proposal')
-  const titleId = `approval-decision-${intent.proposal.id}-title`
-  const impactId = `approval-decision-${intent.proposal.id}-impact`
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
-  ><div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+      <Dialog.Content
+        className="card"
+        role="alertdialog"
+        aria-busy={busy}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onPointerDownOutside={event => { if (busy) event.preventDefault() }}
+        onCloseAutoFocus={event => event.preventDefault()}
+        style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(560px, calc(100% - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+      >
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
       <AlertTriangle aria-hidden="true" size={19} style={{ color: intent.approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
       <div>
-        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {intent.proposal.title}</h2>
-        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+        <Dialog.Title style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {intent.proposal.title}</Dialog.Title>
+        <Dialog.Description style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
           {intent.approve
             ? t('Tímto zaznamenáte lidské schválení. Návrh smí pokračovat jen podle svého řízeného následného procesu; AI tím nezískává oprávnění jednat sama.', 'This records human approval. The proposal may proceed only through its governed follow-up process; this does not authorize the AI to act on its own.')
             : t('Tímto zaznamenáte lidské zamítnutí. Návrh se neprovede a důvod zůstane v auditní stopě.', 'This records human rejection. The proposal will not be executed and the reason remains in the audit trail.')}
-        </p>
+        </Dialog.Description>
       </div>
     </div>
     <div style={{ marginTop: 14, padding: '11px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5 }}>
@@ -514,5 +510,7 @@ function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
         {busy ? t('Ukládám rozhodnutí…', 'Recording decision…') : intent.approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
       </button>
     </div>
-  </div></div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }

@@ -10,6 +10,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useRouter } from 'next/navigation'
 import { CreditCard, Search, User, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -53,24 +54,18 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [attempt, setAttempt] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
 
   const shown = query.trim().length >= 2 ? results : recents
 
   useEffect(() => {
     if (open) {
-      openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setQuery('')
       setResults([])
       setUnavailable(false)
       setLoading(false)
       setRecents(loadRecents())
       setActive(0)
-      setTimeout(() => inputRef.current?.focus(), 0)
-    } else if (openerRef.current) {
-      openerRef.current.focus()
-      openerRef.current = null
     }
   }, [open])
 
@@ -130,28 +125,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const shownRef = useRef(shown)
   const activeRef = useRef(active)
   const chooseRef = useRef(choose)
-  const onCloseRef = useRef(onClose)
   useLayoutEffect(() => {
     shownRef.current = shown
     activeRef.current = active
     chooseRef.current = choose
-    onCloseRef.current = onClose
   })
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current() }
-      if (e.key === 'Tab') {
-        const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-        ) ?? [])
-        if (focusables.length === 0) return
-        const first = focusables[0]
-        const last = focusables[focusables.length - 1]
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
-      }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActive(a => Math.max(0, Math.min(a + 1, shownRef.current.length - 1)))
@@ -171,8 +153,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     el?.scrollIntoView?.({ block: 'nearest' })
   }, [active])
 
-  if (!open) return null
-
   const groups: Array<{ title: string; icon: typeof User; items: Array<{ ref: EntityRef; index: number }> }> = []
   const parties = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'party')
   const accounts = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'account')
@@ -180,23 +160,34 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   if (accounts.length) groups.push({ title: t('Účty', 'Accounts'), icon: CreditCard, items: accounts })
 
   return (
-    <div
-      role="dialog" aria-modal="true" aria-label={t('Rychlé hledání', 'Quick search')}
-      ref={dialogRef}
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)',
-        display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '12vh',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
+    <Dialog.Root open={open} onOpenChange={nextOpen => { if (!nextOpen) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)' }} />
+        <Dialog.Content
+        onOpenAutoFocus={event => {
+          event.preventDefault()
+          openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          inputRef.current?.focus()
+        }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const opener = openerRef.current
+          if (opener?.isConnected) opener.focus()
+          openerRef.current = null
+        }}
         style={{
+          position: 'fixed', zIndex: 101, left: '50%', top: '12vh', transform: 'translateX(-50%)',
           width: '560px', maxWidth: '92vw', background: 'var(--surface)',
           border: '1px solid var(--border)', borderRadius: '12px',
           boxShadow: '0 16px 48px rgba(0,0,0,0.35)', overflow: 'hidden',
         }}
       >
+        <Dialog.Title style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+          {t('Rychlé hledání', 'Quick search')}
+        </Dialog.Title>
+        <Dialog.Description style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+          {t('Vyhledejte klienta nebo účet a otevřete jeho detail.', 'Search for a party or account and open its detail.')}
+        </Dialog.Description>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
           <Search size={15} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <input
@@ -286,6 +277,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   setUnavailable(false)
                   setLoading(true)
                   setAttempt(value => value + 1)
+                  requestAnimationFrame(() => inputRef.current?.focus())
                 }}
                 style={{
                   marginTop: '10px', border: '1px solid var(--border)', borderRadius: '8px',
@@ -309,7 +301,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <span>↵ {t('otevřít', 'open')}</span>
           <span>esc {t('zavřít', 'close')}</span>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
