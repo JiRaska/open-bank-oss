@@ -71,6 +71,8 @@ export default function MerchantsPage() {
   const [uploading, setUploading] = useState<string | null>(null)
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
   const [removing, setRemoving] = useState(false)
+  const removalTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const newEntryRef = useRef<HTMLButtonElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -316,7 +318,7 @@ export default function MerchantsPage() {
             <h2 style={{ fontSize: 14, margin: 0 }}>
               {t('Katalog', 'Catalogue')} <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>({total})</span>
             </h2>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT })}>
+            <button ref={newEntryRef} type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT })}>
               <Plus size={12} aria-hidden="true" /> {t('Nový záznam', 'New entry')}
             </button>
           </div>
@@ -371,7 +373,11 @@ export default function MerchantsPage() {
                     {m.logoContentHash && <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => { setActionError(null); setPendingRemoval({ kind: 'logo', merchant: m }) }}
+                      onClick={event => {
+                        setActionError(null)
+                        removalTriggerRef.current = event.currentTarget
+                        setPendingRemoval({ kind: 'logo', merchant: m })
+                      }}
                       aria-label={t(`Smazat logo ${m.descriptorKey}`, `Delete the logo for ${m.descriptorKey}`)}
                     >
                       <ImageOff size={12} aria-hidden="true" />
@@ -379,7 +385,11 @@ export default function MerchantsPage() {
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => { setActionError(null); setPendingRemoval({ kind: 'entry', merchant: m }) }}
+                      onClick={event => {
+                        setActionError(null)
+                        removalTriggerRef.current = event.currentTarget
+                        setPendingRemoval({ kind: 'entry', merchant: m })
+                      }}
                       aria-label={t(`Smazat ${m.descriptorKey}`, `Delete ${m.descriptorKey}`)}
                     >
                       <Trash2 size={12} aria-hidden="true" />
@@ -400,6 +410,8 @@ export default function MerchantsPage() {
         removal={pendingRemoval}
         busy={removing}
         failed={actionError != null}
+        returnFocusRef={removalTriggerRef}
+        fallbackFocusRef={newEntryRef}
         onCancel={() => { if (!removing) { setPendingRemoval(null); setActionError(null) } }}
         onConfirm={() => void confirmRemoval()}
       />}
@@ -407,10 +419,12 @@ export default function MerchantsPage() {
   )
 }
 
-function MerchantRemovalDialog({ removal, busy, failed, onCancel, onConfirm }: {
+function MerchantRemovalDialog({ removal, busy, failed, returnFocusRef, fallbackFocusRef, onCancel, onConfirm }: {
   removal: PendingRemoval
   busy: boolean
   failed: boolean
+  returnFocusRef: React.RefObject<HTMLButtonElement | null>
+  fallbackFocusRef: React.RefObject<HTMLButtonElement | null>
   onCancel: () => void
   onConfirm: () => void
 }) {
@@ -421,7 +435,20 @@ function MerchantRemovalDialog({ removal, busy, failed, onCancel, onConfirm }: {
   const titleId = 'merchant-removal-title'
   const impactId = 'merchant-removal-impact'
 
-  useEffect(() => { cancelRef.current?.focus() }, [])
+  useEffect(() => {
+    const returnFocus = returnFocusRef.current
+    const fallbackFocus = fallbackFocusRef.current
+    cancelRef.current?.focus()
+    return () => {
+      // React may remove the originating row in the same commit that closes the dialog.
+      // Defer until that commit settles, then return to the exact trigger when it survived or
+      // to the stable catalogue action when it did not.
+      queueMicrotask(() => {
+        const target = returnFocus?.isConnected ? returnFocus : fallbackFocus
+        target?.focus()
+      })
+    }
+  }, [fallbackFocusRef, returnFocusRef])
 
   return (
     <div

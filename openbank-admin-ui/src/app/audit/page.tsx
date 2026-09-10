@@ -4,20 +4,15 @@
 
 'use client'
 
-import { Fragment, useState, useCallback } from 'react'
+import { Fragment, useState, useCallback, useRef } from 'react'
 import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { formatAuditPayload, parseAuditEvidenceList, type AuditEvidence } from '@/lib/audit/auditEvidence'
 
 const AUDIT_SERVICE = '/api/svc/audit-service'
-
-interface AuditEntry {
-  id: string; aggregateId: string; aggregateType: string
-  eventType: string; actorId?: string; actorType?: string
-  payload?: Record<string, unknown>; occurredAt: string
-}
 
 const EVENT_COLOR: Record<string, string> = {
   CREATED: 'var(--green)', UPDATED: 'var(--accent)', DELETED: 'var(--red)',
@@ -28,7 +23,7 @@ const EVENT_COLOR: Record<string, string> = {
 export default function AuditPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [entries, setEntries]   = useState<AuditEntry[]>([])
+  const [entries, setEntries]   = useState<AuditEvidence[]>([])
   const [loading, setLoading]   = useState(false)
   // Instead of a raw "HTTP 404" string, hold a typed reason that renders as a
   // calm <DataUnavailable> panel. audit-service isn't deployed in every
@@ -37,13 +32,19 @@ export default function AuditPage() {
   const [aggregateId, setAggregateId] = useState('')
   const [loadedAggregateId, setLoadedAggregateId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const activeSearch = useRef<AbortController | null>(null)
 
   const search = useCallback(async () => {
     const query = aggregateId.trim()
     if (!query) return
+    activeSearch.current?.abort()
+    const controller = new AbortController()
+    activeSearch.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), 5000)
     setLoading(true); setUnavailable(null)
     try {
-      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${query}?limit=100`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${encodeURIComponent(query)}?limit=100`, { signal: controller.signal })
+      if (activeSearch.current !== controller) return
       if (!res.ok) {
         if (loadedAggregateId !== query) {
           setEntries([])
@@ -52,10 +53,22 @@ export default function AuditPage() {
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json()
-      setEntries(Array.isArray(data) ? data : data.entries ?? [])
+      let data: AuditEvidence[]
+      try {
+        data = parseAuditEvidenceList(await res.json(), query)
+      } catch {
+        if (loadedAggregateId !== query) {
+          setEntries([])
+          setLoadedAggregateId(null)
+        }
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      if (activeSearch.current !== controller) return
+      setEntries(data)
       setLoadedAggregateId(query)
     } catch {
+      if (activeSearch.current !== controller) return
       // fetch threw (timeout/abort/network) — the BFF or audit-service didn't
       // answer at all. Treat as unreachable rather than leaking the raw error.
       if (loadedAggregateId !== query) {
@@ -63,7 +76,13 @@ export default function AuditPage() {
         setLoadedAggregateId(null)
       }
       setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+    } finally {
+      window.clearTimeout(timeout)
+      if (activeSearch.current === controller) {
+        activeSearch.current = null
+        setLoading(false)
+      }
+    }
   }, [aggregateId, loadedAggregateId])
 
   return (
@@ -72,7 +91,7 @@ export default function AuditPage() {
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Auditní log', 'Audit Log')}</span></div>}
         icon={<ScrollText size={18} aria-hidden="true" />}
         title={t('Auditní log', 'Audit Log')}
-        subtitle={t('Neměnný auditní záznam pro všechny entity platformy', 'Immutable audit trail for all platform entities')}
+        subtitle={t('Nejnovější ověřitelné události a jejich původ', 'Latest verifiable events and their provenance')}
       />
 
       {/* Search */}
@@ -87,7 +106,18 @@ export default function AuditPage() {
               placeholder="Aggregate ID (account UUID, party UUID, transaction UUID…)"
               aria-label={t('ID agregátu', 'Aggregate ID')}
               value={aggregateId}
-              onChange={e => setAggregateId(e.target.value)}
+              onChange={e => {
+                activeSearch.current?.abort()
+                activeSearch.current = null
+                setLoading(false)
+                setAggregateId(e.target.value)
+                setUnavailable(null)
+                if (loadedAggregateId !== e.target.value.trim()) {
+                  setEntries([])
+                  setLoadedAggregateId(null)
+                  setExpanded(null)
+                }
+              }}
               onKeyDown={e => e.key === 'Enter' && search()}
             />
           </div>
@@ -117,7 +147,7 @@ export default function AuditPage() {
       {entries.length > 0 && (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            {entries.length} {t('událostí pro', 'events for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
+          {t(`Nejnovějších ${entries.length} událostí (limit 100) pro`, `Latest ${entries.length} events (100 maximum) for`)} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
           </div>
           <table className="data-table">
             <thead>
@@ -125,6 +155,7 @@ export default function AuditPage() {
                 <th>{t('Událost', 'Event')}</th>
                 <th>{t('Typ agregátu', 'Aggregate Type')}</th>
                 <th>{t('Aktér', 'Actor')}</th>
+                <th>{t('Zdroj', 'Source')}</th>
                 <th>{t('Nastalo', 'Occurred At')}</th>
                 <th></th>
               </tr>
@@ -143,16 +174,25 @@ export default function AuditPage() {
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                       {e.actorId ? `${e.actorType ?? 'USER'}:${e.actorId.slice(0, 8)}…` : 'system'}
                     </td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {e.sourceService}
+                      <span className="tag" style={{ marginLeft: '6px', fontSize: '10px' }}>{e.sourceServiceSource.toLowerCase()}</span>
+                    </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                       {new Date(e.occurredAt).toLocaleString(dateLocale)}
+                      {e.occurredAtSource === 'INGEST' && (
+                        <span className="tag" title={t('Čas události chyběl; zobrazen je čas přijetí.', 'Producer event time was absent; ingest time is shown.')} style={{ marginLeft: '6px', fontSize: '10px' }}>
+                          {t('čas přijetí', 'ingest time')}
+                        </span>
+                      )}
                     </td>
                     <td style={{ color: 'var(--accent)', fontSize: '12px' }}>{expanded === e.id ? '▲' : '▼'}</td>
                   </tr>
                   {expanded === e.id && e.payload && (
                     <tr key={`${e.id}-payload`}>
-                      <td colSpan={5} style={{ background: 'var(--surface-2)', padding: '12px 16px' }}>
+                      <td colSpan={6} style={{ background: 'var(--surface-2)', padding: '12px 16px' }}>
                         <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {JSON.stringify(e.payload, null, 2)}
+                          {formatAuditPayload(e.payload)}
                         </pre>
                       </td>
                     </tr>

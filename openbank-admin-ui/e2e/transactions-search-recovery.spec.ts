@@ -22,7 +22,7 @@ test.describe('Transaction ledger search recovery', () => {
           contentType: 'application/json',
           body: JSON.stringify({
             data: [{
-              id: 'transaction-42',
+              id: '33333333-3333-4333-8333-333333333333',
               referenceNumber: 'TXN-EVIDENCE-42',
               type: 'CREDIT',
               sourceAccountId: '11111111-1111-1111-1111-111111111111',
@@ -34,9 +34,10 @@ test.describe('Transaction ledger search recovery', () => {
               valueDate: '2026-08-31',
               bookingDate: '2026-08-31',
               initiatedAt: '2026-08-31T08:00:00Z',
+              completedAt: '2026-08-31T08:00:01Z',
             }],
             count: 1,
-            limit: 50,
+            limit: 51,
             offset: 0,
           }),
         })
@@ -52,6 +53,9 @@ test.describe('Transaction ledger search recovery', () => {
 
     await expect(page.getByText('TXN-EVIDENCE-42')).toBeVisible()
     await expect(page.getByText('Verified settlement')).toBeVisible()
+    const amount = page.getByText(/1.*250.*CZK/).first()
+    await expect(amount).toBeVisible()
+    expect(await amount.textContent()).not.toMatch(/[+-]/)
 
     await page.getByRole('button', { name: /Search transactions|Vyhledat transakce/ }).click()
 
@@ -59,5 +63,62 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(page.getByText('Verified settlement')).toBeVisible()
     await expect(page.getByText(/Failed to load: Transaction search|Načtení selhalo: Vyhledávání transakcí/)).toBeVisible()
     expect(requests).toBe(2)
+  })
+
+  test('rejects a malformed successful response without replacing verified money-path evidence', async ({ page }) => {
+    let malformed = false
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [{
+          id: '33333333-3333-4333-8333-333333333333', referenceNumber: 'TXN-EVIDENCE-42',
+          type: 'CREDIT', sourceAccountId: null, targetAccountId: '22222222-2222-4222-8222-222222222222',
+          amount: 1250, currencyCode: 'CZK', status: malformed ? 'SETTLED' : 'COMPLETED', description: 'Verified settlement',
+          valueDate: '2026-08-31', bookingDate: '2026-08-31', initiatedAt: '2026-08-31T08:00:00Z', completedAt: '2026-08-31T08:00:01Z',
+        }],
+        count: 1, limit: 51, offset: 0,
+      }),
+    }))
+
+    await page.goto('/transactions')
+    await page.getByLabel(/Filter by IBAN|Filtrovat podle IBAN/).fill('CZ6508000000192000145399')
+    const search = page.getByRole('button', { name: /Search transactions|Vyhledat transakce/ })
+    await search.click()
+    await expect(page.getByText('TXN-EVIDENCE-42')).toBeVisible()
+
+    malformed = true
+    await search.click()
+    await expect(page.getByText('TXN-EVIDENCE-42')).toBeVisible()
+    await expect(page.getByText(/Failed to load: Transaction search|Načtení selhalo: Vyhledávání transakcí/)).toBeVisible()
+    await expect(page.getByText('SETTLED')).toBeHidden()
+  })
+
+  test('purges retained transaction evidence when authorization is lost', async ({ page }) => {
+    let unauthorized = false
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => {
+      if (unauthorized) return route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"unauthorized"}' })
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: [{
+            id: '33333333-3333-4333-8333-333333333333', referenceNumber: 'TXN-PRIVATE-42',
+            type: 'CREDIT', sourceAccountId: null, targetAccountId: null, amount: 1250,
+            currencyCode: 'CZK', status: 'COMPLETED', description: 'Restricted evidence',
+            valueDate: '2026-08-31', bookingDate: '2026-08-31', initiatedAt: '2026-08-31T08:00:00Z', completedAt: '2026-08-31T08:00:01Z',
+          }],
+          count: 1, limit: 51, offset: 0,
+        }),
+      })
+    })
+
+    await page.goto('/transactions')
+    const search = page.getByRole('button', { name: /Search transactions|Vyhledat transakce/ })
+    await search.click()
+    await expect(page.getByText('TXN-PRIVATE-42')).toBeVisible()
+
+    unauthorized = true
+    await search.click()
+    await expect(page.getByText(/Session expired|Vypršela relace/i)).toBeVisible()
+    await expect(page.getByText('TXN-PRIVATE-42')).toHaveCount(0)
   })
 })
