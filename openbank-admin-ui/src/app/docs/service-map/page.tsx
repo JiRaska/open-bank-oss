@@ -3,10 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen, Play, Pause, KeyRound, ShieldCheck, Boxes, Cloud, Send, Server } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
-import { svcUrl } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
@@ -15,6 +15,11 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBand } from '@/components/topology/layout'
+import {
+  parseMapGovernance, parseMapHealth, parseServiceMapGraph,
+  type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
+  type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
+} from '@/lib/governance/service-map-evidence'
 
 // Service definitions with positions for the map
 const SERVICES = [
@@ -114,6 +119,24 @@ const GROUP_LABELS: Record<string, { label: string; color: string }> = {
   cards:      { label: 'Cards',           color: '#db2777' },
 }
 type HealthStatus = 'UP' | 'DOWN' | 'UNKNOWN'
+type EvidenceState = 'loading' | 'ok' | 'unreachable' | 'not_deployed' | 'scaled_to_zero' | 'unauthorized' | 'error'
+type EvidenceResult<T> = { ok: true; value: T } | { ok: false; state: EvidenceState }
+
+const evidenceFailure = (failure: BffFailure): EvidenceState => {
+  if (failure === 'not_deployed' || failure === 'scaled_to_zero' || failure === 'unauthorized' || failure === 'unreachable') return failure
+  return 'error'
+}
+
+async function fetchEvidence<T>(url: string, parse: (value: unknown) => T | null): Promise<EvidenceResult<T>> {
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) return { ok: false, state: evidenceFailure(await classifyBffFailure(response)) }
+    const parsed = parse(await response.json())
+    return parsed === null ? { ok: false, state: 'error' } : { ok: true, value: parsed }
+  } catch {
+    return { ok: false, state: 'unreachable' }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Auto-layout — a clean, deterministic grid per group so nodes never overlap
@@ -267,10 +290,6 @@ function LegoBrick({ cx, cy, color, degree, selected }: { cx: number; cy: number
 // application.yaml, never hand-authored. Presentation-only metadata (colour,
 // icon, bilingual copy) lives here; the topology itself is code-derived.
 // ---------------------------------------------------------------------------
-type InfraNodeT = { id: string; kind: 'infra'; tech: string; label: string }
-type ExternalNodeT = { id: string; kind: 'external'; vendor: string; label: string }
-type InfraEdgeT = { from: string; to: string; type: 'db' | 'broker' | 'auth' | 'authz' }
-type ExternalEdgeT = { from: string; to: string; type: 'push' | 'webhook' | 'registry' | 'api' | 'llm'; enabled: boolean }
 type TierMeta = { color: string; Icon: typeof Database; labelCs: string; labelEn: string; descCs: string; descEn: string }
 
 const INFRA_META: Record<string, TierMeta> = {
@@ -354,73 +373,98 @@ export default function ServiceMapPage() {
   const [graphEdges, setGraphEdges] = useState<{ from: string; to: string; via: string; type: 'rest' | 'kafka' }[]>([])
   // Per-service degree (upstream + downstream) from the graph → drives brick size.
   const [degrees, setDegrees] = useState<Record<string, number>>({})
-  const [isChecking, setIsChecking] = useState(false)
+  const [isChecking, setIsChecking] = useState(true)
   // Data-flow tiers (infra substrate + external 3rd parties), from the same graph fetch.
   const [infraNodes, setInfraNodes] = useState<InfraNodeT[]>([])
   const [externalNodes, setExternalNodes] = useState<ExternalNodeT[]>([])
   const [infraEdges, setInfraEdges] = useState<InfraEdgeT[]>([])
   const [externalEdges, setExternalEdges] = useState<ExternalEdgeT[]>([])
+  const [evidence, setEvidence] = useState<Record<'health' | 'governance' | 'topology', EvidenceState>>({
+    health: 'loading', governance: 'loading', topology: 'loading',
+  })
+  const [verified, setVerified] = useState<Record<'health' | 'governance' | 'topology', boolean>>({
+    health: false, governance: false, topology: false,
+  })
   // Animation + tier visibility controls. Infra has ~130 edges → hidden by default
   // (revealed per-service on hover, or globally via its toggle); external is sparse → shown.
   const [flow, setFlow] = useFlowAnimation()
   const [showInfra, setShowInfra] = useState(false)
   const [showExternal, setShowExternal] = useState(true)
+  const requestGeneration = useRef(0)
 
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
+    const generation = ++requestGeneration.current
     setIsChecking(true)
-    try {
-      const [res, govRes, graphRes] = await Promise.all([
-        fetch('/api/services/health'),
-        fetch('/api/services/governance'),
-        fetch('/api/catalog/graph'),
-      ])
+    setEvidence(current => ({
+      health: current.health === 'ok' ? 'ok' : 'loading',
+      governance: current.governance === 'ok' ? 'ok' : 'loading',
+      topology: current.topology === 'ok' ? 'ok' : 'loading',
+    }))
+    const [healthResult, governanceResult, graphResult] = await Promise.all([
+      fetchEvidence('/api/services/health', parseMapHealth),
+      fetchEvidence('/api/services/governance', parseMapGovernance),
+      fetchEvidence('/api/catalog/graph', parseServiceMapGraph),
+    ])
+    if (generation !== requestGeneration.current) return
 
-      if (res.ok) {
-        const data = await res.json() as { services: { port: number; status: string }[] }
-        const newStatuses: Record<string, HealthStatus> = {}
-        for (const svc of SERVICES) {
-          const entry = data.services.find(s => s.port === svc.port)
-          if (!entry) { newStatuses[svc.id] = 'UNKNOWN'; continue }
-          newStatuses[svc.id] = entry.status === 'UP' ? 'UP' : entry.status === 'DOWN' ? 'DOWN' : 'UNKNOWN'
-        }
-        setHealthStatuses(newStatuses)
-      }
-
-      if (govRes.ok) {
-        const govData = await govRes.json() as { byService?: Record<string, GovernanceManifestEntry> }
-        setGovernanceData(govData.byService ?? {})
-      }
-
-      if (graphRes.ok) {
-        const graph = await graphRes.json() as {
-          edges?: { from: string; to: string; via: string; type: 'rest' | 'kafka' }[]
-          nodes?: { name: string; dependsOn?: number; dependedOnBy?: number }[]
-          infraNodes?: InfraNodeT[]
-          externalNodes?: ExternalNodeT[]
-          infraEdges?: InfraEdgeT[]
-          externalEdges?: ExternalEdgeT[]
-        }
-        setGraphEdges(Array.isArray(graph.edges) ? graph.edges : [])
-        const deg: Record<string, number> = {}
-        for (const n of graph.nodes ?? []) {
-          const id = SERVICE_NAME_TO_ID[n.name.replace(/^openbank-/, '')]
-          if (id) deg[id] = (n.dependsOn ?? 0) + (n.dependedOnBy ?? 0)
-        }
-        setDegrees(deg)
-        setInfraNodes(Array.isArray(graph.infraNodes) ? graph.infraNodes : [])
-        setExternalNodes(Array.isArray(graph.externalNodes) ? graph.externalNodes : [])
-        setInfraEdges(Array.isArray(graph.infraEdges) ? graph.infraEdges : [])
-        setExternalEdges(Array.isArray(graph.externalEdges) ? graph.externalEdges : [])
-      }
-    } catch {
-    } finally {
+    if ([healthResult, governanceResult, graphResult].some(result => !result.ok && result.state === 'unauthorized')) {
+      requestGeneration.current += 1
+      setHealthStatuses({})
+      setGovernanceData({})
+      setGraphEdges([])
+      setDegrees({})
+      setInfraNodes([])
+      setExternalNodes([])
+      setInfraEdges([])
+      setExternalEdges([])
+      setSelected(null)
+      setVerified({ health: false, governance: false, topology: false })
+      setEvidence({ health: 'unauthorized', governance: 'unauthorized', topology: 'unauthorized' })
       setIsChecking(false)
+      return
     }
-  }
+
+    const nextEvidence: Record<'health' | 'governance' | 'topology', EvidenceState> = {
+      health: healthResult.ok ? 'ok' : healthResult.state,
+      governance: governanceResult.ok ? (governanceResult.value.available ? 'ok' : 'not_deployed') : governanceResult.state,
+      topology: graphResult.ok ? (graphResult.value.available ? 'ok' : 'not_deployed') : graphResult.state,
+    }
+    if (healthResult.ok) {
+      const newStatuses: Record<string, HealthStatus> = {}
+      for (const svc of SERVICES) {
+        const entry = healthResult.value.find(service => service.port === svc.port)
+        newStatuses[svc.id] = entry?.status ?? 'UNKNOWN'
+      }
+      setHealthStatuses(newStatuses)
+    }
+    if (governanceResult.ok && governanceResult.value.available) setGovernanceData(governanceResult.value.byService)
+    if (graphResult.ok && graphResult.value.available) {
+      const graph = graphResult.value.graph
+      const deg: Record<string, number> = {}
+      for (const node of graph.nodes) {
+        const id = SERVICE_NAME_TO_ID[node.name.replace(/^openbank-/, '')]
+        if (id) deg[id] = (node.dependsOn ?? 0) + (node.dependedOnBy ?? 0)
+      }
+      setGraphEdges(graph.edges)
+      setDegrees(deg)
+      setInfraNodes(graph.infraNodes)
+      setExternalNodes(graph.externalNodes)
+      setInfraEdges(graph.infraEdges)
+      setExternalEdges(graph.externalEdges)
+    }
+    setVerified(current => ({
+      health: current.health || healthResult.ok,
+      governance: current.governance || (governanceResult.ok && governanceResult.value.available),
+      topology: current.topology || (graphResult.ok && graphResult.value.available),
+    }))
+    setEvidence(nextEvidence)
+    setIsChecking(false)
+  }, [])
 
   useEffect(() => {
-    checkHealth()
-  }, [])
+    void Promise.resolve().then(checkHealth)
+    return () => { requestGeneration.current += 1 }
+  }, [checkHealth])
 
   const selectedSvc = SERVICES.find(s => s.id === selected)
   const selectedTier: InfraNodeT | ExternalNodeT | undefined = [...infraNodes, ...externalNodes].find(n => n.id === selected)
@@ -556,6 +600,22 @@ export default function ServiceMapPage() {
     sdd: 'SEPA Direct Debit mandáty a inkasa',
   }
 
+  const evidenceLabels = {
+    health: t('Provozní stav', 'Runtime health'),
+    governance: t('Governance', 'Governance'),
+    topology: t('Vazby a integrace', 'Dependencies & integrations'),
+  }
+  const evidenceCopy = (key: keyof typeof evidence, state: EvidenceState) => {
+    if (state === 'loading') return t('Načítám', 'Loading')
+    if (state === 'ok') return t('Ověřeno', 'Verified')
+    const stale = verified[key] ? t(' · poslední ověřená data', ' · last verified data') : ''
+    if (state === 'unauthorized') return t('Relace vypršela', 'Session expired')
+    if (state === 'scaled_to_zero') return t('Zdroj je uspán', 'Source scaled to zero') + stale
+    if (state === 'not_deployed') return t('Snapshot není nasazen', 'Snapshot not deployed') + stale
+    if (state === 'error') return t('Neplatná evidence', 'Invalid evidence') + stale
+    return t('Zdroj neodpovídá', 'Source unavailable') + stale
+  }
+
   return (
     <div>
       <DocsPageHeader
@@ -570,6 +630,22 @@ export default function ServiceMapPage() {
       />
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
+
+      <section className="card" aria-label={t('Stav zdrojů mapy', 'Map evidence status')} style={{ padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+        {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {
+          const state = evidence[key]
+          const tone = state === 'ok' ? 'var(--success)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning)'
+          return (
+            <div key={key} data-testid={`map-evidence-${key}`} role={state === 'ok' || state === 'loading' ? undefined : 'status'} aria-live={state === 'ok' || state === 'loading' ? undefined : 'polite'} style={{ minWidth: 0, padding: '8px 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>{evidenceLabels[key]}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: tone, fontSize: 11 }}>
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
+                <span>{evidenceCopy(key, state)}</span>
+              </div>
+            </div>
+          )
+        })}
+      </section>
 
       {/* Filter tabs and Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
