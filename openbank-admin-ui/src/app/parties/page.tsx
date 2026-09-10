@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { Users, Plus, Search, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -12,20 +12,12 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import { parsePartyListPage, type PartyListItem, type PartyListPage } from '@/lib/party/partyListContract'
 
 const PAGE_SIZE = 25
 
-interface Party {
-  id: string
-  partyType: string
-  status: string
-  legalName: string
-  tradingName?: string
-  email: string
-  phone?: string
-  kycStatus: string
-  createdAt: string
-}
+type Party = PartyListItem
+type PartyListMeta = Omit<PartyListPage, 'items'>
 
 interface Pagination {
   limit: number
@@ -40,6 +32,10 @@ export default function PartiesPage() {
   // ── list mode (no search term) ──────────────────────────────────────────────
   const [parties, setParties]         = useState<Party[]>([])
   const [loading, setLoading]         = useState(true)
+  const [listLoadingMore, setListLoadingMore] = useState(false)
+  const [listPage, setListPage] = useState<PartyListMeta | null>(null)
+  const [listPageError, setListPageError] = useState<UnavailableKind | null>(null)
+  const listGeneration = useRef(0)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
   // of a raw "HTTP 404" leak (admin-ui graceful-state rule). party-service may
   // not be deployed here — we degrade to an explained empty state.
@@ -53,6 +49,23 @@ export default function PartiesPage() {
   const [searching, setSearching]         = useState(false)
   const [loadingMore, setLoadingMore]     = useState(false)
   const [searchUnavail, setSearchUnavail] = useState<{ kind: UnavailableKind } | null>(null)
+  const searchGeneration = useRef(0)
+
+  const purgeAuthorizedEvidence = useCallback(() => {
+    listGeneration.current += 1
+    searchGeneration.current += 1
+    setParties([])
+    setListPage(null)
+    setListPageError(null)
+    setSearchRows([])
+    setSearchPagi(null)
+    setLoading(false)
+    setListLoadingMore(false)
+    setSearching(false)
+    setLoadingMore(false)
+    setUnavailable({ kind: 'unauthorized' })
+    setSearchUnavail({ kind: 'unauthorized' })
+  }, [])
 
   // ── derived ─────────────────────────────────────────────────────────────────
   const inSearchMode  = debouncedQ.length >= 2
@@ -62,34 +75,59 @@ export default function PartiesPage() {
   const displayUnavail = inSearchMode ? searchUnavail : unavailable
 
   // ── list load ───────────────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoading(true); setUnavailable(null)
+  const load = useCallback(async (page = 0, append = false) => {
+    const generation = ++listGeneration.current
+    if (append) setListLoadingMore(true)
+    else setLoading(true)
+    setListPageError(null)
+    if (!append) setUnavailable(null)
     try {
       const res = await fetch(
-        svcUrl('party-service', '/api/v1/parties'),
+        svcUrl('party-service', '/api/v1/parties', { page: String(page), size: String(PAGE_SIZE) }),
         { signal: AbortSignal.timeout(5000) }
       )
       if (!res.ok) {
-        // 404/405 → list endpoint not yet deployed; degrade to empty, not error
-        if (res.status === 404 || res.status === 405) {
-          setParties([])
-        } else {
-          setParties([])
-          setUnavailable({ kind: await classifyBffFailure(res) })
+        // A collection with no parties is 200 + items:[]. A 404 therefore means the
+        // service/route is absent, never a truthful empty registry; 405 is contract drift.
+        const classified = await classifyBffFailure(res)
+        const kind = res.status === 405 || classified === 'not_found' ? 'error' : classified
+        if (generation !== listGeneration.current) return
+        if (kind === 'unauthorized') {
+          purgeAuthorizedEvidence()
+          return
         }
+        if (append) setListPageError(kind)
+        else { setParties([]); setListPage(null); setUnavailable({ kind }) }
         return
       }
-      const data = await res.json()
-      setParties(Array.isArray(data) ? data : data.items ?? data.content ?? [])
+      const data = await res.json().catch(() => null)
+      const parsed = parsePartyListPage(data, page)
+      if (generation !== listGeneration.current) return
+      if (!parsed) {
+        if (append) setListPageError('error')
+        else { setParties([]); setListPage(null); setUnavailable({ kind: 'error' }) }
+        return
+      }
+      setParties(previous => append
+        ? [...previous, ...parsed.items.filter(item => !previous.some(existing => existing.id === item.id))]
+        : parsed.items)
+      setListPage({ total: parsed.total, page: parsed.page, size: parsed.size })
     } catch {
       // Timeout / abort / network — BFF or party-service didn't answer
-      setParties([])
-      setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
-  }, [])
+      if (generation !== listGeneration.current) return
+      if (append) setListPageError('unreachable')
+      else { setParties([]); setListPage(null); setUnavailable({ kind: 'unreachable' }) }
+    } finally {
+      if (generation === listGeneration.current) {
+        if (append) setListLoadingMore(false)
+        else setLoading(false)
+      }
+    }
+  }, [purgeAuthorizedEvidence])
 
   // ── name search — ADR-0055 (first correct SearchRequest adopter in fleet) ───
   const runSearch = useCallback(async (q: string, cursor?: string) => {
+    const generation = ++searchGeneration.current
     if (!cursor) { setSearching(true); setSearchRows([]) } else setLoadingMore(true)
     setSearchUnavail(null)
     try {
@@ -100,19 +138,32 @@ export default function PartiesPage() {
         { signal: AbortSignal.timeout(5000) }
       )
       if (!res.ok) {
-        setSearchUnavail({ kind: await classifyBffFailure(res) })
+        const kind = await classifyBffFailure(res)
+        if (generation !== searchGeneration.current) return
+        if (kind === 'unauthorized') {
+          purgeAuthorizedEvidence()
+          return
+        }
+        setSearchUnavail({ kind })
         return
       }
       const data = await res.json()
+      if (generation !== searchGeneration.current) return
       // Response: { data: Party[], pagination: { limit, hasNextPage, nextCursor? } }
       // GDPR: server enforces toSimpleResponse() — no phone/address/DOB returned
       const rows: Party[] = data.data ?? []
       setSearchRows(prev => cursor ? [...prev, ...rows] : rows)
       setSearchPagi(data.pagination ?? null)
     } catch {
+      if (generation !== searchGeneration.current) return
       setSearchUnavail({ kind: 'unreachable' })
-    } finally { setSearching(false); setLoadingMore(false) }
-  }, [])
+    } finally {
+      if (generation === searchGeneration.current) {
+        setSearching(false)
+        setLoadingMore(false)
+      }
+    }
+  }, [purgeAuthorizedEvidence])
 
   // ── debounce 300 ms ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -122,15 +173,18 @@ export default function PartiesPage() {
 
   // ── fire search when debounced query changes ────────────────────────────────
   useEffect(() => {
-    if (debouncedQ.length >= 2) {
-      runSearch(debouncedQ)
-    } else {
-      setSearchRows([]); setSearchPagi(null); setSearchUnavail(null)
-    }
+    void Promise.resolve().then(() => {
+      if (debouncedQ.length >= 2) {
+        void runSearch(debouncedQ)
+      } else {
+        searchGeneration.current += 1
+        setSearchRows([]); setSearchPagi(null); setSearchUnavail(null)
+      }
+    })
   }, [debouncedQ, runSearch])
 
   // ── initial list load ───────────────────────────────────────────────────────
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void Promise.resolve().then(() => load()) }, [load])
 
   return (
     <div>
@@ -140,7 +194,7 @@ export default function PartiesPage() {
         subtitle={t('Zákazníci a společnosti registrované v platformě', 'Customers and companies registered in the platform')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Subjekty', 'Parties')}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" type="button" onClick={load} disabled={loading || inSearchMode}
+          <button className="btn btn-secondary" type="button" onClick={() => load()} disabled={loading || inSearchMode}
             aria-busy={loading} aria-label={t('Obnovit subjekty', 'Refresh parties')}>
             <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
@@ -175,6 +229,11 @@ export default function PartiesPage() {
         {inSearchMode && !searching && (
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
             {t(`${searchRows.length} výsledků`, `${searchRows.length} result${searchRows.length !== 1 ? 's' : ''}`)}
+          </span>
+        )}
+        {!inSearchMode && !loading && listPage && (
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }} role="status">
+            {t(`Načteno ${parties.length} z ${listPage.total}`, `Loaded ${parties.length} of ${listPage.total}`)}
           </span>
         )}
         {inSearchMode && searching && (
@@ -268,6 +327,37 @@ export default function PartiesPage() {
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '13px' }}>
               {t('Načítám…', 'Loading…')}
             </div>
+          )}
+          {!inSearchMode && listPage && (listPage.page + 1) * listPage.size < listPage.total && !listLoadingMore && !listPageError && (
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => load(listPage.page + 1, true)}
+                aria-label={t('Načíst další subjekty ze seznamu', 'Load more parties from the list')}
+              >
+                <ChevronDown size={13} aria-hidden="true" />
+                {t('Načíst další', 'Load more')}
+              </button>
+            </div>
+          )}
+          {!inSearchMode && listLoadingMore && (
+            <div role="status" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '13px' }}>
+              {t('Načítám další subjekty…', 'Loading more parties…')}
+            </div>
+          )}
+          {!inSearchMode && listPageError && listPage && (
+            <DataUnavailable
+              kind={listPageError}
+              service={t('Party-service', 'Party-service')}
+              feature={t('Další strana subjektů', 'Next party page')}
+              lang={language}
+              dense
+            >
+              <button type="button" className="btn btn-secondary" onClick={() => load(listPage.page + 1, true)}>
+                {t('Zkusit znovu', 'Retry')}
+              </button>
+            </DataUnavailable>
           )}
         </div>
       )}

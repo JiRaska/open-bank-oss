@@ -614,23 +614,22 @@ class CustomerEdgeResource(
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header must not be blank" }
         require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
         val customer = customer()
-        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
-            ?: return badRequest("Malformed term-deposit request")
-        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
-            return badRequest("Term-deposit request contains unsupported fields")
+        val parsed = when (val result = parseOpenTermDepositRequest(body)) {
+            is OpenRequestParse.Reject -> return result.response
+            is OpenRequestParse.Ok -> result
         }
-        val productId = request.uuidField("productId")
-            ?: return Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build()
-        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
-            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
-                runCatching { UUID.fromString(value) }.getOrNull()
-            } ?: return badRequest("incentiveReservationId must be a UUID")
-        }
+        val request = parsed.request
+        val productId = parsed.productId
+        val reservationId = parsed.reservationId
         val offer = when (val result = resolvePublicTermDeposit(customer, productId)) {
             is TermDepositResolution.Found -> result.offer
             TermDepositResolution.NotFound -> return termDepositNotFound()
             TermDepositResolution.Unavailable -> return termDepositCatalogueUnavailable()
         }
+        // #9044: the terms record the deposit is opened under — see gateTermsForOpen.
+        val termsGate = gateTermsForOpen(request, offer)
+        if (termsGate is TermsGate.Reject) return termsGate.response
+        val terms = (termsGate as TermsGate.Ok)
         val party = when (val result = activeParty(customer)) {
             is ActivePartyResult.Approved -> result
             is ActivePartyResult.Rejected -> return result.response
@@ -641,6 +640,9 @@ class CustomerEdgeResource(
             .put("accountType", "TERM_DEPOSIT")
             .put("currencyCode", offer.path("currency").asText())
             .put("legalName", party.legalName)
+            .put("termsVersion", terms.version)
+            .put("termsUrl", terms.url)
+            .put("termsEffectiveFrom", terms.effectiveFrom)
         val response = upstream.post(
             "$accountServiceUrl/api/v1/accounts",
             customer.partyId.toString(),
@@ -5127,6 +5129,88 @@ class CustomerEdgeResource(
     }
 
     /** Maps the rich operator product into only the terms a retail customer needs to decide. */
+    /**
+     * The terms document in force TODAY for this offer (#9044): effectiveFrom <= today and
+     * (no effectiveTo or effectiveTo >= today); the latest effectiveFrom wins when several
+     * qualify. Returns null when the product carries no currently effective document — the
+     * caller must treat that as unopenable, never as "open it without a terms record".
+     */
+    private fun resolveCurrentTerms(offer: JsonNode): JsonNode? {
+        val today = LocalDate.now(clock)
+        val docs = offer.path("termsAndConditions")
+        if (!docs.isArray) return null
+        return docs.filter { doc ->
+            val from = runCatching { LocalDate.parse(doc.path("effectiveFrom").asText()) }.getOrNull()
+                ?: return@filter false
+            val to = doc.path("effectiveTo").takeIf { it.isTextual }
+                ?.let { runCatching { LocalDate.parse(it.asText()) }.getOrNull() }
+            !from.isAfter(today) && (to == null || !to.isBefore(today))
+        }.maxByOrNull { it.path("effectiveFrom").asText() }
+    }
+
+    /** Parses and validates the open-term-deposit request body (#9044 keeps this small). */
+    private fun parseOpenTermDepositRequest(body: String): OpenRequestParse {
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return OpenRequestParse.Reject(badRequest("Malformed term-deposit request"))
+        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
+            return OpenRequestParse.Reject(badRequest("Term-deposit request contains unsupported fields"))
+        }
+        val productId = request.uuidField("productId")
+            ?: return OpenRequestParse.Reject(
+                Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build(),
+            )
+        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
+                runCatching { UUID.fromString(value) }.getOrNull()
+            } ?: return OpenRequestParse.Reject(badRequest("incentiveReservationId must be a UUID"))
+        }
+        return OpenRequestParse.Ok(request, productId, reservationId)
+    }
+
+    private sealed interface OpenRequestParse {
+        data class Ok(val request: JsonNode, val productId: UUID, val reservationId: UUID?) : OpenRequestParse
+        data class Reject(val response: Response) : OpenRequestParse
+    }
+
+    /**
+     * The #9044 terms gate for term-deposit opening. The deposit must open with a RECORD of the
+     * terms it was opened under — they carry the early-withdrawal penalty and the notice period,
+     * and a complaints review asks "which terms govern this deposit" months later, when
+     * reconstruction from openedAt is least defensible. The edge resolves the CURRENTLY EFFECTIVE
+     * terms document server-side (what was published); a product with none is unopenable, and a
+     * client echoing a STALE rendered version is refused with 409, so a terms rollout can never
+     * bind the customer to a document they were not shown (ADR-0269: shown vs published is made
+     * explicit, never papered over).
+     */
+    private fun gateTermsForOpen(request: JsonNode, offer: JsonNode): TermsGate {
+        val terms = resolveCurrentTerms(offer)
+            ?: return TermsGate.Reject(
+                Response.status(Response.Status.CONFLICT)
+                    .entity("{\"error\":\"Product has no currently effective terms document\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        val version = terms.path("version").asText()
+        val shown = request.get("termsVersionShown")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()
+                ?: return TermsGate.Reject(badRequest("termsVersionShown must be a string"))
+        }
+        if (shown != null && shown != version) {
+            return TermsGate.Reject(
+                Response.status(Response.Status.CONFLICT)
+                    .entity("{\"error\":\"Terms version mismatch — re-display the current terms before opening\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        }
+        return TermsGate.Ok(version, terms.path("url").asText(), terms.path("effectiveFrom").asText())
+    }
+
+    private sealed interface TermsGate {
+        data class Ok(val version: String, val url: String, val effectiveFrom: String) : TermsGate
+        data class Reject(val response: Response) : TermsGate
+    }
+
     private fun termDepositOffer(product: JsonNode): ObjectNode? {
         val today = LocalDate.now(clock)
         if (!isDiscoverableTermDeposit(product) || !isCurrentlyValid(product, today)) return null
@@ -5310,7 +5394,7 @@ class CustomerEdgeResource(
             "REWARDS_HUB",
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
-        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
+        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId", "termsVersionShown")
         private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(422)
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128

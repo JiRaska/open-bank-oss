@@ -33,7 +33,10 @@ describe('GET /api/security/kpis', () => {
       generatedAt: '2026-09-04T21:00:00Z',
       netpol: { available: true, covered: 59, total: 73, coveragePct: 81, gateGreen: true },
       freshness: { available: false, reason: 'skipped' },
-      credentials: { available: true, staticSecrets: 158, withDeadline: 0, overdue: 0 },
+      credentials: { available: true, totalSecrets: 165, staticSecrets: 158, withDeadline: 0, overdue: 0, undeclared: 158, overdueFound: false },
+      fuzz: { available: false, reason: 'no fleet artifact' },
+      threatModels: { available: false, reason: 'collector unavailable' },
+      mttr: { available: false, reason: 'token unavailable' },
     }
     const file = path.join(tmpDir, 'security-kpis.json')
     await fs.writeFile(file, JSON.stringify(snapshot))
@@ -59,6 +62,25 @@ describe('GET /api/security/kpis', () => {
     const file = path.join(tmpDir, 'security-kpis.json')
     await fs.writeFile(file, '{not json')
     process.env.OPENBANK_SECURITY_KPIS = file
+    const res = await (await loadGet())()
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({ available: false, reason: 'error' })
+  })
+
+  it('rejects a contradictory snapshot instead of serving authoritative-looking KPI data', async () => {
+    const snapshot = {
+      generatedAt: '2026-09-04T21:00:00Z',
+      netpol: { available: true, covered: 59, total: 73, coveragePct: 100, gateGreen: true },
+      freshness: { available: false, reason: 'skipped' },
+      credentials: { available: false, reason: 'skipped' },
+      fuzz: { available: false, reason: 'skipped' },
+      threatModels: { available: false, reason: 'skipped' },
+      mttr: { available: false, reason: 'skipped' },
+    }
+    const file = path.join(tmpDir, 'security-kpis.json')
+    await fs.writeFile(file, JSON.stringify(snapshot))
+    process.env.OPENBANK_SECURITY_KPIS = file
+
     const res = await (await loadGet())()
     expect(res.status).toBe(200)
     await expect(res.json()).resolves.toMatchObject({ available: false, reason: 'error' })

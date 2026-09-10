@@ -48,6 +48,7 @@ describe('delegation education', () => {
     expect(corporate).not.toBeNull()
     fireEvent.click(within(corporate!).getByText('Corporate'))
     expect(within(corporate!).getByRole('region', { name: 'Corporate: What the console can explain today' })).toBeVisible()
+    expect(within(corporate!).getByRole('region', { name: 'Corporate: What the console can explain today' })).toHaveTextContent('Switching to a company profile verifies an active mandate')
     expect(within(corporate!).getByRole('region', { name: 'Corporate: Next control layer — not active' })).toHaveTextContent('N-of-M approval')
     expect(within(corporate!).getByText(/Target model:/)).toBeVisible()
   })
