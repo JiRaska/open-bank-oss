@@ -29,6 +29,10 @@ const SNAPSHOT = {
   to: '2026-09-02',
   steps: [
     { step: 'WELCOME', stepOrdinal: 1, viewed: 40, completed: 30, holdAbandons: 0, dropOffPct: 25, medianSeconds: 12 },
+    { step: 'IDENTITY', stepOrdinal: 2, viewed: 30, completed: 28, holdAbandons: 0, dropOffPct: 6.7, medianSeconds: 20 },
+    { step: 'EMAIL', stepOrdinal: 3, viewed: 28, completed: 26, holdAbandons: 0, dropOffPct: 7.1, medianSeconds: 15 },
+    { step: 'AGREEMENT', stepOrdinal: 4, viewed: 26, completed: 24, holdAbandons: 0, dropOffPct: 7.7, medianSeconds: 18 },
+    { step: 'PASSKEY', stepOrdinal: 5, viewed: 24, completed: 20, holdAbandons: 0, dropOffPct: 16.7, medianSeconds: 30 },
     { step: 'SIGN', stepOrdinal: 6, viewed: 20, completed: 18, holdAbandons: 0, dropOffPct: 10, medianSeconds: 45 },
   ],
   signOutcomes: [{ day: '2026-08-31', attempts: 20, successes: 18, failures: 2 }],
@@ -66,7 +70,7 @@ describe('onboarding analytics recovery', () => {
     const recovered = { ...SNAPSHOT, steps: SNAPSHOT.steps.map(step => step.step === 'WELCOME' ? { ...step, viewed: 50 } : step) }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(200, SNAPSHOT))
-      .mockResolvedValueOnce(response(200, { ...SNAPSHOT, available: false, error: 'ClickHouse timeout', steps: [] }))
+      .mockResolvedValueOnce(response(502, { available: false }))
       .mockResolvedValueOnce(response(200, recovered))
     vi.stubGlobal('fetch', fetchMock)
 
