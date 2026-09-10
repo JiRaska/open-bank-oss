@@ -35,6 +35,8 @@ export interface MutationScore {
   targetPackage: string
   totalMutants: number
   killed: number
+  /** PIT also counts a timed-out mutant as detected. Optional for older bundled reports. */
+  timedOut?: number
   survived: number
   noCoverage: number
   /** Percentage 0–100, rounded. null when pitest has not run yet. */

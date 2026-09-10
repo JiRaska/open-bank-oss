@@ -4,14 +4,16 @@
 
 package com.openbank.lending.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.security.identity.SecurityIdentity
-import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -63,16 +65,36 @@ class CustomerIntakeResource(
     private val config: CustomerIntakeConfig,
     private val identity: SecurityIdentity,
     private val clock: Clock,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper,
 ) {
     @POST
     @Path("/applications")
     @Authorize(action = "lending.intake", resource = "")
     @Operation(summary = "Submit a loan application on behalf of an authenticated customer (edge only)")
-    fun submit(@HeaderParam(PARTY_HEADER) partyHeader: String?, request: CustomerIntakeRequest): Uni<Response> {
+    suspend fun submit(
+        @HeaderParam(PARTY_HEADER) partyHeader: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-Request-ID") xRequestId: String?,
+        request: CustomerIntakeRequest,
+    ): Response {
         val refusal = refuse(partyHeader, request)
-        if (refusal != null) return Uni.createFrom().item(refusal)
+        if (refusal != null) return refusal
 
         val partyId = UUID.fromString(partyHeader)
+        // Idempotent replay (ADR-0297, #8351): same contract as LendingResource.applyForLoan —
+        // the edge supplies Idempotency-Key / X-Request-ID on retries; a keyed retry replays the
+        // cached 201 and never stacks a duplicate application. Scoped per party.
+        val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        requestKey?.let { key ->
+            idempotencyStore.get("lending:intake-apply:$partyId:$key")?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
         val application = LoanApplicationRequest(
             partyId = partyId,
             requestedAmount = Money(request.amount, CurrencyCode.of(config.currency)),
@@ -82,9 +104,16 @@ class CustomerIntakeResource(
             jurisdiction = config.jurisdiction,
             productType = config.productType,
         )
-        return apply.apply(application, "$CUSTOMER_ACTOR_PREFIX$partyId")
-            .map { Response.status(HTTP_CREATED).entity(it).build() }
-            .onFailure().recoverWithItem { e -> error(HTTP_UNPROCESSABLE, e.message ?: "intake refused") }
+        val created = try {
+            apply.apply(application, "$CUSTOMER_ACTOR_PREFIX$partyId").awaitSuspending()
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            return error(HTTP_UNPROCESSABLE, e.message ?: "intake refused")
+        }
+        val body = objectMapper.writeValueAsString(created)
+        requestKey?.let { key ->
+            idempotencyStore.save("lending:intake-apply:$partyId:$key", HTTP_CREATED, body, INTAKE_KEY_TTL_SECONDS)
+        }
+        return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -146,6 +175,7 @@ class CustomerIntakeResource(
 
         private val ZERO_UUID = UUID(0, 0)
         private const val HTTP_CREATED = 201
+        private const val INTAKE_KEY_TTL_SECONDS = 300L
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_UNPROCESSABLE = 422

@@ -173,7 +173,7 @@ private const val OPENED_AT = "2026-08-27T03:00:00Z"
 private const val CLAIM_JSON =
     """{"interactionRef":"$INTERACTION_ID","code":"WELCOME10","productId":"$PRODUCT_ID"}"""
 private const val PRODUCT_JSON =
-    """{"id":"$PRODUCT_ID","code":"TD-12M","name":"12 month deposit","type":"TERM_DEPOSIT","status":"ACTIVE","isPublic":true,"currency":"CZK","termDepositConfig":{"termMonths":12,"interestRateAnnual":3.5},"termsAndConditions":[]}"""
+    """{"id":"$PRODUCT_ID","code":"TD-12M","name":"12 month deposit","type":"TERM_DEPOSIT","status":"ACTIVE","isPublic":true,"currency":"CZK","termDepositConfig":{"termMonths":12,"interestRateAnnual":3.5},"termsAndConditions":[{"version":"2026-01","url":"https://docs.example/td.pdf","effectiveFrom":"2026-01-01","language":"cs"}]}"""
 private const val ATTRIBUTION_JSON =
     """{"campaignId":"66666666-6666-4666-8666-666666666666","stepOrder":0,"channel":"PUSH","incentiveOfferRef":{"id":"$OFFER_ID","name":"WELCOME","version":1}}"""
 private const val RESERVATION_JSON =

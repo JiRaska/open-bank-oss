@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -25,7 +25,19 @@ paths:
     post:
       tags: [Consents]
       summary: Create a consent
+      description: >-
+        Idempotent replay: when the Berlin Group `tppTransactionId` body property or the
+        `X-Request-ID` header is supplied, a retry returns the cached response with
+        `X-Idempotency-Replayed: true` and creates nothing a second time (ADR-0293). Both are
+        optional today — requests without either are accepted but not deduplicated.
       operationId: createConsent
+      parameters:
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Berlin Group request id; used as the idempotency key when tppTransactionId is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -312,6 +324,10 @@ paths:
     post:
       tags: [Suppressions]
       summary: Create a do-not-contact suppression (ADR-0219 D3)
+      description: >-
+        Idempotent on the natural key (partyId, scope, value) over ACTIVE rows: a retried create
+        replays the original suppression — no duplicate row, no second event (ADR-0293). A revoked
+        suppression does not block a deliberate re-suppression of the same value.
       operationId: createSuppression
       requestBody:
         required: true
@@ -465,6 +481,9 @@ components:
         tppTransactionId:
           type: string
           nullable: true
+          description: >-
+            Berlin Group transaction id — the idempotency key for this creation. A retry carrying
+            the same value replays the first response (ADR-0293).
     ConsentResponse:
       type: object
       properties:

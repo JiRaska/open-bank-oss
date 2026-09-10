@@ -2,7 +2,7 @@
 date: 2026-07-31
 decision-status: proposed
 delivery-status: partial
-followup: "none — the guards and the service are live; no payment service calls them, which is the tail"
+followup: "#9355 — complete D3 rail rollout beyond domestic payment and reconcile reservations to final clearing outcomes"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -13,13 +13,23 @@ summary: "Delegation service owns granular, SCA-bound grants over products (acco
 
 # ADR-0232 — Delegated access: customer-to-party sharing with granular capabilities
 
-**Delivery note (2026-08-19).** `openbank-delegation-service` is live at `version.txt` 0.7.0,
-deployed via `auto-deploy.yml`, carries `DelegationGrant`/`SpendCeilings`/`SpendReservation` and a
-threat model, and is listed money-path in `rules.yaml`. The amount-aware guards are now backed by
-the **enforced** `enforcement-reachability` gate (#3615). What is still unbuilt is the half that
-issue named: no payment service integrates delegation — a grep for `delegation` across
-`openbank-domestic-payment/src/main` and `openbank-sepa-payment/src/main` returns nothing, so the
-delegated money path is reachable in the service and not yet on the payment path.
+**Delivery note (measured 2026-09-09).** `openbank-delegation-service` carries
+`DelegationGrant`/`SpendCeilings`/`SpendReservation`, a threat model, and is listed money-path in
+`rules.yaml`. The first D3 payment-instruction path is now live at customer-edge: a delegated
+domestic-payment initiation asks account-service's amount-aware
+`/delegation/payment-authorization` decision before the delegate's own SCA is consumed or an
+instruction reaches domestic-payment. The decision is based on the local active-grant projection,
+requires `ACCOUNT_INITIATE_PAYMENT`, carries the grantor and delegation id into the audit chain,
+and fails closed for an unavailable decision, absent/expired grant, or a per-transaction ceiling.
+`DelegatedDomesticPaymentTest`, `LegacyDelegationArmRefusedIT` and
+`CustomerEdgeDelegatedPaymentPactConsumerTest` prove that boundary.
+
+This is deliberately a **first rail**, not completion of D3: delegated SEPA, instant, card and
+savings execution still need their own enforcing integrations. Domestic payment reserves the
+delegated grant's atomic, idempotent `SpendReservation` before SCA, releases it if SCA fails, and
+confirms it when the domestic-payment service accepts the instruction. A later clearing failure
+therefore conservatively remains counted until final-outcome reconciliation is added; this avoids
+ever re-opening a ceiling before the money path can prove it did not move.
 
 Relates: ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0094
 (EUDI hub), ADR-0118 (GDPR lifecycle), ADR-0126 (unified consent),

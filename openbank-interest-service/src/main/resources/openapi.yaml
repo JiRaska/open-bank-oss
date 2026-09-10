@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Interest Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
     final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
@@ -26,6 +26,10 @@ paths:
     post:
       tags: [Interest]
       summary: Accrue interest for a single account
+      description: >-
+        Idempotent (ADR-0291): one accrual per (account, accrualDate, product, currency) — the
+        V12 UNIQUE key backs it. A retry with the same natural key replays the ORIGINAL accrual
+        (200, no second write), even after the rate config was deactivated.
       operationId: accrueInterest
       requestBody:
         required: true
@@ -45,6 +49,10 @@ paths:
     post:
       tags: [Interest]
       summary: Accrue interest for all accounts
+      description: >-
+        Re-runnable batch (ADR-0291): per-account dedup on the accrual natural key makes a second
+        run for the same date a no-op for accounts already accrued; per-account failures collapse
+        to a skip, never abort the batch.
       operationId: accrueAllInterest
       parameters:
         - name: date
@@ -60,6 +68,11 @@ paths:
     post:
       tags: [Interest]
       summary: Capitalize accrued interest
+      description: >-
+        Idempotent (ADR-0291, ADR-0033): the accrual set is claimed (ACCRUING → CAPITALIZING)
+        before the ledger is told anything, and the ledger idempotency key is derived from
+        (account, product, periodTo), so a plain retry collapses onto the journal the interrupted
+        attempt booked — exactly-once on money.
       operationId: capitalizeInterest
       parameters:
         - name: accountId
@@ -195,7 +208,8 @@ paths:
         Assembles the per-period *Vyúčtování daně vybírané srážkou* (§38d ZDP, ADR-0038), folding all
         tax actually withheld in the month into one batch, advancing the paired records
         RECORDED → REMITTED, and emitting `interest.withholding.remitted.v1`. Idempotent: one batch
-        per `(year, month)` — re-running returns the assembled batch.
+        per `(year, month)` — re-running returns the assembled batch (ADR-0291; the
+        `uq_withholding_remittance_period` UNIQUE key, V4, is the race backstop).
       operationId: assembleWithholdingRemittance
       parameters:
         - name: year
@@ -263,6 +277,10 @@ paths:
     post:
       tags: [Interest]
       summary: Create interest rate config
+      description: >-
+        Idempotent (ADR-0291): a retry carrying the same natural key (productId, accountId,
+        currency, effectiveFrom) replays the already-active config instead of minting a shadowing
+        duplicate. A rate CHANGE carries a different effectiveFrom and persists normally.
       operationId: createRateConfig
       requestBody:
         required: true
