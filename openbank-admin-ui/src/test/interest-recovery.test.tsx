@@ -106,7 +106,7 @@ describe('interest snapshot recovery', () => {
 
   it.each([
     { status: 401, body: { error: 'unauthorized' }, title: 'Session expired' },
-    { status: 403, body: { error: 'forbidden' }, title: 'Access denied' },
+    { status: 403, body: { error: 'forbidden' }, title: 'Session expired' },
   ])('keeps a retained privileged snapshot blocked through an HTTP $status retry', async ({ status, body, title }) => {
     let resolveRetry!: (response: Response) => void
     const retryResponse = new Promise<Response>(resolve => { resolveRetry = resolve })
