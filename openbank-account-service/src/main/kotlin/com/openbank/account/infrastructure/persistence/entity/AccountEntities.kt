@@ -86,6 +86,17 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "nickname", length = 60)
     var nickname: String? = null
 
+    /** Terms version this TERM_DEPOSIT was opened under (V24, #9044). Null = pre-V24 account. */
+    @Column(name = "terms_version")
+    var termsVersion: String? = null
+
+    /** Snapshot of the terms document URL at opening — evidence of what was shown (V24, #9044). */
+    @Column(name = "terms_url")
+    var termsUrl: String? = null
+
+    @Column(name = "terms_effective_from")
+    var termsEffectiveFrom: LocalDate? = null
+
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.now()

@@ -82,6 +82,18 @@
 # for exactly this reason ("OPA is not present in a test JVM"); %dev keeps the deployed default of
 # AUTHZ_ENFORCE:true, so the fuzz JVM needs it explicitly.
 #
+# That "pass 1 never reaches the interceptor" immunity ended the day psd2-service entered the
+# fleet scope (#9257): its anonymous-grant endpoints (the eIDAS/mTLS model — gate
+# `psd2-anonymous-grant-stays-behind-eidas-mtls`) pass authN UNAUTHENTICATED by design and DO
+# reach AuthorizeInterceptor, which then fails closed with the same 503 when no sidecar answers.
+# Measured on psd2's first fleet run, 34268765822: 28/29 jobs green, psd2 failed with exactly 12
+# schemathesis failures, every one
+# `[503] POLICY_DECISION_POINT_UNAVAILABLE: policy decision point unavailable: OPA call failed:
+# null` — a harness gap, not an HTTP-surface finding. The harness therefore stubs OPA itself with
+# an allow decision (see the OPA stub comment in the body); pass 1's authN property is unchanged
+# because authenticated endpoints still 401 before the interceptor, and only endpoints whose
+# authn passes reach the now-allowing PDP.
+#
 # So pass 2 tests neither authentication nor authorization, by design — both are pass 1's job. What
 # is left is the only thing pass 2 claims: does a handler answer 5xx to input it should reject with
 # a 4xx.
@@ -218,8 +230,40 @@ EOF
   if ! grep -qE '^[[:space:]]+-Dquarkus\.devservices\.enabled=false \\$' "$0"; then
     echo "SELF-TEST FAIL 3: quarkusDev no longer disables dev services"; ST_RC=1
   fi
+  # Control 4: the OPA allow stub must still be wired — a green fleet run cannot show it
+  # regressed, because only services with anonymous-grant endpoints (today: psd2) ever call
+  # the PDP in pass 1, and their failure mode is the 503 this stub exists to prevent (run
+  # 34268765822). Anchored to the Python handler's exact branch, not the prose: the header and
+  # comments mention the shape too, so an unanchored grep would match its own documentation.
+  if ! grep -qF 'self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/")' "$0"; then
+    echo "SELF-TEST FAIL 4: the OPA allow stub (8181, /v1/data/ -> {\"result\": true}) is gone"; ST_RC=1
+  fi
+  # Control 5: EXERCISE the stub over a keep-alive connection — control 4's grep cannot see
+  # the regression class that failed run 34274283230, where the handler answered the first
+  # POST and then 501'd every reused connection because the unread request body was parsed
+  # as the next request line. Run the real heredoc on a throwaway port and POST TWICE on one
+  # connection (curl reuses it for consecutive URLs): both must answer 200 with the exact
+  # bare-boolean allow body OpaSidecarPolicyDecisionPoint.parseResponse accepts.
+  # Anchored to the heredoc OPENER as a line-END pattern — the bare string also occurs in this
+  # very control and its comments, and an unanchored match extracts the control, not the stub
+  # (measured twice: the first two runs of this control extracted themselves and the stub
+  # never started — the self-matching trap the control-3 comment above already documents).
+  sed -n "/STUBEOF' &\$/,/^STUBEOF/p" "$0" | sed '1d;$d' > "${ST_TMP}/stub.py"
+  FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 >/dev/null 2>&1 &
+  ST_STUB_PID=$!
+  sleep 1
+  ST_POST="$(curl -s -w '|%{http_code}' -X POST http://127.0.0.1:18181/v1/data/openbank/rest/allow \
+              -H 'Content-Type: application/json' -d '{"input":{"principal":{"id":"anonymous"}}}' \
+              http://127.0.0.1:18181/v1/data/openbank/rest/allow 2>/dev/null || true)"
+  kill "${ST_STUB_PID}" 2>/dev/null; wait "${ST_STUB_PID}" 2>/dev/null || true
+  # curl prints -w per URL, so two responses on one reused connection read
+  # `{"result": true}|200{"result": true}|200` — any 501 from an undrained body shows up here.
+  case "${ST_POST}" in
+    '{"result": true}|200{"result": true}|200') ;;
+    *) echo "SELF-TEST FAIL 5: OPA stub did not answer two keep-alive POSTs with the allow body (got: ${ST_POST})"; ST_RC=1 ;;
+  esac
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (3 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (5 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
 fi
 
@@ -286,7 +330,9 @@ for svc in $SERVICES; do
   # the "absent" answer these cross-service readers are written to expect (the fx adapter maps 404
   # to null and skips the leg), so schemathesis measures the HTTP surface, not the harness.
   # Never stub ports this job already provisions (postgres, redis) or shares with other infra
-  # defaults (keycloak 8080, otel 4317, OPA 8181), and never the service's own port.
+  # defaults (keycloak 8080, otel 4317), and never the service's own port. OPA 8181 is likewise
+  # excluded from the 404 stubs — it gets its own ALLOW stub below, not a 404.
+  OPA_STUB_PORTS=""
   STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
     | grep -oE '[0-9]+$' | sort -un \
     | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
@@ -307,14 +353,41 @@ for svc in $SERVICES; do
     STUB_PORTS="$(printf '%s\n18099\n' ${STUB_PORTS} | sort -un)"
     OIDC_FLAGS+=("-Dquarkus.oidc-client.auth-server-url=http://127.0.0.1:18099/realms/openbank")
   fi
+  # OPA allow-stub on 8181, derived like Redis and oidc-client above: a top-level `opa:` block
+  # means the service wires AuthorizeInterceptor against the sidecar default
+  # `http://localhost:8181`, and pass 1 (authz ON) calls the PDP for every request that passes
+  # authN. For normal services that is never any request (401/403 fires first), so the absent
+  # sidecar was invisible for the fleet's whole life; psd2's anonymous-grant eIDAS/mTLS
+  # endpoints pass authN unauthenticated by design, reach the interceptor, and fail CLOSED
+  # (ADR-0034) — run 34268765822, 12 failures, all
+  # `[503] POLICY_DECISION_POINT_UNAVAILABLE: policy decision point unavailable: OPA call
+  # failed: null`. The stub answers OPA data queries (`/v1/data/…`) with `{"result": true}`,
+  # the bare-boolean allow shape OpaSidecarPolicyDecisionPoint.parseResponse accepts (a 2xx is
+  # required — a 404 raises PolicyDecisionException, which is exactly the 503 being fixed), so
+  # pass 1 fuzzes those anonymous handlers against an ALLOW decision instead of failing closed.
+  # Pass 2 sets authz.enforce=false and never calls the PDP; the stub is simply unused there.
+  if grep -qE '^opa:' "$APP_YAML"; then
+    echo "==> [${svc}] config declares opa: — stubbing the PDP on 8181 with an allow decision (pass-1 anonymous-grant endpoints)"
+    OPA_STUB_PORTS="8181"
+  fi
+  # ONE stub process serves both behaviours, and the port sets are disjoint by construction:
+  # the 404 set above excludes 8181 explicitly, and only the OPA set adds it back — so no
+  # double-bind is possible. (The first version of the allow stub folded 8181 INTO the 404
+  # list, which worked only because one process serves both, but printed the allow port in
+  # the "404-for-everything" line — a lie in the log while triaging run 34274283230.)
   STUB_PID=""
-  if [ -n "${STUB_PORTS}" ]; then
-    echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
-    python3 - ${STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
+  if [ -n "${STUB_PORTS}" ] || [ -n "${OPA_STUB_PORTS}" ]; then
+    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
+    python3 - ${STUB_PORTS} ${OPA_STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
 import http.server
+import os
 import sys
 import threading
 import time
+
+# The port the OPA allow behaviour binds to; overridable so the self-test can exercise the
+# handler on a throwaway port without colliding with anything on 8181.
+OPA_PORT = int(os.environ.get("FUZZ_OPA_STUB_PORT", "8181"))
 
 
 class Absent(http.server.BaseHTTPRequestHandler):
@@ -327,7 +400,21 @@ class Absent(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _drain_body(self):
+        # DRAIN the request body before answering. protocol_version "HTTP/1.1" keeps the
+        # connection alive, so an unread POST body is still sitting in the socket buffer when
+        # the response goes out — and the NEXT parse_request on that keep-alive connection
+        # reads the body bytes as a request line, answering
+        # `501 Unsupported method ('{"input":...')` for a request that was never made.
+        # Measured on run 34274283230: the first psd2 PDP call got its allow, every reused
+        # connection then 501'd with exactly that message, and the interceptor mapped it to
+        # the same 503 POLICY_DECISION_POINT_UNAVAILABLE the stub exists to prevent.
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+
     def _absent(self):
+        self._drain_body()
         # OIDC token-issuer stub: the outbound oidc-client discovers the realm and mints a token
         # BEFORE the cross-service call; without these two answers the mint throws and the caller
         # answers 500 without the 404 stub ever being asked (see the caller-side comment).
@@ -340,6 +427,16 @@ class Absent(http.server.BaseHTTPRequestHandler):
             return
         if self.path.endswith("/protocol/openid-connect/token"):
             self._answer(200, b'{"access_token":"fuzz-stub-token","token_type":"Bearer","expires_in":3600}')
+            return
+        # OPA PDP stub (8181 only, started for services declaring a top-level `opa:` block —
+        # see the caller-side comment): pass 1's anonymous-grant endpoints (psd2 eIDAS/mTLS)
+        # reach AuthorizeInterceptor, and a 404 here raises PolicyDecisionException, which the
+        # interceptor maps to the 503 POLICY_DECISION_POINT_UNAVAILABLE that failed run
+        # 34268765822. `{"result": true}` is the bare-boolean allow shape
+        # OpaSidecarPolicyDecisionPoint.parseResponse accepts. Everything NOT a data query
+        # keeps the 404 — the stub answers allow only where a PDP answer is asked for.
+        if self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/"):
+            self._answer(200, b'{"result": true}')
             return
         self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')
 
@@ -464,18 +561,8 @@ STUBEOF
       # reference each, because every exclusion is a hole in the coverage this lane exists to
       # prove. An entry with neither is a finding waiting to be hidden.
       EXCLUDE_FLAGS=()
-      case "${svc}" in
-        openbank-sanctions-service)
-          # POST /api/v1/sanctions/lists/refresh-all fans out to the EXTERNAL sanctions feeds
-          # synchronously; a real fetch exceeds this lane's 5s request window by design — it
-          # read-timed-out on every fleet fuzz since the lane exists (runs 34017868446,
-          # 34107337021). Not a handler defect and not stubbable: the slow peer is the public
-          # internet. The tracked fix is the async-202 redesign (#8590), not a longer window —
-          # a synchronous trigger that can take minutes belongs off the request path entirely.
-          EXCLUDE_FLAGS+=(--exclude-operation-id refreshAllSanctionsLists)
-          echo "==> [${svc}] excluding refreshAllSanctionsLists from fuzz (external-feed fan-out > request window; async redesign tracked in #8590)"
-          ;;
-      esac
+      # refreshAllSanctionsLists used to be excluded here (external-feed fan-out > request
+      # window); #9048 made refresh-all answer 202 immediately, so it is fuzzable again.
       # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on transitive
       # starlette/pytest — 3.x hard-caps pytest<9 and starlette<1):
       #   --base-url -> --url; --hypothesis-max-examples -> --max-examples;
