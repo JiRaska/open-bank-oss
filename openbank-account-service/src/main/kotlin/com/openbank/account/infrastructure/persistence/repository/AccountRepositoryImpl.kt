@@ -240,6 +240,9 @@ private fun AccountEntity.toDomain() = Account(
     goalTargetMinorUnits = goalTargetMinorUnits,
     goalTargetDate = goalTargetDate,
     nickname = nickname,
+    termsVersion = termsVersion,
+    termsUrl = termsUrl,
+    termsEffectiveFrom = termsEffectiveFrom,
 )
 
 private fun Account.toEntity() = AccountEntity().also {
@@ -261,4 +264,7 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalTargetMinorUnits = goalTargetMinorUnits
     it.goalTargetDate = goalTargetDate
     it.nickname = nickname
+    it.termsVersion = termsVersion
+    it.termsUrl = termsUrl
+    it.termsEffectiveFrom = termsEffectiveFrom
 }
