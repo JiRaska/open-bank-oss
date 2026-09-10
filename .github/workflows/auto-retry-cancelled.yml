@@ -185,7 +185,7 @@ jobs:
       # what a privileged control should execute. Checking out the triggering branch here would
       # let any PR author rewrite this script and have it run with `actions: write`.
       - name: Fetch the decision script (sparse, default branch)
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
           # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
