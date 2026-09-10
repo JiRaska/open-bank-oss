@@ -18,6 +18,7 @@ import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -65,6 +66,16 @@ class OnboardingEventPayloadParsingTest {
         runBlocking { consume() }
         coVerify(exactly = 0) { projection.applyEvent(any()) }
         verify { metrics.record(topic, ProjectionOutcomeMetrics.Outcome.UNRECOGNISED) }
+    }
+
+    // #9038: a recognised event type carrying a status value the enum no longer knows is a
+    // producer/consumer vocabulary drift, not noise to ignore — it is recorded FAILED and
+    // rethrown (nacked) so the record dead-letters, rather than silently dropped.
+    private fun assertNacked(consume: suspend () -> Unit, topic: String) {
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED
+        assertThatThrownBy { runBlocking { consume() } }.isInstanceOf(UnparseableStatusException::class.java)
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+        verify { metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED) }
     }
 
     // ── kyc-events-in ────────────────────────────────────────────────────────
@@ -166,8 +177,8 @@ class OnboardingEventPayloadParsingTest {
     }
 
     @Test
-    fun `a status value KycStage does not know is dropped rather than crashing the consumer`() {
-        assertDropped(
+    fun `a status value KycStage does not know is nacked rather than mis-projected`() {
+        assertNacked(
             {
                 consumer.consumeKycEvent(
                     """{"eventType":"KYC_CASE_STATUS_CHANGED","partyId":"$partyId","kycCaseId":"$caseId",
@@ -279,8 +290,8 @@ class OnboardingEventPayloadParsingTest {
     }
 
     @Test
-    fun `a party status PartyStage does not know is dropped rather than mis-projected`() {
-        assertDropped(
+    fun `a party status PartyStage does not know is nacked rather than mis-projected`() {
+        assertNacked(
             {
                 consumer.consumePartyEvent(
                     """{"eventType":"PARTY_STATUS_CHANGED","partyId":"$partyId","newStatus":"MERGED"}""",
