@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.DecisionRequest
@@ -11,6 +12,8 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
+import com.openbank.libs.idempotency.IdempotencyRecord
+import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
@@ -65,11 +68,17 @@ class CustomerIntakeResourceTest {
     private fun identity(name: String): SecurityIdentity =
         QuarkusSecurityIdentity.builder().setPrincipal(Principal { name }).build()
 
+    private val store = RecordingIdempotencyStore()
+
     private fun resource(
         config: CustomerIntakeConfig = config(),
         principal: String = edge,
         apply: RecordingApply = RecordingApply(),
-    ) = CustomerIntakeResource(apply, config, identity(principal), clock) to apply
+    ) = CustomerIntakeResource(apply, config, identity(principal), clock, store, ObjectMapper()) to apply
+
+    /** Drives the now-suspend endpoint with no replay headers (the pre-ADR-0297 call shape). */
+    private fun submit(res: CustomerIntakeResource, party: String?, req: CustomerIntakeRequest) =
+        kotlinx.coroutines.runBlocking { res.submit(party, null, null, req) }
 
     private fun request(amount: String = "250000", term: Int = 48) = CustomerIntakeRequest(BigDecimal(amount), term)
 
@@ -77,7 +86,7 @@ class CustomerIntakeResourceTest {
     fun `accepts an application from the edge principal and records the customer as maker`() {
         val (res, apply) = resource()
 
-        val response = res.submit(partyId.toString(), request()).await().indefinitely()
+        val response = submit(res, partyId.toString(), request())
 
         assertThat(response.status).isEqualTo(201)
         assertThat(apply.lastRequest?.partyId).isEqualTo(partyId)
@@ -90,7 +99,7 @@ class CustomerIntakeResourceTest {
     fun `refuses an ordinary operator who is not the edge principal`() {
         val (res, apply) = resource(principal = "alice@openbank.local")
 
-        val response = res.submit(partyId.toString(), request()).await().indefinitely()
+        val response = submit(res, partyId.toString(), request())
 
         // @RolesAllowed(ROLE_OPERATOR) alone would have admitted this: the edge's M2M token carries
         // ROLE_OPERATOR and nothing else, so the role cannot distinguish the edge from a person.
@@ -102,7 +111,7 @@ class CustomerIntakeResourceTest {
     fun `an unset caller-principal refuses everything rather than admitting any operator`() {
         val (res, apply) = resource(config = config(caller = null))
 
-        val response = res.submit(partyId.toString(), request()).await().indefinitely()
+        val response = submit(res, partyId.toString(), request())
 
         assertThat(response.status).isEqualTo(403)
         assertThat(apply.lastRequest).isNull()
@@ -112,7 +121,7 @@ class CustomerIntakeResourceTest {
     fun `refuses when the feature is off`() {
         val (res, apply) = resource(config = config(enabled = false))
 
-        assertThat(res.submit(partyId.toString(), request()).await().indefinitely().status).isEqualTo(403)
+        assertThat(submit(res, partyId.toString(), request()).status).isEqualTo(403)
         assertThat(apply.lastRequest).isNull()
     }
 
@@ -120,7 +129,7 @@ class CustomerIntakeResourceTest {
     fun `refuses an unpriced product instead of guessing a rate`() {
         val (res, apply) = resource(config = config(rate = null))
 
-        assertThat(res.submit(partyId.toString(), request()).await().indefinitely().status).isEqualTo(403)
+        assertThat(submit(res, partyId.toString(), request()).status).isEqualTo(403)
         assertThat(apply.lastRequest).isNull()
     }
 
@@ -128,11 +137,11 @@ class CustomerIntakeResourceTest {
     fun `refuses a missing or malformed party header`() {
         val (res, apply) = resource()
 
-        assertThat(res.submit(null, request()).await().indefinitely().status).isEqualTo(400)
-        assertThat(res.submit("not-a-uuid", request()).await().indefinitely().status).isEqualTo(400)
+        assertThat(submit(res, null, request()).status).isEqualTo(400)
+        assertThat(submit(res, "not-a-uuid", request()).status).isEqualTo(400)
         // The nil UUID is a real value that parses; it is also what an unset header downstream looks
         // like, so it must not become a party every customer shares.
-        assertThat(res.submit("00000000-0000-0000-0000-000000000000", request()).await().indefinitely().status)
+        assertThat(submit(res, "00000000-0000-0000-0000-000000000000", request()).status)
             .isEqualTo(400)
         assertThat(apply.lastRequest).isNull()
     }
@@ -141,21 +150,51 @@ class CustomerIntakeResourceTest {
     fun `refuses amounts and terms outside the configured product bounds`() {
         val (res, apply) = resource()
 
-        assertThat(res.submit(partyId.toString(), request(amount = "4999")).await().indefinitely().status)
+        assertThat(submit(res, partyId.toString(), request(amount = "4999")).status)
             .isEqualTo(400)
-        assertThat(res.submit(partyId.toString(), request(amount = "1000001")).await().indefinitely().status)
+        assertThat(submit(res, partyId.toString(), request(amount = "1000001")).status)
             .isEqualTo(400)
-        assertThat(res.submit(partyId.toString(), request(term = 5)).await().indefinitely().status).isEqualTo(400)
-        assertThat(res.submit(partyId.toString(), request(term = 121)).await().indefinitely().status).isEqualTo(400)
+        assertThat(submit(res, partyId.toString(), request(term = 5)).status).isEqualTo(400)
+        assertThat(submit(res, partyId.toString(), request(term = 121)).status).isEqualTo(400)
         assertThat(apply.lastRequest).isNull()
+    }
+
+    @Test
+    fun `a keyed retry replays the cached 201 and never calls the use case twice (ADR-0297)`() {
+        val (res, apply) = resource()
+        val first = kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-1", null, request()) }
+
+        assertThat(first.status).isEqualTo(201)
+        val callsAfterFirst = if (apply.lastRequest == null) 0 else 1
+
+        val second = kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-1", null, request()) }
+
+        assertThat(second.status).isEqualTo(201)
+        assertThat(second.getHeaderString("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(second.entity).isEqualTo(first.entity)
+        // Still exactly one use-case call — the replay never reached it.
+        assertThat(callsAfterFirst).isEqualTo(1)
+        assertThat(store.saved).containsKey("lending:intake-apply:$partyId:idem-1")
+    }
+
+    @Test
+    fun `different idempotency keys are two applications, not a replay`() {
+        val (res, _) = resource()
+        kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-a", null, request()) }
+        val second = kotlinx.coroutines.runBlocking { res.submit(partyId.toString(), "idem-b", null, request()) }
+
+        assertThat(second.getHeaderString("X-Idempotency-Replayed")).isNull()
+        assertThat(store.saved).containsKeys(
+            "lending:intake-apply:$partyId:idem-a",
+            "lending:intake-apply:$partyId:idem-b",
+        )
     }
 
     @Test
     fun `an over-scaled amount is a 400, not the 500 that Money's init would raise`() {
         val (res, apply) = resource()
 
-        val response = res.submit(partyId.toString(), CustomerIntakeRequest(BigDecimal("250000.123"), 48))
-            .await().indefinitely()
+        val response = submit(res, partyId.toString(), CustomerIntakeRequest(BigDecimal("250000.123"), 48))
 
         assertThat(response.status).isEqualTo(400)
         assertThat(apply.lastRequest).isNull()
@@ -165,7 +204,7 @@ class CustomerIntakeResourceTest {
     fun `price jurisdiction and product come from configuration, never from the caller`() {
         val (res, apply) = resource()
 
-        res.submit(partyId.toString(), request()).await().indefinitely()
+        submit(res, partyId.toString(), request())
 
         val submitted = requireNotNull(apply.lastRequest)
         assertThat(submitted.nominalAnnualRate).isEqualByComparingTo(BigDecimal("0.079"))
@@ -203,5 +242,14 @@ class CustomerIntakeResourceTest {
         override fun summariseApplications() = unsupported<List<ApplicationStateSummary>>()
 
         private fun <T> unsupported(): Uni<T> = throw UnsupportedOperationException("not used by intake")
+    }
+
+    /** In-memory IdempotencyStore for the replay tests — records saves, serves gets. */
+    private class RecordingIdempotencyStore : IdempotencyStore {
+        val saved = mutableMapOf<String, IdempotencyRecord>()
+        override suspend fun get(key: String): IdempotencyRecord? = saved[key]
+        override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
+            saved[key] = IdempotencyRecord(key, statusCode, responseBody, java.time.OffsetDateTime.now())
+        }
     }
 }
