@@ -1158,6 +1158,7 @@ main {
   .page-header > :last-child:not(:only-child) { align-self: flex-start; }
   .table,
   .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .incident-filters { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 560px) {
