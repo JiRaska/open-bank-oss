@@ -1,0 +1,125 @@
+# -----------------------------------------------------------------------------
+# auto-deploy red watch (issue #9130).
+#
+# WHY THIS EXISTS
+#   auto-deploy.yml never triggers main-red-watch: that watch listens on
+#   `workflow_run` of push-on-main workflows, and auto-deploy runs on schedule /
+#   workflow_dispatch / its own chaining, so no push event exists to fire on.
+#   Measured 2026-09-07/08: four consecutive auto-deploy failures over seven
+#   hours (pact REGRESSION blocks on sdd/vop/swift) surfaced only because a human
+#   went looking for whether two fixes had reached sandbox. A red run every 40
+#   minutes with nobody addressed is a broken pipeline reading as background
+#   noise — and because deploys still PARTIALLY land, the estate looks healthy
+#   while three services sit pinned.
+#
+# ESCALATION, not redness — the same shape as main-red-watch (issue #4019): a
+#   scheduled job going red would reproduce the blind spot it exists to close.
+#   So this opens or refreshes ONE issue (label `fleet-health`, marker
+#   `<!-- auto-deploy-red -->`), reopens it if hand-closed while the pipeline is
+#   still failing, and closes it itself on the next green run.
+#
+# THRESHOLD: three consecutive completed failures. One failure can be a
+#   transient broker hiccup the next tick clears; three in a row (≈ 2 hours at
+#   the deploy cadence) is a stuck pipeline by any reading, and the gate itself
+#   says a REGRESSION block "will not clear on its own" (ADR-0092, #2549).
+#   Cancelled runs are not failures (concurrency-group supersede is normal,
+#   #2185) and in-progress runs are simply not a verdict yet.
+# -----------------------------------------------------------------------------
+name: auto-deploy red watch
+
+on:
+  schedule:
+    # Off-peak minutes by convention; auto-deploy ticks roughly every 40 min,
+    # so ~30 min here sees a stuck pipeline within one tick of the threshold.
+    - cron: '11,41 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: auto-deploy-red-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const LABEL = 'fleet-health'
+            const MARKER = '<!-- auto-deploy-red -->'
+            const THRESHOLD = 3
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: 'auto-deploy.yml',
+              status: 'completed', per_page: 10,
+            })
+            // completed excludes cancelled? No — completed INCLUDES cancelled/failure/success.
+            // A cancelled run is a superseded verdict, not a red one (#2185): skip it.
+            const verdicts = runs.filter(r => r.conclusion !== 'cancelled')
+            const recent = verdicts.slice(0, THRESHOLD)
+            const stuck = recent.length >= THRESHOLD && recent.every(r => r.conclusion === 'failure')
+            const latestGreen = verdicts.find(r => r.conclusion === 'success')
+
+            const findOpen = async (state) => {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                ...context.repo, state, labels: LABEL, per_page: 100,
+                sort: 'updated', direction: 'desc',
+              })
+              return issues.find(i => (i.body || '').includes(MARKER))
+            }
+
+            if (!stuck) {
+              const open = await findOpen('open')
+              if (open && latestGreen) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: open.number,
+                  body: `auto-deploy is green again ([run ${latestGreen.id}](${latestGreen.html_url}), ${latestGreen.created_at}) — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+                })
+                await github.rest.issues.update({ ...context.repo, issue_number: open.number, state: 'closed' })
+                core.info(`closed #${open.number}`)
+              } else {
+                core.info('auto-deploy not stuck; nothing to do.')
+              }
+              return
+            }
+
+            const first = recent[0]
+            const last = recent[recent.length - 1]
+            const title = `auto-deploy has failed ${THRESHOLD}+ runs in a row — services pinned to their last deployable images`
+            const body = [
+              MARKER,
+              '## auto-deploy is stuck red — the estate looks deployed and is not',
+              '',
+              `${THRESHOLD} consecutive completed auto-deploy runs failed:`,
+              '',
+              ...recent.map(r => `- [run ${r.id}](${r.html_url}) — ${r.created_at} — head \`${(r.head_sha || '').slice(0, 9)}\``),
+              '',
+              `Newest: ${first.created_at}; oldest of the streak: ${last.created_at}.`,
+              '',
+              'A REGRESSION/PENDING_BUILD block does not clear on its own — the reconcile tick',
+              're-offers it forever (ADR-0092, #2549). Partial deploys still land, so the fleet',
+              'looks healthy while blocked services stay pinned. See #9130 for the first measured',
+              'instance (four failures over seven hours, found by accident).',
+              '',
+              'This issue refreshes in place while the streak continues and closes itself on the',
+              `next green run. Hand-closing while still red reopens it. _(\`${context.workflow}\` run ${context.runId})_`,
+            ].join('\n')
+
+            const open = await findOpen('open')
+            if (open) {
+              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
+              core.info(`refreshed #${open.number}`)
+              return
+            }
+            // Reopen a hand-closed one if it is still true; otherwise file fresh.
+            const closed = await findOpen('closed')
+            if (closed) {
+              await github.rest.issues.update({ ...context.repo, issue_number: closed.number, title, body, state: 'open' })
+              core.info(`reopened #${closed.number}`)
+              return
+            }
+            const created = await github.rest.issues.create({ ...context.repo, title, body, labels: [LABEL] })
+            core.info(`opened #${created.data.number}`)

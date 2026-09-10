@@ -106,6 +106,24 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const componentAttention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
     + (report?.totals.staleEvidence ?? 0) + (report?.totals.unresolvedEvidence ?? report?.totals.unknownEvidence ?? 0)
     + skippedComponentEvidence
+  const requiredControlGaps = (report?.requiredControls ?? []).filter(control => control.state !== 'passed')
+  const requiredControlAttention = requiredControlGaps.filter(control => {
+    // Coverage/runtime controls are not component evidence. Synthetic controls are already
+    // represented by the matching journey; other controls are represented by either the
+    // component-wide missing-evidence signal or a same-kind non-passed observation.
+    if (control.kind === 'coverage' || control.kind === 'runtime') return true
+    if (control.kind === 'synthetic') {
+      return !report?.syntheticJourneys.some(journey => `synthetic:${journey.id}` === control.id && journey.state !== 'passed')
+    }
+    const component = report?.components.find(item => item.component === control.component)
+    if (!component) return true
+    const hasExecutionEvidence = component.evidence.some(item => {
+      const observed = Date.parse(item.observedAt ?? '')
+      return Number.isFinite(observed) && item.state !== 'not-run' && item.state !== 'blocked'
+    })
+    if (!hasExecutionEvidence) return false
+    return !component.evidence.some(item => item.kind === control.kind && item.state !== 'passed')
+  }).length + Math.max(0, (report?.totals.requiredControlGaps ?? 0) - requiredControlGaps.length)
   // The fleet totals cover service-component evidence only. Client CI/RUM, journey catalog and
   // performance plans are distinct operator surfaces, so a page with only one of those gaps must
   // not announce itself healthy just because the service-component envelope is green.
@@ -131,7 +149,7 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
     + (report?.syntheticJourneys ?? []).filter(item => item.status === 'planned' || item.state !== 'passed').length
     + clientAttention
   const collectionAttention = testIntelligenceCollectionNeedsAttention(report) ? 1 : 0
-  const attention = componentAttention + crossLayerAttention + collectionAttention
+  const attention = componentAttention + requiredControlAttention + crossLayerAttention + collectionAttention
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
   const runtimeProofs = report?.components.reduce((sum, component) => sum + component.testInfrastructure.observed.filter(event => event.lifecycle === 'started').length, 0) ?? 0
   const traceProofs = report?.components.filter(component => component.evidence.some(evidence => evidence.kind === 'trace' && evidence.state === 'passed')).length ?? 0

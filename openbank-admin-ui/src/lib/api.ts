@@ -4,10 +4,16 @@
 
 import type { Account, AccountBalance, CursorPage, Transaction, JournalEntry, ServiceInfo, ServiceHealth, ServiceSnapshot, ServiceConfigResponse, ServiceConfigSnapshot } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
+import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 const TRANSACTION_SERVICE = '/api/svc/transaction-service'
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
+
+// Values supplied by routes, deep links, and operator input must remain one path segment.
+// Encoding at this boundary prevents a value such as "../../other-endpoint" from changing
+// which same-origin API operation the browser calls.
+const pathSegment = (value: string): string => encodeURIComponent(value)
 
 export const SERVICES: { name: string; port: number }[] = [
   { name: 'account-service',        port: 8100 },
@@ -78,25 +84,26 @@ export async function fetchAllGovernanceManifests(): Promise<{ byService: Record
 }
 
 export const accountApi = {
-  list: (partyId: string, cursor?: string) =>
-    apiFetchSimple<CursorPage<Account>>(
-      `${ACCOUNT_SERVICE}/api/v1/accounts?partyId=${partyId}${cursor ? `&cursor=${cursor}` : ''}`
-    ),
-  get: (id: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}`),
-  getBalance: (id: string) => apiFetchSimple<AccountBalance>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/balance`),
-  getByIban: (iban: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/iban/${iban}`),
-  open: (data: { partyId: string; productId: string; accountType: string; currencyCode: string; legalName: string }, idempotencyKey: string) =>
-    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts`, {
+  list: (partyId: string, cursor?: string) => {
+    const params = new URLSearchParams({ partyId })
+    if (cursor) params.set('cursor', cursor)
+    return apiFetchSimple<CursorPage<Account>>(`${ACCOUNT_SERVICE}/api/v1/accounts?${params}`)
+  },
+  get: (id: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}`),
+  getBalance: (id: string) => apiFetchSimple<AccountBalance>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}/balance`),
+  getByIban: (iban: string) => apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/iban/${pathSegment(iban)}`),
+  open: (data: { partyId: string; productId: string; accountType: string; currencyCode: string; legalName: string; termsVersion?: string; termsUrl?: string; termsEffectiveFrom?: string }, idempotencyKey: string) =>
+    apiFetchSimple<unknown>(`${ACCOUNT_SERVICE}/api/v1/accounts`, {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(data),
     }),
   close: (id: string, reason?: string) =>
-    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/close`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}/close`, { method: 'POST', body: JSON.stringify({ reason }) }),
   freeze: (id: string, reason: string) =>
-    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/freeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}/freeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
   unfreeze: (id: string, reason: string) =>
-    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${id}/unfreeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    apiFetchSimple<Account>(`${ACCOUNT_SERVICE}/api/v1/accounts/${pathSegment(id)}/unfreeze`, { method: 'POST', body: JSON.stringify({ reason }) }),
 }
 
 // Operator-initiated customer messaging (ADR-0176 D2/D5). Mirrors the SHIPPED
@@ -161,7 +168,7 @@ export const opsMessageApi = {
   // Checker decision (ApprovalResource.decide): one PATCH with an approve boolean. Self-approval
   // is refused server-side (403); an unknown/already-decided id is 404/409 — all thrown here.
   decide: (id: string, approve: boolean) =>
-    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${id}`, {
+    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${pathSegment(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ approve }),
     }),
@@ -177,17 +184,18 @@ export const ledgerApi = {
     if (cursor) params.set('cursor', cursor)
     return apiFetchSimple<CursorPage<JournalEntry>>(`${LEDGER_SERVICE}/api/v1/journals?${params}`)
   },
-  get: (id: string) => apiFetchSimple<JournalEntry>(`${LEDGER_SERVICE}/api/v1/journals/${id}`),
+  get: (id: string) => apiFetchSimple<JournalEntry>(`${LEDGER_SERVICE}/api/v1/journals/${pathSegment(id)}`),
   getByTransaction: (transactionId: string) =>
-    apiFetchSimple<JournalEntry[]>(`${LEDGER_SERVICE}/api/v1/journals/transaction/${transactionId}`),
+    apiFetchSimple<JournalEntry[]>(`${LEDGER_SERVICE}/api/v1/journals/transaction/${pathSegment(transactionId)}`),
 }
 
 export const transactionApi = {
-  list: (accountId: string, cursor?: string) =>
-    apiFetchSimple<CursorPage<Transaction>>(
-      `${TRANSACTION_SERVICE}/api/v1/transactions?accountId=${accountId}${cursor ? `&cursor=${cursor}` : ''}`
-    ),
-  get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${id}`),
+  list: (accountId: string, cursor?: string) => {
+    const params = new URLSearchParams({ accountId })
+    if (cursor) params.set('cursor', cursor)
+    return apiFetchSimple<CursorPage<Transaction>>(`${TRANSACTION_SERVICE}/api/v1/transactions?${params}`)
+  },
+  get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${pathSegment(id)}`),
 }
 
 import type { ServiceHealthEntry } from '@/app/api/services/health/route'
@@ -231,41 +239,85 @@ export async function fetchServiceSnapshot(name: string, port: number): Promise<
 }
 
 export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
+  const evidence = await fetchAllServiceSnapshotsEvidence()
+  return evidence.ok
+    ? evidence.snapshots
+    : SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
+}
+
+export type ServiceSnapshotsEvidence =
+  | { ok: true; snapshots: ServiceSnapshot[] }
+  | { ok: false; failure: BffFailure }
+
+function hasVersion(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  return typeof (value as { version?: unknown }).version === 'string' && (value as { version: string }).version.length > 0
+}
+
+function isStack(value: unknown): boolean {
+  if (value == null) return true
+  if (typeof value !== 'object' || Array.isArray(value)) return false
+  const stack = value as Record<string, unknown>
+  return ['kotlin', 'quarkus', 'java', 'gradle', 'libs'].every(key => stack[key] === undefined || hasVersion(stack[key]))
+}
+
+function isHealthEntry(value: unknown): value is ServiceHealthEntry {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  return typeof entry.name === 'string' && entry.name.length > 0 &&
+    typeof entry.port === 'number' && Number.isInteger(entry.port) && entry.port > 0 &&
+    (entry.status === 'UP' || entry.status === 'DOWN' || entry.status === 'UNKNOWN') &&
+    typeof entry.reachable === 'boolean' &&
+    (entry.latencyMs === null || (typeof entry.latencyMs === 'number' && Number.isFinite(entry.latencyMs))) &&
+    (entry.version == null || typeof entry.version === 'string') &&
+    (entry.gitCommit == null || typeof entry.gitCommit === 'string') &&
+    isStack(entry.stack)
+}
+
+function snapshotFromHealthEntry(entry: ServiceHealthEntry): ServiceSnapshot {
+  const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
+  return {
+    name: entry.name,
+    port: entry.port,
+    info: hasInfoSignal ? {
+      service: entry.name,
+      version: entry.version,
+      apiVersion: null,
+      buildTime: null,
+      gitCommit: entry.gitCommit,
+      timestamp: null,
+      status: entry.status,
+      stack: entry.stack ?? null,
+    } : null,
+    health: entry.status !== 'UNKNOWN' ? { status: entry.status === 'UP' ? 'UP' : 'DOWN', checks: [] } : null,
+    rateLimitMax: null,
+    rateLimitRemaining: null,
+    apiVersion: null,
+    latencyMs: entry.latencyMs,
+    reachable: entry.reachable,
+  }
+}
+
+/** Evidence-preserving variant for screens that must distinguish a failed collector from an all-down fleet. */
+export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapshotsEvidence> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 10000)
   try {
     const res = await fetch('/api/services/health', { cache: 'no-store', signal: controller.signal })
-    clearTimeout(timeoutId)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data: { services: ServiceHealthEntry[] } = await res.json()
-    return data.services.map(entry => {
-      // info must be present if the service published EITHER a version OR a tech stack
-      // (BuildInfo). Previously this only checked version/gitCommit, which dropped
-      // the stack on the floor and Tech Inventory then showed N/A for everything.
-      const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
-      return {
-        name: entry.name,
-        port: entry.port,
-        info: hasInfoSignal ? {
-          service: entry.name,
-          version: entry.version,
-          apiVersion: null,
-          buildTime: null,
-          gitCommit: entry.gitCommit,
-          timestamp: null,
-          status: entry.status,
-          stack: entry.stack ?? null,
-        } : null,
-        health: entry.status !== 'UNKNOWN' ? { status: entry.status === 'UP' ? 'UP' : 'DOWN', checks: [] } : null,
-        rateLimitMax: null,
-        rateLimitRemaining: null,
-        apiVersion: null,
-        latencyMs: entry.latencyMs,
-        reachable: entry.reachable,
-      }
-    })
+    if (!res.ok) return { ok: false, failure: await classifyBffFailure(res) }
+    const data = await res.json().catch(() => null)
+    if (typeof data !== 'object' || data === null || !Array.isArray((data as { services?: unknown }).services)) {
+      return { ok: false, failure: 'error' }
+    }
+    const services = (data as { services: unknown[] }).services
+    if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
+    if (new Set(services.map(entry => `${entry.name}:${entry.port}`)).size !== services.length) {
+      return { ok: false, failure: 'error' }
+    }
+    return { ok: true, snapshots: services.map(snapshotFromHealthEntry) }
   } catch {
-    return SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
+    return { ok: false, failure: 'unreachable' }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
-
