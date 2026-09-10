@@ -14,7 +14,12 @@ const ENTRY = {
   actorId: 'operator-42',
   actorType: 'USER',
   occurredAt: '2026-08-31T08:00:00Z',
-  payload: { status: 'ACTIVE' },
+  recordedAt: '2026-08-31T08:00:01Z',
+  occurredAtSource: 'EVENT',
+  sourceService: 'account-service',
+  sourceServiceSource: 'EVENT',
+  actChain: [],
+  payload: JSON.stringify({ status: 'ACTIVE' }),
 }
 
 test.beforeEach(async ({ context, baseURL }) => {
