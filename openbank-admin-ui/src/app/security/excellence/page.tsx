@@ -30,6 +30,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
+import { parseSecurityEnvelope, summarizeReachable } from '@/lib/security/summary'
 
 // ── Doménové stavy ───────────────────────────────────────────────────────────
 
@@ -109,14 +110,16 @@ const unavailable = (reason: string): Patch => ({ status: 'unavailable', unavail
 async function fetchPosture(): Promise<Patch> {
   const { ok, body } = await safeJson('/api/security')
   if (!ok) return unavailable('unreachable')
-  const env = body as { available?: boolean; reason?: string; report?: { platformScore: number; criticalFindings: number; highFindings: number; reachableServices: number; totalServices: number } }
-  if (!env.available || !env.report) return unavailable(env.reason ?? 'not_deployed')
+  let env
+  try { env = parseSecurityEnvelope(body) } catch { return unavailable('invalid_evidence') }
+  if (!env.available) return unavailable(env.reason)
   const r = env.report
+  const summary = summarizeReachable(r.serviceResults)
   return {
-    status: r.criticalFindings > 0 ? 'critical' : r.highFindings > 0 ? 'degraded' : 'ok',
-    score: r.platformScore,
-    metricCs: `${r.criticalFindings} krit. / ${r.highFindings} vys. nálezů · ${r.reachableServices}/${r.totalServices} služeb`,
-    metricEn: `${r.criticalFindings} crit. / ${r.highFindings} high findings · ${r.reachableServices}/${r.totalServices} services`,
+    status: summary.criticalCount > 0 ? 'critical' : summary.highCount > 0 ? 'degraded' : 'ok',
+    score: summary.avgScore,
+    metricCs: `${summary.criticalCount} krit. / ${summary.highCount} vys. nálezů · ${summary.reachableCount}/${r.totalServices} služeb`,
+    metricEn: `${summary.criticalCount} crit. / ${summary.highCount} high findings · ${summary.reachableCount}/${r.totalServices} services`,
   }
 }
 
@@ -446,6 +449,7 @@ export default function SecurityExcellencePage() {
       case 'not_deployed': return t('Nenasazeno v tomto prostředí', 'Not deployed in this environment')
       case 'unauthorized': return t('Role bez oprávnění', 'Role lacks permission')
       case 'unreachable':  return t('Služba neodpovídá', 'Service unreachable')
+      case 'invalid_evidence': return t('Neplatná evidence — skóre zadrženo', 'Invalid evidence — score withheld')
       default:             return t('Nedostupné', 'Unavailable')
     }
   }
