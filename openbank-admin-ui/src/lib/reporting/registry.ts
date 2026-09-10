@@ -33,7 +33,9 @@ function isIsoDate(value: string): boolean {
   if (!m) return false
   const month = Number(m[2])
   const day = Number(m[3])
-  return month >= 1 && month <= 12 && day >= 1 && day <= 31
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
 export type ParamValue = string
@@ -111,7 +113,7 @@ export const REPORT_REGISTRY: readonly ReportEntry[] = [
     id: 'risk-settlement-daily',
     titleCs: 'Denní objem zúčtovaných transakcí',
     titleEn: 'Daily settled transaction volume',
-    descriptionCs: 'Počet a objem zúčtovaných transakcí za den, měnu a rail. Základní risk baseline.',
+    descriptionCs: 'Počet a objem zúčtovaných transakcí podle dne, měny a platební sítě.',
     descriptionEn: 'Settled transaction count and volume per day, currency and rail. The baseline risk read.',
     permission: 'compliance:view',
     params: [FROM, TO],
@@ -188,7 +190,7 @@ export const REPORT_REGISTRY: readonly ReportEntry[] = [
     id: 'risk-credit-distress-daily',
     titleCs: 'Úvěrové distress signály',
     titleEn: 'Credit distress signals',
-    descriptionCs: 'Odmítnuté/podražené nabídky a z abandoned žádosti za den (gold marts ADR-0269).',
+    descriptionCs: 'Potlačené nabídky a opuštěné úvěrové žádosti po dnech.',
     descriptionEn: 'Suppressed quotes and abandoned applications per day (ADR-0269 gold marts).',
     permission: 'compliance:view',
     params: [FROM, TO],
@@ -209,7 +211,7 @@ export const REPORT_REGISTRY: readonly ReportEntry[] = [
     id: 'warehouse-event-volume',
     titleCs: 'Objem událostí ve warehouse',
     titleEn: 'Warehouse event volume',
-    descriptionCs: 'Události za den a doménu — kontext kompletnosti: den bez settlement událostí poznáš jen odsud.',
+    descriptionCs: 'Příchozí události podle dne a domény. Pomáhá odhalit mezery v dodávce dat.',
     descriptionEn: 'Events per day and domain — the completeness context: a day with no settlement events is only visible here.',
     permission: 'compliance:view',
     params: [FROM, TO],
@@ -262,5 +264,6 @@ export function validateParams(
     }
     params[param.name] = value
   }
+  if (params.from && params.to && params.from > params.to) return { ok: false, param: 'to' }
   return { ok: true, params }
 }

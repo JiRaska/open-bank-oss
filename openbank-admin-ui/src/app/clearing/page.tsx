@@ -14,11 +14,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-
-interface ClearingBatch {
-  id: string; batchReference: string; paymentRail: string; status: string
-  itemCount: number; totalAmount: number; currency: string; createdAt: string; settledAt?: string
-}
+import { formatClearingMoney, parseClearingBatches, type ClearingBatch } from '@/lib/clearing/clearingBatchContract'
 
 export default function ClearingPage() {
   const { t, language } = useLanguage()
@@ -29,7 +25,7 @@ export default function ClearingPage() {
     svcUrl('clearing-service', '/api/v1/clearing/batches'),
     { select: (raw) => {
       setLastSuccessfulAt(new Date())
-      return Array.isArray(raw) ? (raw as ClearingBatch[]) : ((raw as { batches?: ClearingBatch[] }).batches ?? [])
+      return parseClearingBatches(raw)
     } },
   )
   const batches = data ?? []
@@ -38,13 +34,14 @@ export default function ClearingPage() {
 
   const filtered = batches.filter(b =>
     b.batchReference?.toLowerCase().includes(search.toLowerCase()) ||
-    b.paymentRail?.toLowerCase().includes(search.toLowerCase()) ||
+    b.rail.toLowerCase().includes(search.toLowerCase()) ||
     b.status?.toLowerCase().includes(search.toLowerCase())
   )
 
   const settled = batches.filter(b => b.status === 'SETTLED')
-  const pending = batches.filter(b => b.status === 'PENDING' || b.status === 'PROCESSING')
-  const totalVolume = batches.reduce((s, b) => s + (b.totalAmount ?? 0), 0)
+  const pending = batches.filter(b => b.status === 'PENDING' || b.status === 'IN_CLEARING')
+  const currencies = [...new Set(batches.map(b => b.currency))]
+  const totalDebit = currencies.length === 1 ? batches.reduce((sum, batch) => sum + batch.totalDebit, 0) : null
 
   return (
     <AuthGuard permission="payment-rails:view">
@@ -89,8 +86,8 @@ export default function ClearingPage() {
           {[
             { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} aria-hidden="true" /> },
             { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, tone: 'success' as const },
-            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} aria-hidden="true" />, tone: 'warning' as const },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Banknote size={16} aria-hidden="true" /> },
+            { label: t('Čeká / V clearingu', 'Pending / In clearing'), value: pending.length, icon: <Clock size={16} aria-hidden="true" />, tone: 'warning' as const },
+            { label: t('Hrubé debety', 'Gross debits'), value: totalDebit === null ? t('Více měn', 'Multiple currencies') : formatClearingMoney(totalDebit, currencies[0] ?? 'EUR', numberLocale), icon: <Banknote size={16} aria-hidden="true" /> },
           ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
         </div>}
 
@@ -118,7 +115,7 @@ export default function ClearingPage() {
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {[t('Reference', 'Reference'), t('Rail', 'Rail'), t('Položky', 'Items'), t('Objem', 'Volume'), t('Měna', 'Currency'), t('Status', 'Status'), t('Vytvořeno', 'Created')].map(h => (
+                {[t('Reference', 'Reference'), t('Rail', 'Rail'), t('Položky', 'Items'), t('Debet / Kredit', 'Debit / Credit'), t('Čistá pozice', 'Net position'), t('Status', 'Status'), t('Vytvořeno', 'Created')].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
@@ -128,10 +125,13 @@ export default function ClearingPage() {
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{b.batchReference}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.paymentRail}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.rail.replaceAll('_', ' ')}</td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)' }}>{b.itemCount}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(b.totalAmount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.currency}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
+                      <div>{formatClearingMoney(b.totalDebit, b.currency, numberLocale)}</div>
+                      <div style={{ color: 'var(--text-tertiary)', marginTop: 2 }}>{formatClearingMoney(b.totalCredit, b.currency, numberLocale)}</div>
+                    </td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: b.netPosition < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>{formatClearingMoney(b.netPosition, b.currency, numberLocale)}</td>
                     <td style={{ padding: '12px 16px' }}><StatusBadge status={b.status} tone={b.status === 'FAILED' ? 'danger' : b.status === 'SETTLED' ? 'success' : 'warning'} /></td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString(numberLocale) : '—'}</td>
                   </tr>

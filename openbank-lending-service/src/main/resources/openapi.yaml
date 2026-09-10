@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.20.0
+  version: 1.21.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -25,6 +25,26 @@ paths:
       tags: [Lending]
       operationId: applyForLoan
       summary: Submit a loan application (maker)
+      description: >-
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application, because a customer may
+        legitimately apply twice (no natural key exists).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -64,12 +84,29 @@ paths:
         neither price their own loan nor choose which ADR-0212 compliance pack judges them. Only the
         configured customer-edge service principal may call it; any other caller is refused 403.
         This is the MAKER leg only — the application still needs a human four-eyes decision.
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application.
       parameters:
         - name: X-Customer-Party-Id
           in: header
           required: true
           description: The applicant's party id, set by customer-edge from the customer JWT.
           schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -196,6 +233,8 @@ paths:
         binding offer. Price, currency and bounds are lending-side configuration; the body carries
         only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
         floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+        Inherently idempotent (ADR-0297): a pure computation over configuration and the body —
+        no persistence, so a retry simply recomputes the same indicative price.
       parameters:
         - name: X-Customer-Party-Id
           in: header
@@ -687,6 +726,10 @@ paths:
         The registrant identity is the JWT subject. The registered collateral is PENDING and is not
         consulted by the IFRS 9 ECL calculation until a different principal approves it via
         POST /api/v1/lending/collateral/{id}/decision.
+        Idempotent (ADR-0297): while the original registration is still PENDING, a retry with an
+        identical tuple (type, description, market value, haircut) replays the ORIGINAL PENDING
+        collateral instead of stacking a duplicate a checker could approve twice. Once the
+        original is decided, an identical new registration is legitimate and persists.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       requestBody:
@@ -838,6 +881,9 @@ paths:
       description: >-
         Strict, fail-closed pack decoding (ADR-0212): an unknown key, enum value or type rejects the
         whole proposal. The pack activates only after a DIFFERENT compliance principal approves it.
+        Idempotent (ADR-0297): the pack content hash is the natural key — while an identical pack
+        proposal is still PROPOSED, a retry replays it instead of queuing a duplicate for the
+        checker. Re-proposing after a decision creates a fresh proposal.
       requestBody:
         required: true
         content:

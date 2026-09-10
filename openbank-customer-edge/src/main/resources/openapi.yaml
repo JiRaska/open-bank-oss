@@ -3,7 +3,11 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.53.0
+  # 1.53.1 -> 1.54.0 (#9044): additive — optional termsVersionShown on OpenTermDepositRequest
+  # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
+  # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
+  # on POST /term-deposits.
+  version: 1.54.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -185,6 +189,11 @@ paths:
           description: Missing idempotency key or malformed product ID
         '404':
           description: Product is not an active public term-deposit offer, or party is absent
+        '409':
+          description: >-
+            Terms version mismatch — the client displayed a terms version that no longer governs
+            (#9044); re-display the current terms and retry. Also returned when the product has
+            no currently effective terms document.
         '422':
           description: KYC not approved
 
@@ -4974,6 +4983,14 @@ components:
             Optional opaque reservation returned by /incentives/claims. The edge commits it only
             after account-service returns the authoritative openedAt; deterministic rejection
             releases it, while transient failure leaves it retryable until its TTL.
+        termsVersionShown:
+          type: string
+          description: >-
+            The terms document version the client RENDERED to the customer (#9044). The edge
+            resolves the currently effective version from the catalogue; when the two differ the
+            open is refused with 409, so a terms rollout can never bind the customer to a
+            document they were not shown. The version actually opened under is recorded on the
+            account by account-service.
 
     ClaimCampaignIncentiveRequest:
       type: object
@@ -5055,9 +5072,12 @@ components:
           description: Monthly account fee as the catalogue states it. Sent even when zero.
         annualRate:
           type: number
+          example: 5.8
           description: >-
-            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
-            absence means "not priced here", not 0 %.
+            Term deposits only — one fixed rate for one fixed term, as a PERCENT (5.8 means
+            5.8 % p.a.), which is how every rate crossing this edge is stated. The platform keeps
+            rates as decimal fractions internally; the conversion happens here so no client has to
+            know that. Absent for every other type; absence means "not priced here", not 0 %.
         term:
           type: object
           description: The term deposit's own TermDepositConfig, verbatim.
@@ -5083,6 +5103,7 @@ components:
         currency: {type: string, example: CZK}
         minimumDeposit: {type: number, nullable: true}
         maximumDeposit: {type: number, nullable: true}
+        # Percent, not a fraction: 5.8 means 5.8 % p.a. (see ProductOffer.annualRate).
         annualRate: {type: number, format: double, example: 5.8}
         term:
           type: object
