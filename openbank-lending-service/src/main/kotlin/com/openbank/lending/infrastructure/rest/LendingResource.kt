@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
 import com.openbank.lending.application.port.`in`.CollateralUseCase
 import com.openbank.lending.application.port.`in`.DisburseLoanUseCase
@@ -23,12 +24,15 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
+import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -65,6 +69,8 @@ class LendingResource(
     private val outbox: com.openbank.lending.application.port.out.LendingOutboxRepository,
     private val identity: SecurityIdentity,
     private val clock: Clock,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper,
 ) {
     /**
      * The trusted acting principal for maker-checker controls: the authenticated JWT subject, never a
@@ -78,9 +84,38 @@ class LendingResource(
     @Path("/applications")
     @Operation(summary = "Submit a loan application (maker)")
     @Authorize(action = "lending.create", resource = "")
-    fun applyForLoan(request: LoanApplicationRequest): Uni<Response> = apply.apply(request, actor())
-        .map { Response.status(HTTP_CREATED).entity(it).build() }
-        .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
+    suspend fun applyForLoan(
+        request: LoanApplicationRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-Request-ID") xRequestId: String?,
+    ): Response {
+        // Idempotent replay (ADR-0297, #8351): a loan application has NO complete natural key —
+        // a customer may legitimately apply twice for the same amount and product — so the replay
+        // handle is the caller-supplied Idempotency-Key (X-Request-ID as fallback, both optional,
+        // the pre-existing edge contract), scoped per party. A keyed retry replays the cached 201
+        // and never stacks a duplicate SUBMITTED application into the origination graph.
+        val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
+        requestKey?.let { key ->
+            idempotencyStore.get(applyIdempotencyKey(request.partyId, key))?.let { cached ->
+                return Response.status(cached.statusCode)
+                    .entity(cached.responseBody)
+                    .type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true")
+                    .build()
+            }
+        }
+        val created = try {
+            apply.apply(request, actor()).awaitSuspending()
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            // Same mapping as before: any use-case refusal is a 400 with the message.
+            return Response.status(400).entity(mapOf("error" to e.message)).build()
+        }
+        val body = objectMapper.writeValueAsString(created)
+        requestKey?.let { key ->
+            idempotencyStore.save(applyIdempotencyKey(request.partyId, key), HTTP_CREATED, body, APPLY_KEY_TTL_SECONDS)
+        }
+        return Response.status(HTTP_CREATED).entity(body).type(MediaType.APPLICATION_JSON).build()
+    }
 
     // --- Termination & early exit (ADR-0215) ---------------------------------------------------------
 
@@ -435,8 +470,11 @@ class LendingResource(
             .map { Response.ok(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(404).entity(mapOf("error" to e.message)).build() }
 
+    private fun applyIdempotencyKey(partyId: UUID, requestKey: String) = "lending:apply:$partyId:$requestKey"
+
     private companion object {
         const val HTTP_CREATED = 201
+        const val APPLY_KEY_TTL_SECONDS = 300L
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
     }

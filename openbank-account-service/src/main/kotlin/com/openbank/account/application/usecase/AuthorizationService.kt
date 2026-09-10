@@ -17,7 +17,9 @@ import com.openbank.account.domain.model.AccountAccessEntry
 import com.openbank.account.domain.model.AccountAccessSource
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AuthorizationRole
+import com.openbank.account.domain.model.AuthorizationStatus
 import com.openbank.account.domain.model.DelegatedAccessGrant
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -31,6 +33,7 @@ class AuthorizationNotOnAccountException(authId: UUID, accountId: UUID) :
     RuntimeException("Authorization $authId does not belong to account $accountId")
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one use-case class mirrors the authorization surface (sameAmountAs is a private helper)
 class AuthorizationService(
     private val accountRepository: AccountRepository,
     private val authorizationRepository: AccountAuthorizationRepository,
@@ -41,9 +44,37 @@ class AuthorizationService(
 
     private val log = Logger.getLogger(AuthorizationService::class.java)
 
+    /**
+     * Scale-insensitive equality for optional limits: [Money] is a data class over
+     * [java.math.BigDecimal], so `==` would treat 100.0 and 100.00 as different grants and a retry
+     * with a differently serialized amount would slip past the replay check.
+     */
+    private fun Money?.sameAmountAs(other: Money?): Boolean = when {
+        this == null && other == null -> true
+        this == null || other == null -> false
+        else -> currency == other.currency && amount.compareTo(other.amount) == 0
+    }
+
     override suspend fun grantAuthorization(command: GrantAuthorizationCommand): AccountAuthorization {
         accountRepository.findById(command.accountId)
             ?: throw AccountNotFoundException("Account not found: ${command.accountId}")
+
+        // Idempotent replay (ADR-0295, #8351): the natural key of a grant is the full tuple the
+        // caller supplied — (account, party, role, limits, validity) — restricted to grants still
+        // ACTIVE. A retried POST replays the ORIGINAL grant instead of stacking a duplicate
+        // authority row. The check deliberately matches only ACTIVE grants: a revoke followed by
+        // an identical re-grant is a legitimate NEW grant, not a retry, and must persist. No DB
+        // backstop (see the ADR): the residual true-concurrency window stacks two identical
+        // authority rows, which the payment guard reads as one authority — no double money.
+        authorizationRepository.findByAccountId(command.accountId).firstOrNull { existing ->
+            existing.status == AuthorizationStatus.ACTIVE &&
+                existing.partyId == command.partyId &&
+                existing.role == command.role &&
+                existing.dailyLimit.sameAmountAs(command.dailyLimit) &&
+                existing.transactionLimit.sameAmountAs(command.transactionLimit) &&
+                existing.validFrom == command.validFrom &&
+                existing.validTo == command.validTo
+        }?.let { return it }
 
         val auth = AccountAuthorization(
             accountId = command.accountId,

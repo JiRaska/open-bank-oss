@@ -72,11 +72,32 @@ class SanctionsListService(
             ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
     }
 
-    suspend fun refreshAll(): List<SanctionsList> {
-        Log.info("Refreshing all enabled sanctions lists")
-        return repo.listSanctionsLists()
-            .filter { list -> list.enabled }
-            .map { list -> refresh(list.listType) }
+    /**
+     * #9048: request a refresh of every enabled list and answer immediately. The endpoint cannot
+     * afford to run the imports synchronously — a full sweep of all feeds can take far longer
+     * than any sane HTTP timeout, so the request used to hang until the proxy gave up while the
+     * imports kept running in the background, and the caller could not tell whether anything had
+     * happened. Instead we set a `refreshRequestedAt` flag on every enabled list; the scheduled
+     * loop treats a flagged list as due and runs the real imports one list at a time, clearing the
+     * flag via markUpdated as each completes. Per-list progress stays queryable through each
+     * list's lastUpdatedAt.
+     */
+    suspend fun requestRefreshAll(): Int {
+        Log.info("Refresh requested for all enabled sanctions lists (deferred to scheduler)")
+        return repo.requestRefreshAll()
+    }
+
+    /**
+     * Legacy v1 variant of the same request: flags the lists exactly like [requestRefreshAll] but
+     * returns the enabled lists (200 + array) so the v1 contract SHAPE survives the deprecation
+     * window (docs/03-api: a breaking change moves to /api/v2 while v1 runs in parallel). The
+     * returned lists are the PRE-refresh state — v1 could no longer keep its old post-refresh
+     * semantics anyway, because those semantics were the defect: they required the imports to
+     * finish inside the request.
+     */
+    suspend fun requestRefreshAllLegacy(): List<SanctionsList> {
+        requestRefreshAll()
+        return repo.listSanctionsLists().filter { it.enabled }
     }
 
     /**
@@ -146,6 +167,9 @@ class SanctionsListService(
 
     private fun SanctionsList.isDueForScheduledRefresh(now: ZonedDateTime): Boolean {
         if (!enabled) return false
+        // #9048: an explicit refresh request overrides the cron schedule — the operator asked for
+        // this list now, so the next tick picks it up regardless of hour/day.
+        if (refreshRequestedAt != null) return true
         val currentDay = now.dayOfWeek.name.take(3)
         if (currentDay !in cronDays.split(',').filter { it.isNotBlank() }) return false
         if (now.hour != cronHour || now.minute != cronMinute) return false

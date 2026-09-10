@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.18.0
+  version: 1.19.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -436,7 +436,7 @@ paths:
       description: >
         Idempotent per fiscal year while the record is DRAFT (the record id is stable; the
         snapshot — totals, account count, content hash, computedAt — is refreshed). Conflicts
-        (409) once the year is ATTESTED, or when the GL does not balance.
+        (409) once the year is ATTESTED, or when the GL does not balance. Replay semantics: ADR-0294.
       operationId: createYearCloseDraft
       parameters:
         - $ref: '#/components/parameters/FiscalYearPath'
@@ -585,8 +585,8 @@ paths:
       tags: [AccountingDay]
       summary: Open an accounting day for posting
       description: >
-        Creates the day in OPEN. A day is opened once — a repeat is 409, not an idempotent no-op.
-        A future business date is refused (422).
+        Creates the day in OPEN. A day is opened once — a repeat is 409, not an idempotent no-op
+        (ADR-0294). A future business date is refused (422).
       operationId: openAccountingDay
       parameters:
         - $ref: '#/components/parameters/BusinessDatePath'
@@ -616,7 +616,7 @@ paths:
         because a day that must be corrected after cutoff is corrected forward (a reversal books
         into the current open day with a link to the original entry), never rewritten in place.
         Each transition is published on the outbox as AccountingDayTransitioned; consumers react to
-        that rather than polling this service per posting.
+        that rather than polling this service per posting. Replay semantics: ADR-0294.
       operationId: transitionAccountingDay
       parameters:
         - $ref: '#/components/parameters/BusinessDatePath'
@@ -703,6 +703,7 @@ paths:
         Idempotent while DRAFT — a refresh keeps the record id and moves only the snapshot, so the
         checker always reviews a draft with a known author. Refused with 409 if the period is
         already FROZEN, if the GL does not balance over it, or if the period has not ended yet.
+        Replay semantics: ADR-0294.
       operationId: createClosedPeriodDraft
       parameters:
         - $ref: '#/components/parameters/PeriodTypePath'

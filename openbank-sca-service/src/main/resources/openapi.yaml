@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -22,7 +22,24 @@ paths:
     post:
       tags: [SCA]
       summary: Initiate an SCA challenge
+      description: >-
+        Idempotent (ADR-0296): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second challenge is minted.
       operationId: initiateScaChallenge
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -111,6 +128,11 @@ paths:
     post:
       tags: [SCA]
       summary: Enrol a device credential for decoupled approval (ADR-0021)
+      description: >-
+        Idempotent on the credentialId natural key (ADR-0296): re-enrolling the same credential
+        for the same party replays the original enrollment (201, no duplicate row;
+        `credential_id UNIQUE`, V4, is the race backstop). The same credentialId presented for a
+        DIFFERENT party is refused (409) — a credential belongs to exactly one party.
       operationId: enrollScaDevice
       parameters:
         - name: partyId

@@ -12,11 +12,8 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
-
-interface AccrualRecord {
-  id: string; accountId: string; accrualDate: string; accruedAmount: number
-  currency: string; rate: number; dayCount: string; status: string
-}
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { parseInterestAccruals, statusTone, type AccrualRecord } from '@/lib/interest/interestAccrualContract'
 
 type AccessBlock = 'unauthorized' | 'forbidden'
 
@@ -57,7 +54,7 @@ export default function InterestPage() {
     svcUrl('interest-service', '/api/v1/interest/accruals'),
     { select: (raw) => {
       setLastSuccessfulAt(new Date())
-      return Array.isArray(raw) ? (raw as AccrualRecord[]) : ((raw as { accruals?: AccrualRecord[] }).accruals ?? [])
+      return parseInterestAccruals(raw)
     } },
   )
   const accruals = data ?? []
@@ -87,7 +84,8 @@ export default function InterestPage() {
 
   const accruing = accruals.filter(a => a.status === 'ACCRUING')
   const capitalized = accruals.filter(a => a.status === 'CAPITALIZED')
-  const totalAccrued = accruals.reduce((s, a) => s + (a.accruedAmount ?? 0), 0)
+  const currencies = [...new Set(accruals.map(a => a.currency))]
+  const totalAccrued = currencies.length === 1 ? accruals.reduce((sum, accrual) => sum + accrual.accruedAmount, 0) : null
 
   return (
     <AuthGuard permission="interest:view">
@@ -173,7 +171,7 @@ export default function InterestPage() {
             { label: t('Záznamy celkem', 'Total records'), value: accruals.length, icon: <TrendingUp size={16} aria-hidden="true" />, color: 'var(--accent)' },
             { label: t('Akruuje', 'Accruing'), value: accruing.length, icon: <Percent size={16} aria-hidden="true" />, color: 'var(--warning)' },
             { label: t('Kapitalizováno', 'Capitalised'), value: capitalized.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },
-            { label: t('Celkem naakruováno', 'Total accrued'), value: totalAccrued.toLocaleString(numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <Calendar size={16} aria-hidden="true" />, color: 'var(--accent-2)' },
+            { label: t('Celkem naakruováno', 'Total accrued'), value: totalAccrued === null ? t('Více měn', 'Multiple currencies') : `${totalAccrued.toLocaleString(numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${currencies[0]}`, icon: <Calendar size={16} aria-hidden="true" />, color: 'var(--accent-2)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -228,12 +226,7 @@ export default function InterestPage() {
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.currency}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{((a.rate ?? 0) * 100).toFixed(4)}%</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.dayCount}</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                      background: a.status === 'CAPITALIZED' ? 'var(--success-bg)' : 'var(--warning-bg)',
-                      color: a.status === 'CAPITALIZED' ? 'var(--success-text)' : 'var(--warning-text)',
-                      border: `1px solid ${a.status === 'CAPITALIZED' ? 'var(--success-border)' : 'var(--warning-border)'}` }}>{a.status}</span>
-                  </td>
+                  <td style={{ padding: '12px 16px' }}><StatusBadge status={a.status} tone={statusTone(a.status)} /></td>
                 </tr>
               ))}</tbody>
             </table>
