@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.3...product-catalog-v0.18.4) (2026-09-08)
+
+
+### Bug Fixes
+
+* **edge:** catalogue rates cross to the customer as percent, not as the stored fraction ([#9144](https://github.com/JiRaska/open-bank-oss/issues/9144)) ([9ce6286](https://github.com/JiRaska/open-bank-oss/commit/9ce62868fdf9d58eecf67293e3cdf1334bc02861))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.2...product-catalog-v0.18.3) (2026-09-03)
 
 

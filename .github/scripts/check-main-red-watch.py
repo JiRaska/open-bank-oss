@@ -107,6 +107,12 @@ NOT_WATCHED: dict[str, str] = {
         "registry failure is not a defect in main's source tree, so watching it would make this "
         "issue label mostly noise -- which trains people to filter it, the #3891 failure mode."
     ),
+    "edge openapi dispatch": (
+        "A best-effort notification to another repository, not a verdict on main's tree. Its job "
+        "already exits 0 when the ping cannot be sent -- the mobile app's own schedule is what "
+        "guarantees the drift is noticed -- so a red here would only ever be infrastructure, and "
+        "paging on a lost optimisation is how an issue label gets filtered."
+    ),
     "Admin-UI deploy": (
         "Deploy lane, not a verdict on main's tree. Its drift is already escalated by "
         "deploy-drift-watch.yml against the committed image pin."

@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Tells the mobile app that the customer-edge contract moved, the moment it moves.
+#
+# The app keeps a committed snapshot of this OpenAPI and validates its wire DTOs against it
+# (EdgeContractTest). Until now the app noticed drift only on its own schedule, which is how a
+# weekend spec change left every app PR and one release unmergeable for 72 hours
+# (JiRaska/openbank-app#643). This turns that poll into a push: seconds instead of a day.
+#
+# Best-effort ON PURPOSE. The app still runs its own schedule and does not depend on this ping —
+# a notification that can be revoked, mis-scoped or edited away is not a guarantee, and a detector
+# that can only be TOLD is one that can be switched off by accident. If no credential is
+# configured this job says so in the summary and exits 0 rather than failing every merge to main
+# over a signal that is an optimisation.
+#
+# Nothing here reveals anything: the repository is public, the payload is a version string.
+
+name: edge openapi dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - openbank-customer-edge/src/main/resources/openapi.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-openapi-dispatch
+  cancel-in-progress: true
+
+jobs:
+  notify-app:
+    name: Ping openbank-app that the edge contract moved
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Read the spec version
+        id: spec
+        run: |
+          set -euo pipefail
+          # Plain text, no YAML parser: this runs on a hosted runner whose Python may or may not
+          # carry PyYAML, and the job must not fail over how it reads one string.
+          v=$(awk '/^info:/{f=1;next} f&&/^[^ ]/{exit} f&&/^  version:/{gsub(/[ "'"'"']/,"",$2); print $2; exit}' \
+                openbank-customer-edge/src/main/resources/openapi.yaml)
+          echo "version=${v:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "customer-edge OpenAPI is now ${v:-unknown}"
+
+      - name: Mint an installation token for the app repo
+        id: app_token
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          owner: JiRaska
+          repositories: openbank-app
+
+      - name: Send the dispatch
+        env:
+          TOKEN: ${{ steps.app_token.outputs.token }}
+          VERSION: ${{ steps.spec.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            {
+              echo "## Edge contract moved to \`$VERSION\` — app NOT pinged"
+              echo ""
+              echo "No installation token for \`JiRaska/openbank-app\` (the GitHub App is not installed"
+              echo "there, or the secrets are absent). The app's own scheduled sync still catches this;"
+              echo "the ping would only have made it faster."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::No token for openbank-app — skipped the ping. The app's schedule still covers this."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/JiRaska/openbank-app/dispatches \
+            -d "{\"event_type\":\"edge-openapi-changed\",\"client_payload\":{\"version\":\"$VERSION\"}}")
+          # 204 is the only success. Anything else is reported, not swallowed — a ping we believe
+          # was delivered and was not is worse than no ping at all.
+          if [ "$code" = "204" ]; then
+            echo "Pinged openbank-app (edge $VERSION)."
+            echo "Pinged \`openbank-app\` — edge OpenAPI is now \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Dispatch to openbank-app returned HTTP $code — the app's schedule still covers this."
+            cat /tmp/resp.json || true
+            {
+              echo "## Ping to openbank-app failed (HTTP $code)"
+              echo "The app's scheduled sync still catches the drift; only the latency is lost."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

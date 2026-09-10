@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-07T10:52:32.817696+00:00",
+  "generatedAt": "2026-09-09T07:33:51.261103+00:00",
   "netpol": {
     "available": true,
     "covered": 60,
@@ -9,39 +9,43 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 100,
-    "scoredModules": 3,
-    "unknownModules": 24
+    "fleetScore": 60,
+    "scoredModules": 5,
+    "unknownModules": 22
   },
   "credentials": {
     "available": true,
-    "totalSecrets": 168,
-    "staticSecrets": 161,
-    "withDeadline": 3,
+    "totalSecrets": 169,
+    "staticSecrets": 162,
+    "withDeadline": 4,
     "overdue": 0,
     "undeclared": 158,
     "overdueFound": false
   },
   "fuzz": {
     "available": true,
-    "inScope": 26,
-    "tested": 26,
+    "inScope": 28,
+    "tested": 28,
     "coveragePct": 100,
-    "totalExercised": 4,
-    "excludedCount": 1,
-    "run": "https://github.com/JiRaska/open-bank-oss/actions/runs/34109987701",
-    "runDate": "2026-09-07"
+    "totalExercised": 12,
+    "excludedCount": 0,
+    "run": "https://github.com/JiRaska/open-bank-oss/actions/runs/34316666163",
+    "runDate": "2026-09-09"
   },
   "threatModels": {
     "available": true,
-    "moneyPathTotal": 23,
-    "withModel": 23,
+    "moneyPathTotal": 24,
+    "withModel": 24,
     "missing": [],
     "staleCount": 0,
-    "oldestDays": 28
+    "oldestDays": 30
   },
   "mttr": {
-    "available": false,
-    "reason": "dependabot alerts API answered 403 \u2014 the token lacks access (GITHUB_TOKEN can never read it; set a security-scoped METADATA_REFRESH_PAT)"
+    "available": true,
+    "severityScope": "critical+high",
+    "fixedCount": 0,
+    "medianFixDays": null,
+    "openCount": 0,
+    "oldestOpenDays": 0
   }
 }

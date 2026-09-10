@@ -142,6 +142,8 @@ export interface MutationEvidence {
   observedAt: string | null
   total: number
   killed: number
+  /** PIT counts a timed-out mutant as detected when computing its score. */
+  timedOut?: number
   survived: number
   noCoverage: number
   score: number | null

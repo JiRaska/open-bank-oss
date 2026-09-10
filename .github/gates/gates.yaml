@@ -5082,7 +5082,7 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    min_subjects: 200   # 291 source files scanned today (2026-09-09); findings may reach zero
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
@@ -5159,3 +5159,22 @@ gates:
     min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
+
+  - id: workflow-supply-chain
+    name: "workflow action pins and bounded agent admission"
+    group: supplychain
+    mode: enforced
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs."
+    review_after: "2026-12-08"
+    budget_seconds: 15
+    min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-workflow-supply-chain.py"
+      - ".github/scripts/test-workflow-supply-chain.py"
+      - ".github/scripts/agent-admission.py"
+      - ".github/scripts/test-agent-admission.py"
+    selftest: |
+      python3 .github/scripts/test-workflow-supply-chain.py
+      python3 .github/scripts/test-agent-admission.py
+    run: python3 .github/scripts/check-workflow-supply-chain.py

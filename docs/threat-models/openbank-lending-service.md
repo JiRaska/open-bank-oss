@@ -696,6 +696,16 @@ What that changes, and what it does not:
   impact of a candidate parameter set before it merges. No new endpoint, no authz change, no
   behavior change to computed values (the defaults themselves are untouched). Rollback: revert
   the commit; the `model_version` column is additive and unread by pre-change code.
+- **2026-09-07** — Creation-POST idempotency (ADR-0297, burn-down #8351): the two application
+  creation POSTs (`/api/v1/lending/applications`, `/api/v1/lending/intake/applications`) accept
+  an optional `Idempotency-Key` / `X-Request-ID` replayed for 300 s per party via the shared
+  Redis `IdempotencyStore`; collateral registration replays the still-PENDING identical twin
+  (caller tuple), closing the path where a transport retry stacked a duplicate a checker could
+  approve twice — two approved identical items would double-count against the loan's LGD;
+  compliance-pack proposals replay on the pack `contentHash` while PROPOSED; intake quotes are
+  pure computations with no persistence. The 17 lifecycle POSTs were re-verified as guarded by
+  the aggregate state machine. No new caller, route or role; the optional key changes nothing
+  for clients that do not send it. Rollback: revert the commit.
 
 ## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
 
