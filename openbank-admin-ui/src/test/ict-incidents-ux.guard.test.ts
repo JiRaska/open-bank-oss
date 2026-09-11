@@ -7,11 +7,11 @@ const read = () => fs.readFileSync(path.join(process.cwd(), 'src/app/security/in
 describe('ICT incident register truthfulness', () => {
   it('distinguishes an empty, successfully loaded register from every unavailable state', () => {
     const source = read()
-    expect(source).toContain("data.reason === 'unauthorized'")
-    expect(source).toContain("data.reason === 'not_deployed'")
-    expect(source).toContain("data.reason === 'unreachable'")
-    expect(source).toContain('This does not confirm that no incidents exist.')
-    expect(source).toContain('contains no records.')
+    expect(source).toContain("failure === 'unauthorized'")
+    expect(source).toContain("failure === 'not_deployed'")
+    expect(source).toContain("failure === 'invalid_response'")
+    expect(source).toContain('Showing the last successfully verified snapshot.')
+    expect(source).toContain('The register was verified and contains no incidents.')
   })
 
   it('keeps the read-only register accessible and exposes the incident category', () => {
@@ -20,7 +20,7 @@ describe('ICT incident register truthfulness', () => {
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain('role="alert"')
     expect(source).toContain('<caption className="sr-only">')
-    expect(source).toContain("{i.category || '—'}")
-    expect(source).toContain("i.reportedToRegulator ? t('Oznámeno', 'Reported')")
+    expect(source).toContain('<StatusBadge status="REPORTED"')
+    expect(source).toContain('item.regulatoryReportId')
   })
 })

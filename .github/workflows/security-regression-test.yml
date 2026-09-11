@@ -51,8 +51,10 @@ jobs:
             const body = pr.body || "";
 
             // Closing keywords only — Refs is a mention, not a resolution.
-            const closing = [...body.matchAll(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)]
-              .map(m => Number(m[1]));
+            const closing = [...new Set(
+              [...body.matchAll(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)]
+                .map(m => Number(m[1])),
+            )];
             if (closing.length === 0) {
               core.info("No closing issue references — rule does not apply.");
               return;
@@ -63,24 +65,65 @@ jobs:
               return;
             }
 
-            const securityIssues = [];
-            for (const n of closing) {
-              const { data: issue } = await github.rest.issues.get({
-                owner: context.repo.owner, repo: context.repo.repo, issue_number: n,
-              });
-              if (issue.labels.some(l => (l.name || l) === "security")) securityIssues.push(n);
-            }
+            // One GraphQL request covers every referenced issue and the PR files. The previous
+            // N+1 REST shape shared the installation's core quota with the whole workflow fleet;
+            // once that quota reached zero this gate failed before evaluating the policy at all.
+            const issueFields = closing
+              .map((n, i) => `issue${i}: issue(number: ${n}) { labels(first: 100) { nodes { name } } }`)
+              .join("\n");
+            const data = await github.graphql(
+              `query($owner: String!, $repo: String!, $pr: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  ${issueFields}
+                  pullRequest(number: $pr) {
+                    files(first: 100) {
+                      nodes { path }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }`,
+              { owner: context.repo.owner, repo: context.repo.repo, pr: pr.number },
+            );
+            const repository = data.repository;
+            const securityIssues = closing.filter((n, i) => {
+              const issue = repository[`issue${i}`];
+              if (!issue) throw new Error(`Closing issue #${n} was not found`);
+              return issue.labels.nodes.some(label => label.name === "security");
+            });
             if (securityIssues.length === 0) {
               core.info(`Closed issues ${closing.join(", ")} — none labeled 'security'.`);
               return;
             }
 
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
-              per_page: 100,
-            });
+            const fileConnection = repository.pullRequest?.files;
+            if (!fileConnection) throw new Error(`Pull request #${pr.number} was not found`);
+            const files = [...fileConnection.nodes];
+            let pageInfo = fileConnection.pageInfo;
+            while (pageInfo.hasNextPage) {
+              const page = await github.graphql(
+                `query($owner: String!, $repo: String!, $pr: Int!, $cursor: String!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      files(first: 100, after: $cursor) {
+                        nodes { path }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }`,
+                {
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  pr: pr.number, cursor: pageInfo.endCursor,
+                },
+              );
+              const next = page.repository.pullRequest?.files;
+              if (!next) throw new Error(`Pull request #${pr.number} disappeared during pagination`);
+              files.push(...next.nodes);
+              pageInfo = next.pageInfo;
+            }
             const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
-            const touchedTests = files.map(f => f.filename).filter(f => TEST_SURFACE.test(f));
+            const touchedTests = files.map(file => file.path).filter(path => TEST_SURFACE.test(path));
             if (touchedTests.length > 0) {
               core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
               return;
