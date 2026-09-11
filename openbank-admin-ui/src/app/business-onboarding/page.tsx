@@ -15,6 +15,9 @@ import { Building2, RefreshCw, ShieldAlert, AlertTriangle, Check, Search, Histor
 
 const SVC = 'kyb-service'
 
+/** One page of the review queue. Asked for explicitly; the service's own default is 20. */
+const QUEUE_PAGE = 200
+
 // ── Types (mirror kyb openapi Case / RepresentationDecision / Attestation) ──────
 
 interface Representative { fullName: string; role: string | null; body: string | null }
@@ -99,11 +102,23 @@ function AttestationForm({
   onAttested: () => void
 }) {
   const { t } = useLanguage()
-  // Seeded from the parser as a SUGGESTION, never as a default that binds: the operator has to
-  // look at the source text either way, and pre-filling nothing would only make them retype a
-  // number they can already see.
-  const [signers, setSigners] = useState<string>(String(decision.parserSuggestsSigners ?? 1))
-  const [roles, setRoles] = useState<string>(decision.parserSuggestsRoles.join(', '))
+  // Seeded from the STANDING confirmation when the entity has one, and only otherwise from the
+  // parser's suggestion.
+  //
+  // This distinction is the whole point. For an ATTESTED decision the server sends the PARSER's
+  // numbers in `parserSuggests*` (`parsedSigners`, and `parserSuggestsRoles` is always empty
+  // there) — so seeding from those on an entity a human confirmed as "2 signatures, předseda +
+  // člen" would open the re-confirm form pre-filled with the parser's "1" and no offices. One
+  // click on a button labelled "Re-confirm" would then supersede a role-constrained joint rule
+  // with a bare count of one, silently, which is precisely the mistake human attestation exists
+  // to prevent.
+  const standing = decision.attestation
+  const [signers, setSigners] = useState<string>(
+    String(standing?.confirmedSigners ?? decision.parserSuggestsSigners ?? 1),
+  )
+  const [roles, setRoles] = useState<string>(
+    (standing?.confirmedRoles ?? decision.parserSuggestsRoles).join(', '),
+  )
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -137,11 +152,15 @@ function AttestationForm({
           setError(
             res.status === 409
               ? t(
-                  'Text pravidla se v rejstříku změnil od otevření formuláře. Načtěte jej znovu a přečtěte si nové znění.',
-                  'The register text changed since this form was opened. Reload it and read the new wording.',
+                  'Text pravidla se v rejstříku změnil od otevření formuláře. Načítám nové znění — přečtěte si ho a potvrďte znovu.',
+                  'The register text changed since this form was opened. Loading the new wording — read it and confirm again.',
                 )
               : t('Potvrzení se nezdařilo.', 'Confirmation failed.'),
           )
+          // Without this the panel keeps the stale decision: `load` is keyed on scheme+identifier,
+          // so nothing re-runs on its own and every further click re-posts a hash that can never
+          // match again. Telling the operator to "reload" while offering no way to is a dead end.
+          if (res.status === 409) onAttested()
           return
         }
         succeeded = true
@@ -231,6 +250,7 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
   const { t, language } = useLanguage()
   const [decision, setDecision] = useState<Decision | null>(null)
   const [history, setHistory] = useState<Attestation[] | null>(null)
+  const [historyFailed, setHistoryFailed] = useState(false)
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const generation = useRef(0)
@@ -271,9 +291,13 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
       const res = await fetch(svcUrl(SVC, `/api/v1/kyb/representation/${scheme}/${identifier}/history`), {
         signal: AbortSignal.timeout(6000),
       })
-      if (res.ok) setHistory(await res.json())
+      // An empty list is a real answer ("never confirmed"); a failed fetch is not. Without this
+      // branch a 403 or a 500 leaves `history` null and the button simply appears inert.
+      setHistory(res.ok ? await res.json() : [])
+      setHistoryFailed(!res.ok)
     } catch {
       setHistory([])
+      setHistoryFailed(true)
     }
   }, [scheme, identifier])
 
@@ -353,7 +377,21 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
         permission="business-onboarding:attest"
         fallback={<div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Potvrdit zastoupení může pouze oprávněný operátor.', 'Only an authorized operator can confirm the representation.')}</div>}
       >
-        <AttestationForm scheme={scheme} identifier={identifier} decision={decision} onAttested={load} />
+        {/*
+          Keyed on the rule text, deliberately. The form seeds its fields ONCE (useState
+          initialisers) while `ruleTextHash` is read from the prop at submit time — so without a
+          key, a refresh that brings back a different wording leaves the operator's typed numbers
+          beside a hash of text they have not read, and the 409 guard cannot fire because that
+          hash is fresh. Re-keying remounts the form whenever the text changes, which is the only
+          thing that keeps the two coupled.
+        */}
+        <AttestationForm
+          key={decision.ruleTextHash}
+          scheme={scheme}
+          identifier={identifier}
+          decision={decision}
+          onAttested={load}
+        />
       </Can>
 
       <div style={{ marginTop: 10 }}>
@@ -369,7 +407,13 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
         </button>
         {history && (
           <ul style={{ marginTop: 8, fontSize: 12, listStyle: 'none', padding: 0, display: 'grid', gap: 5 }}>
-            {history.length === 0 && <li style={{ color: 'var(--text-secondary)' }}>{t('Zatím žádné potvrzení.', 'No confirmation yet.')}</li>}
+            {history.length === 0 && (
+              <li role={historyFailed ? 'alert' : undefined} style={{ color: 'var(--text-secondary)' }}>
+                {historyFailed
+                  ? t('Historii se nepodařilo načíst.', 'The history could not be loaded.')
+                  : t('Zatím žádné potvrzení.', 'No confirmation yet.')}
+              </li>
+            )}
             {history.map(a => (
               <li key={a.id} style={{ color: a.supersededAt ? 'var(--text-tertiary)' : 'var(--text-primary)' }}>
                 <span className="mono">{a.attestedAt.slice(0, 16).replace('T', ' ')}</span>
@@ -402,8 +446,13 @@ export default function BusinessOnboardingPage() {
     setUnavail(null)
     try {
       // No status parameter means the operator review queue (MANUAL_REVIEW) — kyb-service's own
-      // default for this route.
-      const res = await fetch(svcUrl(SVC, '/api/v1/kyb/cases'), { signal: AbortSignal.timeout(6000) })
+      // default for this route. `size` is explicit because the service defaults to 20, and a
+      // silently truncated array made the count label below assert "20 cases awaiting review" for
+      // a queue of any size, while the search box filtered only that first page.
+      const res = await fetch(
+        svcUrl(SVC, '/api/v1/kyb/cases', { page: '0', size: String(QUEUE_PAGE) }),
+        { signal: AbortSignal.timeout(6000) },
+      )
       if (generation !== loadGeneration.current) return
       if (!res.ok) {
         const failure = await classifyBffFailure(res)
@@ -479,6 +528,15 @@ export default function BusinessOnboardingPage() {
           <section className="card" aria-label={t('Filtr fronty', 'Queue filter')} style={{ padding: 14 }}>
             <div aria-live="polite" style={{ fontSize: 12, marginBottom: 10 }}>
               <strong>{queueLabel(cases.length)}</strong>
+              {cases.length >= QUEUE_PAGE && (
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  {' · '}
+                  {t(
+                    'zobrazena první stránka — fronta může být delší',
+                    'first page shown — the queue may be longer',
+                  )}
+                </span>
+              )}
             </div>
             <label style={{ display: 'grid', gap: 5, fontSize: 12, color: 'var(--text-secondary)', maxWidth: 340 }}>
               {t('Hledat firmu nebo případ', 'Find a company or case')}

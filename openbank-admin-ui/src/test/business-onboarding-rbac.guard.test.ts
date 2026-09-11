@@ -14,10 +14,12 @@ describe('business onboarding RBAC contract', () => {
     expect(hasPermission([ROLES.ADMIN], 'business-onboarding:attest')).toBe(true)
     expect(hasPermission([ROLES.OPERATOR], 'business-onboarding:attest')).toBe(true)
     expect(hasPermission([ROLES.KYC], 'business-onboarding:attest')).toBe(true)
-    // Compliance may READ the queue and must not confirm a signing rule: kyb-service's
-    // @RolesAllowed on those routes is OPERATOR/ADMIN/KYC, and a console that offered the
-    // button would render a control that 403s on click.
-    expect(hasPermission([ROLES.COMPLIANCE], 'business-onboarding:view')).toBe(true)
+    // COMPLIANCE gets NEITHER. It is absent from kyb-service's @RolesAllowed on the
+    // representation routes, from requireOperator() on GET /cases, from rules.yaml's
+    // role_action_matrix for every kyb.* action, and from kyb_rest_ext.rego's
+    // operator-kyb-review reason. An earlier version of this file asserted it could read the
+    // queue; that was false against all four, and the page's very first fetch would have 403'd.
+    expect(hasPermission([ROLES.COMPLIANCE], 'business-onboarding:view')).toBe(false)
     expect(hasPermission([ROLES.COMPLIANCE], 'business-onboarding:attest')).toBe(false)
     expect(hasPermission([ROLES.DEMO], 'business-onboarding:view')).toBe(false)
   })
