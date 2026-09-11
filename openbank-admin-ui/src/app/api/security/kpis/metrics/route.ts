@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { parseSecurityKpis } from '@/lib/security/kpiContract'
 
 // ── Security KPIs: Prometheus text exposition of the CI-generated snapshot ───
 //
@@ -113,7 +114,7 @@ export async function GET(): Promise<NextResponse> {
   let gauges: Gauge[] = []
   try {
     const raw = await fs.readFile(snapshotFile(), 'utf-8')
-    gauges = gaugesFromSnapshot(JSON.parse(raw) as Record<string, unknown>)
+    gauges = gaugesFromSnapshot(parseSecurityKpis(JSON.parse(raw)) as unknown as Record<string, unknown>)
   } catch {
     // Absent/corrupt snapshot: still 200, with zero series. Prometheus records the
     // target as up with no samples; SecurityKpiSnapshotStale/absent() semantics

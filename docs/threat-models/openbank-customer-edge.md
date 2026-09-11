@@ -149,6 +149,23 @@ Trust boundaries:
 
 ## 6. Change log
 
+- **2026-09-08** — **Merchant logos are served through the edge, not fetched from a third party.**
+  New inbound surface `GET /customer/v1/merchants/{descriptorKey}/logo`, proxying bytes from
+  transaction-service, plus a rewrite of `merchant.logoUrl` in the transaction page from the
+  service's `/api/v1/...` prefix to this edge's `/customer/v1/...`. The route serves PUBLIC BUSINESS
+  data — a trading name's mark, identical for every customer who shopped there — so there is no
+  account to own and no ownership check to make; authentication is the gate, and the descriptor in
+  the path is a merchant key that carries nothing customer-derived. The reason it exists at all is
+  the exposure it removes: a logo loaded from an external host would tell that host the customer's
+  IP address and which merchant they paid, on every statement render, with the image loading
+  correctly the whole time and nothing in the app looking wrong. The rewrite is the one field the
+  edge does not forward byte-for-byte, and it is what keeps the URL resolvable — this edge serves
+  `/customer/v1`, so the service's own origin-relative path would 404 here. An absolute URL in that
+  field is left untouched rather than laundered into looking local. Bytes and content type pass
+  through unchanged; no new outbound edge (transaction-service was already a caller). Rollback:
+  revert; `logoUrl` reverts to the upstream path, which resolves to nothing and renders as no logo —
+  the same as today.
+
 - **2026-09-01** — **Delegated domestic spend is reserved before the rail.** The edge now accepts
   delegated debit authority only as the complete `DELEGATED` + grant UUID + grantor UUID tuple,
   consumes SCA, then reserves the exact amount and currency under the caller's stable
