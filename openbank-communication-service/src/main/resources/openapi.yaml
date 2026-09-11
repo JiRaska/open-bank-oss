@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
   title: OpenBank Communication Service
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). 1.0.0 -> 1.2.0 (#9633): additive —
-  # the ADR-0285 D4 golden-set documents. 1.0.0 is what origin/main holds, so this could not stay
-  # there: `openapi-version-not-taken` reads the base tip and an unchanged version on an additive
-  # change fails both that gate and `api-contract-gate`.
-  # 1.2.0 and not 1.1.0: #9602 (phase 3 playbook) takes 1.1.0 and is SEQUENCED first. The two touch
-  # different paths and do not conflict in content, but info.version is one number. If #9602 is
-  # closed rather than merged, drop this to 1.1.0.
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  # 1.0.0 -> 1.1.0 (#9602, MERGED): additive — the ADR-0285 phase 3 playbook layer.
+  # 1.1.0 -> 1.2.0 (#9633, this): additive — the ADR-0285 D4 golden-set documents.
+  # The sequencing both files recorded has played out: #9602 landed at 1.1.0 (live main), so 1.2.0
+  # is the next free minor rather than a collision. Neither branch could stay at 1.0.0 — main
+  # holds it, and `openapi-version-not-taken` reads the base tip, so an unchanged version on an
+  # additive change fails that gate and `api-contract-gate` both.
   version: 1.2.0
 paths:
   /api/v1/personas/{personaKey}/style-versions:

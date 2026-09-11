@@ -59,6 +59,7 @@ class ClearingServiceTest {
         val savedItem = request.toExpectedItem()
         val itemSlot: CapturingSlot<ClearingItem> = slot()
 
+        every { itemRepo.findByPaymentId(request.paymentId) } returns Uni.createFrom().item(emptyList())
         every { itemRepo.save(capture(itemSlot)) } returns Uni.createFrom().item(savedItem)
 
         val result = service.submit(request).await().indefinitely()
@@ -71,6 +72,57 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.amount).isEqualByComparingTo(request.amount)
         assertThat(itemSlot.captured.currency).isEqualTo(request.currency)
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
+        verify(exactly = 1) { itemRepo.save(any()) }
+    }
+
+    @Test
+    fun `a retried submit for the same payment replays the existing clearing item`() {
+        // ADR-0298 (#8351): a payment enters clearing exactly once — a retry must not stack a
+        // second PENDING row that the clearing cycle would sweep into a batch and settle twice.
+        val request = SubmitPaymentRequest(
+            paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            paymentReference = "PAY-001",
+            debtorIban = "DE89370400440532013000",
+            creditorIban = "DE12500105170648489890",
+            amount = BigDecimal("125.50"),
+        )
+        val existing = request.toExpectedItem()
+
+        every { itemRepo.findByPaymentId(request.paymentId) } returns Uni.createFrom().item(listOf(existing))
+
+        val result = service.submit(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(existing)
+        verify(exactly = 0) { itemRepo.save(any()) }
+    }
+
+    @Test
+    fun `a submit that loses the unique-index race re-reads the winner`() {
+        // ADR-0298 (#8351): uq_clearing_items_payment (V9) fires on a true-concurrency race; the
+        // loser replays the winner instead of erroring the caller.
+        val request = SubmitPaymentRequest(
+            paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            paymentReference = "PAY-001",
+            debtorIban = "DE89370400440532013000",
+            creditorIban = "DE12500105170648489890",
+            amount = BigDecimal("125.50"),
+        )
+        val winner = request.toExpectedItem()
+        val violation = java.sql.SQLException(
+            "duplicate key value violates unique constraint \"uq_clearing_items_payment\" (23505)",
+            "23505",
+        )
+
+        every { itemRepo.findByPaymentId(request.paymentId) } returnsMany
+            listOf(
+                Uni.createFrom().item(emptyList()),
+                Uni.createFrom().item(listOf(winner)),
+            )
+        every { itemRepo.save(any()) } returns Uni.createFrom().failure(violation)
+
+        val result = service.submit(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(winner)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
 

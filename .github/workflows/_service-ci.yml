@@ -226,6 +226,15 @@ jobs:
       # -Dquarkus.smallrye-openapi.store-schema-directory writes the document Quarkus
       # actually serves, as a side effect of the SAME quarkusBuild task this :build already
       # runs. Read by the openapi-request-schema-conformance step below.
+      #
+      # The path is RELATIVE TO THE SUBPROJECT, not to the repo root. Passing
+      # "<svc>/build/openapi-generated" therefore wrote to <svc>/<svc>/build/..., the step
+      # below found nothing at the path it was given, and — because a missing document is
+      # "Not a finding" there — the gate reported clean for six weeks having compared zero
+      # schemas. Measured 2026-09-05 by running the same command locally:
+      #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
+      # With the path corrected, that one service alone yields "2 request schema(s) compared,
+      # 21 finding(s)". Keep this relative to the subproject.
       - name: Build + test (:${{ inputs.service }})
         run: |
           # Capture image/lifecycle/time plus a transient daemon id from this job's Docker
@@ -249,7 +258,7 @@ jobs:
           }
           trap cleanup_test_evidence EXIT
           ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
-            -Dquarkus.smallrye-openapi.store-schema-directory="${{ inputs.service }}/build/openapi-generated"
+            -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
       # cause, so the reader goes hunting for a test bug that is not there. Diagnostic only:
@@ -541,7 +550,7 @@ jobs:
       - name: Authenticate to ECR via OIDC
         id: ecr_auth
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
