@@ -8,6 +8,7 @@
 
 import { test, expect, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { APPROVAL_DOMAINS } from '../src/lib/approvals/evidence'
 
 const PARTY_ID = '05a02ef1-381c-40e7-b73f-d6855eead42e'
 const TRACE_ID = '0123456789abcdef0123456789abcdef'
@@ -148,11 +149,13 @@ test('Temporal and approvals show live source-backed operator state and human pr
   await expect(page.getByLabel(/^(Spuštěno|Scheduled): 12$/)).toBeVisible()
 
   await json(page, '**/api/agent/proposals?state=all', [{
-    id: 'proposal-human', title: 'Human customer correction', rationale: 'verified with customer', suggestedAction: 'party.correct',
+    id: '22222222-2222-4222-8222-222222222222', title: 'Human customer correction', rationale: 'verified with customer', suggestedAction: 'party.correct',
     proposedBy: 'alice@openbank.test', proposedAt: '2026-08-22T08:00:00Z', state: 'PROPOSED', decidedBy: null, decidedAt: null, decisionReason: null, modelId: null,
     agent: { id: 'alice@openbank.test', displayName: 'Alice Nováková', icon: 'user', charterKnown: false },
   }])
-  await json(page, '**/api/approvals/pending', { items: [], sources: {} })
+  await json(page, '**/api/approvals/pending', {
+    items: [], sources: Object.fromEntries(APPROVAL_DOMAINS.map(domain => [domain, 'not-configured'])),
+  })
   await json(page, '**/api/governance/agent-identities', { available: true, agents: [] })
   await page.goto('/approvals')
   await expect(page.getByText('Alice Nováková')).toBeVisible()
