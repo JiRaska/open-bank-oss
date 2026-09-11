@@ -7,8 +7,16 @@ info:
   # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
   # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
   # on POST /term-deposits.
-  # 1.54.0 -> 1.55.0: customer recertification review and evidence routes.
-  version: 1.55.0
+  # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
+  # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
+  # this takes the next minor; whoever lands second renumbers.
+  # 1.56.0 (#9286): additive — customer-managed delegated account portfolios.
+  # 1.56.0 -> 1.57.0 (#9215): additive — customer recertification review and evidence routes.
+  # Four PRs have now queued on this one spec: #9044=1.54, #9119=1.55, #9286=1.56, this=1.57.
+  # #9286 is OPEN and takes 1.56.0, so these two are SEQUENCED — #9286 first. If #9286 is closed
+  # rather than merged, drop this to 1.56.0. Neither number is on main yet, so nothing but this
+  # comment records the order.
+  version: 1.57.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -840,6 +848,35 @@ paths:
                 $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
+
+  /merchants/{descriptorKey}/logo:
+    get:
+      tags: [Transactions]
+      summary: A merchant's logo, as a square PNG
+      description: >-
+        Proxied from transaction-service, which stores the bitmap. The bank serves it itself for one
+        reason: a logo loaded from an external host would tell that host the customer's IP address
+        and which merchant they paid, every time a statement renders. Public business data, so there
+        is no account to own and no ownership check — authentication is the gate. Follow the
+        `merchant.logoUrl` this API returns rather than constructing the path; it carries a `v` token
+        so a replaced logo is a new URL and the response may be cached hard.
+      operationId: getMerchantLogo
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: descriptorKey, in: path, required: true, schema: {type: string}}
+        - {name: size, in: query, required: false, schema: {type: integer, enum: [64, 128], default: 64}}
+        - {name: v, in: query, required: false, description: Cache-busting token echoed from logoUrl., schema: {type: string}}
+      responses:
+        '200':
+          description: The logo bitmap
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing descriptor key
+        '404':
+          description: No logo stored for this merchant
 
   /statements/{accountId}:
     get:
@@ -4456,6 +4493,13 @@ components:
             logoUrl:
               type: string
               nullable: true
+              description: >-
+                Path to the logo ON THIS EDGE, e.g.
+                "/customer/v1/merchants/ALZACZ/logo?size=64&v=<hash>". The edge rewrites the prefix
+                transaction-service emits so the path resolves against the host that served this
+                response; it is never an external URL, because a logo fetched from a third party
+                would tell that party who the customer paid. Absent when no logo has been ingested —
+                render what you render today, never a placeholder.
             category:
               type: string
               nullable: true

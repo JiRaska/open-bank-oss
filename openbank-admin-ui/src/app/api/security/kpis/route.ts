@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { parseSecurityKpis } from '@/lib/security/kpiContract'
 
 // ── Security KPIs: READ-ONLY serving of the CI-generated snapshot ────────────
 //
@@ -44,11 +45,11 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json(payload, { status: 200 })
   }
   try {
-    const kpis = JSON.parse(raw)
+    const kpis = parseSecurityKpis(JSON.parse(raw))
     const payload: KpisEnvelope = { available: true, kpis }
     return NextResponse.json(payload, { status: 200 })
   } catch {
-    const payload: KpisEnvelope = { available: false, reason: 'error', detail: 'Invalid JSON in security-kpis.json' }
+    const payload: KpisEnvelope = { available: false, reason: 'error', detail: 'Invalid or contradictory security-kpis.json evidence' }
     return NextResponse.json(payload, { status: 200 })
   }
 }
