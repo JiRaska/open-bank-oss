@@ -206,9 +206,25 @@ kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbna
 ```
 
 On PostgreSQL 18.1 (the fleet image, `ghcr.io/cloudnative-pg/postgresql:18.1`) a `CREATEROLE`
-role holds ADMIN on roles it creates, which is what lets `vault_admin` run the
-`DROP OWNED BY` / `DROP ROLE` in the revocation statements. Confirm that on the first database
-you convert by letting one lease expire and checking the role is actually gone:
+role holds ADMIN OPTION on roles it creates, which lets `vault_admin` `GRANT`, `REVOKE` and
+`DROP` them — and that is exactly as far as it goes. ADMIN is **not** membership, so
+`vault_admin` cannot run `DROP OWNED BY`:
+
+```
+ERROR:  permission denied to drop objects
+DETAIL:  Only roles with privileges of role "v-..." may drop objects owned by it.
+```
+
+That is why the revocation statements are only `REVOKE` + `DROP ROLE`. Under membership the
+dynamic role holds no direct grants, so once the membership is revoked nothing depends on it and
+the `DROP` completes — verified end to end against a live database inside a rolled-back
+transaction. (The one-off cleanup of the pre-existing orphans in #9689 *did* need
+`DROP OWNED BY`, because those roles hold direct table grants; that runs as `postgres`, and the
+REVOKE half of it has to be executed under `SET LOCAL ROLE vault_admin` because `REVOKE` only
+removes grants whose grantor is the current user.)
+
+Confirm revocation on the first database you convert by letting one lease expire and checking
+the role is actually gone:
 
 ```sh
 kubectl exec -n <namespace> <cluster>-1 -c postgres -- psql -U postgres -d <dbname> -tAc \
