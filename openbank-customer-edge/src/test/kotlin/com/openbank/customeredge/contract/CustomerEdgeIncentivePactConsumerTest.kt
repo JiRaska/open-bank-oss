@@ -238,7 +238,6 @@ class CustomerEdgeIncentivePactConsumerTest {
             clientId = "openbank-customer-edge"
             clientSecret = "pact"
             tlsTrustCertificateFile = java.util.Optional.empty()
-            allowedHostSuffixes = ".svc,127.0.0.1,localhost"
         }
         return CustomerEdgeResource(
             upstream,
