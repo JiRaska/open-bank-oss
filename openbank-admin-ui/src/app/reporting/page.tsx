@@ -20,40 +20,10 @@ import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
 import { ReportTrend } from '@/components/reporting/ReportTrend'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
+import { parseReportCatalogue, parseReportResult, type CatalogueColumn, type CatalogueReport, type ReportResult } from '@/lib/reporting/clientContract'
 
 // Shapes mirrored from /api/reporting/route.ts and /api/reporting/[queryId]/route.ts. The page
 // deliberately does NOT import the registry module: its SQL builders stay server-side.
-interface CatalogueParam {
-  name: string
-  labelCs: string
-  labelEn: string
-  type: 'date' | 'number' | 'enum'
-  required: boolean
-  defaultValue?: string
-  options?: readonly string[]
-}
-interface CatalogueColumn { key: string; labelCs: string; labelEn: string; format: 'text' | 'number' | 'money' | 'datetime' }
-interface CatalogueReport {
-  id: string
-  titleCs: string
-  titleEn: string
-  descriptionCs: string
-  descriptionEn: string
-  permission: string
-  params: readonly CatalogueParam[]
-  columns: readonly CatalogueColumn[]
-}
-interface ReportResult {
-  available: boolean
-  reportId: string
-  columns: readonly CatalogueColumn[]
-  rows: Record<string, unknown>[]
-  generatedAt: string | null
-  rowCount: number
-  truncated: boolean
-  error?: string
-}
-
 function isoDay(d: Date) { return d.toISOString().slice(0, 10) }
 
 function formatCell(value: unknown, format: CatalogueColumn['format'], locale: string): string {
@@ -107,9 +77,9 @@ export default function ReportingPage() {
         const res = await fetch('/api/reporting', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
         if (res.status === 401 || res.status === 403) { setCatalogueDenied(true); return }
         if (!res.ok) { setCatalogueFailed(true); setCatalogue([]); return }
-        const body = (await res.json()) as { reports: CatalogueReport[] }
-        setCatalogue(body.reports)
-        if (body.reports.length > 0) selectReport(body.reports[0])
+        const reports = parseReportCatalogue(await res.json())
+        setCatalogue(reports)
+        selectReport(reports[0])
       } catch {
         setCatalogueFailed(true)
         setCatalogue([])
@@ -141,7 +111,7 @@ export default function ReportingPage() {
       if (res.status === 404) { setFailure('not_found'); setResult(null); return }
       if (res.status === 400) { setFailure('invalid'); setResult(null); return }
       if (!res.ok) throw new Error('report unavailable')
-      const body = (await res.json()) as ReportResult
+      const body = parseReportResult(await res.json(), report)
       if (id === requestId.current) setResult(body)
     } catch {
       if (id !== requestId.current) return

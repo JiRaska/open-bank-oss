@@ -16,7 +16,9 @@
 # a `.github/gates/gates.yaml` entry gets rationale/review_after/min_subjects tracking and a
 # `--self-test` this repo's own tooling (run-gates.py, check-gate-script-registration.py) can see,
 # where a lone Vitest assertion cannot. Keep the two thresholds in sync by hand; they check the
-# same corpus with the same regex on purpose.
+# same corpus with the same regex on purpose. `SUBJECTS` is the number of source files scanned,
+# not the number of findings: findings are debt that is expected to reach zero, while source files
+# are the corpus whose disappearance must fail the runner's subject floor.
 #
 # EXIT CODES
 #   0  count is at or under the ratchet ceiling
@@ -39,7 +41,7 @@ SOURCE_EXTENSIONS = {".tsx", ".css"}
 
 # Lowering this is always safe; raising it needs an intentional token decision, same rule as the
 # Vitest test's own comment. Keep this number equal to that test's ceiling.
-MAX_RAW_COLOUR_LITERALS = 1782
+MAX_RAW_COLOUR_LITERALS = 1599
 
 
 def source_files(root: pathlib.Path):
@@ -68,6 +70,11 @@ def scan(root: str):
                 "literal": m.group(0),
             })
     return findings
+
+
+def source_count(root: str) -> int:
+    base = pathlib.Path(root) / "openbank-admin-ui" / "src"
+    return sum(1 for _ in source_files(base))
 
 
 # --- self-test ---------------------------------------------------------------------------------
@@ -101,7 +108,17 @@ def self_test() -> int:
             (literals.count("#fff") == 1, "must flag three-digit hex in .tsx"),
             (literals.count("#abcabc") == 1, "must flag hex in .css under components/"),
             (len(found) == 3, "globals.css and non-source extensions must be excluded"),
+            (source_count(str(root)) == 2, "subject count measures scanned files, not findings"),
         ]
+
+        (app / "page.tsx").write_text('const bg = "var(--ob-surface)"\n')
+        (components / "Widget.css").write_text("body { color: var(--ob-text); }\n")
+        checks.append(
+            (
+                len(scan(str(root))) == 0 and source_count(str(root)) == 2,
+                "a fully migrated zero-debt corpus stays observable",
+            ),
+        )
         for ok, label in checks:
             print(f"{'pass' if ok else 'FAIL'}  {label}")
             failures += 0 if ok else 1
@@ -130,7 +147,9 @@ def main() -> int:
 
     findings = scan(args.root)
     count = len(findings)
-    print(f"SUBJECTS={count}  # raw hex colour literals in openbank-admin-ui app/ and components/")
+    files_scanned = source_count(args.root)
+    print(f"SUBJECTS={files_scanned}  # admin-ui source files scanned for raw hex colours")
+    print(f"DEBT={count}  # raw hex colour literals remaining")
 
     if args.list:
         for f in sorted(findings, key=lambda x: (x["file"], x["line"])):
