@@ -51,13 +51,22 @@ test('/sdd has no automated WCAG A/AA violations in its healthy default state', 
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify([{
-        id: '11111111-1111-1111-1111-111111111111',
+        id: '11111111-1111-4111-8111-111111111111',
+        accountId: '22222222-2222-4222-a222-222222222222',
         umr: 'UMR-EVIDENCE-42',
+        creditorIdentifier: 'CZ98ZZZ00000000001',
         creditorName: 'Verified Utilities SE',
+        debtorName: 'Example Manufacturing a.s.',
         debtorIban: 'CZ6508000000192000145399',
         status: 'ACTIVE',
         scheme: 'CORE',
+        sequenceType: 'OOFF',
+        signatureDate: '2026-01-15',
+        b2bConfirmed: false,
+        lastCollectionDate: null,
+        lastPreNotificationDate: null,
         createdAt: '2026-08-31T08:00:00Z',
+        amendments: [],
       }]),
     })
   })

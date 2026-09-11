@@ -20,14 +20,15 @@ export default function AmlPage() {
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
   const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
-  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
+  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCaseSnapshot>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
     { select: (raw) => {
       setLastSuccessfulAt(new Date())
       return parseAmlCases(raw)
     } },
   )
-  const cases = data ?? []
+  const cases = data?.cases ?? []
+  const excludedCount = data?.excludedCount ?? 0
   const hasSnapshot = data !== null
   const showingRetainedSnapshot = unavailable !== null && hasSnapshot
   const filtered = cases.filter(c =>
@@ -82,6 +83,13 @@ export default function AmlPage() {
           {t('Aktualizuji AML případy; poslední snapshot zůstává dostupný.', 'Refreshing AML cases; the last snapshot remains available.')}
         </p>}
 
+        {hasSnapshot && excludedCount > 0 && <p role="alert" style={{ margin: '0 0 20px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>
+          {t(
+            `${excludedCount} neplatných AML záznamů bylo z přehledu vyřazeno; zobrazené souhrny počítají pouze ověřené záznamy.`,
+            `${excludedCount} invalid AML record${excludedCount === 1 ? ' was' : 's were'} excluded; displayed totals use validated records only.`,
+          )}
+        </p>}
+
         {hasSnapshot && escalated.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
             background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
@@ -106,8 +114,8 @@ export default function AmlPage() {
             { label: t('Případů celkem', 'Total Cases'), value: cases.length, icon: <ShieldAlert size={16} />, color: 'var(--accent)' },
             { label: t('Vysoké riziko', 'High Risk'), value: highRisk.length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
             { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Eskalováno', 'Escalated'), value: escalated.length, icon: <AlertOctagon size={16} />, color: '#dc2626' },
-          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.color === 'var(--danger)' || k.color === '#dc2626' ? 'danger' : k.color === 'var(--warning)' ? 'warning' : undefined} />)}
+            { label: t('Eskalováno', 'Escalated'), value: escalated.length, icon: <AlertOctagon size={16} />, color: 'var(--danger)' },
+          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.color === 'var(--danger)' ? 'danger' : k.color === 'var(--warning)' ? 'warning' : undefined} />)}
         </div>}
 
         <div className="card">

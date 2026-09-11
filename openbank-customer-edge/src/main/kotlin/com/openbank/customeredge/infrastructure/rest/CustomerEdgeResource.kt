@@ -2269,6 +2269,57 @@ class CustomerEdgeResource(
     }
 
     /**
+     * Point `merchant.logoUrl` at THIS edge instead of at transaction-service's own path.
+     *
+     * The service emits an origin-relative `/api/v1/merchants/<key>/logo?…` on purpose — a logo must
+     * never be a third-party URL, or every statement render would tell that host the customer's IP
+     * address and which merchant they paid. Origin-relative is right and, unchanged, it is also
+     * unreachable here: this edge serves `/customer/v1`, so a mobile client resolving that path
+     * against the edge host would 404. Rewriting the prefix keeps the property (still same-origin,
+     * still no third party) and makes it resolvable, which is why the edge does not simply forward
+     * this one field byte-for-byte as it does the rest of the object.
+     */
+    private fun rewriteMerchantLogoUrl(item: com.fasterxml.jackson.databind.JsonNode) {
+        val merchant = item.path("merchant") as? com.fasterxml.jackson.databind.node.ObjectNode ?: return
+        val logoUrl = merchant.path("logoUrl").asText(null) ?: return
+        if (!logoUrl.startsWith(UPSTREAM_MERCHANT_PREFIX)) return
+        merchant.put("logoUrl", EDGE_MERCHANT_PREFIX + logoUrl.removePrefix(UPSTREAM_MERCHANT_PREFIX))
+    }
+
+    /**
+     * A merchant's logo, proxied from transaction-service.
+     *
+     * Public business data — a trading name's mark — so there is no account to own and no ownership
+     * check to make; the route is authenticated like every other, and that is the whole gate. What
+     * it buys is the thing an `<img src>` to a logo CDN would have cost: the customer's device talks
+     * only to this bank, so no third party learns who they paid from the fact that a logo loaded.
+     *
+     * Bytes and content type pass through unchanged via [UpstreamClient.getRaw]. `v` is the content
+     * hash the service put in the URL; it is not read here, and is carried so a replaced logo is a
+     * different URL rather than a stale cache entry.
+     */
+    @GET
+    @Path("/merchants/{descriptorKey}/logo")
+    @Authorize(action = "customer.transactions.read")
+    @Blocking
+    fun merchantLogo(
+        @PathParam("descriptorKey") descriptorKey: String?,
+        @QueryParam("size") @DefaultValue("64") size: Int,
+    ): Response {
+        // Nullable + explicit check: a non-nullable JAX-RS path parameter would make an absent value
+        // a 500 rather than the 400 it is (fleet rule; the guard in the body would be dead code).
+        val key = descriptorKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return badRequest("Missing path parameter 'descriptorKey'")
+        val customer = customer()
+        return upstream.getRaw(
+            "$transactionServiceUrl/api/v1/merchants/${java.net.URLEncoder.encode(key, Charsets.UTF_8)}" +
+                "/logo?size=$size",
+            customer.partyId.toString(),
+            "image/png",
+        )
+    }
+
+    /**
      * Add `counterpartyIban` to each transaction in a page.
      *
      * transaction-service keys both sides by ACCOUNT ID and carries no IBAN, so a client reading
@@ -2312,6 +2363,7 @@ class CustomerEdgeResource(
                 }
                 if (iban != null) obj.put("counterpartyIban", iban)
             }
+            items.forEach { item -> rewriteMerchantLogoUrl(item) }
             Response.ok(root.toString()).build()
         }.getOrElse { resp }
     }
@@ -5356,6 +5408,14 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        /**
+         * The path transaction-service puts in `merchant.logoUrl`, and the path this edge serves it
+         * on. The rewrite between them is [rewriteMerchantLogoUrl]; both halves are same-origin, so
+         * a logo still reaches no third party.
+         */
+        private const val UPSTREAM_MERCHANT_PREFIX = "/api/v1/merchants/"
+        private const val EDGE_MERCHANT_PREFIX = "/customer/v1/merchants/"
 
         /**
          * The product types a customer may discover and open from the app.

@@ -14,21 +14,12 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 import { accountPartySelection } from '@/lib/accounts/partySelection'
+import { AccountOpeningContractError, parseAccountOpeningProducts, parseOpenedAccount, type AccountOpeningProduct } from '@/lib/accounts/openingContract'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'TERM_DEPOSIT', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
-const CUSTOMER_ACCOUNT_TYPES = new Set(['CURRENT', 'SAVINGS', 'TERM_DEPOSIT'])
 const CURRENCIES    = ['CZK', 'EUR', 'USD', 'GBP', 'CHF', 'PLN']
-
-interface CatalogProduct {
-  id: string
-  code: string
-  name: string
-  type: string
-  currency: string
-  status: string
-}
 
 export default function NewAccountPage() {
   const router = useRouter()
@@ -39,6 +30,9 @@ export default function NewAccountPage() {
     accountType: 'CURRENT',
     currencyCode: 'CZK',
     legalName:   '',
+    termsVersion: '',
+    termsUrl: '',
+    termsEffectiveFrom: '',
   })
   const [errors, setErrors]   = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
@@ -48,7 +42,7 @@ export default function NewAccountPage() {
   // interrupted response instead of opening a second account.
   const openingInFlight = useRef(false)
   const idempotencyKey = useRef<string | null>(null)
-  const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [products, setProducts] = useState<AccountOpeningProduct[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsUnavailable, setProductsUnavailable] = useState(false)
 
@@ -61,9 +55,7 @@ export default function NewAccountPage() {
         await classifyBffFailure(response.clone())
         throw new Error('catalog unavailable')
       }
-      const body = await response.json() as CatalogProduct[] | { products?: CatalogProduct[]; items?: CatalogProduct[] }
-      const rows = Array.isArray(body) ? body : body.products ?? body.items ?? []
-      setProducts(rows.filter(product => product.status === 'ACTIVE' && CUSTOMER_ACCOUNT_TYPES.has(product.type)))
+      setProducts(parseAccountOpeningProducts(await response.json()))
     }).catch(error => {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setProductsUnavailable(true)
@@ -76,7 +68,13 @@ export default function NewAccountPage() {
     setForm(current => ({
       ...current,
       productId,
-      ...(product ? { accountType: product.type, currencyCode: product.currency } : {}),
+      ...(product ? {
+        accountType: product.type,
+        currencyCode: product.currency,
+        termsVersion: product.terms?.version ?? '',
+        termsUrl: product.terms?.url ?? '',
+        termsEffectiveFrom: product.terms?.effectiveFrom ?? '',
+      } : {}),
     }))
   }
 
@@ -87,6 +85,12 @@ export default function NewAccountPage() {
     if (!form.productId.trim()) e.productId = t('Product ID je povinné', 'Product ID is required')
     else if (!/^[0-9a-f-]{36}$/i.test(form.productId.trim())) e.productId = t('Musí být platné UUID', 'Must be a valid UUID')
     if (!form.legalName.trim()) e.legalName = t('Právní název je povinný pro sankční screening', 'Legal name is required for sanctions screening')
+    if (form.accountType === 'TERM_DEPOSIT' && !form.termsVersion) {
+      e.productId = t(
+        'Termínovaný vklad vyžaduje aktuální obchodní podmínky z katalogu.',
+        'A term deposit requires current terms from the product catalogue.',
+      )
+    }
     return e
   }
 
@@ -112,16 +116,30 @@ export default function NewAccountPage() {
     setErrors({}); setSubmitting(true); setApiError(null)
     try {
       const stableIdempotencyKey = idempotencyKey.current ??= crypto.randomUUID()
-      const account = await accountApi.open({
+      const request = {
         partyId:     form.partyId.trim(),
         productId:   form.productId.trim(),
         accountType: form.accountType,
         currencyCode: form.currencyCode,
         legalName:   form.legalName.trim(),
-      }, stableIdempotencyKey)
+        ...(form.termsVersion ? {
+          termsVersion: form.termsVersion,
+          termsUrl: form.termsUrl,
+          termsEffectiveFrom: form.termsEffectiveFrom,
+        } : {}),
+      }
+      const account = parseOpenedAccount(
+        await accountApi.open(request, stableIdempotencyKey),
+        request,
+      )
       router.push(`/accounts/${account.id}`)
     } catch (err: unknown) {
-      setApiError(err instanceof Error ? err.message : t('Otevření účtu selhalo', 'Failed to open account'))
+      setApiError(err instanceof AccountOpeningContractError
+        ? t(
+            'Služba nepotvrdila údaje nového účtu. Účet mohl vzniknout; obnovte seznam před dalším pokusem.',
+            'The service did not confirm the new account details. The account may exist; refresh the list before trying again.',
+          )
+        : err instanceof Error ? err.message : t('Otevření účtu selhalo', 'Failed to open account'))
     } finally {
       openingInFlight.current = false
       setSubmitting(false)
@@ -229,17 +247,28 @@ export default function NewAccountPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                 <div className="field">
                   <label htmlFor="account-type">{t('Typ účtu', 'Account type')}</label>
-                  <select id="account-type" className="input" value={form.accountType} onChange={set('accountType')}>
+                  <select id="account-type" className="input" value={form.accountType} onChange={set('accountType')} disabled={Boolean(form.productId && !productsUnavailable)}>
                     {ACCOUNT_TYPES.map(at => <option key={at}>{at}</option>)}
                   </select>
                 </div>
                 <div className="field">
                   <label htmlFor="account-currency">{t('Měna', 'Currency')}</label>
-                  <select id="account-currency" className="input" value={form.currencyCode} onChange={set('currencyCode')}>
+                  <select id="account-currency" className="input" value={form.currencyCode} onChange={set('currencyCode')} disabled={Boolean(form.productId && !productsUnavailable)}>
                     {CURRENCIES.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
               </div>
+
+              {form.termsVersion && <div style={{
+                padding: '10px 12px', borderRadius: 'var(--r-md)', fontSize: '12px',
+                background: 'var(--success-bg)', border: '1px solid var(--success-border)', color: 'var(--success-text)',
+              }}>
+                {t('Účet bude otevřen podle podmínek', 'The account will be opened under terms')} <strong>v{form.termsVersion}</strong>
+                {' · '}
+                <a href={form.termsUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>
+                  {t('Otevřít dokument', 'Open document')}
+                </a>
+              </div>}
 
               <div style={{
                 padding: '10px 12px',

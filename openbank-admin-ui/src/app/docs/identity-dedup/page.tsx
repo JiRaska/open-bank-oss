@@ -9,12 +9,14 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
+const fade = (color: string, amount: number) => `color-mix(in srgb, ${color} ${amount}%, transparent)`
+
 // Status pill mirrored from the docs status vocabulary (live / partial / planned).
 function Status({ kind, t }: { kind: 'live' | 'partial' | 'planned'; t: (cs: string, en: string) => string }) {
   const map = {
-    live: { bg: '#16a34a15', fg: '#16a34a', br: '#16a34a30', label: t('ŽIVÉ', 'LIVE') },
-    partial: { bg: '#d9770615', fg: '#d97706', br: '#d9770630', label: t('ČÁSTEČNÉ', 'PARTIAL') },
-    planned: { bg: '#64748b15', fg: '#64748b', br: '#64748b30', label: t('PLÁNOVÁNO', 'PLANNED') },
+    live: { bg: 'var(--success-bg)', fg: 'var(--success)', br: 'var(--success-border)', label: t('ŽIVÉ', 'LIVE') },
+    partial: { bg: 'var(--warning-bg)', fg: 'var(--warning)', br: 'var(--warning-border)', label: t('ČÁSTEČNÉ', 'PARTIAL') },
+    planned: { bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', br: 'var(--border-strong)', label: t('PLÁNOVÁNO', 'PLANNED') },
   }[kind]
   return (
     <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', background: map.bg, color: map.fg, borderRadius: '20px', border: `1px solid ${map.br}`, whiteSpace: 'nowrap' }}>
@@ -28,7 +30,7 @@ export default function IdentityDedupPage() {
 
   const principles: { icon: React.ReactNode; color: string; title: [string, string]; body: [string, string] }[] = [
     {
-      icon: <KeyRound size={18} />, color: '#6366f1',
+      icon: <KeyRound size={18} />, color: 'var(--accent)',
       title: ['Jediná autorita identity (golden record)', 'Single identity authority (golden record)'],
       body: [
         'pid-service je jediný zdroj pravdy o tom, kdo je kdo. Jeden živý člověk = jedna party. Ostatní služby (party, účty, platby) drží jen referenci partyId, nikdy vlastní rozhodnutí o identitě.',
@@ -36,7 +38,7 @@ export default function IdentityDedupPage() {
       ],
     },
     {
-      icon: <Lock size={18} />, color: '#16a34a',
+      icon: <Lock size={18} />, color: 'var(--success)',
       title: ['Rodné číslo nikdy neopustí pid', 'The national ID never leaves pid'],
       body: [
         'Plaintext rodného čísla se v pid zpracuje v rámci jednoho requestu a zahodí — nikdy se neukládá ani neloguje. Do DB jde jen klíčovaný blind index HMAC-SHA256(pepper, RČ). Pepper žije v OpenBao, ne v databázi.',
@@ -44,7 +46,7 @@ export default function IdentityDedupPage() {
       ],
     },
     {
-      icon: <GitMerge size={18} />, color: '#2563eb',
+      icon: <GitMerge size={18} />, color: 'var(--info)',
       title: ['Auto-merge jen deterministicky', 'Auto-merge only on deterministic keys'],
       body: [
         'Sloučení dvou identit proběhne automaticky jen při shodě tvrdého klíče (blind index RČ, EUDI PID id). Pravděpodobnostní shoda NIKDY nesloučí sama — je jen dalším zdrojem kandidátů do fronty ke schválení.',
@@ -52,7 +54,7 @@ export default function IdentityDedupPage() {
       ],
     },
     {
-      icon: <ShieldCheck size={18} />, color: '#0891b2',
+      icon: <ShieldCheck size={18} />, color: 'var(--info-text)',
       title: ['Neutrální odpověď klientovi', 'Neutral response to the client'],
       body: [
         'Klient se nikdy nedozví „tato osoba už u nás je". Onboarding buď tiše pokračuje (reuse / create), nebo vrátí neutrální „čeká na ověření". Existence cizí identity se nedá vytěžit přes onboarding.',
@@ -60,7 +62,7 @@ export default function IdentityDedupPage() {
       ],
     },
     {
-      icon: <AlertTriangle size={18} />, color: '#dc2626',
+      icon: <AlertTriangle size={18} />, color: 'var(--danger)',
       title: ['Ambiguita → čtyři oči, ne hádání', 'Ambiguity → four-eyes, not guessing'],
       body: [
         'Kolize blind indexu s rozdílnými atributy nebo pravděpodobnostní shoda v šedé zóně se nikdy neuhodne — routuje se na manuální verifikaci (čtyři oči). Raději nechat člověka rozhodnout než špatně sloučit.',
@@ -68,7 +70,7 @@ export default function IdentityDedupPage() {
       ],
     },
     {
-      icon: <Fingerprint size={18} />, color: '#7c3aed',
+      icon: <Fingerprint size={18} />, color: 'var(--accent)',
       title: ['EUDI-native, ne doc-scan první', 'EUDI-native, not doc-scan first'],
       body: [
         'Cílový model (ADR-0094): pid = EUDI Person Identification Data hub. eIDAS 2.0 peněženka (OpenID4VP/VCI) dává deterministický PID identifikátor a selektivní disclosure — onboarding na úrovni High bez skenu dokladu.',
@@ -80,28 +82,28 @@ export default function IdentityDedupPage() {
   // Three-tier resolution ladder.
   const tiers: { tier: string; color: string; signal: [string, string]; technique: [string, string]; merge: [string, string]; status: 'live' | 'partial' | 'planned' }[] = [
     {
-      tier: '1', color: '#16a34a',
+      tier: '1', color: 'var(--success)',
       signal: ['Rodné číslo (RČ)', 'National ID (RČ)'],
       technique: ['Blind index — HMAC-SHA256(pepper, kanonické RČ). Rovnost indexů = stejná osoba.', 'Blind index — HMAC-SHA256(pepper, canonical RČ). Index equality = same person.'],
       merge: ['Deterministicky reuse', 'Deterministic reuse'],
       status: 'live',
     },
     {
-      tier: '2', color: '#2563eb',
+      tier: '2', color: 'var(--info)',
       signal: ['Jméno + datum narození', 'Name + date of birth'],
       technique: ['Match-key — normalizované (diakritika, case, pořadí) jméno+datum. Přesná shoda klíče.', 'Match-key — normalized (diacritics, case, order) name+birthdate. Exact key match.'],
       merge: ['Reuse, jinak kandidát', 'Reuse, else candidate'],
       status: 'live',
     },
     {
-      tier: "2'", color: '#d97706',
+      tier: "2'", color: 'var(--warning)',
       signal: ['Fuzzy atributy', 'Fuzzy attributes'],
       technique: ['Probabilistický record linkage (Splink / Fellegi-Sunter). Skóre m/u, šedá zóna vs práh.', 'Probabilistic record linkage (Splink / Fellegi-Sunter). m/u scores, gray-zone vs threshold.'],
       merge: ['Jen kandidát → čtyři oči', 'Candidate only → four-eyes'],
       status: 'planned',
     },
     {
-      tier: '0', color: '#7c3aed',
+      tier: '0', color: 'var(--accent)',
       signal: ['EUDI PID id / BankID', 'EUDI PID id / BankID'],
       technique: ['Kryptograficky podepsaný identifikátor z peněženky (eIDAS High). Nejtvrdší klíč.', 'Cryptographically signed wallet identifier (eIDAS High). The hardest key.'],
       merge: ['Deterministicky reuse', 'Deterministic reuse'],
@@ -199,7 +201,7 @@ export default function IdentityDedupPage() {
             {tiers.map((tr, i) => (
               <tr key={i}>
                 <td>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '8px', background: `${tr.color}15`, color: tr.color, fontWeight: 800, fontSize: '13px' }}>{tr.tier}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '8px', background: fade(tr.color, 8), color: tr.color, fontWeight: 800, fontSize: '13px' }}>{tr.tier}</span>
                 </td>
                 <td style={{ fontWeight: 600, color: ink }}>{t(...tr.signal)}</td>
                 <td style={{ color: sub, fontSize: '12.5px', lineHeight: 1.5 }}>{t(...tr.technique)}</td>
@@ -217,7 +219,7 @@ export default function IdentityDedupPage() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '14px', marginBottom: '28px' }}>
         <WorkedCase
-          t={t} accent="#16a34a"
+          t={t} accent="var(--success)"
           title={['1 · Stejná osoba, jiný zápis jména', '1 · Same person, different name spelling']}
           steps={[
             ['Eva Nováková, 90-01-01, RČ 9001011234 — onboarding A vytvoří party P1; pid zapíše blind index.', 'Eva Nováková, 90-01-01, RČ 9001011234 — onboarding A creates party P1; pid writes the blind index.'],
@@ -225,10 +227,10 @@ export default function IdentityDedupPage() {
             ['Tier-1 blind index sedí na P1 → MATCH_EXISTING.', 'Tier-1 blind index matches P1 → MATCH_EXISTING.'],
           ]}
           verdict={['MATCH_EXISTING → reuse P1 + přilinkuj nový Keycloak sub (KEYCLOAK_ID).', 'MATCH_EXISTING → reuse P1 + re-link the new Keycloak sub (KEYCLOAK_ID).']}
-          verdictColor="#16a34a"
+          verdictColor="var(--success)"
         />
         <WorkedCase
-          t={t} accent="#2563eb"
+          t={t} accent="var(--info)"
           title={['2 · Dva jmenovci, různé RČ', '2 · Two namesakes, different national IDs']}
           steps={[
             ['Jan Svoboda, 88-05-05, RČ 8805051111 — party P2.', 'Jan Svoboda, 88-05-05, RČ 8805051111 — party P2.'],
@@ -236,10 +238,10 @@ export default function IdentityDedupPage() {
             ['Tier-1: indexy se liší. Tier-2 match-key (jméno+datum) by kolidoval, ale tvrdý klíč RČ je rozhodující → různé osoby.', 'Tier-1: indexes differ. Tier-2 match-key (name+birthdate) would collide, but the hard RČ key is decisive → different people.'],
           ]}
           verdict={['NO_MATCH → vytvoř party P3 + zaregistruj identitu do pidu (dual-write).', 'NO_MATCH → create party P3 + register the identity into pid (dual-write).']}
-          verdictColor="#2563eb"
+          verdictColor="var(--info)"
         />
         <WorkedCase
-          t={t} accent="#dc2626"
+          t={t} accent="var(--danger)"
           title={['3 · Kolize indexu, rozdílné atributy', '3 · Index collision, divergent attributes']}
           steps={[
             ['Žádost se stejným blind indexem jako P1, ale jiné datum narození / pohlaví.', 'A request with the same blind index as P1, but a different birthdate / gender.'],
@@ -247,7 +249,7 @@ export default function IdentityDedupPage() {
             ['Routuje se na manuální verifikaci (RN_COLLISION); klient dostane neutrální „čeká na ověření".', 'Routes to manual verification (RN_COLLISION); the client gets a neutral "pending verification".'],
           ]}
           verdict={['NEEDS_MANUAL_VERIFICATION → fronta čtyř očí, žádný auto-merge.', 'NEEDS_MANUAL_VERIFICATION → four-eyes queue, no auto-merge.']}
-          verdictColor="#dc2626"
+          verdictColor="var(--danger)"
         />
       </div>
 
@@ -277,63 +279,63 @@ function ResolutionFlow({ t }: { t: (cs: string, en: string) => string }) {
     <svg viewBox="0 0 960 600" style={{ width: '100%', minWidth: '720px', height: 'auto' }} fontFamily="inherit">
       <defs>
         <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8" />
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--text-tertiary)" />
         </marker>
       </defs>
 
       {/* Step 1: applicant */}
-      <FlowBox x={360} y={16} w={240} h={52} fill="#6366f115" stroke="#6366f1"
+      <FlowBox x={360} y={16} w={240} h={52} fill="var(--accent-bg)" stroke="var(--accent)"
         title={t('Nový žadatel', 'New applicant')}
         sub={t('jméno · datum nar. · RČ?', 'name · birthdate · RČ?')} />
-      <line x1={480} y1={68} x2={480} y2={96} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr)" />
+      <line x1={480} y1={68} x2={480} y2={96} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr)" />
 
       {/* Step 2: edge gate */}
-      <FlowBox x={330} y={96} w={300} h={56} fill="#0891b215" stroke="#0891b2"
+      <FlowBox x={330} y={96} w={300} h={56} fill="var(--info-bg)" stroke="var(--info-text)"
         title={t('customer-edge · resolver gate', 'customer-edge · resolver gate')}
         sub={t('flag IDENTITY_RESOLUTION_ENABLED', 'flag IDENTITY_RESOLUTION_ENABLED')} />
-      <text x={642} y={128} fontSize={10.5} fill="#64748b">{t('fail-open', 'fail-open')}</text>
-      <line x1={480} y1={152} x2={480} y2={180} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr)" />
+      <text x={642} y={128} fontSize={10.5} fill="var(--text-tertiary)">{t('fail-open', 'fail-open')}</text>
+      <line x1={480} y1={152} x2={480} y2={180} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr)" />
 
       {/* Step 3: pid resolve */}
-      <FlowBox x={350} y={180} w={260} h={52} fill="#1e293b" stroke="#0f172a"
-        title="POST pid /resolve" titleColor="#fff"
-        sub={t('porovnání bez plaintextu RČ', 'compares without plaintext RČ')} subColor="#cbd5e1" />
+      <FlowBox x={350} y={180} w={260} h={52} fill="var(--text-primary)" stroke="var(--text-primary)"
+        title="POST pid /resolve" titleColor="var(--text-inverse)"
+        sub={t('porovnání bez plaintextu RČ', 'compares without plaintext RČ')} subColor="var(--border-strong)" />
 
       {/* tier ladder */}
-      <line x1={480} y1={232} x2={480} y2={256} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr)" />
-      <TierChip x={150} y={256} color="#16a34a" label={t('Tier-1 · RČ blind index', 'Tier-1 · RČ blind index')} tag={t('tvrdý klíč', 'hard key')} />
-      <TierChip x={385} y={256} color="#2563eb" label={t('Tier-2 · match-key', 'Tier-2 · match-key')} tag={t('jméno+datum', 'name+date')} />
-      <TierChip x={620} y={256} color="#d97706" label={t("Tier-2′ · Splink", "Tier-2' · Splink")} tag={t('kandidát', 'candidate')} dashed />
-      <text x={810} y={283} fontSize={10.5} fill="#64748b">{t('v pořadí ↓', 'in order ↓')}</text>
+      <line x1={480} y1={232} x2={480} y2={256} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr)" />
+      <TierChip x={150} y={256} color="var(--success)" label={t('Tier-1 · RČ blind index', 'Tier-1 · RČ blind index')} tag={t('tvrdý klíč', 'hard key')} />
+      <TierChip x={385} y={256} color="var(--info)" label={t('Tier-2 · match-key', 'Tier-2 · match-key')} tag={t('jméno+datum', 'name+date')} />
+      <TierChip x={620} y={256} color="var(--warning)" label={t("Tier-2′ · Splink", "Tier-2' · Splink")} tag={t('kandidát', 'candidate')} dashed />
+      <text x={810} y={283} fontSize={10.5} fill="var(--text-tertiary)">{t('v pořadí ↓', 'in order ↓')}</text>
 
       {/* split to 3 outcomes */}
-      <line x1={480} y1={296} x2={480} y2={324} stroke="#94a3b8" strokeWidth={1.5} />
-      <line x1={170} y1={324} x2={790} y2={324} stroke="#94a3b8" strokeWidth={1.5} />
+      <line x1={480} y1={296} x2={480} y2={324} stroke="var(--text-tertiary)" strokeWidth={1.5} />
+      <line x1={170} y1={324} x2={790} y2={324} stroke="var(--text-tertiary)" strokeWidth={1.5} />
       {[170, 480, 790].map((x) => (
-        <line key={x} x1={x} y1={324} x2={x} y2={352} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr)" />
+        <line key={x} x1={x} y1={324} x2={x} y2={352} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr)" />
       ))}
 
       {/* outcome boxes */}
-      <OutcomeBox cx={170} y={352} fill="#16a34a"
+      <OutcomeBox cx={170} y={352} fill="var(--success)"
         verdict="MATCH_EXISTING"
         action={t('reuse party + re-link sub', 'reuse party + re-link sub')} />
-      <OutcomeBox cx={480} y={352} fill="#2563eb"
+      <OutcomeBox cx={480} y={352} fill="var(--info)"
         verdict="NO_MATCH"
         action={t('create party + register do pid', 'create party + register into pid')} />
-      <OutcomeBox cx={790} y={352} fill="#dc2626"
+      <OutcomeBox cx={790} y={352} fill="var(--danger)"
         verdict="NEEDS_MANUAL_VERIFICATION"
         action={t('neutrální 202 · čtyři oči', 'neutral 202 · four-eyes')} />
 
       {/* dual-write loop back to pid */}
-      <path d="M 600 392 C 720 392 740 300 660 206" fill="none" stroke="#2563eb" strokeWidth={1.4} strokeDasharray="4 3" markerEnd="url(#arr)" />
-      <text x={690} y={300} fontSize={10} fill="#2563eb" transform="rotate(-58 690 300)">{t('dual-write blind index', 'dual-write blind index')}</text>
+      <path d="M 600 392 C 720 392 740 300 660 206" fill="none" stroke="var(--info)" strokeWidth={1.4} strokeDasharray="4 3" markerEnd="url(#arr)" />
+      <text x={690} y={300} fontSize={10} fill="var(--info)" transform="rotate(-58 690 300)">{t('dual-write blind index', 'dual-write blind index')}</text>
 
       {/* legend */}
       <g transform="translate(150,470)">
         <text x={0} y={0} fontSize={11} fontWeight={700} fill={ink}>{t('Klíč:', 'Key:')}</text>
-        <rect x={44} y={-10} width={12} height={12} rx={3} fill="#16a34a" /><text x={62} y={0} fontSize={11} fill="#64748b">{t('deterministická shoda (auto)', 'deterministic match (auto)')}</text>
-        <rect x={290} y={-10} width={12} height={12} rx={3} fill="#d97706" /><text x={308} y={0} fontSize={11} fill="#64748b">{t('pravděpodobnostní (jen kandidát)', 'probabilistic (candidate only)')}</text>
-        <rect x={560} y={-10} width={12} height={12} rx={3} fill="#dc2626" /><text x={578} y={0} fontSize={11} fill="#64748b">{t('člověk rozhoduje', 'human decides')}</text>
+        <rect x={44} y={-10} width={12} height={12} rx={3} fill="var(--success)" /><text x={62} y={0} fontSize={11} fill="var(--text-tertiary)">{t('deterministická shoda (auto)', 'deterministic match (auto)')}</text>
+        <rect x={290} y={-10} width={12} height={12} rx={3} fill="var(--warning)" /><text x={308} y={0} fontSize={11} fill="var(--text-tertiary)">{t('pravděpodobnostní (jen kandidát)', 'probabilistic (candidate only)')}</text>
+        <rect x={560} y={-10} width={12} height={12} rx={3} fill="var(--danger)" /><text x={578} y={0} fontSize={11} fill="var(--text-tertiary)">{t('člověk rozhoduje', 'human decides')}</text>
       </g>
     </svg>
   )
@@ -346,7 +348,7 @@ function FlowBox({ x, y, w, h, fill, stroke, title, sub, titleColor, subColor }:
     <g>
       <rect x={x} y={y} width={w} height={h} rx={9} fill={fill} stroke={stroke} strokeWidth={1.4} />
       <text x={x + w / 2} y={y + (sub ? h / 2 - 4 : h / 2 + 4)} textAnchor="middle" fontSize={13} fontWeight={700} fill={titleColor || stroke}>{title}</text>
-      {sub && <text x={x + w / 2} y={y + h / 2 + 13} textAnchor="middle" fontSize={11} fill={subColor || '#64748b'}>{sub}</text>}
+      {sub && <text x={x + w / 2} y={y + h / 2 + 13} textAnchor="middle" fontSize={11} fill={subColor || 'var(--text-tertiary)'}>{sub}</text>}
     </g>
   )
 }
@@ -354,9 +356,9 @@ function FlowBox({ x, y, w, h, fill, stroke, title, sub, titleColor, subColor }:
 function TierChip({ x, y, color, label, tag, dashed }: { x: number; y: number; color: string; label: string; tag: string; dashed?: boolean }) {
   return (
     <g>
-      <rect x={x} y={y} width={190} height={40} rx={8} fill={`${color}12`} stroke={color} strokeWidth={1.3} strokeDasharray={dashed ? '5 3' : undefined} />
+      <rect x={x} y={y} width={190} height={40} rx={8} fill={fade(color, 7)} stroke={color} strokeWidth={1.3} strokeDasharray={dashed ? '5 3' : undefined} />
       <text x={x + 95} y={y + 17} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={color}>{label}</text>
-      <text x={x + 95} y={y + 31} textAnchor="middle" fontSize={10} fill="#64748b">{tag}</text>
+      <text x={x + 95} y={y + 31} textAnchor="middle" fontSize={10} fill="var(--text-tertiary)">{tag}</text>
     </g>
   )
 }
@@ -366,9 +368,9 @@ function OutcomeBox({ cx, y, fill, verdict, action }: { cx: number; y: number; f
   const x = cx - w / 2
   return (
     <g>
-      <rect x={x} y={y} width={w} height={40} rx={8} fill={`${fill}15`} stroke={fill} strokeWidth={1.5} />
+      <rect x={x} y={y} width={w} height={40} rx={8} fill={fade(fill, 8)} stroke={fill} strokeWidth={1.5} />
       <text x={cx} y={y + 17} textAnchor="middle" fontSize={11} fontWeight={800} fill={fill}>{verdict}</text>
-      <text x={cx} y={y + 31} textAnchor="middle" fontSize={10.5} fill="#475569">{action}</text>
+      <text x={cx} y={y + 31} textAnchor="middle" fontSize={10.5} fill="var(--text-secondary)">{action}</text>
     </g>
   )
 }
@@ -380,35 +382,35 @@ function BlindIndexPipeline({ t }: { t: (cs: string, en: string) => string }) {
     <svg viewBox="0 0 960 230" style={{ width: '100%', minWidth: '720px', height: 'auto' }} fontFamily="inherit">
       <defs>
         <marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
-          <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8" />
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--text-tertiary)" />
         </marker>
       </defs>
 
-      <PipeBox x={10} y={70} w={170} fill="#fef2f2" stroke="#dc2626"
-        top={t('Plaintext RČ', 'Plaintext RČ')} mono="900101/1234" foot={t('jen v paměti requestu', 'request memory only')} footColor="#dc2626" />
-      <line x1={180} y1={95} x2={214} y2={95} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr2)" />
+      <PipeBox x={10} y={70} w={170} fill="var(--danger-bg)" stroke="var(--danger)"
+        top={t('Plaintext RČ', 'Plaintext RČ')} mono="900101/1234" foot={t('jen v paměti requestu', 'request memory only')} footColor="var(--danger)" />
+      <line x1={180} y1={95} x2={214} y2={95} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr2)" />
 
-      <PipeBox x={214} y={70} w={160} fill="var(--surface-3)" stroke="#94a3b8"
+      <PipeBox x={214} y={70} w={160} fill="var(--surface-3)" stroke="var(--text-tertiary)"
         top={t('Kanonizace', 'Canonicalize')} mono="9001011234" foot={t('odstraň lomítko, validuj', 'strip slash, validate')} />
-      <line x1={374} y1={95} x2={408} y2={95} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr2)" />
+      <line x1={374} y1={95} x2={408} y2={95} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr2)" />
 
-      <PipeBox x={408} y={70} w={184} fill="#eef2ff" stroke="#6366f1"
-        top="HMAC-SHA256" mono={t('pepper ⊕ RČ', 'pepper ⊕ RČ')} foot={t('pepper z OpenBao', 'pepper from OpenBao')} footColor="#6366f1" />
-      <line x1={592} y1={95} x2={626} y2={95} stroke="#94a3b8" strokeWidth={1.5} markerEnd="url(#arr2)" />
+      <PipeBox x={408} y={70} w={184} fill="var(--accent-bg)" stroke="var(--accent)"
+        top="HMAC-SHA256" mono={t('pepper ⊕ RČ', 'pepper ⊕ RČ')} foot={t('pepper z OpenBao', 'pepper from OpenBao')} footColor="var(--accent)" />
+      <line x1={592} y1={95} x2={626} y2={95} stroke="var(--text-tertiary)" strokeWidth={1.5} markerEnd="url(#arr2)" />
 
-      <PipeBox x={626} y={70} w={184} fill="#f0fdf4" stroke="#16a34a"
-        top={t('Blind index', 'Blind index')} mono="a17f…e3c9" foot={t('uloženo do DB', 'persisted to DB')} footColor="#16a34a" />
+      <PipeBox x={626} y={70} w={184} fill="var(--success-bg)" stroke="var(--success)"
+        top={t('Blind index', 'Blind index')} mono="a17f…e3c9" foot={t('uloženo do DB', 'persisted to DB')} footColor="var(--success)" />
 
       {/* pepper key callout */}
       <g>
-        <rect x={430} y={8} width={140} height={30} rx={7} fill="#1e293b" />
-        <text x={500} y={27} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">🔑 OpenBao pepper</text>
-        <line x1={500} y1={38} x2={500} y2={68} stroke="#6366f1" strokeWidth={1.4} strokeDasharray="4 3" markerEnd="url(#arr2)" />
+        <rect x={430} y={8} width={140} height={30} rx={7} fill="var(--text-primary)" />
+        <text x={500} y={27} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--text-inverse)">🔑 OpenBao pepper</text>
+        <line x1={500} y1={38} x2={500} y2={68} stroke="var(--accent)" strokeWidth={1.4} strokeDasharray="4 3" markerEnd="url(#arr2)" />
       </g>
 
       {/* invariants */}
-      <text x={92} y={150} textAnchor="middle" fontSize={10.5} fill="#dc2626" fontWeight={600}>{t('✗ nikdy neuloženo', '✗ never stored')}</text>
-      <text x={718} y={150} textAnchor="middle" fontSize={10.5} fill="#16a34a" fontWeight={600}>{t('✓ jednosměrné, klíčované', '✓ one-way, keyed')}</text>
+      <text x={92} y={150} textAnchor="middle" fontSize={10.5} fill="var(--danger)" fontWeight={600}>{t('✗ nikdy neuloženo', '✗ never stored')}</text>
+      <text x={718} y={150} textAnchor="middle" fontSize={10.5} fill="var(--success)" fontWeight={600}>{t('✓ jednosměrné, klíčované', '✓ one-way, keyed')}</text>
 
       <g transform="translate(120,188)">
         <rect x={0} y={-14} width={720} height={34} rx={8} fill="var(--surface-2)" stroke="var(--border)" />
@@ -428,7 +430,7 @@ function PipeBox({ x, y, w, fill, stroke, top, mono, foot, footColor }: {
       <rect x={x} y={y} width={w} height={50} rx={9} fill={fill} stroke={stroke} strokeWidth={1.4} />
       <text x={x + w / 2} y={y + 16} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={stroke}>{top}</text>
       <text x={x + w / 2} y={y + 34} textAnchor="middle" fontSize={12} fontWeight={700} fill="var(--text-primary)" fontFamily="ui-monospace, monospace">{mono}</text>
-      <text x={x + w / 2} y={y + 66} textAnchor="middle" fontSize={10} fill={footColor || '#64748b'}>{foot}</text>
+      <text x={x + w / 2} y={y + 66} textAnchor="middle" fontSize={10} fill={footColor || 'var(--text-tertiary)'}>{foot}</text>
     </g>
   )
 }
@@ -451,7 +453,7 @@ function WorkedCase({ t, accent, title, steps, verdict, verdictColor }: {
           <li key={i} style={{ marginBottom: '6px' }}>{t(...s)}</li>
         ))}
       </ol>
-      <div style={{ marginTop: '12px', padding: '9px 11px', borderRadius: '8px', background: `${verdictColor}12`, border: `1px solid ${verdictColor}30`, display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
+      <div style={{ marginTop: '12px', padding: '9px 11px', borderRadius: '8px', background: fade(verdictColor, 7), border: `1px solid ${fade(verdictColor, 19)}`, display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
         <ArrowRight size={14} style={{ color: verdictColor, flexShrink: 0, marginTop: '2px' }} />
         <span style={{ fontSize: '12px', fontWeight: 600, color: verdictColor, lineHeight: 1.45 }}>{t(...verdict)}</span>
       </div>
