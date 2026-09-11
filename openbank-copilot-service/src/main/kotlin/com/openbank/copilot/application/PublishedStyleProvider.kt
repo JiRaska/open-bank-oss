@@ -57,7 +57,12 @@ class PublishedStyleProvider(private val port: PublishedStylePort, private val c
         }.getOrElse { e ->
             if (e is CancellationException) throw e
             LOG.warnf(e, "published style fetch failed for persona=%s — falling back", personaKey)
-            cached?.style ?: ResolvedStyle.Baseline(RegisteredPromptTemplates.customerCopilotStyleV1)
+            // Re-read the cache rather than reuse the `cached` snapshot captured before the fetch:
+            // a concurrent caller can have raced this one past TTL expiry, fetched successfully,
+            // and already written a fresh entry — falling back to the stale pre-fetch snapshot
+            // (or worse, to the baseline when a fresh value is sitting right there) would discard
+            // a value that is, at this exact moment, valid.
+            cache.get()?.style ?: ResolvedStyle.Baseline(RegisteredPromptTemplates.customerCopilotStyleV1)
         }
     }
 

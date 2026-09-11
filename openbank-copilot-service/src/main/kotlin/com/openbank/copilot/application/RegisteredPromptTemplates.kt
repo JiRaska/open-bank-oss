@@ -3,6 +3,9 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.application
 
+import io.quarkus.runtime.Startup
+import jakarta.enterprise.context.ApplicationScoped
+
 /**
  * ADR-0148 prompt-registry loader, mirroring `openbank-agent-service`'s
  * `RegisteredPromptTemplates` exactly (same classpath-packaging convention,
@@ -32,5 +35,33 @@ internal object RegisteredPromptTemplates {
                 "prompt registry resource missing: $path — packaged by build.gradle.kts from " +
                     "openbank-libs/governance/prompts/$charter/$name.md (ADR-0148)",
             )
+    }
+}
+
+/**
+ * Forces [RegisteredPromptTemplates] to load at boot rather than lazily on first use. Without
+ * this, `customerCopilotStyleV1` is only touched from `PublishedStyleProvider`'s failure branch —
+ * a `processResources` misconfiguration would leave the service green until communication-service
+ * is actually down with a cold cache, which is precisely the moment the fallback is needed and the
+ * worst time to discover it's broken. Same shape as `HelpKnowledgeBase`'s `@Startup`, same reason
+ * this codebase's own CLAUDE.md documents for `PdfBoxPadesSealAdapter`: an `@ApplicationScoped`
+ * bean is lazy by default, and a boot-time guard that only runs on first request is not a guard.
+ */
+// UtilityClassWithPublicConstructor: not a utility class — a CDI lifecycle bean whose only job is
+// its @Startup-triggered `init` block. detekt doesn't recognize that shape; HelpKnowledgeBase's
+// @Startup bean escapes the same rule only because it happens to also implement CorpusSource.
+@Suppress("UtilityClassWithPublicConstructor")
+@Startup
+@ApplicationScoped
+class RegisteredPromptTemplatesEagerLoader {
+    init {
+        val chars = RegisteredPromptTemplates.customerCopilotStyleV1.length
+        LOG.infof("ADR-0148 registered-prompt baseline loaded at boot: customer-copilot/style.v1 (%d chars)", chars)
+    }
+
+    private companion object {
+        val LOG: org.jboss.logging.Logger = org.jboss.logging.Logger.getLogger(
+            RegisteredPromptTemplatesEagerLoader::class.java,
+        )
     }
 }
