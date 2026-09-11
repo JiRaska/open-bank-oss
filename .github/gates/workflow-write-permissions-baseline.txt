@@ -23,7 +23,7 @@ auto-deploy.yml|job:gitops-pr|id-token
 auto-deploy.yml|job:gitops-pr|pull-requests
 auto-retry-cancelled.yml|job:raise-issue|issues
 auto-retry-cancelled.yml|job:record-flake|issues
-auto-retry-cancelled.yml|top|actions
+auto-retry-cancelled.yml|job:retry|actions
 backfill-release-evidence.yml|job:backfill|contents
 backfill-release-evidence.yml|job:backfill|id-token
 branch-cleanup.yml|job:delete-closed-deploy-branch|contents
