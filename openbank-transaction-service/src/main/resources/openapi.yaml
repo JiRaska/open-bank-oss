@@ -10,6 +10,10 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
+  # 1.16.0 -> 1.17.0 (#9115): additive — MerchantGeo.precision, the per-town location routes, and
+  # the logo-ingest routes. 1.16.0 was claimed on main by #8838 while this branch was open, so this
+  # takes the next free minor; whoever lands second renumbers (the matching version line merging
+  # "cleanly" is the trap — git sees identical text, not a taken version).
   version: 1.17.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
@@ -974,11 +978,11 @@ components:
           type: number
         currencyCode:
           type: string
-        baseCurrencyCode:
-          type: string
-          nullable: true
         baseAmount:
           type: number
+          nullable: true
+        baseCurrencyCode:
+          type: string
           nullable: true
         description:
           type: string
@@ -986,6 +990,9 @@ components:
         valueDate:
           type: string
           format: date
+        bookingDate:
+          type: string
+          nullable: true
         initiatedByPartyId:
           type: string
           format: uuid
