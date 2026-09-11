@@ -14,6 +14,7 @@ import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import io.mockk.coEvery
@@ -42,6 +43,7 @@ class MerchantLogoUrlTest {
     private lateinit var useCase: TransactionUseCase
     private lateinit var repository: PanacheTransactionRepository
     private lateinit var catalog: MerchantCatalogRepository
+    private lateinit var locations: MerchantLocationRepository
     private lateinit var resource: TransactionResource
     private lateinit var categoryOverrides: TransactionCategoryOverrideRepository
 
@@ -53,12 +55,14 @@ class MerchantLogoUrlTest {
         useCase = mockk()
         repository = mockk()
         catalog = mockk()
-        // The customer-category read path is not what this test is about; an empty override map
-        // keeps `category` resolving from the catalogue exactly as it did before #8909, so the
-        // logo assertions below stay about logos.
+        // Neither the customer-category nor the location read path is what this test is about.
+        // Empty maps from both keep `category` resolving from the catalogue and `location` null,
+        // so the logo assertions below stay about logos.
         categoryOverrides = mockk()
         coEvery { categoryOverrides.findFor(any(), any()) } returns emptyMap()
-        resource = TransactionResource(useCase, repository, catalog, categoryOverrides)
+        locations = mockk()
+        coEvery { locations.findByKeys(any()) } returns emptyMap()
+        resource = TransactionResource(useCase, repository, catalog, categoryOverrides, locations)
     }
 
     private fun transaction() = Transaction(
@@ -95,6 +99,7 @@ class MerchantLogoUrlTest {
         coEvery { useCase.listTransactions(any()) } returns
             CursorPage(listOf(transaction()), PageInfo(limit = 20, hasNextPage = false))
         coEvery { catalog.findByDescriptors(any()) } returns mapOf("ALZACZ" to entity)
+        coEvery { locations.findByKeys(any()) } returns emptyMap()
 
         val response = resource.listTransactions(accountId, 20, null)
 

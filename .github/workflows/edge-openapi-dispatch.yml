@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
-# Copyright (c) OpenBank contributors. Licensed under the Mozilla Public License 2.0.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Tells the mobile app that the customer-edge contract moved, the moment it moves.
 #
@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 

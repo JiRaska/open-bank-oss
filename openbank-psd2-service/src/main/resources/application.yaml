@@ -93,6 +93,21 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 3000
 
+  # Local/default datasource so the service boots outside the cluster and the
+  # api-fuzz harness can derive + provision its DB (issue #9257 — psd2 was the
+  # only in-scope candidate carrying no postgresql:// URL here, which kept it
+  # out of the DAST fleet). GitOps overrides all of these via
+  # QUARKUS_DATASOURCE_* env (psd2-service.yaml); DB name openbank_psd2 matches
+  # postgres.yaml.
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_psd2}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_psd2}
+
   management:
     enabled: true
     port: 8085

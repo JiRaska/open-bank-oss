@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 
 vi.mock('next-auth/react', () => ({
-  useSession: () => ({ data: { user: { roles: ['ROLE_VIEWER'] } }, status: 'authenticated' }),
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
 }))
 vi.mock('@/lib/i18n/LanguageContext', () => ({
   useLanguage: () => ({ language: 'en', t: (_cs: string, en: string) => en }),
@@ -74,5 +74,32 @@ describe('Test Agent governance evidence', () => {
     const truncationStatus = screen.getByRole('status')
     expect(truncationStatus).toHaveTextContent('Showing 5 of 6 findings.')
     expect(truncationStatus).toBeVisible()
+  })
+
+  it('keeps the last successful evidence visible when a new analysis fails', async () => {
+    const finding = {
+      id: 'critical-current', checkType: 'flaky-test', severity: 'CRITICAL',
+      detectedAt: '2026-08-08T10:00:00Z', title: 'Current critical finding',
+      component: 'openbank-payment-service', rootCause: 'Measured regression',
+      proposalUrl: null, status: 'OPEN',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        findings: [finding], available: true,
+        governance: { activePrompt: 'system.v3', evalEvidence: 'recorded' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'unavailable' }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<TestAgentPanel />)
+    expect(await screen.findByText(/Current critical finding/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze current evidence' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('last successfully loaded evidence remains below')
+    expect(screen.getByText(/Current critical finding/)).toBeVisible()
+    expect(screen.getByText('system.v3')).toBeVisible()
+    expect(screen.queryByText(/agent is unavailable/i)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze current evidence' })).toBeEnabled())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/test-intelligence/agents', { method: 'POST' })
   })
 })

@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-psd2-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ab4f271600ad8931"
+        openbank.tech/policy-checksum: "931b3426fabe9e91"
       labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
     spec:
       securityContext:

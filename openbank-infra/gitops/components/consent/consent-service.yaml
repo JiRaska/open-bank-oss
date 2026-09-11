@@ -28,7 +28,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-consent-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "dcd7e8ef5c0477e8"
+        openbank.tech/policy-checksum: "ff95598832ff798a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: consent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-consent-service:sandbox-1cff9564
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-consent-service:sandbox-8353e931
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

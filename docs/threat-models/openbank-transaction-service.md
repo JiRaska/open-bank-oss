@@ -208,14 +208,86 @@ only from an operator request.
 **Rollback:** revert; `logoUrl` returns to null and the route disappears. The migration is additive,
 so the previous release runs unchanged against the new schema.
 
-## 4f. Customer-set spend categories (#8573) — STRIDE supplement
+## 4f. Per-town merchant locations (geo precision) — STRIDE supplement
+
+`merchant_location` and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/locations[/{cityToken}]`
+let an operator record where a merchant trades town by town, and `MerchantGeo` gained a `precision`
+field. The surface shape matches §4d — operator-only writes into a table the customer statement
+renders from — so what is new here is a correctness-of-claim risk rather than a new kind of access.
+
+**What was wrong before.** V16 seeded ONE coordinate per brand. `BILLA` sat at a Prague address, so
+every Billa purchase in the country resolved there — on a screen captioned "where you spent". No
+component was broken: the data answered exactly the question it was asked, and a chain has no single
+location. A wrong location presented as a fact is worse than no location, and it was being presented
+as a fact because nothing in the response said how much the pin was worth.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **T**ampering | A customer reads a purchase as having happened somewhere it did not — the basis for a false fraud report, or for dismissing a real one | `precision` is now part of the contract: `CITY` says the pin is representative and a client must caption a town rather than draw a street. `EXACT` is refused unless the row names the device that took the payment, in the API **and** in a table constraint, so it cannot be asserted by typing |
+| **T**ampering | A location for the wrong town is substituted for a merchant with shops in many | The read matches on the PAIR (descriptor, town-from-this-transaction's-descriptor). Matching on the merchant alone would return whichever row came back first — the same defect one level down, which `a location for another town is never substituted` holds |
+| **I**nfo disclosure | The location table becomes a record of where a CARDHOLDER was | Rows are keyed by (acquirer descriptor, town) and hold public business data. Nothing is keyed by customer, card or transaction; the town comes from the merchant's own descriptor, which is identical for every customer who shopped there |
+| **S**poofing | A planted location moves a merchant somewhere plausible | Writes require `Roles.OPERATOR`/`ADMIN` and OPA `merchant.update`; `source` records where a coordinate came from |
+| **D**oS | Locations add a per-row query to the statement page | One query per page, bounded by the distinct merchants on it, mirroring the catalogue read beside it |
+
+**DFD update:** none beyond §4d — same callers, same roles, one more local reference read inside the
+existing request.
+**Risk class:** truthfulness of a location claim shown to a customer.
+**Rollback:** revert; `precision` disappears and geo falls back to the catalogue pin. The migration is
+additive and its rollback is in the file.
+
+**Known gap, stated rather than papered over.** `EXACT` requires a terminal id and **no feed in this
+fleet supplies one** — card authorisations carry MCC and country and nothing else. So today every row
+is `CITY`, and the honest per-purchase location a POS or ATM identifier would give is not yet
+reachable. The column exists so a fact can land without a schema change; it does not pretend one has.
+
+## 4g. Logo ingest from an operator-named URL — STRIDE supplement
+
+`POST /api/v1/merchants/{descriptorKey}/logo/fetch` downloads a logo instead of having an operator
+upload the file, and `GET /api/v1/merchants/logo-sources` reports whether that is configured.
+
+**This is the only place this service reaches out to the internet, and it is a server-side request
+forgery primitive by construction.** An operator names a URL and the service fetches it, from inside
+the cluster, with the cluster's network position. The URL an attacker wants is not a logo: it is the
+cloud instance metadata service, an internal admin port, or something that trusts callers on the pod
+network. **The response never has to come back** — a request that *reached* one of those has already
+done the damage, and the 400 that follows reads as a rejected logo.
+
+Why it exists at all: without it the catalogue is filled one file at a time, and a catalogue filled
+by hand is one that stays at thirty rows. That is not a hypothetical — it is `merchant_catalog`'s
+actual history (§4d, #8573).
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **I**nfo disclosure | The service is made to fetch cloud metadata or an internal endpoint and the attacker learns credentials or internal state | Four fences, each load-bearing alone: a host **allowlist that is empty by default** (unconfigured, the endpoint refuses everything, so no deployment acquires this by upgrading); **https only**; **every resolved address must be publicly routable**, so an allowlisted name answering `127.0.0.1`, `169.254.169.254`, `10/8`, `100.64/10` or `fd00::/7` is refused; and **redirects refused, never followed** — the allowlisted host answering `302` to the metadata service is the standard bypass |
+| **I**nfo disclosure | Even a refused fetch confirms whether an internal host exists (timing, error text) | Bounded: the allowlist is checked before any resolution, so an unlisted host produces no lookup and no connection at all. A listed host is one the bank chose |
+| **T**ampering | Fetched bytes are trusted because the service fetched them itself | They are not. The body goes through exactly the same decode / dimension-check / re-encode as an upload (§4e): SVG and polyglots refused, metadata stripped, a declared oversize refused before allocation |
+| **D**oS | A source streams gigabytes, or a slow-loris fetch holds the pod | Read capped at 512 kB and **streamed**, not trusted from `Content-Length` — a source that lies about the header is the one you least want to allocate for. Connect and request timeouts are 5 s and 10 s |
+| **E**oP | A viewer triggers ingest | `Roles.OPERATOR`/`ADMIN` plus OPA `merchant.update`, the same gate as the upload it replaces |
+| **R**epudiation | No record of where a trademark came from | `source_url` is stored **as fetched** rather than as typed, with `licence`, `attribution` and `uploaded_by` |
+
+**Residual risk, stated rather than papered over.** Between the address check and the connection the
+name is resolved again by the JDK's own connect, so an attacker who controls an **allowlisted** name
+can still steer that second lookup (DNS rebinding). Closing it needs connecting to a pinned IP with
+SNI and Host preserved, which `java.net.http.HttpClient` does not expose. The allowlist is what
+bounds it: the attacker must already own a name this bank chose to trust, which is a materially
+different position from "any URL an operator can be talked into pasting".
+
+**DFD update:** one NEW outbound edge — transaction-service to a public host on 443, egress-limited
+by the allowlist. Nothing else in this service makes an internet call, so a NetworkPolicy that
+permits none is the environment-level backstop, and an environment that has not configured the
+allowlist needs no policy change at all.
+**Risk class:** SSRF, bounded by configuration that is absent by default.
+**Rollback:** revert, or simply unset the allowlist — with no hosts configured the endpoint refuses
+every URL and the upload path is unaffected.
+
+## 4h. Customer-set spend categories (#8573) — STRIDE supplement
 
 `TransactionCategoryResource` (`PUT`/`DELETE /api/v1/transactions/{id}/category`,
 `GET /category-overrides`) is a new inbound REST surface. It writes no money and creates no
 transaction, but it decides what a customer's own statement says their spending was, so a bad row
 is the bank misdescribing where the money went.
 
-Numbered 4f: #8874 took §4d and main's self-hosted merchant logos took §4e.
+Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has since taken §4f (per-town locations) and §4g (logo ingest) — both of which landed while this branch was open, so the section number it reserved was already spent twice over.
 
 | STRIDE | Threat | Mitigation |
 | --- | --- | --- |
@@ -265,6 +337,10 @@ Numbered 4f: #8874 took §4d and main's self-hosted merchant logos took §4e.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-08** — Logo ingest from an operator-named URL (`POST …/logo/fetch`), plus `GET …/logo-sources` so the operator screen can tell "off by design" from "broken" (§4g). This is the service's only outbound internet call and an SSRF primitive by construction; it is fenced by an allowlist that is **empty by default**, https-only, a publicly-routable check on every resolved address, and refusal (not following) of redirects. Fetched bytes get the same re-encode as an upload. Residual DNS-rebinding risk is recorded in §4g rather than claimed closed. Rollback: unset the allowlist and the endpoint refuses everything.
+
+- **2026-09-07** — Per-town merchant locations (`merchant_location`, `…/locations[/{cityToken}]`) and a `precision` field on `MerchantGeo` (§4f). The seeded catalogue pinned each chain at one Prague coordinate, so a Billa purchase in Brno rendered 185 km from where it happened; coordinates now say whether they are `EXACT` (the place the money was spent) or `CITY` (representative for the town), and `EXACT` is refused without the device id that would justify it — in the API and in a `CHECK` constraint. No new caller, role or network edge. Rollback: revert; geo falls back to the catalogue pin.
 
 - **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
 

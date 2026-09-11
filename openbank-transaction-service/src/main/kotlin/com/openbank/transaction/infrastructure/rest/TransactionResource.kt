@@ -22,7 +22,9 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
+import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
@@ -63,6 +65,7 @@ class TransactionResource(
     private val transactionRepository: PanacheTransactionRepository,
     private val merchantCatalog: MerchantCatalogRepository,
     private val categoryOverrides: TransactionCategoryOverrideRepository,
+    private val merchantLocations: MerchantLocationRepository,
 ) {
 
     @GET
@@ -88,7 +91,11 @@ class TransactionResource(
             accountId,
             page.data.mapNotNull { CounterpartyKey.of(it.counterpartyName, it.description) },
         )
-        return Response.ok(page.toResponse(merchants, overrides)).build()
+        // A third bounded read, for the same reason as the others: a chain's coordinates depend on
+        // WHICH town the descriptor named, and the catalogue row cannot know that. Keyed by the pair,
+        // one query per page.
+        val locations = merchantLocations.findByKeys(locationKeys(page.data.map { it.description }))
+        return Response.ok(page.toResponse(merchants, overrides, locations)).build()
     }
 
     @GET
@@ -382,7 +389,22 @@ data class MerchantResponse(
     val source: String = "ENRICHED",
 )
 
-data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
+/**
+ * Where the merchant is — and how much that answer is worth.
+ *
+ * [precision] is `EXACT` only where the coordinates are about the place the money was spent: a
+ * single-site merchant, or a location resolved from the device that took the payment. For a chain
+ * it is `CITY`, because a brand has no single location and the seeded coordinates were a pin in
+ * Prague that put every Billa purchase in the country at one address. A client may caption the town
+ * for `CITY`; it must not drop a pin claiming a street.
+ */
+data class MerchantGeoResponse(
+    val lat: Double,
+    val lon: Double,
+    val city: String?,
+    val country: String?,
+    val precision: String,
+)
 
 /**
  * How much of the content hash goes in the logo URL. A 64-bit prefix: the token only has to
@@ -391,7 +413,12 @@ data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: Strin
  */
 private const val LOGO_VERSION_CHARS = 16
 
-private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
+/**
+ * @param location the merchant's row for the town THIS transaction's descriptor named, when there is
+ *   one. It wins over the catalogue's own coordinates, which for a chain are a representative pin
+ *   for the whole brand and cannot be about a particular purchase.
+ */
+private fun MerchantCatalogEntity.toResponse(location: MerchantLocationEntity? = null) = MerchantResponse(
     cleanName = cleanName,
     // Null when no logo has been ingested — absence stays absence, and a client renders whatever
     // it renders today. The hash makes the URL change whenever the bytes do, which is what lets
@@ -401,18 +428,47 @@ private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
     category = category,
     // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
     // half-populated row can never become a pin at latitude 0.
-    geo = if (lat != null && lon != null) {
-        MerchantGeoResponse(lat = lat!!, lon = lon!!, city = city, country = country)
-    } else {
-        null
+    geo = when {
+        location != null -> MerchantGeoResponse(
+            lat = location.lat,
+            lon = location.lon,
+            city = location.city,
+            country = location.country,
+            precision = location.geoPrecision,
+        )
+        lat != null && lon != null -> MerchantGeoResponse(
+            lat = lat!!,
+            lon = lon!!,
+            city = city,
+            country = country,
+            precision = geoPrecision,
+        )
+        else -> null
     },
 )
+
+/**
+ * The (merchant, town) pairs a page of descriptions can resolve to a location.
+ *
+ * Only descriptors that named a town produce a pair: with no town there is nothing to narrow to,
+ * and asking for `<merchant>|` would either miss or — worse — match a row someone had keyed on the
+ * empty string.
+ */
+private fun locationKeys(descriptions: List<String?>): Set<Pair<String, String>> =
+    descriptions.mapNotNull { MerchantDescriptor.parse(it) }
+        .mapNotNull { parsed -> parsed.cityToken?.let { parsed.key to it } }
+        .toSet()
 
 private fun Transaction.toResponse(
     merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
     overrides: Map<String, String> = emptyMap(),
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
 ): TransactionResponse {
-    val catalogue = MerchantDescriptor.normalise(description)?.let { merchants[it] }
+    // ONE parse, not two. `MerchantDescriptor.normalise(d)` is defined as `parse(d)?.key`, so the
+    // two sides of this merge were asking the same question twice — the catalogue lookup needs the
+    // key, the location lookup needs the key AND the town, and `parse` returns both.
+    val parsed = MerchantDescriptor.parse(description)
+    val catalogue = parsed?.let { merchants[it.key] }
     // Unknown ids are dropped rather than shown. A category retired from the shared vocabulary
     // leaves rows behind, and echoing one back would name a category no client can render or undo.
     val mine = CounterpartyKey.of(counterpartyName, description)
@@ -443,14 +499,17 @@ private fun Transaction.toResponse(
             merchantCategory != null -> "MCC"
             else -> "CATALOGUE"
         },
-        merchant = catalogue?.toResponse(),
+        merchant = catalogue?.toResponse(
+            location = parsed?.cityToken?.let { locations["${parsed.key}|$it"] },
+        ),
     )
 }
 
 private fun CursorPage<Transaction>.toResponse(
     merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
     overrides: Map<String, String> = emptyMap(),
-) = CursorPage(data = data.map { it.toResponse(merchants, overrides) }, pagination = pagination)
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
+) = CursorPage(data = data.map { it.toResponse(merchants, overrides, locations) }, pagination = pagination)
 
 /**
  * Strict enum parsing for request inputs (issue #8699). The previous
