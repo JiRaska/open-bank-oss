@@ -192,6 +192,7 @@ function DevOpsContent() {
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [reviewIntent, setReviewIntent] = useState<{ finding: DevOpsFinding; approve: boolean } | null>(null)
   const reviewTriggerRef = useRef<HTMLElement | null>(null)
+  const reviewWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -263,8 +264,14 @@ function DevOpsContent() {
   const closeReview = useCallback(() => {
     setReviewIntent(null)
     setDecisionError(null)
+  }, [])
+
+  const restoreReviewFocus = useCallback(() => {
     const trigger = reviewTriggerRef.current
-    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected && (!(trigger instanceof HTMLButtonElement) || !trigger.disabled)) trigger.focus()
+      else reviewWorkspaceRef.current?.focus()
+    })
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -391,6 +398,7 @@ function DevOpsContent() {
           <QualityGateHealthPanel />
 
           {/* ── DevOps Insights (AI) — ADR-0119 — shared AgentInsightsPanel (admin-ui agent-output rule) ── */}
+          <div ref={reviewWorkspaceRef} tabIndex={-1} aria-label={t('Pracovní plocha DevOps nálezů', 'DevOps findings workspace')}>
           <AgentInsightsPanel
             title={t('DevOps náhledy (AI)', 'DevOps Insights (AI)')}
             subtitle={t(
@@ -404,6 +412,7 @@ function DevOpsContent() {
             decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
             decidingId={canDecide ? deciding : null}
           />
+          </div>
           {reviewIntent && (
             <RemediationReviewDialog
               finding={reviewIntent.finding}
@@ -411,6 +420,7 @@ function DevOpsContent() {
               busy={deciding === reviewIntent.finding.id}
               failed={decisionError !== null}
               onCancel={closeReview}
+              onRestoreFocus={restoreReviewFocus}
               onConfirm={async () => {
                 const ok = await submitDecision(reviewIntent.finding.id, reviewIntent.approve ? 'approve' : 'reject')
                 if (ok) closeReview()

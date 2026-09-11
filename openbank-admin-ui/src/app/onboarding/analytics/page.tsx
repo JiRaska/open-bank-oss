@@ -19,7 +19,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList,
   LineChart, Line, PieChart, Pie, Legend,
 } from 'recharts'
-import type { FunnelAnalytics } from '@/app/api/onboarding/funnel-analytics/route'
+import { parseFunnelAnalytics, type FunnelAnalytics } from '@/lib/onboarding/funnelAnalyticsContract'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Step labels (contract order WELCOME→SIGN) ─────────────────────────────────
@@ -101,12 +101,8 @@ export default function OnboardingAnalyticsPage() {
         setFailure('operational')
         return
       }
-      const next = await res.json() as FunnelAnalytics
+      const next = parseFunnelAnalytics(await res.json(), from, to)
       if (requestGeneration !== generation.current) return
-      if (next.error || next.from !== from || next.to !== to) {
-        setFailure('operational')
-        return
-      }
       setData(next)
       loadedRange.current = requestedRange
       setRenderedRange(requestedRange)
@@ -223,11 +219,11 @@ export default function OnboardingAnalyticsPage() {
         </div>
       ) : !visibleData || visibleData.available === false ? (
         <div className="card" style={{ padding: 0 }}>
-          <DataUnavailable kind={failure === 'operational' || visibleData?.error ? 'unreachable' : 'no_data'}
+          <DataUnavailable kind={failure === 'operational' ? 'unreachable' : 'no_data'}
             service="Analytics-sink (ClickHouse)"
             feature={t('Konverze onboardingu', 'Onboarding conversion')}
             lang={language}
-            detail={failure === 'operational' || visibleData?.error
+            detail={failure === 'operational'
               ? t('ClickHouse gold marty nejsou dostupné.', 'ClickHouse gold marts are unavailable.')
               : t('V tomto období nejsou žádná data funnelu.', 'No funnel data in this period.')}>
             {failure === 'operational' && (

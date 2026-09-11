@@ -11,18 +11,13 @@
 // a field is added to SensorEntry.
 
 import Link from 'next/link'
-import { ChevronLeft, CheckCircle2, CircleDashed, Circle, Apple, Smartphone } from 'lucide-react'
+import { ChevronLeft, Apple, Smartphone } from 'lucide-react'
 import {
   FAMILY_META, sensorsByFamily, statusCounts,
   type SensorFamily, type SensorEntry, type Platform,
 } from '@/lib/docs/sensors'
 import { STATUS_META, type Status } from '@/lib/docs/status'
-
-const STATUS_ICON: Record<Status, React.ElementType> = {
-  live: CheckCircle2,
-  partial: CircleDashed,
-  planned: Circle,
-}
+import { StatusBadge } from '@/components/ui/StatusBadge'
 
 const PLATFORM_LABEL: Record<Platform, { label: string; Icon: React.ElementType }> = {
   ios: { label: 'iOS', Icon: Apple },
@@ -31,18 +26,14 @@ const PLATFORM_LABEL: Record<Platform, { label: string; Icon: React.ElementType 
 
 function StatusPill({ status, lang }: { status: Status; lang: 'cs' | 'en' }) {
   const meta = STATUS_META[status]
-  const Icon = STATUS_ICON[status]
   return (
-    <span
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
-        borderRadius: 20, fontSize: 11, fontWeight: 600,
-        color: meta.color, background: meta.bg, border: `1px solid ${meta.border}`,
-      }}
-    >
-      <Icon size={12} />
-      {meta.label[lang]}
-    </span>
+    <StatusBadge
+      status={status}
+      tone={meta.tone}
+      label={meta.label[lang]}
+      leading={<meta.Icon size={12} />}
+      className="badge-sm"
+    />
   )
 }
 

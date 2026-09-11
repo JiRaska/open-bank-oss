@@ -58,10 +58,12 @@ class CardOutboxRequeueIT {
                         this.status = OutboxStatus.DEAD.name
                         this.attemptCount = attempts
                         this.lastError = "circuit breaker is open"
-                        // The live rows carry 1970 (#3272). Kept here so the test data is the
-                        // shape actually stranded in the cluster.
-                        this.createdAt = Instant.EPOCH
-                        this.updatedAt = Instant.EPOCH
+                        // The live rows carried 1970 (#3272) until the #9081 migration restamped
+                        // them and added the plausibility CHECK — 1970 is no longer insertable.
+                        // A plausibly old instant keeps the load-bearing half of this test: the
+                        // requeue must NOT restamp createdAt, the claim ordering key.
+                        this.createdAt = STRANDED_AT
+                        this.updatedAt = STRANDED_AT
                     },
                 )
             }
@@ -102,7 +104,7 @@ class CardOutboxRequeueIT {
             assertThat(row.attemptCount).isZero()
             assertThat(row.lastError).isNull()
             // createdAt is NOT restamped — it is the claim ordering key, not a fact to rewrite.
-            assertThat(row.createdAt).isEqualTo(Instant.EPOCH)
+            assertThat(row.createdAt).isEqualTo(STRANDED_AT)
         }
     }
 
@@ -169,5 +171,10 @@ class CardOutboxRequeueIT {
             .post("/api/v1/cards/outbox/requeue")
             .then()
             .statusCode(403)
+    }
+
+    private companion object {
+        /** Old enough to sort behind any fresh work, young enough to pass the #9081 CHECK. */
+        val STRANDED_AT: Instant = Instant.parse("2024-01-01T00:00:00Z")
     }
 }

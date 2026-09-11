@@ -73,8 +73,8 @@ export default function CompliancePacksPage() {
   const [detail, setDetail] = useState<PackActivationView | null>(null)
   const [review, setReview] = useState<{ proposal: PackActivationView; approve: boolean } | null>(null)
   const reviewCancelRef = useRef<HTMLButtonElement>(null)
-  const reviewTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const pendingWorkspaceRef = useRef<HTMLDivElement>(null)
+  const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const reviewReturnFocusRef = useRef<HTMLElement | null>(null)
   const detailTriggerRef = useRef<HTMLElement | null>(null)
 
   const openDetail = (pack: PackActivationView, event: React.MouseEvent<HTMLElement>) => {
@@ -125,6 +125,17 @@ export default function CompliancePacksPage() {
   const failWith = async (res: Response, fallback: string) => {
     const body = await res.json().catch(() => ({} as { error?: string }))
     setError(body?.error || `${fallback} (HTTP ${res.status})`)
+  }
+
+  const openReview = (event: React.MouseEvent<HTMLButtonElement>, proposal: PackActivationView, approve: boolean) => {
+    reviewReturnFocusRef.current = event.currentTarget
+    setError(null)
+    setReview({ proposal, approve })
+  }
+
+  const closeReview = () => {
+    setReview(null)
+    setError(null)
   }
 
   const propose = async () => {
@@ -179,8 +190,8 @@ export default function CompliancePacksPage() {
         ? t('Pack aktivován. Guard ho používá okamžitě, bez restartu služby.',
             'Pack activated. The origination guard uses it immediately — no service restart.')
         : t('Návrh zamítnut.', 'Proposal rejected.'))
-      await load()
       setReview(null)
+      await load()
     } catch {
       setError(t('lending-service je nedostupný.', 'lending-service is unreachable.'))
     } finally {
@@ -281,10 +292,17 @@ export default function CompliancePacksPage() {
         </table>
       </div>
 
-      <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div
+        id="compliance-pack-pending-heading"
+        role="region"
+        tabIndex={-1}
+        aria-label={t('Návrhy compliance packů', 'Compliance pack proposals')}
+        className="section-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
         <Clock aria-hidden="true" size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
       </div>
-      <div ref={pendingWorkspaceRef} role="region" tabIndex={-1} aria-label={t('Návrhy compliance packů', 'Compliance pack proposals')} className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         {pending.map(p => (
           <div
             key={p.id}
@@ -314,10 +332,10 @@ export default function CompliancePacksPage() {
                 onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                 style={{ fontSize: 12 }}
               />
-              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={event => { reviewTriggerRef.current = event.currentTarget; setError(null); setReview({ proposal: p, approve: true }) }} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={event => openReview(event, p, true)} style={{ fontSize: 12 }}>
                 {t('Schválit', 'Approve')}
               </button>
-              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={event => { reviewTriggerRef.current = event.currentTarget; setError(null); setReview({ proposal: p, approve: false }) }} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={event => openReview(event, p, false)} style={{ fontSize: 12 }}>
                 {t('Zamítnout', 'Reject')}
               </button>
               </Can>
@@ -332,27 +350,27 @@ export default function CompliancePacksPage() {
       </div>
 
       {review && (
-        <Dialog.Root open onOpenChange={open => { if (!open && busyId !== review.proposal.id) { setReview(null); setError(null) } }}>
+        <Dialog.Root open onOpenChange={open => { if (!open && busyId !== review.proposal.id) closeReview() }}>
           <Dialog.Portal>
-          <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
-          <Dialog.Content
-            className="card"
-            role="alertdialog"
-            aria-busy={busyId === review.proposal.id}
-            onOpenAutoFocus={event => { event.preventDefault(); reviewCancelRef.current?.focus() }}
-            onCloseAutoFocus={event => {
-              event.preventDefault()
-              requestAnimationFrame(() => {
-                const trigger = reviewTriggerRef.current
-                if (trigger?.isConnected && !trigger.disabled) trigger.focus()
-                else pendingWorkspaceRef.current?.focus()
-              })
-            }}
-            onEscapeKeyDown={event => { if (busyId === review.proposal.id) event.preventDefault() }}
-            onPointerDownOutside={event => { if (busyId === review.proposal.id) event.preventDefault() }}
-            onInteractOutside={event => { if (busyId === review.proposal.id) event.preventDefault() }}
-            style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(620px, calc(100vw - 40px))', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}
-          >
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+            <Dialog.Content
+              className="card"
+              role="alertdialog"
+              aria-busy={busyId === review.proposal.id}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                reviewCancelRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                const original = reviewReturnFocusRef.current
+                const fallback = document.getElementById('compliance-pack-pending-heading')
+                ;(original?.isConnected ? original : fallback)?.focus()
+              }}
+              onEscapeKeyDown={event => { if (busyId === review.proposal.id) event.preventDefault() }}
+              onPointerDownOutside={event => { if (busyId === review.proposal.id) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(620px, calc(100% - 40px))', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}
+            >
             <Dialog.Title style={{ margin: 0, fontSize: 17 }}>
               {review.approve ? t('Zkontrolovat aktivaci packu', 'Review pack activation') : t('Zkontrolovat zamítnutí packu', 'Review pack rejection')}
             </Dialog.Title>
@@ -374,16 +392,16 @@ export default function CompliancePacksPage() {
             <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               {t('Four-eyes kontrolu vynucuje lending-service: checker musí být jiný principál než maker.', 'The lending service enforces four-eyes: the checker must be a different principal from the maker.')}
             </p>
-            {error && <div role="alert" data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+            {error && <div data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-              <button ref={reviewCancelRef} autoFocus type="button" className="btn btn-secondary" disabled={busyId === review.proposal.id} onClick={() => { setReview(null); setError(null) }}>
+              <button ref={reviewCancelRef} type="button" className="btn btn-secondary" disabled={busyId === review.proposal.id} onClick={closeReview}>
                 {t('Zpět', 'Back')}
               </button>
-              <button type="button" className={review.approve ? 'btn btn-primary' : 'btn btn-secondary'} aria-busy={busyId === review.proposal.id} disabled={busyId === review.proposal.id} onClick={() => void decide(review.proposal.id, review.approve)}>
+              <button ref={reviewConfirmRef} type="button" className={review.approve ? 'btn btn-primary' : 'btn btn-secondary'} aria-busy={busyId === review.proposal.id} disabled={busyId === review.proposal.id} onClick={() => void decide(review.proposal.id, review.approve)}>
                 {busyId === review.proposal.id ? t('Odesílám…', 'Submitting…') : review.approve ? t('Potvrdit aktivaci', 'Confirm activation') : t('Potvrdit zamítnutí', 'Confirm rejection')}
               </button>
             </div>
-          </Dialog.Content>
+            </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
       )}
