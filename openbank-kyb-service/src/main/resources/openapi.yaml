@@ -846,6 +846,12 @@ components:
           format: uuid
         requiredSignatures:
           type: [integer, 'null']
+        requiredSignerRoles:
+          type: array
+          items: { type: string }
+          description: >-
+            The offices the attested rule requires. Empty means a plain count — any listed
+            representatives may sign. Non-empty means each office must be filled by a distinct signer.
         signedCount:
           type: integer
         extract:

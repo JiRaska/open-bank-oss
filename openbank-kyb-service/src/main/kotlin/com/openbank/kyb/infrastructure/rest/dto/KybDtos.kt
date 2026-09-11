@@ -224,6 +224,11 @@ data class ExtractResponse(
                 "mode" to e.representationRule.mode.name,
                 "requiredSigners" to e.representationRule.signaturesRequired(e.representatives.size),
                 "sourceText" to e.representationRule.sourceText,
+                // The offices the rule names, when it names them (#9709). Null for `requiredSigners`
+                // beside a non-empty list is not a gap: a role-constrained rule has no answer
+                // expressible as a count, and a console that showed only the number would invite the
+                // reader to check it and stop.
+                "requiredRoles" to e.representationRule.requiredRoles,
             ),
             source = e.source,
             sourceRef = e.sourceRef,
@@ -271,6 +276,8 @@ data class CaseResponse(
     val initiatorPartyId: UUID,
     val entityPartyId: UUID?,
     val requiredSignatures: Int?,
+    /** The offices the attested rule names; empty means any listed representatives may sign (#9711). */
+    val requiredSignerRoles: List<String>,
     val signedCount: Int,
     val extract: ExtractResponse?,
     val signers: List<SignerResponse>,
@@ -288,6 +295,7 @@ data class CaseResponse(
             initiatorPartyId = c.initiatorPartyId,
             entityPartyId = c.entityPartyId,
             requiredSignatures = c.requiredSignatures,
+            requiredSignerRoles = c.requiredSignerRoles,
             signedCount = c.signedCount,
             extract = c.extract?.let { ExtractResponse.from(it) },
             signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
