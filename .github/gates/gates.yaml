@@ -2223,6 +2223,20 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: ci-reconcile-selector-selftest
+    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
+      expired, and duplicate runs and asserts the exact retry and flake matrices.
+    budget_seconds: 10
+    rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
+    review_after: "2027-03-11"
+    min_subjects: 3
+    run: |
+      python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
     group: registry
