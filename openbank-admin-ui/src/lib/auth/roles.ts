@@ -127,6 +127,12 @@ export const PERMISSIONS = {
   // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
   "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Business onboarding (ADR-0284). `attest` confirms how a legal entity is represented — how many
+  // signatures a framework agreement needs, and from which offices — so it mirrors kyb-service's
+  // own @RolesAllowed(OPERATOR, ADMIN, KYC) on those routes. Nav/route gating only: the BFF relays
+  // the operator's own bearer and kyb-service + OPA decide the real answer.
+  "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC],
+  "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -265,6 +271,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],
   ['identity-cases:view', ['/identity-cases']],
+  ['business-onboarding:view', ['/business-onboarding']],
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
