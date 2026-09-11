@@ -121,4 +121,55 @@ class CustomerBusinessResourceTest {
         resource(upstream).mine()
         assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/cases?partyId=$caller")
     }
+
+    @Test
+    fun `search forwards the trimmed terms and the caller's own party, and encodes them`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        every { upstream.get(capture(url), capture(party)) } returns Response.ok().build()
+
+        val response = resource(upstream).search("CZ", "  Příklad & syn  ", " Praha ", 10)
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(party.captured).isEqualTo(caller.toString())
+        assertThat(url.captured).startsWith("$kyb/api/v1/kyb/registry/search?")
+        // Encoded, not interpolated: an ampersand in a company name would otherwise append a
+        // parameter of the caller's choosing to the upstream query.
+        assertThat(url.captured).contains("name=P%C5%99%C3%ADklad+%26+syn")
+        assertThat(url.captured).contains("city=Praha")
+        assertThat(url.captured).contains("limit=10")
+    }
+
+    @Test
+    fun `search drops a blank town rather than sending an empty filter`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok().build()
+
+        resource(upstream).search("CZ", "Kofola", "   ", null)
+
+        assertThat(url.captured).doesNotContain("city=")
+        assertThat(url.captured).doesNotContain("limit=")
+    }
+
+    @Test
+    fun `search rejects a malformed request WITHOUT an upstream round trip`() {
+        val upstream = mockk<UpstreamClient>()
+
+        // An absent parameter is a 400 from requireNotNull, never the 500 a non-null JAX-RS
+        // parameter would give (root CLAUDE.md, gate `nonnull-jaxrs-param-ratchet`).
+        listOf<() -> Unit>(
+            { resource(upstream).search(null, "Kofola", null, null) },
+            { resource(upstream).search("CZ", null, null, null) },
+            { resource(upstream).search("CZE", "Kofola", null, null) },
+            { resource(upstream).search("CZ", "ab", null, null) },
+            { resource(upstream).search("CZ", "Kofola", null, 0) },
+            { resource(upstream).search("CZ", "Kofola", null, 500) },
+        ).forEach { call ->
+            assertThatThrownBy { call() }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+
+        io.mockk.verify(exactly = 0) { upstream.get(any(), any()) }
+    }
 }

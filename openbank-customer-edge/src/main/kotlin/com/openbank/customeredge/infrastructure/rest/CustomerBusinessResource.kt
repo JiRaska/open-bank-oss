@@ -66,6 +66,44 @@ class CustomerBusinessResource(
         return upstream.get("$kybServiceUrl$UPSTREAM/schemes$q", human().toString())
     }
 
+    /**
+     * Find a company by NAME rather than by identifier (#9707). The entry screen for a founder who
+     * does not know their own IČO — it lives on an invoice, not in anyone's head.
+     *
+     * Read-only over a public register and creates nothing, like `/lookup` and `/schemes`. Every
+     * parameter is shape-checked before it reaches a URL rather than merely encoded: the same
+     * reasoning as the invitation token below, and the reason a bad `limit` is a 400 here instead
+     * of an upstream round trip.
+     */
+    @GET
+    @Path("/search")
+    @Blocking
+    fun search(
+        @QueryParam("country") country: String?,
+        @QueryParam("name") name: String?,
+        @QueryParam("city") city: String?,
+        @QueryParam("limit") limit: Int?,
+    ): Response {
+        // Nullable + requireNotNull, never a non-null JAX-RS parameter: an absent one would be
+        // injected as null and answer 500 (root CLAUDE.md, gate `nonnull-jaxrs-param-ratchet`).
+        requireNotNull(country) { "query parameter 'country' is required" }
+        requireNotNull(name) { "query parameter 'name' is required" }
+        require(COUNTRY.matches(country)) { "country must be an ISO 3166-1 alpha-2 code" }
+        val term = name.trim()
+        require(term.length in MIN_TERM..MAX_TERM) { "name must be between $MIN_TERM and $MAX_TERM characters" }
+        val town = city?.trim()?.takeIf { it.isNotEmpty() }
+        require(town == null || town.length <= MAX_TERM) { "city must be at most $MAX_TERM characters" }
+        require(limit == null || limit in 1..MAX_LIMIT) { "limit must be between 1 and $MAX_LIMIT" }
+
+        val query = buildString {
+            append("?country=").append(enc(country))
+            append("&name=").append(enc(term))
+            town?.let { append("&city=").append(enc(it)) }
+            limit?.let { append("&limit=").append(it) }
+        }
+        return upstream.get("$kybServiceUrl$UPSTREAM/registry/search$query", human().toString())
+    }
+
     @POST
     @Path("/lookup")
     @Blocking
@@ -182,5 +220,10 @@ class CustomerBusinessResource(
         /** An invitation token is opaque, URL-safe and bounded; anything else is malformed. */
         val TOKEN = Regex("^[A-Za-z0-9_-]{8,128}$")
         val COUNTRY = Regex("^[A-Za-z]{2}$")
+
+        /** Mirrors kyb-service's own floor and caps; a shorter term matches tens of thousands of names. */
+        const val MIN_TERM = 3
+        const val MAX_TERM = 100
+        const val MAX_LIMIT = 50
     }
 }
