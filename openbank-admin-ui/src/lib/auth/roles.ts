@@ -219,6 +219,10 @@ export const PERMISSIONS = {
   // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
   "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
   "communication:style:decide":  [ROLES.ADMIN, ROLES.COMMS_APPROVER],
+  // ADR-0285 D4: golden-set entries are CRUD-only, no four-eyes (nothing an editor writes here
+  // reaches a customer without a separate change wiring the replay engine) — same maker-only
+  // grant as style:propose.
+  "communication:golden-set:manage": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
