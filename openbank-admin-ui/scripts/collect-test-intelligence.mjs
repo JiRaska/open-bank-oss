@@ -544,6 +544,17 @@ function contracts() {
   })
 }
 
+function pitestMutationScore(detected, total) {
+  return total ? Math.floor((detected * 100 + Math.floor(total / 2)) / total) : null
+}
+
+function legacyMutationThreshold(evidence) {
+  if (typeof evidence?.detail !== 'string') return null
+  const match = evidence.detail.match(/^\d+\/\d+ killed \(\d+(?:\.\d+)?%, target (\d+(?:\.\d+)?)%\)$/)
+  const threshold = Number(match?.[1])
+  return Number.isFinite(threshold) && threshold >= 0 && threshold <= 100 ? threshold : null
+}
+
 async function mutations(components) {
   const result = []
   for (const component of components) {
@@ -553,18 +564,23 @@ async function mutations(components) {
     const items = parsed?.mutations?.mutation ?? []
     const status = name => items.filter(item => item.$?.status === name).length
     const killed = status('KILLED')
+    const timedOut = status('TIMED_OUT')
     const survived = status('SURVIVED')
     const noCoverage = status('NO_COVERAGE')
     const at = observedAt(file)
     const mutationRun = readJson(path.join(path.dirname(file), 'test-intelligence-run.json'))
     const specialized = mutationRun?.specializedEvidence?.find(item => item.kind === 'mutation')
     const provenance = safeRun(mutationRun?.run, `mutation:${component}`)
+    const legacyThreshold = legacyMutationThreshold(specialized)
+    const specializedState = legacyThreshold === null
+      ? specialized?.state
+      : items.length === 0 ? 'skipped' : pitestMutationScore(killed + timedOut, items.length) < legacyThreshold ? 'failed' : 'passed'
     result.push({
       component, state: specialized
-        ? freshnessAwareState(specialized.state, mutationRun?.run?.observedAt ?? at)
-        : stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
-      total: items.length, killed, survived, noCoverage,
-      score: items.length ? Math.round((killed / items.length) * 10_000) / 100 : null,
+        ? freshnessAwareState(specializedState, mutationRun?.run?.observedAt ?? at)
+        : 'unknown', observedAt: mutationRun?.run?.observedAt ?? at,
+      total: items.length, killed, timedOut, survived, noCoverage,
+      score: pitestMutationScore(killed + timedOut, items.length),
       ...(provenance ? { run: provenance } : {}),
     })
   }
@@ -574,7 +590,11 @@ async function mutations(components) {
 function mutationComponents() {
   const workflow = readText(path.join(repo, '.github', 'workflows', 'pitest.yml'))
   const serviceMatrix = workflow.match(/\n {8}service:\s*\n([\s\S]*?)\n {4}steps:/)?.[1] ?? ''
-  return new Set([...serviceMatrix.matchAll(/- (openbank-[a-z0-9-]+)/g)].map(match => match[1]))
+  const matrixComponents = [...serviceMatrix.matchAll(/- (openbank-[a-z0-9-]+)/g)].map(match => match[1])
+  const fixedComponents = [...workflow.matchAll(
+    /--mutation-report\s+["']?(openbank-[a-z0-9-]+)\/build\/reports\/pitest\/mutations\.xml["']?/g,
+  )].map(match => match[1])
+  return new Set([...matrixComponents, ...fixedComponents])
 }
 
 function platformCapabilities() {
@@ -624,41 +644,43 @@ function requiredControls(components, contracts, mutations, performance, synthet
       observedAt: row?.observedAt ?? null,
     })
   }
-  for (const component of components.filter(item => item.released)) {
-    addEvidence(component, 'unit', 'Every released component must publish executable test evidence.')
-    if (exists(path.join(repo, component.component, 'build.gradle.kts'))) {
-      controls.push({
-        id: `${component.component}:coverage`, component: component.component, kind: 'coverage',
-        state: component.coverage.state, reason: 'Every released Gradle component is subject to the Kover coverage ratchet.',
-        source: component.coverage.source, observedAt: component.coverage.observedAt,
-      })
+  for (const component of components) {
+    if (component.released) {
+      addEvidence(component, 'unit', 'Every released component must publish executable test evidence.')
+      if (exists(path.join(repo, component.component, 'build.gradle.kts'))) {
+        controls.push({
+          id: `${component.component}:coverage`, component: component.component, kind: 'coverage',
+          state: component.coverage.state, reason: 'Every released Gradle component is subject to the Kover coverage ratchet.',
+          source: component.coverage.source, observedAt: component.coverage.observedAt,
+        })
+      }
+      if (component.component === 'openbank-admin-ui') addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
+      if (component.moneyPath || component.testInfrastructure.declared.length > 0) {
+        addEvidence(component, 'integration', component.moneyPath
+          ? 'Money-path components require integration evidence.'
+          : 'A declared container topology requires an integration run.')
+      }
+      if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
+      if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
+      for (const resource of component.testInfrastructure.declared) {
+        const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
+        const starts = rows.filter(item => item.lifecycle === 'started').length
+        const stops = rows.filter(item => item.lifecycle === 'stopped').length
+        controls.push({
+          id: `${component.component}:runtime:${resource}`, component: component.component, kind: 'runtime',
+          state: starts > 0 && starts === stops ? 'passed' : starts > 0 || stops > 0 ? 'failed' : 'not-run',
+          reason: `Declared ${resource} topology requires balanced start and stop proof from the same run.`,
+          source: rows.length ? 'test-intelligence-run:v1' : null,
+          observedAt: rows.map(item => item.observedAt).sort().at(-1) ?? null,
+        })
+      }
     }
-    if (component.component === 'openbank-admin-ui') addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
-    if (component.moneyPath || component.testInfrastructure.declared.length > 0) {
-      addEvidence(component, 'integration', component.moneyPath
-        ? 'Money-path components require integration evidence.'
-        : 'A declared container topology requires an integration run.')
-    }
-    if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
-    if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
     if (mutationParticipants.has(component.component)) {
       const row = mutationByComponent.get(component.component)
       controls.push({
         id: `${component.component}:mutation`, component: component.component, kind: 'mutation',
-        state: row?.state ?? 'not-run', reason: 'The service is in the governed Pitest matrix and must publish its 70% advisory result.',
+        state: row?.state ?? 'not-run', reason: 'The component has a governed Pitest lane and must publish its mutation result.',
         source: row ? 'Pitest:mutations.xml' : null, observedAt: row?.observedAt ?? null,
-      })
-    }
-    for (const resource of component.testInfrastructure.declared) {
-      const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
-      const starts = rows.filter(item => item.lifecycle === 'started').length
-      const stops = rows.filter(item => item.lifecycle === 'stopped').length
-      controls.push({
-        id: `${component.component}:runtime:${resource}`, component: component.component, kind: 'runtime',
-        state: starts > 0 && starts === stops ? 'passed' : starts > 0 || stops > 0 ? 'failed' : 'not-run',
-        reason: `Declared ${resource} topology requires balanced start and stop proof from the same run.`,
-        source: rows.length ? 'test-intelligence-run:v1' : null,
-        observedAt: rows.map(item => item.observedAt).sort().at(-1) ?? null,
       })
     }
   }
@@ -998,8 +1020,12 @@ async function clientExperiences() {
 
 async function main() {
   const names = releasedComponents()
+  const governedMutationComponents = mutationComponents()
   const simulation = 'openbank-simulation'
   const tooling = exists(path.join(repo, simulation)) ? [simulation] : []
+  const internalMutationComponents = [...governedMutationComponents]
+    .filter(component => !names.includes(component) && !tooling.includes(component))
+    .sort()
   const moneyPath = moneyPathComponents()
   const currentEnvelopes = [...names, ...tooling]
     .map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json')))
@@ -1022,7 +1048,13 @@ async function main() {
       testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
     })
   }
-  const mutationEvidence = await mutations(names)
+  for (const component of internalMutationComponents) {
+    components.push({
+      component, released: false, moneyPath: false, evidence: [], coverage: coverage(component),
+      testInfrastructure: { declared: [], observed: [] },
+    })
+  }
+  const mutationEvidence = await mutations([...names, ...internalMutationComponents])
   for (const item of mutationEvidence) {
     components.find(component => component.component === item.component)?.evidence.push({
       kind: 'mutation', state: item.state, observedAt: item.observedAt,

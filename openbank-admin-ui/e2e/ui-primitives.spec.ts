@@ -43,14 +43,14 @@ const READINESS = {
 
 const CONSENTS = [
   {
-    id: 'c1', partyId: '11111111-1111-1111-1111-111111111111',
+    id: '11111111-1111-4111-8111-111111111111', partyId: '11111111-1111-4111-8111-111111111111',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_EMAIL'], accountIbans: null, status: 'ACTIVE',
     validFrom: '2026-07-01T00:00:00Z', validTo: '2027-06-30T00:00:00Z', createdAt: '2026-07-01T00:00:00Z',
   },
   {
-    id: 'c2', partyId: '22222222-2222-2222-2222-222222222222',
+    id: '22222222-2222-4222-8222-222222222222', partyId: '22222222-2222-4222-8222-222222222222',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_PUSH'], accountIbans: null, status: 'REVOKED',
@@ -63,7 +63,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/governance', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ items: [
+        body: JSON.stringify({ available: true, timestamp: '2026-09-10T03:00:00Z', items: [
           { serviceName: 'account-service', dataDomain: 'core' },
           { serviceName: 'ledger-service', dataDomain: 'core' },
           { serviceName: 'aml-service', dataDomain: 'compliance' },
