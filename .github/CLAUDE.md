@@ -43,6 +43,19 @@
   plain red while having silently left half the fleet unlinted — 455 actionable findings against a
   true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
   its exit code.
+- **A rate-limited SARIF UPLOAD loses a real finding and reads as a scan failure.** On 2026-09-05
+  the installation limit hit CodeQL and Trivy in the same hour, and in both the analysis RAN — the
+  log shows queries interpreted and `Exported results to SARIF` — before
+  `##[error]API rate limit exceeded for installation` on the upload step. So the check goes red
+  having found nothing anyone can read, and a genuine alert in that SARIF is simply gone. Two
+  consequences worth carrying: a red security check is not evidence of a finding OR of cleanliness
+  until you read which STEP failed, and a green run earlier in the same hour does not clear a later
+  red one. The same hour's `dependency-review` failed with
+  `Dependency review is not supported on this repository. Please ensure that Dependency graph is
+  enabled` — which is NOT what it means when the graph is on (measured: the `dependency-graph/sbom`
+  endpoint answered with 2373 packages, and the same workflow passed on other branches minutes
+  later). That message is what the action prints when its API call fails for any reason, so it sends
+  you into the repository settings for a problem that is not there.
 - **"I could not READ the corpus" is a third state, and a gate that renders it as a failure
   turns someone else's rate limit into your red PR.** On 2026-08-21 ~18:25 UTC one installation
   rate limit hit two gates in the same run and they disagreed:
