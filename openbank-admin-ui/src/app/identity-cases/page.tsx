@@ -10,7 +10,7 @@ import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { LoadingState, PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check, Search } from 'lucide-react'
 
@@ -408,13 +408,10 @@ export default function IdentityCasesPage() {
         </button>}
       />
       {loading && cases.length === 0 ? (
-        <div className="card" role="status" aria-live="polite" style={{ padding: '28px', display: 'flex', gap: 12, alignItems: 'center' }}>
-          <RefreshCw size={18} aria-hidden="true" className="animate-spin" />
-          <div>
-            <div style={{ fontWeight: 650 }}>{t('Načítám frontu případů…', 'Loading the case queue…')}</div>
-            <div style={{ marginTop: 3, fontSize: 12, color: 'var(--text-secondary)' }}>{t('Ověřuji otevřené případy a pořadí druhých hlasů.', 'Checking active cases and second-vote priority.')}</div>
-          </div>
-        </div>
+        <LoadingState
+          label={t('Načítám frontu případů…', 'Loading the case queue…')}
+          description={t('Ověřuji otevřené případy a pořadí druhých hlasů.', 'Checking active cases and second-vote priority.')}
+        />
       ) : unavail ? (
         <DataUnavailable kind={unavail} service="pid-service" feature={t('ověření identity', 'identity verification')} lang={language} />
       ) : cases.length === 0 && !loading ? (
