@@ -79,6 +79,36 @@ class GoldenSetScorerTest {
     }
 
     @Test
+    fun `an English-style decimal with no currency marker still fails (was a false negative)`() {
+        val result = GoldenSetScorer.score(
+            entry(expectNoFigureFromMemory = true),
+            "The conversion rate is 24.50.",
+        )
+        val dim = result.dimensions.single { it.dimension == "no figure from memory" }
+        assertThat(dim.outcome).isEqualTo(GoldenSetScorer.Outcome.FAIL)
+    }
+
+    @Test
+    fun `a leading currency symbol or code still fails (was a false negative)`() {
+        val leadingSymbol = GoldenSetScorer.score(entry(expectNoFigureFromMemory = true), "It costs \$24.50 today.")
+        val leadingCode = GoldenSetScorer.score(entry(expectNoFigureFromMemory = true), "It costs USD 24.50 today.")
+        assertThat(leadingSymbol.dimensions.single { it.dimension == "no figure from memory" }.outcome)
+            .isEqualTo(GoldenSetScorer.Outcome.FAIL)
+        assertThat(leadingCode.dimensions.single { it.dimension == "no figure from memory" }.outcome)
+            .isEqualTo(GoldenSetScorer.Outcome.FAIL)
+    }
+
+    @Test
+    fun `a bare integer with no decimal point and no currency marker is NOT caught (documented limitation)`() {
+        val result = GoldenSetScorer.score(
+            entry(expectNoFigureFromMemory = true),
+            "Poplatek bude přibližně 1500.",
+        )
+        val dim = result.dimensions.single { it.dimension == "no figure from memory" }
+        assertThat(dim.outcome).isEqualTo(GoldenSetScorer.Outcome.PASS)
+    }
+
+    @Test
     fun `no figure in the answer passes when the entry forbids inventing one`() {
         val result = GoldenSetScorer.score(
             entry(expectNoFigureFromMemory = true),

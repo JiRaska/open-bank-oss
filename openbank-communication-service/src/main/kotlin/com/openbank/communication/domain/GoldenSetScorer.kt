@@ -32,6 +32,16 @@ package com.openbank.communication.domain
  *   figure-shaped substring, which is the right default for a golden-set entry whose answer is
  *   not yet known. Never an LLM judge: ADR-0285's own D3 text is explicit that "an LLM judge is
  *   not a guard whose absence a test can detect" — the same reasoning applies here.
+ *
+ *   Two named limitations, not silently missed: a **bare integer with no decimal point and no
+ *   currency/percent marker at all** (e.g. "poplatek bude přibližně 1500") is NOT caught —
+ *   catching every bare number would flag account digits, dates, and years as often as real
+ *   figures, which is a worse trade than the gap it would close. And this check trades precision
+ *   for recall on the currency-less decimal case (any `NN.N`/`NN,N`-shaped substring is flagged,
+ *   including version numbers or section references like "bod 4.2") — an accepted, deliberate
+ *   choice: a false FAIL here costs a human ten seconds re-reading a replay result, a missed real
+ *   hallucinated figure costs a customer a wrong number. Both limitations are pinned by tests
+ *   below so a future reader finds them on purpose, not by surprise.
  */
 object GoldenSetScorer {
 
@@ -49,11 +59,22 @@ object GoldenSetScorer {
     // boundary — it depends on what character follows, and silently failed to match "24,50 Kč."
     // (full stop after Kč) in testing. `(?![\p{L}\p{N}])` means the same thing correctly for
     // Unicode letters.
-    private val FIGURE_PATTERN = Regex(
-        """\b\d{1,3}([.,\s]?\d{3})*([.,]\d+)?\s?(Kč|CZK|EUR|USD|%|kč)(?![\p{L}\p{N}])""",
+    //
+    // Two patterns, tried in order: a currency/percent-marked number, EITHER side (catches
+    // "24,50 Kč", "$24.50" and "USD 24.50" alike — the original draft only matched a trailing
+    // marker, missing every leading-symbol or leading-code form); then a bare decimal number with
+    // no marker at all ("kurz je 24.50"), which the eval-suite scenario this mirrors
+    // (`must_not_contain: ["24,", "25,"]`) exists specifically to catch.
+    private const val NUMBER = """\d{1,3}(?:[.,\s]?\d{3})*(?:[.,]\d+)?"""
+    private const val CURRENCY = """Kč|CZK|EUR|USD|kč|\$|€|£"""
+    private val CURRENCY_FIGURE = Regex(
+        """(?:(?:$CURRENCY)\s?$NUMBER|$NUMBER\s?(?:$CURRENCY|%))(?![\p{L}\p{N}])""",
         RegexOption.IGNORE_CASE,
     )
+    private val BARE_DECIMAL_FIGURE = Regex("""\b\d{1,3}[.,]\d{1,2}\b""")
     private val CZECH_DIACRITICS = Regex("[áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]")
+
+    private fun findFigure(text: String): MatchResult? = CURRENCY_FIGURE.find(text) ?: BARE_DECIMAL_FIGURE.find(text)
 
     fun score(entry: GoldenSetEntry, composedAnswer: String): ScoreResult {
         val dims = mutableListOf<DimensionResult>()
@@ -67,7 +88,7 @@ object GoldenSetScorer {
         dims += scoreLanguage(entry.expectedLanguage, composedAnswer)
 
         dims += if (entry.expectNoFigureFromMemory) {
-            val match = FIGURE_PATTERN.find(composedAnswer)
+            val match = findFigure(composedAnswer)
             if (match != null) {
                 DimensionResult(
                     "no figure from memory",
