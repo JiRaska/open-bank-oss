@@ -5074,7 +5074,13 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 200   # 291 source files scanned today (2026-09-09); findings may reach zero
+    # The subject is the SOURCE CORPUS, not the finding count — measured, not assumed:
+    # check-raw-colour-literal-ratchet.py line 151 prints `SUBJECTS={files_scanned}`, and a run
+    # today reports `SUBJECTS=297  # admin-ui source files scanned for raw hex colours`.
+    # So the floor does not fight the ratchet: findings may reach zero while the corpus stays ~297.
+    # `min_subjects: 1` would make this gate green about a run that scanned a single file — the
+    # exact no-op a floor exists to refuse.
+    min_subjects: 200   # 297 source files scanned 2026-09-11; findings may reach zero
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
@@ -5153,10 +5159,10 @@ gates:
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
   - id: workflow-supply-chain
-    name: "workflow action pins and bounded agent admission"
+    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
     group: supplychain
     mode: enforced
-    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs."
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
     budget_seconds: 15
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
