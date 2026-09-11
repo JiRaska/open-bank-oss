@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: communication-service-internal-tls
+  namespace: communication
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: communication-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - communication-service.communication.svc
+    - communication-service.communication.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

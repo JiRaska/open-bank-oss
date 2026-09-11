@@ -28,30 +28,9 @@ import {
   type ApprovalSortOrder,
   type DomainApprovalItem,
 } from '@/lib/approvals/triage'
-
-interface Proposal {
-  id: string
-  title: string
-  rationale: string
-  suggestedAction: string
-  proposedBy: string
-  proposedAt: string
-  state: 'PROPOSED' | 'APPROVED' | 'REJECTED'
-  decidedBy: string | null
-  decidedAt: string | null
-  decisionReason: string | null
-  modelId: string | null
-  agent?: { id: string; displayName: string; icon: 'bot' | 'user'; charterKnown: boolean }
-}
-
-interface InboxItem extends Omit<DomainApprovalItem, 'domain'> {
-  id: string
-  domain: ApprovalDomain | 'agent'
-  action: string
-  resourceId: string | null
-  maker: string | null
-  proposedAt: string | null
-}
+import { parseAgentProposalList, parseApprovalInbox, type AgentProposal as Proposal, type ApprovalInboxItem as InboxItem } from '@/lib/approvals/evidence'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 type DecisionIntent = { proposal: Proposal; approve: boolean }
 
@@ -71,6 +50,7 @@ export default function ApprovalsPage() {
   const [domainItems, setDomainItems] = useState<InboxItem[]>([])
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [domainLoadFailed, setDomainLoadFailed] = useState(false)
+  const [agentLoadFailure, setAgentLoadFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const flight = useSingleFlight()
   const [decisionIntent, setDecisionIntent] = useState<DecisionIntent | null>(null)
@@ -87,32 +67,34 @@ export default function ApprovalsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [proposalsResult, inboxResult] = await Promise.allSettled([
+    const [proposalsResult, inboxResult] = await Promise.all([
       fetch('/api/agent/proposals?state=all', { cache: 'no-store' }).then(async response => {
-        if (!response.ok) throw new Error('agent proposals unavailable')
-        const data = await response.json()
-        return Array.isArray(data) ? data as Proposal[] : []
-      }),
-      fetch('/api/approvals/pending', { cache: 'no-store' }).then(async response => {
-        if (!response.ok) throw new Error('domain approvals unavailable')
-        const inbox = await response.json()
-        return {
-          items: Array.isArray(inbox.items) ? inbox.items as InboxItem[] : [],
-          sources: inbox.sources && typeof inbox.sources === 'object' ? inbox.sources as Record<string, string> : {},
+        if (!response.ok) {
+          const failure = response.status === 502
+            ? 'unreachable' as const
+            : response.status === 401 || response.status === 403 ? 'unauthorized' as const : await classifyBffFailure(response)
+          return { ok: false as const, failure }
         }
-      }),
+        const proposals = parseAgentProposalList(await response.json().catch(() => null))
+        return proposals ? { ok: true as const, proposals } : { ok: false as const, failure: 'error' as const }
+      }).catch(() => ({ ok: false as const, failure: 'unreachable' as const })),
+      fetch('/api/approvals/pending', { cache: 'no-store' }).then(async response => {
+        if (!response.ok) return { ok: false as const }
+        const inbox = parseApprovalInbox(await response.json().catch(() => null))
+        return inbox ? { ok: true as const, inbox } : { ok: false as const }
+      }).catch(() => ({ ok: false as const })),
     ])
 
-    if (proposalsResult.status === 'fulfilled') {
-      setRows(proposalsResult.value)
-      setError(null)
+    if (proposalsResult.ok) {
+      setRows(proposalsResult.proposals)
+      setAgentLoadFailure(null)
     } else {
-      setError('unreachable')
+      setAgentLoadFailure(proposalsResult.failure)
     }
 
-    if (inboxResult.status === 'fulfilled') {
-      setDomainItems(inboxResult.value.items)
-      setDomainSources(inboxResult.value.sources)
+    if (inboxResult.ok) {
+      setDomainItems(inboxResult.inbox.items)
+      setDomainSources(inboxResult.inbox.sources)
       setDomainLoadFailed(false)
     } else {
       // Retain any last successful snapshot, but never let it look current or empty.
@@ -335,7 +317,26 @@ export default function ApprovalsPage() {
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
         {t('Čeká na rozhodnutí (AI agent)', 'Pending (AI agent)')} ({pending.length})
       </div>
-      {!loading && pending.length === 0 && (
+      {!loading && agentLoadFailure && (
+        <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+          <DataUnavailable
+            kind={agentLoadFailure}
+            service={t('Agent-service', 'Agent-service')}
+            feature={t('Fronta AI návrhů', 'AI proposal queue')}
+            lang={language}
+            dense
+            title={rows.length > 0 ? t('Zobrazuji poslední ověřené návrhy', 'Showing the last verified proposals') : undefined}
+            detail={rows.length > 0
+              ? t('Nové načtení selhalo. Návrhy níže pocházejí z poslední úspěšné obnovy a nemusí být aktuální.', 'The refresh failed. Proposals below come from the last successful read and may be stale.')
+              : undefined}
+          >
+            <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+              <RefreshCw aria-hidden="true" size={13} /> {t('Zkusit znovu', 'Retry')}
+            </button>
+          </DataUnavailable>
+        </div>
+      )}
+      {!loading && !agentLoadFailure && pending.length === 0 && (
         <div className="card" style={{ padding: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
           {t('Žádné návrhy nečekají na schválení. Agent může návrh vytvořit nástrojem draft_ticket.', 'No proposals awaiting approval. The agent can create one via the draft_ticket tool.')}
         </div>
