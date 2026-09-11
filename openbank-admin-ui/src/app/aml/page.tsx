@@ -20,15 +20,18 @@ export default function AmlPage() {
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
   const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
-  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCaseSnapshot>(
+  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
     { select: (raw) => {
       setLastSuccessfulAt(new Date())
       return parseAmlCases(raw)
     } },
   )
-  const cases = data?.cases ?? []
-  const excludedCount = data?.excludedCount ?? 0
+  // `parseAmlCases` is fail-fast: it THROWS on a malformed row rather than filtering it out, so
+  // there is no "excluded" count to report — either the whole register validated or none of it
+  // did. The old snapshot shape carried `excludedCount` because its parser silently dropped bad
+  // rows, which is the behaviour that hid a total contract mismatch as partial corruption.
+  const cases = data ?? []
   const hasSnapshot = data !== null
   const showingRetainedSnapshot = unavailable !== null && hasSnapshot
   const filtered = cases.filter(c =>
@@ -81,13 +84,6 @@ export default function AmlPage() {
 
         {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {t('Aktualizuji AML případy; poslední snapshot zůstává dostupný.', 'Refreshing AML cases; the last snapshot remains available.')}
-        </p>}
-
-        {hasSnapshot && excludedCount > 0 && <p role="alert" style={{ margin: '0 0 20px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>
-          {t(
-            `${excludedCount} neplatných AML záznamů bylo z přehledu vyřazeno; zobrazené souhrny počítají pouze ověřené záznamy.`,
-            `${excludedCount} invalid AML record${excludedCount === 1 ? ' was' : 's were'} excluded; displayed totals use validated records only.`,
-          )}
         </p>}
 
         {hasSnapshot && escalated.length > 0 && (
