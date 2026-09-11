@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -75,3 +78,20 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Mutation testing (ADR-0063 / ADR-0030 D3).
+// VopNameMatchPolicy is a three-band decision with bounded Levenshtein, token/initial and
+// legal-form rules — the same "substantive domain decision logic" criterion that put
+// sanctions-service on the list (rules.yaml: coverage.money_path_depth). 21 branch sites.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.vop.domain.*")
+    targetTests = setOf("com.openbank.vop.domain.*", "com.openbank.vop.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.vop.domain.*Kt")
+}

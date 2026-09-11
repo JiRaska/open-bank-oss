@@ -13,8 +13,13 @@ import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
+import com.openbank.account.domain.model.AccountAccessEntry
+import com.openbank.account.domain.model.AccountAccessSource
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AuthorizationRole
+import com.openbank.account.domain.model.AuthorizationStatus
+import com.openbank.account.domain.model.DelegatedAccessGrant
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -28,6 +33,7 @@ class AuthorizationNotOnAccountException(authId: UUID, accountId: UUID) :
     RuntimeException("Authorization $authId does not belong to account $accountId")
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one use-case class mirrors the authorization surface (sameAmountAs is a private helper)
 class AuthorizationService(
     private val accountRepository: AccountRepository,
     private val authorizationRepository: AccountAuthorizationRepository,
@@ -38,9 +44,37 @@ class AuthorizationService(
 
     private val log = Logger.getLogger(AuthorizationService::class.java)
 
+    /**
+     * Scale-insensitive equality for optional limits: [Money] is a data class over
+     * [java.math.BigDecimal], so `==` would treat 100.0 and 100.00 as different grants and a retry
+     * with a differently serialized amount would slip past the replay check.
+     */
+    private fun Money?.sameAmountAs(other: Money?): Boolean = when {
+        this == null && other == null -> true
+        this == null || other == null -> false
+        else -> currency == other.currency && amount.compareTo(other.amount) == 0
+    }
+
     override suspend fun grantAuthorization(command: GrantAuthorizationCommand): AccountAuthorization {
         accountRepository.findById(command.accountId)
             ?: throw AccountNotFoundException("Account not found: ${command.accountId}")
+
+        // Idempotent replay (ADR-0295, #8351): the natural key of a grant is the full tuple the
+        // caller supplied — (account, party, role, limits, validity) — restricted to grants still
+        // ACTIVE. A retried POST replays the ORIGINAL grant instead of stacking a duplicate
+        // authority row. The check deliberately matches only ACTIVE grants: a revoke followed by
+        // an identical re-grant is a legitimate NEW grant, not a retry, and must persist. No DB
+        // backstop (see the ADR): the residual true-concurrency window stacks two identical
+        // authority rows, which the payment guard reads as one authority — no double money.
+        authorizationRepository.findByAccountId(command.accountId).firstOrNull { existing ->
+            existing.status == AuthorizationStatus.ACTIVE &&
+                existing.partyId == command.partyId &&
+                existing.role == command.role &&
+                existing.dailyLimit.sameAmountAs(command.dailyLimit) &&
+                existing.transactionLimit.sameAmountAs(command.transactionLimit) &&
+                existing.validFrom == command.validFrom &&
+                existing.validTo == command.validTo
+        }?.let { return it }
 
         val auth = AccountAuthorization(
             accountId = command.accountId,
@@ -70,6 +104,69 @@ class AuthorizationService(
 
     override suspend fun listAuthorizations(query: ListAuthorizationsQuery): List<AccountAuthorization> =
         authorizationRepository.findByAccountId(query.accountId)
+
+    /**
+     * The owner-facing mirror of the payment guard (see [authorizeDelegatedPayment]).
+     *
+     * Reads the SAME two stores, in the same order, with the same active/validity filters. It is
+     * written as a projection of the guard on purpose: an independently computed transparency view
+     * drifts from enforcement the first time either store changes, and the view is the half that
+     * never gets exercised by a real debit.
+     *
+     * `canInitiatePayments` answers the only question an owner actually cares about — can this
+     * person take money out — rather than restating a role name the customer never chose.
+     */
+    override suspend fun effectiveAccess(accountId: UUID): List<AccountAccessEntry> {
+        // No such account: an empty list, not an exception. A 404-vs-200 difference here would let
+        // any caller probe which account ids exist.
+        val account = accountRepository.findById(accountId) ?: return emptyList()
+        val now = OffsetDateTime.now(clock)
+        val today = now.toLocalDate()
+
+        val owner = AccountAccessEntry(
+            partyId = account.partyId,
+            source = AccountAccessSource.OWNER,
+            canInitiatePayments = true,
+            capabilities = setOf(DelegatedAccessGrant.CAP_INITIATE_PAYMENT),
+        )
+
+        val mandates = authorizationRepository.findByAccountId(accountId)
+            .filter { it.isActiveOn(today) }
+            .map { auth ->
+                AccountAccessEntry(
+                    partyId = auth.partyId,
+                    source = AccountAccessSource.BANK_MANDATE,
+                    // Same disjunct the guard uses: PAYMENT_ONLY or FULL_ACCESS may debit.
+                    canInitiatePayments = auth.role == AuthorizationRole.PAYMENT_ONLY ||
+                        auth.role == AuthorizationRole.FULL_ACCESS,
+                    capabilities = setOf(auth.role.name),
+                    perTransactionLimit = auth.transactionLimit?.amount,
+                    perTransactionLimitCurrency = auth.transactionLimit?.currency?.code,
+                    validFrom = auth.validFrom.atStartOfDay().atOffset(now.offset),
+                    validTo = auth.validTo?.atStartOfDay()?.atOffset(now.offset),
+                )
+            }
+
+        val delegations = delegationProjectionRepository.findActiveByAccount(accountId)
+            // issuedBy: a grant only speaks for this account if its grantor owns it. Dropping the
+            // check would let a grant naming someone else's account appear in this owner's view.
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) }
+            .map { grant ->
+                AccountAccessEntry(
+                    partyId = grant.granteePartyId,
+                    source = AccountAccessSource.CUSTOMER_DELEGATION,
+                    canInitiatePayments = grant.satisfies(AuthorizationRole.PAYMENT_ONLY),
+                    capabilities = grant.capabilities,
+                    perTransactionLimit = grant.perTransactionLimitAmount,
+                    perTransactionLimitCurrency = grant.perTransactionLimitCurrency,
+                    validFrom = grant.validFrom,
+                    validTo = grant.validTo,
+                    grantId = grant.id,
+                )
+            }
+
+        return listOf(owner) + mandates + delegations
+    }
 
     override suspend fun isAuthorized(accountId: UUID, partyId: UUID, role: AuthorizationRole): Boolean {
         val account = accountRepository.findById(accountId) ?: return false

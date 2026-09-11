@@ -68,7 +68,10 @@ data:
   # probe does not touch Temporal, so the only evidence was the log volume.
   # case-coordinator-agent → openbank-casecoord (ADR-0244 case workflows; task queue
   # `case-coordinator` is a task queue, not a namespace, and stays out of this list).
-  NAMESPACES: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending openbank-casecoord"
+  # kyb-service → openbank-kyb (ADR-0284 business-onboarding case timers: invitation reminder
+  # and expiry, idle-case abandonment). Same pairing rule as every entry above — the namespace
+  # here AND the `kyb` namespace in temporal-platform-ingress.
+  NAMESPACES: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending openbank-casecoord openbank-kyb"
   RETENTION: "168h"
   # Idempotent: each namespace is `describe`d first and only created if absent; a lost
   # race on create is tolerated when the error says "already exists".

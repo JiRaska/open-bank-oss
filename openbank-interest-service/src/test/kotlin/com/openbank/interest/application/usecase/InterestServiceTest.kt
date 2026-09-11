@@ -47,6 +47,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // one test class mirrors one large use-case class (InterestService)
 class InterestServiceTest {
 
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
@@ -118,6 +119,13 @@ class InterestServiceTest {
         } answers { Uni.createFrom().item(firstArg<InterestCapitalization>()) }
     }
 
+    /** No prior accrual for any natural key — the default world for the accrue tests. */
+    private fun stubNoExistingAccrual() {
+        every {
+            accrualRepo.findByNaturalKey(any(), any(), any(), any())
+        } returns Uni.createFrom().nullItem()
+    }
+
     @Test
     fun `accrue calculates daily rate correctly`() {
         val request = AccrualRequest(
@@ -130,6 +138,7 @@ class InterestServiceTest {
         val config = sampleConfig(annualRate = BigDecimal("0.365"), dayCount = DayCount.ACT_365)
         val accrualSlot: CapturingSlot<InterestAccrual> = slot()
 
+        stubNoExistingAccrual()
         every {
             configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
         } returns Uni.createFrom().item(config)
@@ -157,6 +166,7 @@ class InterestServiceTest {
             accrualDate = LocalDate.of(2026, 1, 20),
         )
 
+        stubNoExistingAccrual()
         every {
             configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
         } returns Uni.createFrom().nullItem()
@@ -165,6 +175,138 @@ class InterestServiceTest {
             .isInstanceOf(RateConfigNotFoundException::class.java)
             .hasMessage("No active rate config for product SAVINGS in currency EUR")
         verify(exactly = 0) { accrualRepo.save(any()) }
+    }
+
+    @Test
+    fun `accrue replays the original accrual for the same natural key without writing (ADR-0291)`() {
+        val request = AccrualRequest(
+            accountId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            productId = "SAVINGS",
+            balance = BigDecimal("1000.00"),
+            currency = "EUR",
+            accrualDate = LocalDate.of(2026, 1, 20),
+        )
+        val original = expectedAccrual(request, sampleConfig(annualRate = BigDecimal("0.365")))
+
+        every {
+            accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
+        } returns Uni.createFrom().item(original)
+
+        val result = service.accrue(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(original)
+        // The replay answers BEFORE the rate is resolved: a deactivated config must not fail it.
+        verify(exactly = 0) { configRepo.findEffectiveRate(any(), any(), any(), any()) }
+        verify(exactly = 0) { accrualRepo.save(any()) }
+    }
+
+    @Test
+    fun `accrue recovers a lost unique race by returning the winner row (ADR-0291)`() {
+        val request = AccrualRequest(
+            accountId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            productId = "SAVINGS",
+            balance = BigDecimal("1000.00"),
+            currency = "EUR",
+            accrualDate = LocalDate.of(2026, 1, 20),
+        )
+        val config = sampleConfig(annualRate = BigDecimal("0.365"))
+        val winner = expectedAccrual(request, config)
+        val conflict = RuntimeException(
+            java.sql.SQLException(
+                "duplicate key value violates unique constraint " +
+                    "\"interest_accruals_account_date_product_currency_key\"",
+                "23505",
+            ),
+        )
+
+        stubNoExistingAccrual()
+        every {
+            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+        } returns Uni.createFrom().item(config)
+        every { accrualRepo.save(any()) } returns Uni.createFrom().failure(conflict)
+        // The recovery re-read: the natural key now resolves to the winner's row.
+        every {
+            accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
+        } returnsMany listOf(Uni.createFrom().nullItem(), Uni.createFrom().item(winner))
+
+        val result = service.accrue(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(winner)
+    }
+
+    @Test
+    fun `accrue propagates a save failure that is NOT the natural-key conflict`() {
+        val request = AccrualRequest(
+            accountId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            productId = "SAVINGS",
+            balance = BigDecimal("1000.00"),
+            currency = "EUR",
+            accrualDate = LocalDate.of(2026, 1, 20),
+        )
+        val config = sampleConfig(annualRate = BigDecimal("0.365"))
+        val boom = RuntimeException("connection reset")
+
+        stubNoExistingAccrual()
+        every {
+            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+        } returns Uni.createFrom().item(config)
+        every { accrualRepo.save(any()) } returns Uni.createFrom().failure(boom)
+
+        assertThatThrownBy { service.accrue(request).await().indefinitely() }
+            .hasStackTraceContaining("connection reset")
+    }
+
+    @Test
+    fun `createConfig replays the active twin for the same natural key without writing (ADR-0291)`() {
+        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+
+        every {
+            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+        } returns Uni.createFrom().item(config)
+
+        val result = service.createConfig(config).await().indefinitely()
+
+        assertThat(result).isEqualTo(config)
+        verify(exactly = 0) { configRepo.save(any()) }
+    }
+
+    @Test
+    fun `createConfig persists a genuinely new config`() {
+        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+
+        every {
+            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+        } returns Uni.createFrom().nullItem()
+        every { configRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestRateConfig>()) }
+
+        val result = service.createConfig(config).await().indefinitely()
+
+        assertThat(result).isEqualTo(config)
+        verify(exactly = 1) { configRepo.save(any()) }
+    }
+
+    @Test
+    fun `createConfig recovers a lost account-override race by returning the winner (ADR-0291)`() {
+        val accountId = UUID.fromString("99999999-9999-9999-9999-999999999999")
+        val config = sampleConfig(annualRate = BigDecimal("0.04")).copy(accountId = accountId, currency = "CZK")
+        val conflict = RuntimeException(
+            java.sql.SQLException(
+                "duplicate key value violates unique constraint \"ux_rate_active_account\"",
+                "23505",
+            ),
+        )
+
+        every {
+            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+        } returns Uni.createFrom().nullItem()
+        every { configRepo.save(any()) } returns Uni.createFrom().failure(conflict)
+        every {
+            configRepo.findEffectiveRate(accountId, config.productId, LocalDate.now(clock), config.currency)
+        } returns Uni.createFrom().item(config)
+
+        val result = service.createConfig(config).await().indefinitely()
+
+        assertThat(result).isEqualTo(config)
     }
 
     @Test
@@ -197,6 +339,7 @@ class InterestServiceTest {
         every { accountDirectoryPort.bookedBalance(savingsC) } returns
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("2000.00"), "CZK"))
         every { configRepo.findEffectiveRate(any(), any(), date, any()) } returns Uni.createFrom().item(config)
+        stubNoExistingAccrual()
         every { accrualRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestAccrual>()) }
 
         val count = service.accrueAll(date).await().indefinitely()
@@ -233,6 +376,7 @@ class InterestServiceTest {
         every { accountDirectoryPort.bookedBalance(ok) } returns
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "CZK"))
         every { configRepo.findEffectiveRate(any(), any(), date, any()) } returns Uni.createFrom().item(config)
+        stubNoExistingAccrual()
         // The duplicate account simulates the UNIQUE(account, date, product) violation on re-run.
         every { accrualRepo.save(match { it.accountId == dup }) } returns
             Uni.createFrom().failure(IllegalStateException("duplicate key value violates unique constraint"))

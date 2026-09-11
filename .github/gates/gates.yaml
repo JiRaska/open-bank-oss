@@ -2223,6 +2223,20 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: ci-reconcile-selector-selftest
+    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
+      expired, and duplicate runs and asserts the exact retry and flake matrices.
+    budget_seconds: 10
+    rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
+    review_after: "2027-03-11"
+    min_subjects: 3
+    run: |
+      python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
     group: registry
@@ -4034,7 +4048,14 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
-      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+      # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
+      # Editing the body to add the checklist (the documented remediation) only reached this
+      # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
+      # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
+      # The live body is the truth the gate means to check; the frozen one is the fallback
+      # when the API is unreachable. One contents-read API call per shard run.
+      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
+      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
 
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
@@ -5053,7 +5074,7 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    min_subjects: 200   # 291 source files scanned today (2026-09-09); findings may reach zero
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
@@ -5130,3 +5151,22 @@ gates:
     min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
+
+  - id: workflow-supply-chain
+    name: "workflow action pins and bounded agent admission"
+    group: supplychain
+    mode: enforced
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs."
+    review_after: "2026-12-08"
+    budget_seconds: 15
+    min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-workflow-supply-chain.py"
+      - ".github/scripts/test-workflow-supply-chain.py"
+      - ".github/scripts/agent-admission.py"
+      - ".github/scripts/test-agent-admission.py"
+    selftest: |
+      python3 .github/scripts/test-workflow-supply-chain.py
+      python3 .github/scripts/test-agent-admission.py
+    run: python3 .github/scripts/check-workflow-supply-chain.py

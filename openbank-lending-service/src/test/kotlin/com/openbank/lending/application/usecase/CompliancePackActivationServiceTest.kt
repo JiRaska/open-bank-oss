@@ -52,6 +52,26 @@ class CompliancePackActivationServiceTest {
     }
 
     @Test
+    fun `a retried propose with identical content replays the pending proposal (ADR-0297)`() {
+        val first = service.propose(czPackJson, "compliance-maker").await().indefinitely()
+        val second = service.propose(czPackJson, "compliance-maker").await().indefinitely()
+
+        assertThat(second.id).isEqualTo(first.id)
+        assertThat(second.contentHash).isEqualTo(first.contentHash)
+        assertThat(repository.findByState(ProposalState.PROPOSED).await().indefinitely()).hasSize(1)
+    }
+
+    @Test
+    fun `the same content proposed again after a decision is a new proposal`() {
+        val first = service.propose(czPackJson, "compliance-maker").await().indefinitely()
+        service.decide(first.id, false, "checker", "not now").await().indefinitely()
+
+        val second = service.propose(czPackJson, "compliance-maker").await().indefinitely()
+
+        assertThat(second.id).isNotEqualTo(first.id)
+    }
+
+    @Test
     fun `invalid pack JSON is refused at proposal time`() {
         assertThatThrownBy { service.propose("{ \"bogus\": true }", "maker") }
             .isInstanceOf(IllegalArgumentException::class.java)

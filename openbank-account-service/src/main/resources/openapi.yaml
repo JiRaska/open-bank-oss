@@ -5,7 +5,12 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.14.0
+  # 1.16.0 -> 1.17.0 (#9044): additive — optional termsVersion/termsUrl/termsEffectiveFrom on
+  # OpenAccountRequest and the Account response. termsVersion is use-case-REQUIRED for
+  # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
+  # opening other account types are unaffected; term-deposit openings come only from
+  # customer-edge, updated in the same change).
+  version: 1.17.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -441,7 +446,9 @@ paths:
         The propose-only flow (ADR-0232 D8): a delegate holding SAVINGS_PROPOSE_WITHDRAW
         creates a withdrawal proposal. Returns 202 with the proposal and the approvalId
         of the paired pending approval — the owner's SCA-bound decision is the only
-        path to execution. Authorize action `account.read`.
+        path to execution. Authorize action `account.read`. Idempotent (ADR-0295): a retry
+        while the original is still PENDING and unexpired replays the ORIGINAL proposal and its
+        approvalId instead of stacking a second executable instruction.
       operationId: proposeSavingsWithdrawal
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -656,6 +663,11 @@ paths:
     post:
       tags: [Accounts]
       summary: Grant an account authorization
+      description: >-
+        Idempotent (ADR-0295): a retry carrying the identical tuple (party, role, limits,
+        validity) while the original grant is still ACTIVE replays the ORIGINAL grant instead of
+        stacking a duplicate authority row. A revoke followed by an identical re-grant is a new
+        grant and persists normally.
       operationId: grantAccountAuthorization
       security:
         - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
@@ -674,6 +686,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/effective:
+    get:
+      tags: [Accounts]
+      summary: Everyone who can act on the account, from both authorization stores
+      description: |
+        The account owner's transparency view. Unlike `/authorizations`, which returns only the
+        `account_authorizations` table, this unifies BOTH stores the payment guard consults —
+        bank mandates and customer delegation grants — so an owner is not shown a half-truth
+        about who can take money out.
+
+        Customer-facing through the customer-edge, which stamps the validated caller party in
+        `X-Customer-Party-Id`. When that header is present the caller MUST own the account;
+        a mismatch returns 404, and an unknown account returns an empty list, so neither
+        response distinguishes "not yours" from "does not exist".
+      operationId: listEffectiveAccountAccess
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Caller party stamped by the customer-edge; enforces owner-only when present.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessResponse'
+        '404':
+          description: Account not found, or not owned by the customer-scoped caller
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -775,6 +827,9 @@ paths:
     post:
       tags: [Accounts]
       summary: Add a currency pocket to an account
+      description: >-
+        Natural-key enforced (ADR-0295): one pocket per (account, currency) — a repeat is a loud
+        400, never a duplicate row (`uq_account_pockets_acc_ccy`, V7).
       operationId: addCurrencyPocket
       security:
         - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
@@ -1016,6 +1071,47 @@ components:
         reason:
           type: string
 
+    AccountAccessResponse:
+      type: object
+      description: |
+        One party's effective ability to act on the account. Carries the party id and nothing else
+        identifying — the caller resolves a display name from a party the customer already knows,
+        so this cannot turn an account id into a person's details.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+          description: |
+            Which store the entry came from. OWNER is the account holder; BANK_MANDATE is an
+            operator-set `account_authorizations` row; CUSTOMER_DELEGATION is a grant the customer
+            issued themselves and can revoke.
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means the entry carries no ceiling of
+            its own — NOT that it is unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
+
     AuthorizationResponse:
       type: object
       required: [id, accountId, partyId, role, validFrom, status, grantedBy, grantedAt]
@@ -1162,6 +1258,19 @@ components:
         legalName:
           type: string
           description: Legal name of the account holder for sanctions screening (ADR-0032 §C).
+        termsVersion:
+          type: string
+          description: >-
+            Terms version the account is opened under (#9044). REQUIRED when accountType is
+            TERM_DEPOSIT (400 otherwise) — a term deposit must never open without a record of
+            the terms it was opened under.
+        termsUrl:
+          type: string
+          description: Snapshot of the terms document URL at opening (#9044).
+        termsEffectiveFrom:
+          type: string
+          format: date
+          description: Snapshot of the terms document effective-from date at opening (#9044).
 
     CloseAccountRequest:
       type: object
@@ -1217,6 +1326,17 @@ components:
           nullable: true
         nickname:
           type: string
+          nullable: true
+        termsVersion:
+          type: string
+          nullable: true
+          description: Terms version the account was opened under (#9044); null = pre-V24 account.
+        termsUrl:
+          type: string
+          nullable: true
+        termsEffectiveFrom:
+          type: string
+          format: date
           nullable: true
 
     RenameAccountRequest:

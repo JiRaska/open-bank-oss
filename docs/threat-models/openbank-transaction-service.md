@@ -59,6 +59,8 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 | **I**nfo disclosure | Domain metrics leak PII / enable per-transaction inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077 / ADR-0079): the `openbank.outbox.backlog` gauge is tagged **only** by `service="transaction"` — never a transaction id, amount, IBAN, counterparty, party id, or reference. It exposes a single read-only count (PENDING + FAILED outbox rows), sampled off the Prometheus scrape thread from a cached `AtomicLong` refreshed by a scheduled `suspend` tick, so the scrape never runs a per-request DB query. `/q/metrics` is cluster-internal |
 | **D**oS | Search flooding (expensive multi-criteria query) | `limit` coerced to ≤200; `offset` ≥0; pagination |
 | **E**oP | Viewer initiates a transaction | Reads exclude write role; initiate = `OPERATOR` only, deny-by-default |
+| **I**nfo disclosure | (issue #8699) An unparseable value on a search filter widens the result set instead of rejecting the request — `GET /api/v1/transactions?status=FAILDE` silently DROPPED the condition and answered 200 with every transaction the caller's role can read, while a malformed `dateFrom` three lines below correctly 400s. A caller probing filter values therefore learns more by spelling one wrong than by spelling it right | `parseEnumParam` distinguishes ABSENT (stays null, filter not applied) from UNPARSEABLE (`IllegalArgumentException`, mapped to 400 by libs-runtime — never a service-local mapper, #526). The same helper covers `rail` and `instructionType` on `POST /api/v1/transactions`, where a null rail had been persisted on a money-path debit under a 201. Note the role gate in §3 was never bypassed: this widens the set WITHIN the caller's authorisation, it does not cross it |
+| **T**ampering | A persisted `rail`, `instructionType` or `actorId` that no longer parses is read back as null, so a settled transaction silently loses the field that says which rail moved the money — indistinguishable from a transaction that never had one | Read-back is strict (`strictPersisted`): an unparseable persisted value raises `IllegalStateException` naming the field and the transaction id rather than nulling it. This deliberately turns a silent read into a 500 — data corruption on a money-path row must be loud, and the enum name is not PII |
 
 ## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
 
@@ -151,7 +153,7 @@ line and needs its own review.
 | **I**nfo disclosure | Enrichment leaks a *cardholder's* whereabouts rather than a shop's | The catalogue has no customer-, card- or transaction-scoped column; a row is per merchant descriptor and identical for every customer who shopped there. Nothing customer-derived is written back |
 | **T**ampering | A wrong or planted catalogue row attributes a payment to the wrong business — a lever for social engineering ("your payment to X") or for hiding one | Rows arrive only by migration, never from a request. Lookup is an **exact** match on the normalised key: no fuzzy or prefix matching, so a near-name cannot inherit another merchant's identity. `description` is passed through unmodified, so the raw acquirer text remains available and authoritative |
 | **R**epudiation | A dispute is raised against a prettified name that does not appear on the acquirer record | Enrichment is display-only and additive. Disputes and SPAYD consume `description`, which this change does not touch; `source: ENRICHED` labels anything the bank resolved |
-| **S**poofing | `logoUrl` points at attacker-controlled content rendered inside the bank app | URLs are catalogue-controlled and expected to be on a bank-controlled CDN; there is no request path that can set one |
+| **S**poofing | `logoUrl` points at attacker-controlled content rendered inside the bank app | Since §4e the field is DERIVED and origin-relative — it can only ever address this service's own logo route, and the catalogue column an operator writes is provenance that customers never receive. The mitigation is now structural rather than an expectation about what operators type |
 | **D**oS | Enrichment adds a per-row query to every statement page | One query per page: descriptors are normalised, de-duplicated and fetched together, so cost is bounded by distinct merchants on the page, not row count |
 
 **DFD update:** none. Same caller, same endpoint, same authorisation; one additional read of a
@@ -160,6 +162,52 @@ local reference table inside the existing request.
 what the catalogue may hold.
 **Rollback:** revert; absent the field, responses are byte-identical to before (the field is
 `NON_NULL`, so an unenriched transaction never carried it).
+
+## 4d. Merchant catalogue administration (#8573) — STRIDE supplement
+
+`MerchantCatalogResource` (`/api/v1/merchants`) is a new inbound REST surface: an operator tool for
+filling the catalogue that §4c reads. It writes no money and reads no cardholder data, but it is a
+write path into a table the customer-facing statement renders from, so a bad row is a bank-attested
+lie about who the customer paid.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **S**poofing | An unauthenticated or non-operator caller writes catalogue rows | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus OPA `@Authorize(action = "merchant.update")` / `"merchant.delete"` on the write endpoints; reads are `Roles.VIEWER`+ with `action = "merchant.list"`. Grants are declared in `openbank-libs/governance/rules-opa-data.yaml`, so `AUTHZ_ENFORCE=true` fails closed on an ungranted action rather than defaulting to allow |
+| **T**ampering | Two spellings of one descriptor create two rows, and the statement renders whichever it hits | Every key — path parameter and worklist output alike — goes through `MerchantDescriptor.normalise`, the same function the read path keys on. A key that normalises away entirely is rejected rather than stored, so an empty key cannot become the row every unidentifiable descriptor collides on |
+| **R**epudiation | No record of who renamed a merchant | `merchant_catalog.updated_at` is stamped on every upsert. **Not** a full audit trail: the row carries no editor identity, so who made a change is recoverable only from the access log. Recorded as a residual risk rather than claimed as a control |
+| **I**nfo disclosure | The catalogue becomes a record of where a cardholder was | The table is keyed by acquirer descriptor and holds public business data only — nothing in it is keyed by customer, card or transaction, stated in both `V16__create_merchant_catalog.sql` and the entity KDoc. `GET /unmatched` returns raw descriptors and their counts, never the transactions or accounts they came from |
+| **D**oS | `GET /unmatched` scans the whole transactions table on every operator refresh | `recentDescriptions` is a bounded, ordered window — `scan` is clamped to `MAX_SCAN` (20 000) and page size to `MAX_PAGE_SIZE`, both server-side via `coerceIn`, so a caller cannot widen the query. It lives in `TransactionDescriptorRepository` rather than the domain repository, keeping catalogue curation off the transaction persistence port |
+| **E**oP | A viewer edits the catalogue | Read and write roles are separate: `list`/`unmatched` admit `VIEWER`, `upsert`/`delete` do not, and the OPA action differs too, so a viewer is denied at both layers |
+
+## 4e. Self-hosted merchant logos — STRIDE supplement
+
+`merchant_logo` stores the logo bitmaps and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`
+serves and maintains them. Two boundaries move: an operator can now upload **binary content that a
+customer's banking app renders**, and the statement response gained a URL that clients dereference.
+
+**The privacy decision this exists to implement.** The obvious alternative — putting a logo CDN's
+URL in the statement response — would make every render tell that host the customer's IP address
+and which merchant they paid, at the moment they open their transaction list. That is a spending
+profile reconstructable from a third party's access log, outside any consent or processor
+agreement, and it needs no compromise of anything: it is what the feature would do while working
+correctly. Serving the bytes from this origin removes the third party from the request path.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **I**nfo disclosure | A logo request tells an external host who a customer paid | `MerchantResponse.logoUrl` is derived and origin-relative; it cannot be set from a request and cannot address another host. `merchant_catalog.logo_url` keeps the upstream URL for licence evidence and is returned only on the operator API |
+| **I**nfo disclosure | The stored image leaks whoever produced it — EXIF, GPS, embedded thumbnails | Only decoded pixels are kept. Re-encoding to a fresh PNG drops every metadata segment, because nothing but the raster is carried across |
+| **T**ampering | An upload carries script into an app that renders it — an SVG, or a polyglot with a payload appended after a valid image | Format is sniffed by magic number, so SVG and HTML are refused as not raster; anything after the image data does not survive the decode/re-encode. `LogoImagesTest` asserts each refusal, not the happy path |
+| **D**oS | A small upload declares an enormous canvas (a decompression bomb) and the decode allocates gigabytes, killing the pod | Dimensions are read from the header **before** any pixel buffer exists and refused above 4096 per side; uploads are capped at 512 kB; the served variants are pre-rendered, and `size` is an enumeration, so a caller cannot make the service resize on the request path |
+| **S**poofing | A planted logo attributes a payment to the wrong business more convincingly than a name alone | Write requires `Roles.OPERATOR`/`ADMIN` and OPA `merchant.update`; the row records `uploaded_by`, `source_url` and `licence`, which the catalogue text rows still do not (§4d's residual repudiation gap is narrower here, not closed elsewhere) |
+| **T**ampering | A cached wrong logo persists after correction, since the response is cached for a year | The URL carries a prefix of the content hash and the ETag is the hash, so replaced bytes are a different URL. Immutability is safe *because* of that, not despite it |
+| **E**oP | A viewer replaces a logo | Read and write split as in §4d: `merchant.list` for the GET, `merchant.update` / `merchant.delete` for the writes, and `VIEWER` holds only the first |
+
+**DFD update:** one new inbound binary write (operator → service) and one new authenticated read of
+static content. No new outbound edge — this service fetches nothing from the internet; bytes arrive
+only from an operator request.
+**Risk class:** content integrity of what a banking app renders, plus the privacy boundary above.
+**Rollback:** revert; `logoUrl` returns to null and the route disappears. The migration is additive,
+so the previous release runs unchanged against the new schema.
 
 ## 5. Residual risks / assumptions
 
@@ -198,6 +246,10 @@ what the catalogue may hold.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
+
+- **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
@@ -323,3 +375,29 @@ what the catalogue may hold.
   alter initiation); the span is assertion-backed by `TransactionApiIT`, which drives the real HTTP
   endpoint against PostgreSQL/Redpanda Testcontainers and the test Temporal terminal-write workflow.
   The contract proves this service boundary only — it does not claim a distributed downstream trace.
+- **2026-09-07** — Authentication-failure response shape. An unauthenticated call to a
+  `@RolesAllowed` endpoint answered with Quarkus's bare `Not Authorized` string, while every other
+  error from this service is an `ApiError` document: `io.quarkus.security.UnauthorizedException` is
+  not a `WebApplicationException`, so `WebApplicationExceptionMapper` — which already maps status
+  401 to `ErrorCode.UNAUTHORIZED` — never saw it. The service now registers the shared
+  `UnauthorizedExceptionMapper` from `openbank-libs-runtime` via a thin `@Provider` subclass, so a
+  401 carries the standard envelope. Risk class = **integrity of the client contract**, not
+  confidentiality: the trust boundary itself is unchanged, the endpoint is refused exactly as
+  before, and the envelope adds no detail about why — the message is a constant
+  (`Authentication required`), never the exception's own text, so nothing about the token, the
+  principal or the failure reason reaches the caller. What changes is that a caller parsing the
+  error body no longer breaks on the one response it is most likely to receive. Assertion-backed by
+  the swift, sdd and interest provider-replay interactions, which each require a 401 for a debit
+  presented without a valid M2M identity and could not be verified at all until this landed
+  (issues #8993, #8984).
+- **2026-09-07** — The 401 envelope moves from a service-local registration to the shared provider.
+  The entry above stands: the response shape, the constant message and the unchanged refusal are
+  all as described there. What changes is only where the `@Provider` lives.
+  `TransactionUnauthorizedExceptionMapper` now does not exist in this service's source;
+  `openbank-libs-runtime`'s `UnauthorizedExceptionMapper` is annotated instead, so every service gets the envelope rather
+  than the ones that remembered to opt in. Risk class = **unchanged**; no new trust boundary, no
+  new data in the body, same status. The supply-chain note worth recording is the enabling change:
+  `provider-type-classpath`'s `SAFE_ROOTS` gains `io.quarkus.security.`, which is a deliberate
+  narrowing of that gate's coverage — a service dropping OIDC would no longer be caught there and
+  would fail at its own ArC init. The evidence and the cost are written at the entry itself, and
+  two self-test cases pin the allowance so it cannot silently widen (issue #8993).

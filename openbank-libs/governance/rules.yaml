@@ -397,6 +397,11 @@ change_requirements:
     allowlist:
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
+      # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the
+      # entry anticipated — onboarding-service's business funnel projection
+      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6) and analytics-sink's
+      # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
+      # the gate fails on a stale entry under --enforce, in both directions.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
@@ -921,6 +926,16 @@ money_path_services:
                                             # a gate (TPP revocation, consent termination by an operator) are not
                                             # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                             # joins the #3679 cohort.
+  - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                            # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                            # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                            # may move, which is money-path for the same reason sca/consent/vop/
+                                            # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                            # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                            # repair money movement; card.create/activate are SCA-bound customer
+                                            # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                            # without the cardholder's SCA today — add a verb here when one ships.
+                                            # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -1130,6 +1145,18 @@ four_eyes:
   actions:
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
+                                         # playbook version. Confirmed no M2M caller — the only allow
+                                         # rule for this action (rest.rego commstyle-publish) requires
+                                         # HUMAN + (ROLE_COMMS_APPROVER or ROLE_ADMIN) and explicitly
+                                         # excludes any service-account-* principal id; D6 deliberately
+                                         # never grants commstyle.publish to a service account
+                                         # (shared_m2m_matrix_write_grants stays empty for it). Also
+                                         # enforced at the application layer, independently: the
+                                         # draft's own maker can never be the caller here
+                                         # (CommunicationStyleService.publish), D3's literal "the
+                                         # maker can never approve their own version" — two separate
+                                         # checks, not one restated twice.
     - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                          # Confirmed no M2M caller — the only allow rule for this
                                          # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -1473,6 +1500,7 @@ dependencies:
         - openbank-flaky-test-hunter/
         - openbank-ap2-service/
         - openbank-mcp-service/
+        - openbank-communication-service/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
@@ -1498,7 +1526,10 @@ dependencies:
         - openbank-flaky-test-hunter
         - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
         - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
+        - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
+                                             # itself, but the ADR's own binding decision places it
+                                             # "under ADR-0197 like the rest of that plane"
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
@@ -2856,6 +2887,10 @@ authz:
         - ledger.read
         - lending.list
         - lending.read
+        # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+        # than relying on the generic operator ".read" rule so the worklist route is granted
+        # explicitly, the same way every other list action in this matrix is.
+        - merchant.list
         - notification.list
         - notification.read
         # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -2919,6 +2954,12 @@ authz:
         - ledger.replay
         - ledger.reverse
         - ledger.trigger
+        - kyb.case.list                    # ADR-0284: business onboarding review queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.lookup
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         - lending.approve
         - lending.collateralDecide
         - lending.collateralRegister
@@ -2927,8 +2968,16 @@ authz:
         - lending.repay
         - lending.reschedule
         - lending.writeoff
+        # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+        # trading name, a logo, a shop location — never anything customer-derived, and not
+        # reachable through customer-edge.
+        - merchant.delete
+        - merchant.update
         - party.approval.decide
         - party.consent.update
+        - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+        - party.mandate.read
+        - party.mandate.revoke
         - party.merge
         - party.update
         - sanctions.approval.decide
@@ -2994,6 +3043,11 @@ authz:
       grant:
         - kyc.case.approve
         - kyc.case.reject
+        - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
         - audit.read
@@ -3155,6 +3209,9 @@ shared_m2m_matrix_write_grants:
     - interest.create
     - interest.delete
     - interest.trigger
+    - kyb.case.reject
+    - kyb.case.review.resolve
+    - kyb.lookup
     - ledger.create
     - ledger.replay
     - ledger.reverse
@@ -3167,10 +3224,14 @@ shared_m2m_matrix_write_grants:
     - lending.repay
     - lending.reschedule
     - lending.writeoff
+    - merchant.delete
+    - merchant.update
     - opsmessage.approval.decide
     - opsmessage.compose
     - party.approval.decide
     - party.consent.update
+    - party.mandate.grant
+    - party.mandate.revoke
     - party.merge
     - party.update
     - sanctions.approval.decide
@@ -3318,6 +3379,7 @@ autonomous_agent_prs:
   # scope would cover nothing at all.
   agent_branch_prefixes:
     - agent/
+    - codex/
   # High blast radius, not money-path by the list above.
   extra_protected_tokens:
     - payment

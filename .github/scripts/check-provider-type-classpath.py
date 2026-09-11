@@ -65,7 +65,25 @@ import gatelib  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 
 # Packages guaranteed present wherever a shared library is.
-SAFE_ROOTS = ("java.", "javax.", "kotlin.", "jakarta.ws.rs.", "com.openbank.")
+#
+# `io.quarkus.security.` is the one entry that is a JUDGEMENT rather than a structural
+# guarantee, so it carries its evidence. Every module in this repo that builds a Quarkus
+# service — 63 of them, measured 2026-09-07 — declares `quarkus-oidc`, which brings
+# `quarkus-security` transitively; agent-service, analytics-sink and ap2-service, the three
+# #6240 crashed, are among them. The six modules that do not are `openbank-libs*` and
+# `openbank-simulation`, none of which applies the `openbank.quarkus-service` plugin or boots
+# ArC at all, so no `@Provider` in them is ever registered.
+#
+# What this buys: a 401 rendered as the standard ApiError envelope fleet-wide from ONE
+# `@Provider` in openbank-libs-runtime (issue #8993), instead of a thin subclass in each of 61
+# services — which was the alternative, and which drags every one of those modules into each
+# PR's changed-module set, cold-cache dependency pinning included.
+#
+# What it costs, stated plainly: if a service ever drops OIDC while consuming libs-runtime, this
+# gate will no longer catch it and that service fails at ArC init instead. That failure is loud
+# and lands in the service's own build, which is why the trade was accepted here; the Hibernate
+# packages stay out precisely because for them the premise is false today.
+SAFE_ROOTS = ("java.", "javax.", "kotlin.", "jakarta.ws.rs.", "com.openbank.", "io.quarkus.security.")
 
 # JAX-RS supertypes ArC resolves the type argument of.
 PROVIDER_SUPERTYPES = ("ExceptionMapper", "MessageBodyReader", "MessageBodyWriter", "ParamConverter")
@@ -132,6 +150,15 @@ def self_test() -> int:
         ("the SAME risky type without @Provider -> silent (this is the sanctioned shape)",
          "import jakarta.ws.rs.ext.ExceptionMapper\nimport org.hibernate.exception.DataException\n\n"
          "class M : ExceptionMapper<DataException> {\n}\n", False),
+        # The io.quarkus.security allowance, pinned in both directions: the type it was added for
+        # must pass, and a NEIGHBOURING io.quarkus package must still fire — otherwise a later
+        # edit could widen the entry to `io.quarkus.` and nothing here would notice.
+        ("io.quarkus.security is allowed -> silent",
+         "import jakarta.ws.rs.ext.ExceptionMapper\nimport io.quarkus.security.UnauthorizedException\n\n"
+         "@Provider\nclass M : ExceptionMapper<UnauthorizedException> {\n}\n", False),
+        ("another io.quarkus package is NOT allowed -> MUST fire",
+         "import jakarta.ws.rs.ext.ExceptionMapper\nimport io.quarkus.runtime.QuarkusApplicationException\n\n"
+         "@Provider\nclass M : ExceptionMapper<QuarkusApplicationException> {\n}\n", True),
         ("a fully-qualified risky type written inline -> MUST fire",
          "import jakarta.ws.rs.ext.ExceptionMapper\n\n"
          "@Provider\nclass M : ExceptionMapper<org.hibernate.exception.DataException> {\n}\n", True),

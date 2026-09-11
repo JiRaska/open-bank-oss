@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -156,6 +157,43 @@ class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
 // with an ORM register these two explicitly (`@Provider` on a thin subclass, or list the class in
 // `quarkus.arc.additional-indexed-classes`); services without one never load them at all.
 
+/**
+ * A 401 as the standard error envelope, instead of Quarkus's bare `Not Authorized` string.
+ *
+ * Every other error these services emit is an [ApiError] document; an authentication failure was
+ * plain text, because [io.quarkus.security.UnauthorizedException] is not a
+ * [WebApplicationException] and never reaches [WebApplicationExceptionMapper] below — Quarkus
+ * answers first. A client that parses the error body therefore broke on the one response it is
+ * most likely to meet. Measured through transaction-service's provider replay of the three
+ * "missing or expired token" pacts, where pact-jvm reported
+ * `Invalid JSON (1:2), found unexpected character 'N'` (issue #8993).
+ *
+ * `@Provider` here, unlike the two persistence mappers above, and the difference is the one the
+ * `provider-type-classpath` gate encodes: a shared `@Provider` is registered in every consumer and
+ * ArC loads its type closure at init, so the type argument must come from a package every consumer
+ * certainly has. `org.hibernate.exception.*` is not — that is #6240. `io.quarkus.security` is:
+ * every module here that builds a Quarkus service declares `quarkus-oidc`. The gate's `SAFE_ROOTS`
+ * carries that reasoning and the self-test pins it, including that a neighbouring `io.quarkus`
+ * package still fires.
+ *
+ * The message is a CONSTANT and never `exception.message`: Quarkus puts the failed mechanism or
+ * the missing permission there, and echoing it would tell an unauthenticated caller which door it
+ * just tried.
+ */
+@Provider
+class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
+    override fun toResponse(exception: UnauthorizedException): Response =
+        Response.status(ErrorCode.UNAUTHORIZED.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.UNAUTHORIZED.httpStatus,
+                    ErrorCode.UNAUTHORIZED.code,
+                    "Authentication required",
+                ),
+            )
+            .build()
+}
+
 @Provider
 class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
     override fun toResponse(exception: WebApplicationException): Response {
@@ -208,6 +246,14 @@ private val PERSISTENCE_STATUS: Map<String, ErrorCode> = mapOf(
     "org.hibernate.exception.ConstraintViolationException" to ErrorCode.CONFLICT,
     // Raised while DECODING the entity, before any handler sees it.
     "java.io.CharConversionException" to ErrorCode.VALIDATION_ERROR,
+    // A malformed multipart/form-data frame — the caller's encoding, never a server fault.
+    // RESTEasy Reactive's parser raises it before any handler or reader runs; found by fleet
+    // fuzzing on party-service's /parties/{id}/documents/upload answering 500 to a garbage
+    // multipart body (run 34017868446). By name, like everything here: a typed @Provider would
+    // name a resteasy-reactive-server type in its supertype and make ArC load it in consumers
+    // that serve no multipart at all.
+    "org.jboss.resteasy.reactive.server.core.multipart.MultipartParser\$MalformedMessageException" to
+        ErrorCode.VALIDATION_ERROR,
 )
 
 /**

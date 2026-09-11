@@ -111,6 +111,13 @@ BASELINE: dict[str, str] = {
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
+    # NOT drift — a DELIBERATE SUBSET (#5962). Delegation lifecycle approvals persist ONLY
+    # PROPOSED/REJECTED/EXECUTED: decide is atomic (DelegationLifecycleApprovalService
+    # PERSISTED_STATES), so the shared ProposalState's transient APPROVED would claim a decision
+    # without the side effect, and no withdraw operation exists (WITHDRAWN unreachable).
+    "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
+        "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
+        "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
@@ -168,16 +175,6 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
         "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
         "whose properties do not match the DTO at all; needs a schema fix first.",
-    # This one is a MIS-PAIRING, kept baselined deliberately. The values are
-    # `UpdateKycRequest.kycStatus`, and pid's `UpdateKycRequest` has no `kycStatus` property at
-    # all — it is (kycLevel: KycLevel, amlRiskScore: AmlRiskScore, pepFlag, sanctionsFlag). With
-    # no real counterpart to pair with, the matcher settled on the openid4vp
-    # `PresentationExchangeStore.Status { PENDING, COMPLETED, EXPIRED }` on the strength of two
-    # coincidental values. The defect is a whole fictional request schema, not an enum drift, so
-    # reconciling the enum alone would polish a document that still describes nothing.
-    "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
-        "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
-        "not an enum fix. The `Status` pairing is coincidental.",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":

@@ -20,6 +20,14 @@ data class OpenAccountRequest(
     val currencyCode: String,
     /** Legal name of the party — required for sanctions screening (ADR-0032 §C). */
     val legalName: String,
+    /**
+     * Terms version + document reference the account is opened under (#9044). REQUIRED for
+     * TERM_DEPOSIT (enforced in the use case — a deposit without a terms record is a compliance
+     * gap, not a nullable convenience), ignored semantic weight for other account types.
+     */
+    val termsVersion: String? = null,
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 )
 
 data class CloseAccountRequest(val reason: String?)
@@ -43,6 +51,10 @@ data class AccountResponse(
     val goalTargetDate: LocalDate? = null,
     /** Customer-chosen display label. Null means "use the account-type default name". */
     val nickname: String? = null,
+    /** Terms version the account was opened under (#9044). Null = pre-V24 account. */
+    val termsVersion: String? = null,
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 )
 
 data class AddPocketRequest(val currencyCode: String)

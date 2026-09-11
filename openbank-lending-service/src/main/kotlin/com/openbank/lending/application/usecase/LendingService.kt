@@ -283,6 +283,7 @@ class LendingService @Inject constructor(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""fromState":"$from",""")
             append(""""toState":"${to.name}",""")
             append(""""actorId":"$actor",""")
@@ -692,7 +693,8 @@ class LendingService @Inject constructor(
                                 // event types in this file/OriginationDecisionService/TerminationService — not
                                 // "lending-service" as the topic-fallback table would say (a pre-existing,
                                 // self-consistent naming choice this PR preserves rather than introduces).
-                                payload = """{"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
+                                    """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
                                     """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
                                     """"sourceService":"lending"}""",
@@ -822,7 +824,8 @@ class LendingService @Inject constructor(
                         // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
                         // markAccrued above — the recognition event itself, not the emit.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${installment.loanId.value}",""" +
+                            """"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
                             """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
                             """"occurredAt":"${accruedAt.toInstant()}",""" +
                             """"sourceService":"lending"}""",
@@ -871,7 +874,8 @@ class LendingService @Inject constructor(
                                 // once into a local so payload and any future reuse cannot disagree.
                                 val writtenOffAt = clock.instant()
                                 // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                                val wPayload = """{"loanId":"${written.id.value}",""" +
+                                val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
+                                    """"loanId":"${written.id.value}",""" +
                                     """"partyId":"${written.partyId}",""" +
                                     """"writtenOff":"$outstanding",""" +
                                     """"writtenOffBy":"${request.writtenOffBy}",""" +
@@ -1126,7 +1130,8 @@ class LendingService @Inject constructor(
                         // #3914: no rescheduledAt column on Loan; clock at the completed reschedule, same
                         // house convention as write-off above.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${updated.id.value}",""" +
+                            """"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
                             """"newPrincipal":"$newPrincipal",""" +
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
@@ -1146,22 +1151,41 @@ class LendingService @Inject constructor(
         }
         require(registeredBy.isNotBlank()) { "Registrant identity is required" }
         val now = OffsetDateTime.now(clock)
-        return valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
-            collateral.save(
-                Collateral(
-                    loanId = loanId,
-                    type = request.type,
-                    description = request.description,
-                    marketValue = valued,
-                    haircut = request.haircut,
-                    valuedAt = now,
-                    // Four-eyes: registration alone does not make the collateral usable to reduce a
-                    // loan's LGD — see applyCollateral, which only sums APPROVED items.
-                    status = CollateralStatus.PENDING,
-                    registeredBy = registeredBy,
-                    createdAt = now,
-                ),
-            )
+        // Idempotent replay (ADR-0297, #8351): the natural key of a registration is the full
+        // caller-supplied tuple (loan, type, description, market value, haircut) while the
+        // original is still PENDING. A retried POST replays the ORIGINAL PENDING collateral
+        // instead of stacking a duplicate that a checker could approve twice — two approved
+        // identical items would double-count against the loan's LGD. Once the original is decided
+        // (APPROVED/REJECTED), an identical new registration is legitimate and persists. No DB
+        // backstop (see the ADR): a lost true-concurrency race stacks two PENDING rows, but each
+        // still needs its own checker decision, so nothing affects LGD silently.
+        return collateral.findByLoan(loanId).flatMap { existing ->
+            existing.firstOrNull {
+                it.status == CollateralStatus.PENDING &&
+                    it.type == request.type &&
+                    it.description == request.description &&
+                    it.marketValue.currency == request.marketValue.currency &&
+                    it.marketValue.amount.compareTo(request.marketValue.amount) == 0 &&
+                    it.haircut.compareTo(request.haircut) == 0
+            }?.let { twin ->
+                Uni.createFrom().item(twin)
+            } ?: valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
+                collateral.save(
+                    Collateral(
+                        loanId = loanId,
+                        type = request.type,
+                        description = request.description,
+                        marketValue = valued,
+                        haircut = request.haircut,
+                        valuedAt = now,
+                        // Four-eyes: registration alone does not make the collateral usable to reduce a
+                        // loan's LGD — see applyCollateral, which only sums APPROVED items.
+                        status = CollateralStatus.PENDING,
+                        registeredBy = registeredBy,
+                        createdAt = now,
+                    ),
+                )
+            }
         }
     }
 
@@ -1381,7 +1405,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         period: String,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
         """"previousStage":"${prior.stage}","newStage":"${snapshot.stage}",""" +
         """"daysPastDue":${snapshot.daysPastDue},"period":"$period","asOf":"${snapshot.asOf}",""" +
         """"occurredAt":"${record.createdAt.toInstant()}","sourceService":"lending"}"""
@@ -1393,7 +1418,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         delta: Money,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","period":"$period",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}","period":"$period",""" +
         """"stage":"${snapshot.stage}",""" +
         """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
         """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}",""" +

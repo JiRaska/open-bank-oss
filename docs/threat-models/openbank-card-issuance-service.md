@@ -6,7 +6,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 - **Date:** 2026-06-30
 - **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). Payment-instrument data context.
-- **Service ADR:** [ADR-0113](../adr/0113-card-issuance-bounded-context.md) (card issuance bounded context — virtual-first, no external processor)
+- **Service ADR:** [ADR-0113](../adr/0113-card-issuance-bounded-context.md) (card issuance bounded context — virtual-first, no external processor); money-path since [ADR-0283](../adr/0283-card-platform-scheme-agnostic-capability-ports.md) phase 0 (#8808)
 
 ## 1. Scope & purpose
 
@@ -183,6 +183,15 @@ retiring the corresponding KEK version in Transit, not after.
   process would need this before card data does.
 
 ## 6. Change log
+
+- **2026-09-05** — Money-path classification (ADR-0283 phase 0, #8808). No code change. The
+  service joins `rules.yaml: money_path_services` because the authorisation decision point (§4a)
+  and the SCA-gated limit/control changes (ADR-0194) decide whether money may move. Measured
+  before the change: `POST /cards/{id}/authorizations` has **no caller** anywhere in the fleet and
+  `openbank.cards.events` never reaches the ledger — the decision exists, the traffic does not.
+  That is the phase 1 defect (#8809), not a residual risk of this service. New governance tails:
+  SLO pair (Pyrra), journey accountability (`journeys.yaml`, ADR-0252), four-eyes assessed in
+  place (no operator verb gated today; see the `money_path_services` entry for why).
 
 - **2026-08-17** — Envelope encryption for the PAN vault (ADR-0262). Adds
   `OpenBaoEnvelopeCardSecretCipher` (opt-in via `openbank.card.key-source=openbao-transit`),
