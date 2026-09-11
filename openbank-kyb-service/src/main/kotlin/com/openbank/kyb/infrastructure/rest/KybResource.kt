@@ -10,8 +10,10 @@ import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
+import com.openbank.kyb.application.port.`in`.RegistrySearchUseCase
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
+import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
@@ -19,6 +21,7 @@ import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -28,6 +31,8 @@ import com.openbank.kyb.infrastructure.rest.dto.MatchInitiatorRequest
 import com.openbank.kyb.infrastructure.rest.dto.RejectRequest
 import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
 import com.openbank.kyb.infrastructure.rest.dto.SchemeResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchHitResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchResponse
 import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
@@ -50,6 +55,7 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -67,6 +73,8 @@ import java.util.UUID
 class KybResource {
 
     @Inject lateinit var lookup: RegistryLookupUseCase
+
+    @Inject lateinit var search: RegistrySearchUseCase
 
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
 
@@ -100,11 +108,52 @@ class KybResource {
                             "version" to it.version,
                             "registry" to it.registry.name,
                             "uboFallback" to it.uboRegister.fallback,
+                            "supportsNameSearch" to it.registry.supportsNameSearch,
                         )
                     },
                 "schemes" to list.map { SchemeResponse(it.name, it.country, it.displayName, it.checksum, example(it)) },
             ),
         ).build()
+    }
+
+    /**
+     * Find a company by name and town (issue #9707). Reuses the `kyb.lookup` action on purpose:
+     * it returns a strict subset of what `/lookup` returns (public-register data, less of it), and
+     * a new action would need a `role_action_matrix` line, a `shared_m2m_matrix_write_grants`
+     * entry and a ~79-bundle OPA restamp — a governance change for no extra exposure.
+     *
+     * Parameters are nullable and checked in the body: a non-null `String` query param is a 500
+     * for the absent case, never a 400 (root CLAUDE.md, `nonnull-jaxrs-param-ratchet`).
+     */
+    @GET
+    @Path("/registry/search")
+    @Authorize(action = "kyb.lookup")
+    @Operation(
+        summary = "Find a company by name, optionally narrowed by town (404 when this register cannot search)",
+    )
+    suspend fun searchRegistry(
+        @QueryParam("country") country: String?,
+        @QueryParam("name") name: String?,
+        @QueryParam("city") city: String?,
+        @QueryParam("limit") limit: Int?,
+    ): Response {
+        val c = requireNotNull(country?.takeIf { it.isNotBlank() }) { "query parameter 'country' is required" }
+        val n = requireNotNull(name?.takeIf { it.isNotBlank() }) { "query parameter 'name' is required" }
+        val result = search.search(
+            SearchRegistryCommand(
+                country = c.uppercase(),
+                name = n,
+                city = city,
+                limit = limit ?: RegistrySearchQuery.DEFAULT_LIMIT,
+            ),
+        ) ?: return Response.status(Response.Status.NOT_FOUND).entity(
+            mapOf("error" to "the register for country '$c' does not support name search"),
+        ).build()
+        val pack = packs.packFor(c.uppercase(), LocalDate.now(clock))
+        val hits = result.hits.map { h ->
+            SearchHitResponse.from(h, h.legalFormCode?.let { code -> pack?.legalFormLabels?.get(code)?.get("cs") })
+        }
+        return Response.ok(SearchResponse(hits, result.totalMatches, result.tooManyMatches)).build()
     }
 
     @POST
