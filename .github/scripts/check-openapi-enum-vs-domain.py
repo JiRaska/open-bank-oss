@@ -175,10 +175,13 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
         "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
         "whose properties do not match the DTO at all; needs a schema fix first.",
-    "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
-    "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
+    # NOT drift — a DELIBERATE SUBSET (#5962). TransitionStatusRequest.targetStatus publishes
+    # every status `SepaPayment.canTransitionTo` can reach; RECEIVED is the entry state and is
+    # the target of no transition, so it is absent here while present on the read filter, which
+    # pairs exactly with the domain enum and is therefore no longer baselined at all.
+    "openbank-sepa-payment:CANCELLED,COMPLETED,PROCESSING,REJECTED,RETURNED,VALIDATED":
+        "#5962 — targetStatus: deliberate subset of SepaPaymentStatus; RECEIVED is unreachable "
+        "as a transition target (SepaPayment.canTransitionTo).",
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
 }
