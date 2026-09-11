@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.4.0
+  version: 1.5.0
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -268,18 +268,34 @@ components:
         paymentId:
           type: string
           format: uuid
-        rail:
-          type: string
-          enum: [SEPA_SCT, SEPA_SCT_INST, SWIFT, DOMESTIC, INTERNAL]
-        amount:
-          type: number
-        currency:
+        paymentReference:
           type: string
         debtorIban:
           type: string
         creditorIban:
           type: string
 
+        debtorBic:
+          type: string
+          nullable: true
+        creditorBic:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+        rail:
+          type: string
+          enum: [SEPA_SCT, SEPA_SCT_INST, SWIFT, DOMESTIC, INTERNAL]
+        valueDate:
+          type: string
+        endToEndId:
+          type: string
+          nullable: true
+        remittanceInfo:
+          type: string
+          nullable: true
     ApprovalResponse:
       type: object
       description: >-
