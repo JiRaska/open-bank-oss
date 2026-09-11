@@ -66,21 +66,24 @@ class CustomerBusinessResourceTest {
     @Test
     fun `claim binds the token party, never a body-supplied one`() {
         val upstream = mockk<UpstreamClient>()
-        val url = slot<String>()
+        val baseUrl = slot<String>()
+        val path = slot<String>()
         val body = slot<String>()
-        every { upstream.post(capture(url), any(), capture(body), any()) } returns Response.ok().build()
+        every {
+            upstream.postToService(capture(baseUrl), capture(path), any(), capture(body), any())
+        } returns Response.ok().build()
 
         resource(upstream).claim("inv_9f3ab21c-4d0e")
 
-        assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/invitations/inv_9f3ab21c-4d0e/claim")
+        assertThat(baseUrl.captured).isEqualTo(kyb)
+        assertThat(path.captured).isEqualTo("/api/v1/kyb/invitations/inv_9f3ab21c-4d0e/claim")
         assertThat(body.captured).isEqualTo("""{"partyId":"$caller"}""")
     }
 
     @Test
     fun `claim refuses a token that is not opaque and URL-safe, before upstream`() {
-        // Encoding it would also be safe, and that is exactly the reasoning CodeQL reported as an
-        // SSRF finding on this path: the guarantee lived two indirections away, in UpstreamClient's
-        // host allowlist. A malformed token is now a 400 here, at the edge.
+        // The structured upstream URI already prevents the path from changing the authority. The
+        // token's own contract is narrower, so malformed input is still a 400 here at the edge.
         // libs-runtime maps IllegalArgumentException to 400 — never a service-local mapper (#526).
         val upstream = mockk<UpstreamClient>()
 
@@ -91,6 +94,7 @@ class CustomerBusinessResourceTest {
             }
 
         io.mockk.verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        io.mockk.verify(exactly = 0) { upstream.postToService(any(), any(), any(), any(), any()) }
     }
 
     @Test

@@ -6,6 +6,9 @@
 package com.openbank.communication.infrastructure.rest
 
 import com.openbank.communication.domain.PersonaNotFoundException
+import com.openbank.communication.domain.PlaybookVersionConflictException
+import com.openbank.communication.domain.PlaybookVersionNotFoundException
+import com.openbank.communication.domain.PlaybookVersionValidationException
 import com.openbank.communication.domain.StyleLintRejectedException
 import com.openbank.communication.domain.StyleVersionConflictException
 import com.openbank.communication.domain.StyleVersionNotFoundException
@@ -39,4 +42,16 @@ private fun status(s: Response.Status, e: Exception) = Response.status(s).entity
     override fun toResponse(e: StyleLintRejectedException) = Response.status(Response.Status.BAD_REQUEST).entity(
         mapOf("error" to "style text rejected by lint", "violations" to e.violations),
     ).build()
+}
+
+@Provider class PlaybookVersionNotFoundMapper : ExceptionMapper<PlaybookVersionNotFoundException> {
+    override fun toResponse(e: PlaybookVersionNotFoundException) = status(Response.Status.NOT_FOUND, e)
+}
+
+@Provider class PlaybookVersionConflictMapper : ExceptionMapper<PlaybookVersionConflictException> {
+    override fun toResponse(e: PlaybookVersionConflictException) = status(Response.Status.CONFLICT, e)
+}
+
+@Provider class PlaybookVersionValidationMapper : ExceptionMapper<PlaybookVersionValidationException> {
+    override fun toResponse(e: PlaybookVersionValidationException) = status(Response.Status.BAD_REQUEST, e)
 }
