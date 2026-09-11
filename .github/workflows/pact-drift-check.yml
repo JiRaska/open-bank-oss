@@ -38,6 +38,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Never collapse two main commits: committed pact evidence belongs to an exact SHA.
+  group: pact-drift-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
