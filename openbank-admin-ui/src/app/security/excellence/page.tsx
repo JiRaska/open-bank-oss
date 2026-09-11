@@ -31,6 +31,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { parseSecurityEnvelope, summarizeReachable } from '@/lib/security/summary'
+import { parseSecurityKpis, type SecurityKpis } from '@/lib/security/kpiContract'
 
 // ── Doménové stavy ───────────────────────────────────────────────────────────
 
@@ -237,20 +238,14 @@ async function fetchSbom(): Promise<Patch> {
 
 // ── ADR-0279 KPI domény: čtou jeden CI-generovaný snapshot (/api/security/kpis) ──
 
-interface KpisSnapshot {
-  netpol?: { available?: boolean; coveragePct?: number; covered?: number; total?: number }
-  freshness?: { available?: boolean; fleetScore?: number; unknownModules?: number }
-  credentials?: { available?: boolean; staticSecrets?: number; withDeadline?: number; overdue?: number }
-  fuzz?: { available?: boolean; inScope?: number; tested?: number; coveragePct?: number; totalExercised?: number; excludedCount?: number; runDate?: string }
-  threatModels?: { available?: boolean; moneyPathTotal?: number; withModel?: number; staleCount?: number; oldestDays?: number }
-  mttr?: { available?: boolean; fixedCount?: number; medianFixDays?: number | null; openCount?: number; oldestOpenDays?: number }
-}
+type KpisSnapshot = SecurityKpis
 
 async function fetchKpis(): Promise<KpisSnapshot | null> {
   const { ok, body } = await safeJson('/api/security/kpis')
   if (!ok) return null
-  const env = body as { available?: boolean; kpis?: KpisSnapshot }
-  return env.available && env.kpis ? env.kpis : null
+  const env = body as { available?: unknown; kpis?: unknown }
+  if (env.available !== true) return null
+  try { return parseSecurityKpis(env.kpis) } catch { return null }
 }
 
 async function fetchSegmentation(snap: KpisSnapshot | null): Promise<Patch> {

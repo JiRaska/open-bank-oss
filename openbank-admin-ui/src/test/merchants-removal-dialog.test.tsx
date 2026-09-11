@@ -55,10 +55,33 @@ describe('merchant destructive action review', () => {
 
   it('puts initial focus on the safe action and lets Escape cancel', async () => {
     renderPage()
-    fireEvent.click(await screen.findByLabelText('Delete BILLA'))
+    const trigger = await screen.findByLabelText('Delete BILLA')
+    fireEvent.click(trigger)
 
     expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus()
     fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('returns focus to a stable catalogue action when deletion removes the trigger', async () => {
+    let deleted = false
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (method === 'DELETE') {
+        deleted = true
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+      if (String(url).includes('/unmatched')) return Promise.resolve(json([]))
+      return Promise.resolve(json({ data: deleted ? [] : [merchant], total: deleted ? 0 : 1 }))
+    }))
+    render(<LanguageProvider><MerchantsPage /></LanguageProvider>)
+
+    fireEvent.click(await screen.findByLabelText('Delete BILLA'))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete entry' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.queryByLabelText('Delete BILLA')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New entry' })).toHaveFocus())
   })
 })
