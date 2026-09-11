@@ -18,7 +18,11 @@ describe('accounts controls accessibility contract', () => {
     expect(source).toContain("buttonAriaLabel={t('Zobrazit další účty', 'Load more accounts')}")
     expect(source).toContain('controls="accounts-results"')
     expect(source).toContain('busy={loadingMore}')
-    expect(source).toContain('onLoadMore={() => void search(query, result?.pagination.nextCursor)}')
+    // The render stays capped at `visible` even when a fragment search returns a full page in
+    // one response; "Load more" reveals the local window first and only reaches back to the
+    // server (the cursor fetch) once that window is exhausted.
+    expect(source).toContain('setVisible(v => v + PAGE_SIZE)')
+    expect(source).toContain('void search(query, result?.pagination.nextCursor)')
     expect(loadMore).toContain('aria-controls={controls}')
     expect(loadMore).toContain("role={announceProgress ? 'status' : undefined}")
     expect(loadMore).toContain('aria-busy={busy}')

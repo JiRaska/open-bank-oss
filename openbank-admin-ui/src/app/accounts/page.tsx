@@ -61,6 +61,9 @@ export default function AccountsPage() {
   const [ibanHint, setIbanHint]         = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreUnavailable, setLoadMoreUnavailable] = useState<UnavailableKind | null>(null)
+  // Bounds the DOM regardless of how much is already fetched — a fragment search can return
+  // a full page in one response, and the render must still stay capped (admin-ui pagination rule).
+  const [visible, setVisible] = useState(PAGE_SIZE)
   const activeSearch = useRef<AbortController | null>(null)
 
   const kind = classifyQuery(query)
@@ -81,6 +84,7 @@ export default function AccountsPage() {
     setIbanHint(null)
     setLoadingMore(false)
     setLoadMoreUnavailable(null)
+    setVisible(PAGE_SIZE)
   }
 
   async function search(value = query, cursor?: string) {
@@ -93,6 +97,7 @@ export default function AccountsPage() {
       setIbanHint(null)
       setUnavailable(null)
       setLoadMoreUnavailable(null)
+      setVisible(PAGE_SIZE)
     }
 
     if (k === 'empty') return
@@ -181,7 +186,10 @@ export default function AccountsPage() {
     return true
   }) ?? []
 
-  const hasMore = Boolean(result?.pagination.hasNextPage && result.pagination.nextCursor)
+  // What's actually rendered — capped at `visible` regardless of how much is in `filtered`.
+  const page = filtered.slice(0, visible)
+  const hasServerMore = Boolean(result?.pagination.hasNextPage && result.pagination.nextCursor)
+  const hasMore = hasServerMore || page.length < filtered.length
   const queryHelpVisible = !ibanHint && !result && !unavailable
 
   return (
@@ -368,7 +376,7 @@ export default function AccountsPage() {
                     />
                   </td></tr>
                 )}
-                {!loading && filtered.map(a => (
+                {!loading && page.map(a => (
                   <tr key={a.id}>
                     <td><span className="mono" style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 500 }}>{a.accountNumber}</span></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accountType}</span></td>
@@ -388,18 +396,21 @@ export default function AccountsPage() {
           </div>
         )}
 
-        {!unavailable && result && filtered.length > 0 && (
+        {!unavailable && result && page.length > 0 && (
           <LoadMoreControl
-            loaded={filtered.length}
+            loaded={page.length}
             total={filtered.length}
             hasMore={hasMore}
             busy={loadingMore}
-            progressLabel={t(`Zobrazeno ${filtered.length} účtů`, `Showing ${filtered.length} accounts`)}
+            progressLabel={t(`Zobrazeno ${page.length} z ${filtered.length} účtů`, `Showing ${page.length} of ${filtered.length} accounts`)}
             buttonLabel={t('Načíst další účty', 'Load more accounts')}
             busyLabel={t('Načítám další…', 'Loading more…')}
             buttonAriaLabel={t('Zobrazit další účty', 'Load more accounts')}
             controls="accounts-results"
-            onLoadMore={() => void search(query, result?.pagination.nextCursor)}
+            onLoadMore={() => {
+              setVisible(v => v + PAGE_SIZE)
+              if (page.length >= filtered.length && hasServerMore) void search(query, result?.pagination.nextCursor)
+            }}
           />
         )}
         {!unavailable && loadMoreUnavailable && (
