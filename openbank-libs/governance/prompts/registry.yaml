@@ -59,7 +59,19 @@ charters:
 
   - id: customer-copilot
     status: registered
-    prompts: [system.v1]
+    prompts: [system.v1, core.v1, style.v1]
+    # system.v1 is what CopilotChatService.systemPrompt() actually returns today (unchanged, kept
+    # as the immutable shipped record per this registry's own rule). core.v1 + style.v1 are the
+    # ADR-0285 D1 split of that SAME text — core.v1 is system.v1 minus its one style-eligible
+    # sentence ("Mluv stručně."), style.v1 is that sentence, registered here as the git-committed
+    # baseline (D5) a future communication-service-backed style layer falls back to. Content is
+    # therefore already correct and immutable; wiring CopilotChatService.systemPrompt() to actually
+    # compose core.v1 + style.v1 (and retiring the system.v1 hardcoded string) is a deliberately
+    # separate, deferred PR — that composition reorders one sentence relative to system.v1 (D1's
+    # fixed core-then-style order can't reproduce the original mid-document position of the sole
+    # style sentence byte-for-byte), and a live customer-facing safety prompt needs the ADR-0148
+    # evals replayed against the reordered text before it becomes the runtime source, not merely
+    # asserted equivalent here.
     source: openbank-copilot-service CopilotChatService.systemPrompt()
     # Concatenated at call time with PromptInjectionGuard.UNTRUSTED_PREAMBLE, which is a shared
     # constant rather than a per-charter prompt; it is not registered separately.
