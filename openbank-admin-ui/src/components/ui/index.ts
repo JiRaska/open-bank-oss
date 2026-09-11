@@ -20,6 +20,7 @@ export { Drawer } from './Drawer'
 export { LoadingState } from './LoadingState'
 export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
+export { EmptyState } from './EmptyState'
 export { Tabs, type TabItem } from './Tabs'
 export {
   BADGE_CLASS,
