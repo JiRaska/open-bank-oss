@@ -23,6 +23,12 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
+  // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
+  // decides the commstyle.publish four-eyes queue) — never the same person on the same
+  // draft, enforced server-side (CommunicationStyleService.publish).
+  COMMS_EDITOR: "ROLE_COMMS_EDITOR",
+  COMMS_APPROVER: "ROLE_COMMS_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -209,6 +215,14 @@ export const PERMISSIONS = {
   // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
   // put two role vocabularies in the console for a surface that cannot yet be written to.
   "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
+  // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
+  "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
+  "communication:style:decide":  [ROLES.ADMIN, ROLES.COMMS_APPROVER],
+  // ADR-0285 D4: golden-set entries are CRUD-only, no four-eyes (nothing an editor writes here
+  // reaches a customer without a separate change wiring the replay engine) — same maker-only
+  // grant as style:propose.
+  "communication:golden-set:manage": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
@@ -286,6 +300,12 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
+  // Longest-prefix-wins: '/communication/edit' must be registered so it beats the bare
+  // '/communication' entry below for anything under it, since ROUTE_PREFIXES only does a
+  // startsWith match (no wildcards) — a dynamic segment can only differentiate a permission
+  // when it comes AFTER the differentiating literal, which is why the editor lives at
+  // /communication/edit/[personaKey], not /communication/[personaId]/edit.
+  ['communication:style:propose', ['/communication/edit']],
   ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
