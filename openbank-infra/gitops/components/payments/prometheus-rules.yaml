@@ -328,6 +328,9 @@ spec:
             severity: warning
             service: '{{ $labels.service }}'
           annotations:
+            # The [1h] window measures payment intake, which is driven by real customer traffic
+            # rather than by any scheduler — there is no period to align the window to.
+            subject_period: continuous
             summary: "{{ $labels.service }} took payments for an hour and scored none of them"
             description: >-
               The fraud-scoring gauge on {{ $labels.service }} ({{ $labels.rail }}) has read
