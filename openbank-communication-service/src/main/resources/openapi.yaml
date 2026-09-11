@@ -1,7 +1,13 @@
 openapi: 3.0.3
 info:
   title: OpenBank Communication Service
-  version: 1.0.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). 1.0.0 -> 1.1.0 (#9602): additive —
+  # the ADR-0285 phase 3 playbook layer. 1.0.0 is what origin/main holds, so this could not stay
+  # there: `openapi-version-not-taken` reads the base tip and an unchanged version on an additive
+  # change fails both that gate and `api-contract-gate`.
+  # SEQUENCED with #9633 (D4 golden set), which takes 1.2.0 — this one lands first. Neither number
+  # is on main yet, so nothing but these comments records the order.
+  version: 1.1.0
 paths:
   /api/v1/personas/{personaKey}/style-versions:
     post:
