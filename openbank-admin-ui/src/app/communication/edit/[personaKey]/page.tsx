@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Send, UploadCloud } from 'lucide-react'
+import { ArrowLeft, ListChecks, Save, Send, Trash2, UploadCloud } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -32,6 +32,21 @@ interface StyleVersionDraft {
   id: string
   version: number
   status: string
+}
+
+// ADR-0285 D4: a golden-set entry is a TEST INPUT (what a hypothetical customer might ask), not
+// content the bot serves — so unlike the style draft above, nothing here goes through D3's lint
+// and there is no four-eyes step. It is pure CRUD; no replay is wired yet (see the service's own
+// KDoc), so creating an entry here is inert until a later, separately-reviewed change adds one.
+interface GoldenSetEntry {
+  id: string
+  question: string
+  expectedLanguage: string
+  expectNoFigureFromMemory: boolean
+  expectedToneMarkers: string[]
+  requiredComplianceSentence: string | null
+  createdBy: string
+  createdAt: string
 }
 
 const PROXY_BASE = '/api/svc/communication-service/api/v1/personas'
@@ -160,6 +175,65 @@ export default function CommunicationStyleEditorPage() {
       setPublishResult({ ok: false, text: t('Publikace se nezdařila.', 'Publish failed.') })
     } finally { setPublishing(false) }
   }, [draftId, draft, t])
+
+  // Golden set (D4) — independent of the draft/publish state above: entries belong to the
+  // persona, not to any one style/playbook version.
+  const [goldenSet, setGoldenSet] = useState<GoldenSetEntry[] | null>(null)
+  const [gsQuestion, setGsQuestion] = useState('')
+  const [gsLanguage, setGsLanguage] = useState('cs')
+  const [gsNoFigure, setGsNoFigure] = useState(true)
+  const [gsToneMarkers, setGsToneMarkers] = useState('')
+  const [gsCompliance, setGsCompliance] = useState('')
+  const [gsSaving, setGsSaving] = useState(false)
+  const [gsError, setGsError] = useState<string | null>(null)
+
+  const loadGoldenSet = useCallback(async () => {
+    try {
+      const res = await fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/golden-set`, { cache: 'no-store' })
+      if (!res.ok) { setGoldenSet([]); return }
+      setGoldenSet(await res.json())
+    } catch {
+      setGoldenSet([])
+    }
+  }, [personaKey])
+
+  useEffect(() => { void loadGoldenSet() }, [loadGoldenSet])
+
+  const createGoldenSetEntry = useCallback(async () => {
+    setGsSaving(true); setGsError(null)
+    try {
+      const res = await fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/golden-set`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          question: gsQuestion,
+          expectedLanguage: gsLanguage,
+          expectNoFigureFromMemory: gsNoFigure,
+          expectedToneMarkers: gsToneMarkers.split(',').map(m => m.trim()).filter(Boolean),
+          requiredComplianceSentence: gsCompliance || null,
+        }),
+      })
+      if (!res.ok) {
+        setGsError(t('Vytvoření se nezdařilo.', 'Create failed.'))
+        return
+      }
+      setGsQuestion(''); setGsToneMarkers(''); setGsCompliance('')
+      await loadGoldenSet()
+    } catch {
+      setGsError(t('Vytvoření se nezdařilo.', 'Create failed.'))
+    } finally { setGsSaving(false) }
+  }, [personaKey, gsQuestion, gsLanguage, gsNoFigure, gsToneMarkers, gsCompliance, loadGoldenSet, t])
+
+  const deleteGoldenSetEntry = useCallback(async (id: string) => {
+    try {
+      await fetch(`/api/svc/communication-service/api/v1/personas/golden-set/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      await loadGoldenSet()
+    } catch {
+      setGsError(t('Odstranění se nezdařilo.', 'Delete failed.'))
+    }
+  }, [loadGoldenSet, t])
 
   if (unavailable) {
     return (
@@ -292,6 +366,73 @@ export default function CommunicationStyleEditorPage() {
             {publishResult && (
               <p style={{ margin: 0, fontSize: '13px', color: publishResult.ok ? 'var(--green)' : 'var(--red)' }}>{publishResult.text}</p>
             )}
+          </div>
+        </Can>
+
+        <Can permission="communication:golden-set:manage">
+          <div className="card" style={{ marginTop: '16px', maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', margin: 0 }}>
+              <ListChecks size={14} /> {t('Zlatá sada (D4)', 'Golden set (D4)')}
+            </h2>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t(
+                'Testovací vstupy pro budoucí přehrávání při publikaci — zatím se nikde nepoužívají.',
+                'Test inputs for a future publish-time replay — not consumed anywhere yet.',
+              )}
+            </p>
+
+            {goldenSet && goldenSet.length > 0 && (
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {goldenSet.map(entry => (
+                  <li key={entry.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                    gap: '8px', padding: '8px', border: '1px solid var(--border)', borderRadius: '8px',
+                  }}
+                  >
+                    <div>
+                      <p style={{ margin: 0, fontSize: '13px' }}>{entry.question}</p>
+                      <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {entry.expectedLanguage}
+                        {entry.expectNoFigureFromMemory && ` · ${t('bez čísel z paměti', 'no figure from memory')}`}
+                        {entry.expectedToneMarkers.length > 0 && ` · ${entry.expectedToneMarkers.join(', ')}`}
+                      </p>
+                    </div>
+                    <button type="button" className="btn btn-secondary" onClick={() => void deleteGoldenSetEntry(entry.id)} aria-label={t('Smazat', 'Delete')}>
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('Otázka', 'Question')}
+              <input className="input" value={gsQuestion} onChange={e => setGsQuestion(e.target.value)}
+                placeholder={t('co by se mohl zákazník zeptat', 'what a customer might ask')} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('Očekávaný jazyk', 'Expected language')}
+              <input className="input" value={gsLanguage} onChange={e => setGsLanguage(e.target.value)} placeholder="cs" />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={gsNoFigure} onChange={e => setGsNoFigure(e.target.checked)} />
+              {t('Bez čísla z paměti', 'No figure from memory')}
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('Tónové značky (oddělené čárkou)', 'Tone markers (comma-separated)')}
+              <input className="input" value={gsToneMarkers} onChange={e => setGsToneMarkers(e.target.value)}
+                placeholder={t('stručný, formální oslovení', 'brief, formal address')} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              {t('Povinná věta (nepovinné)', 'Required compliance sentence (optional)')}
+              <input className="input" value={gsCompliance} onChange={e => setGsCompliance(e.target.value)} />
+            </label>
+            {gsError && <div className="badge badge-danger" style={{ display: 'block' }}>{gsError}</div>}
+            <div>
+              <button type="button" className="btn btn-primary" onClick={() => void createGoldenSetEntry()} disabled={gsSaving || !gsQuestion.trim()}>
+                <Save size={14} /> {gsSaving ? t('Ukládám…', 'Saving…') : t('Přidat', 'Add')}
+              </button>
+            </div>
           </div>
         </Can>
       </div>
