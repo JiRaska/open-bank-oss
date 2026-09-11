@@ -10,7 +10,11 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.15.0
+  # 1.16.0 -> 1.17.0 (#9115): additive — MerchantGeo.precision, the per-town location routes, and
+  # the logo-ingest routes. 1.16.0 was claimed on main by #8838 while this branch was open, so this
+  # takes the next free minor; whoever lands second renumbers (the matching version line merging
+  # "cleanly" is the trap — git sees identical text, not a taken version).
+  version: 1.17.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -332,6 +336,77 @@ paths:
       responses:
         '204': {description: Entry removed}
         '404': {description: No entry under that key}
+  /api/v1/merchants/logo-sources:
+    get:
+      tags: [Merchant catalogue]
+      summary: Whether logo fetching is enabled, and the hosts it may fetch from
+      description: >-
+        The operator screen needs this to decide whether to offer the fetch action at all: a feature
+        that is off by design and one that is broken look identical from a 400, and an allowlist an
+        operator cannot see is one they will guess at.
+      operationId: getMerchantLogoSources
+      responses:
+        '200':
+          description: Ingest configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: {type: boolean}
+                  allowedHosts:
+                    type: array
+                    items: {type: string}
+  /api/v1/merchants/{descriptorKey}/logo/fetch:
+    put:
+      tags: [Merchant catalogue]
+      summary: Ingest a merchant logo from an allowlisted source URL
+      description: >-
+        Downloads a logo instead of having an operator upload the file. This is a server-side request
+        forgery primitive by construction — the service fetches an operator-named URL from inside the
+        cluster — so it is fenced four ways, each load-bearing on its own: a host allowlist that is
+        EMPTY BY DEFAULT (with no configuration the endpoint refuses everything), https only, every
+        resolved address checked to be publicly routable (an allowlisted name that resolves to
+        127.0.0.1 or 169.254.169.254 is refused), and redirects refused rather than followed. What
+        comes back is then decoded, dimension-checked and re-encoded exactly like an upload: fetching
+        it ourselves makes the bytes no more trustworthy.
+      operationId: fetchMerchantLogo
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceUrl]
+              properties:
+                sourceUrl: {type: string}
+                licence:
+                  type: string
+                  nullable: true
+                  description: The operator's assertion about the source; an image file carries no licence of its own.
+                attribution: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Logo replaced
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '201':
+          description: Logo stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '400':
+          description: >-
+            Fetching disabled, missing sourceUrl, non-https scheme, host not allowlisted, host
+            resolving to a non-public address, a redirect, a non-200 source, an oversized body, or
+            content that is not a decodable raster image.
+        '404': {description: No catalogue entry under that key to attach a logo to}
   /api/v1/merchants/{descriptorKey}/logo:
     get:
       tags: [Merchant catalogue]
@@ -426,6 +501,69 @@ paths:
       responses:
         '204': {description: Logo removed}
         '404': {description: No logo stored for this merchant}
+  /api/v1/merchants/{descriptorKey}/locations:
+    get:
+      tags: [Merchant catalogue]
+      summary: Per-town locations for one merchant
+      operationId: listMerchantLocations
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Locations, by town
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/MerchantLocation'}
+        '400': {description: Key normalises to nothing}
+  /api/v1/merchants/{descriptorKey}/locations/{cityToken}:
+    put:
+      tags: [Merchant catalogue]
+      summary: Create or replace one town's location for a merchant
+      description: >-
+        `cityToken` is the town as the ACQUIRER DESCRIPTOR spells it — folded and upper-cased
+        (`PLZEN`, not `Plzeň`) — because that is the token the read path derives from a transaction
+        and matches on. It is folded the same way here, so an operator may type either form.
+      operationId: upsertMerchantLocation
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+        - name: cityToken
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MerchantLocationUpsert'}
+      responses:
+        '200': {description: Location replaced}
+        '201': {description: Location created}
+        '400': {description: Key or town normalises to nothing, unknown precision, or EXACT without a terminalId}
+    delete:
+      tags: [Merchant catalogue]
+      summary: Remove one town's location for a merchant
+      operationId: deleteMerchantLocation
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+        - name: cityToken
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Location removed}
+        '400': {description: Key or town normalises to nothing}
+        '404': {description: No location under that merchant and town}
   /api/v1/transactions/approvals:
     get:
       tags: [Transactions]
@@ -536,6 +674,10 @@ components:
         lon: {type: number, format: double, nullable: true}
         city: {type: string, nullable: true}
         country: {type: string, nullable: true}
+        geoPrecision:
+          type: string
+          enum: [EXACT, CITY]
+          description: What the coordinates on this catalogue row can answer. CITY for every chain.
         updatedAt: {type: string, format: date-time}
     MerchantLogoWritten:
       type: object
@@ -557,6 +699,42 @@ components:
         lon: {type: number, format: double, nullable: true}
         city: {type: string, nullable: true}
         country: {type: string, nullable: true}
+        geoPrecision:
+          type: string
+          enum: [EXACT, CITY]
+          default: CITY
+          description: >-
+            Anything but EXACT is stored as CITY. A chain's single coordinate cannot be where a
+            purchase happened in any of forty towns, so CITY is the honest default and EXACT on a
+            catalogue row is reserved for a genuinely single-site merchant.
+    MerchantLocation:
+      type: object
+      description: Where one merchant trades in one town, keyed by the town token its descriptors carry.
+      properties:
+        descriptorKey: {type: string}
+        cityToken: {type: string}
+        lat: {type: number, format: double}
+        lon: {type: number, format: double}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        precision: {type: string, enum: [EXACT, CITY]}
+        terminalId: {type: string, nullable: true}
+        source: {type: string, nullable: true}
+        updatedAt: {type: string, format: date-time}
+    MerchantLocationUpsert:
+      type: object
+      required: [lat, lon]
+      description: >-
+        `precision` defaults to CITY and may only be EXACT together with a `terminalId`: a coordinate
+        not tied to the device that took the payment cannot be about where the money was spent.
+      properties:
+        lat: {type: number, format: double}
+        lon: {type: number, format: double}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        precision: {type: string, enum: [EXACT, CITY], default: CITY}
+        terminalId: {type: string, nullable: true}
+        source: {type: string, nullable: true}
     ApprovalResponse:
       type: object
       description: >-
@@ -749,6 +927,13 @@ components:
         Location of the SHOP, for card-present spend. Absent for card-not-present merchants: an
         e-shop has no place where the money was spent, and a head-office pin on a "where you spent"
         map would be fiction.
+
+        `precision` says how much the coordinates are worth, and a client MUST honour it. `EXACT`
+        means the pin is about the place this money was spent — a single-site merchant, or a
+        location resolved from the device that took the payment. `CITY` means the merchant trades in
+        this town and the pin is representative: caption the town, do not draw a marker claiming a
+        street. The distinction exists because the catalogue's seeded rows pinned each chain at one
+        Prague address, so a purchase in Brno resolved 185 km from where it happened.
       properties:
         lat:
           type: number
@@ -765,7 +950,13 @@ components:
           type: string
           nullable: true
           description: ISO-3166 alpha-2.
-      required: [lat, lon]
+        precision:
+          type: string
+          enum: [EXACT, CITY]
+          description: >
+            EXACT = where the money was spent. CITY = the merchant trades in this town and the pin
+            is representative.
+      required: [lat, lon, precision]
 
     InitiateTransactionRequest:
       type: object
@@ -787,11 +978,11 @@ components:
           type: number
         currencyCode:
           type: string
-        baseCurrencyCode:
-          type: string
-          nullable: true
         baseAmount:
           type: number
+          nullable: true
+        baseCurrencyCode:
+          type: string
           nullable: true
         description:
           type: string
@@ -799,6 +990,9 @@ components:
         valueDate:
           type: string
           format: date
+        bookingDate:
+          type: string
+          nullable: true
         initiatedByPartyId:
           type: string
           format: uuid
