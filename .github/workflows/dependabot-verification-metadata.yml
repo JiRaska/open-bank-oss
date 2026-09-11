@@ -31,6 +31,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dependabot-verification-metadata-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   refresh-metadata:
     name: Refresh verification metadata

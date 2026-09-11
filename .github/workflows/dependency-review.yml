@@ -17,6 +17,10 @@ permissions:
   # otherwise get").
   checks: read
 
+concurrency:
+  group: dependency-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   dependency-review:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
