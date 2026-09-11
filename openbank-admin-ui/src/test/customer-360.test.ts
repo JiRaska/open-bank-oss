@@ -24,7 +24,7 @@ const OTHER = '22222222-2222-2222-2222-222222222222'
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
 
 /** Captures the SQL the route sends, so isolation can be asserted on the query itself. */
-function stubClickHouse(rows: Record<string, unknown>[]) {
+function stubClickHouse(rows: unknown[]) {
   const seen: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
     seen.push(String(init?.body ?? ''))
@@ -220,9 +220,27 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
     expect(body.asOf).toBe('2026-07-20 10:00:00.000') // newest event, not first row processed
     expect(body.accountIds).toEqual(['acc-1'])
     expect(body.consents).toEqual([{ consentId: 'c-1', status: 'ACTIVE', scopes: ['MARKETING_COMMS_EMAIL'] }])
-    expect(body.partyState).toMatchObject({ legalName: 'Alice' })
+    expect(body.excludedCount).toBe(0)
     expect(body.domains.map((d: { aggregateType: string }) => d.aggregateType).sort())
       .toEqual(['account', 'consent', 'party', 'transaction'])
+  })
+
+  it('excludes malformed projection rows before computing counts and recency', async () => {
+    stubClickHouse([
+      { aggregate_type: 'PARTY', aggregate_id: PARTY, event_type: 'PartyUpdated', occurred_at: '2026-07-20 10:00:00.000', payload: JSON.stringify({ partyId: PARTY }) },
+      { aggregate_type: 'ACCOUNT', aggregate_id: 'acc-bad-date', event_type: 'AccountOpened', occurred_at: 'not-a-date', payload: '{}' },
+      { aggregate_type: 'CONSENT', aggregate_id: 'consent-bad-scopes', event_type: 'ConsentGranted', occurred_at: '2026-07-22 10:00:00.000', payload: JSON.stringify({ scopes: [42] }) },
+      { aggregate_type: 'TRANSACTION', aggregate_id: 'tx-bad-json', event_type: 'TransactionCompleted', occurred_at: '2026-07-23 10:00:00.000', payload: '{' },
+      null,
+    ])
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const body = await (await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })).json()
+
+    expect(body.excludedCount).toBe(4)
+    expect(body.asOf).toBe('2026-07-20 10:00:00.000')
+    expect(body.domains).toEqual([{ aggregateType: 'party', events: 1, lastEventType: 'PartyUpdated', lastOccurredAt: '2026-07-20 10:00:00.000' }])
+    expect(body.accountIds).toEqual([])
+    expect(body.consents).toEqual([])
   })
 
   it('degrades to available:false when ClickHouse is unreachable, never a 5xx', async () => {
@@ -233,7 +251,20 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
     expect(res.status).toBe(200) // house style: the page shows a calm state, not an HTTP error
     const body = await res.json()
     expect(body.available).toBe(false)
-    expect(body.error).toContain('ECONNREFUSED')
+    expect(body.error).toBe('clickhouse unavailable')
+  })
+
+  it('does not present a malformed ClickHouse envelope as a verified empty party', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) }) as Response))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      available: false,
+      partyId: PARTY,
+      error: 'clickhouse unavailable',
+    })
   })
 
   it('never returns a balance or transaction-level amount (ADR-0210 D3 / ADR-0089)', () => {
@@ -270,6 +301,6 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
 
     const body = await res.json()
     expect(body.available).toBe(false)
-    expect(body.error).toContain('ETIMEDOUT')
+    expect(body.error).toBe('clickhouse unavailable')
   })
 })
