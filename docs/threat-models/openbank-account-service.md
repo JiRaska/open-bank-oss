@@ -630,3 +630,17 @@ Recovery from a legacy tombstone is a newly issued grant, never replaying the sa
   **Risk class:** confidentiality (bounded to party ids of parties the owner already transacts
   with); no money mutation, no new principal, no new service-to-service edge. Rollback: remove the
   route; enforcement is unchanged because the guard never reads this projection.
+- **2026-09-08** — **Term-deposit openings record the governing terms version** (#9044), no new
+  route, caller, edge or privilege. `POST /api/v1/accounts` for `TERM_DEPOSIT` now carries a
+  required `termsVersion`/`termsUrl`/`termsEffectiveFrom` triple, persisted on the account row
+  (V24; CHECK NOT VALID, existing deposits stay NULL — no backfill, a historical deposit must not
+  gain terms it never showed the customer). The values are resolved server-side by the
+  customer-edge from the product catalogue's currently-effective terms, and a client-supplied
+  `termsVersionShown` mismatch answers 409 there, so a terms rollout can never bind a customer to
+  a document they were not shown. The record is audit data: it is written once at opening, never
+  mutated, and read back in the account response. **Security-relevant half:** the triple is
+  evidence, not input to any authorization or money decision, so forging it requires the caller to
+  already hold the open-account privilege; the 409 comparison happens at the edge against the
+  catalogue of record, not against client-supplied truth. **Risk class:** accountability /
+  non-repudiation hardening; no money mutation, no new principal, no new service-to-service edge.
+  Rollback: drop the three columns; openings of other account types are unaffected.

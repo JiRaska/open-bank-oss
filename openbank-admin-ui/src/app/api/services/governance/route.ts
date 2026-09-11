@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
+import { readFile } from 'fs/promises'
 import path from 'path'
 
 export const dynamic = 'force-dynamic'
@@ -45,12 +45,15 @@ function governanceFile(): string {
 
 export async function GET() {
   let services: GovernanceService[] = []
+  let available = true
   try {
-    const raw = await fs.readFile(governanceFile(), 'utf-8')
+    const raw = await readFile(governanceFile(), 'utf-8')
     const parsed = JSON.parse(raw) as { services?: GovernanceService[] }
     if (Array.isArray(parsed?.services)) services = parsed.services
+    else available = false
   } catch {
-    services = [] // honest empty — pages degrade through the graceful-state rule
+    services = []
+    available = false
   }
 
   const items: ManifestItem[] = services.map(s => ({
@@ -63,7 +66,7 @@ export async function GET() {
   for (const m of items) byService[m.serviceName] = m
 
   return NextResponse.json(
-    { items, byService, timestamp: new Date().toISOString(), source: 'governance.json (ADR-0071)' },
+    { items, byService, available, timestamp: new Date().toISOString(), source: 'governance.json (ADR-0071)' },
     { headers: { 'Cache-Control': 'no-store' } }
   )
 }

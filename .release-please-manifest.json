@@ -12,6 +12,7 @@
   "openbank-card-issuance-service": "0.26.4",
   "openbank-clearing-service": "0.10.0",
   "openbank-clearing-simulator": "0.6.0",
+  "openbank-communication-service": "0.1.0",
   "openbank-consent-service": "0.24.0",
   "openbank-control-liveness-sentinel": "0.7.3",
   "openbank-copilot-service": "0.16.0",

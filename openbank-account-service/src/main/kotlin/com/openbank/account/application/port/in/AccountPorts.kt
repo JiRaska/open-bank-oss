@@ -32,6 +32,14 @@ data class OpenAccountCommand(
      * (canDebit/canCredit both require ACTIVE).
      */
     val initialStatus: AccountStatus = AccountStatus.ACTIVE,
+    /**
+     * Terms version + document reference the account is opened under (#9044). The use case
+     * REQUIRES a non-blank [termsVersion] for TERM_DEPOSIT; other account types may carry it
+     * but are not required to.
+     */
+    val termsVersion: String? = null,
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 )
 
 data class CloseAccountCommand(val accountId: UUID, val reason: String?, val requestedBy: UUID)
