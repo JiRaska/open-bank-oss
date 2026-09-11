@@ -69,7 +69,11 @@ test.describe('Transaction ledger search recovery', () => {
     await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route =>
       route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ data: [], count: 0, limit: 50, offset: 0 }),
+        // limit MUST be REQUEST_SIZE (PAGE_SIZE + 1 = 51), not PAGE_SIZE. The page sends the
+        // one-row lookahead and rejects any response whose `limit` does not echo what it asked
+        // for, so a 50 here is read as a corrupt result and renders "Failed to load" instead of
+        // the empty state this test is about. Every other mock in this file already returns 51.
+        body: JSON.stringify({ data: [], count: 0, limit: 51, offset: 0 }),
       }),
     )
 
