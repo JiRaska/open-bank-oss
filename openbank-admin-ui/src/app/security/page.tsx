@@ -3,45 +3,17 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
+import { parseSecurityEnvelope, summarizeReachable, serviceVerdict, type PlatformSecurityReport, type SecurityEnvelope, type ServiceScanResult } from '@/lib/security/summary'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
 // maps straight onto <DataUnavailable kind=...>.
-type SecurityEnvelope =
-  | { available: true; report: PlatformReport }
-  | { available: false; reason: 'not_deployed' | 'unreachable' | 'error' | 'unauthorized'; detail?: string }
-
-interface ScanResult {
-  serviceName: string; serviceUrl: string
-  score: number; grade: string; scannedAt: string
-  findings: Finding[]
-  reachable: boolean; durationMs: number
-  headersPresent: Record<string, boolean>
-  openApiAvailable: boolean
-}
-
-interface PlatformReport {
-  reportId: string; generatedAt: string
-  totalServices: number; reachableServices: number
-  serviceResults: ScanResult[]
-  platformScore: number; platformGrade: string
-  criticalFindings: number; highFindings: number
-  owaspCoverage: Record<string, number>
-  complianceStatus: Record<string, boolean>
-}
-
-interface Finding {
-  id: string; category: string; severity: string; title: string
-  description: string; remediation: string; cweId?: string; cvssScore?: number; endpoint?: string
-}
-
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   CRITICAL: { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' },
   HIGH:     { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
@@ -75,11 +47,13 @@ const OWASP_LABELS: Record<string, [string, string]> = {
 }
 
 export default function SecurityPage() {
-  const [report, setReport] = useState<PlatformReport | null>(null)
+  const [report, setReport] = useState<PlatformSecurityReport | null>(null)
   const { t, language } = useLanguage()
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<ScanResult | null>(null)
+  const [selected, setSelected] = useState<ServiceScanResult | null>(null)
   const [filter, setFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH'>('ALL')
+  const requestRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
   // When the scanner can't be reached we render <DataUnavailable> instead of an
   // empty "run the first scan" prompt that an operator misreads as "broken".
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind; detail?: string } | null>(null)
@@ -96,24 +70,44 @@ export default function SecurityPage() {
   }, [])
 
   const load = useCallback(async () => {
+    const request = ++requestRef.current
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), 8_000)
     setLoading(true)
     try {
-      const res = await fetch('/api/security', { cache: 'no-store' })
-      const data: SecurityEnvelope = await res.json()
+      const res = await fetch('/api/security', { cache: 'no-store', signal: controller.signal })
+      const data = parseSecurityEnvelope(await res.json())
+      if (request !== requestRef.current) return
       applyEnvelope(data)
     } catch {
+      if (request !== requestRef.current) return
       // The route is designed never to throw; a failure here is the internal
       // route itself being unavailable, which is still a "can't load" state.
       setReport(null)
       setUnavailable({ kind: 'error' })
     } finally {
-      setLoading(false)
+      window.clearTimeout(timeout)
+      if (request === requestRef.current) {
+        controllerRef.current = null
+        setLoading(false)
+      }
     }
   }, [applyEnvelope])
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => { void load() }, 0)
-    return () => window.clearTimeout(initialLoad)
+    return () => {
+      // main's cleanup only cleared the timer. On unmount an in-flight fetch would still land and
+      // call setState on a gone component, and — worse for an evidence page — a stale response
+      // could overwrite a fresher one. Bumping the generation invalidates any reply still on the
+      // wire (every handler above re-checks `request !== requestRef.current`) and the abort stops
+      // the request itself.
+      window.clearTimeout(initialLoad)
+      requestRef.current += 1
+      controllerRef.current?.abort()
+    }
   }, [load])
 
   const results = report?.serviceResults ?? []

@@ -38,6 +38,9 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
+    // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
+    // `trace` evidence) without exporting trace ids, attribute values or payloads.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
