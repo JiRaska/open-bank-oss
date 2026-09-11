@@ -163,9 +163,10 @@ jobs:
     # CodeQL uploads results to GitHub code scanning, which on a PRIVATE repo is a
     # paid GHAS add-on (not bundled with Free/Pro) — the init step errors with
     # "Code scanning is not enabled for this repository". So this job auto-skips
-    # while the repo is private and activates the moment it goes public (free GHAS),
-    # mirroring the dependency-review job in ci.yml. Until then Trivy fs + Dependabot
-    # cover vulnerable-dependency detection. (Aside: the CodeQL CLI also does not
+    # while the repo is private and activates the moment it goes public (free GHAS).
+    # Dependency review has its own workflow and submitted Gradle graph; while CodeQL
+    # is unavailable, Trivy fs + Dependabot cover the remaining detection layer.
+    # (Aside: the CodeQL CLI also does not
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     # Skip on gitops/docs-only PRs (run_codeql=false) — CodeQL isn't a required check
     # there, and the java-kotlin autobuild is the ~14 min tax that strands deploy PRs.
@@ -397,6 +398,10 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
+        # The scan above is the blocking decision (`--exit-code 1`). SARIF upload is
+        # reporting only: GitHub's installation API rate limit can reject it after a
+        # clean scan, and must not turn that clean security decision into a false red.
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           sarif_file: trivy-fs.sarif
@@ -404,6 +409,8 @@ jobs:
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
+        # Keep reporting availability independent from the blocking IaC scan above.
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           sarif_file: trivy-config.sarif
