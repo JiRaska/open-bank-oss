@@ -11,6 +11,15 @@ type LoadMoreControlProps = {
   onLoadMore: () => void
   /** Disable only when the surrounding result surface already announces the same count. */
   announceProgress?: boolean
+  /**
+   * Whether more rows exist. Omit for a client-side list, where `loaded < total` answers it.
+   * A CURSOR-paginated caller must pass it: it has fetched one page, so `total` is the size of
+   * what is on screen and `loaded < total` is false while the server still holds more.
+   */
+  hasMore?: boolean
+  /** A fetch is in flight. Disables the button and marks it busy, so it cannot be double-fired. */
+  busy?: boolean
+  busyLabel?: string
 }
 
 /** Bounded-list footer that keeps result extent visible and announces incremental progress. */
@@ -23,8 +32,11 @@ export function LoadMoreControl({
   controls,
   onLoadMore,
   announceProgress = true,
+  hasMore,
+  busy = false,
+  busyLabel,
 }: LoadMoreControlProps) {
-  const hasMore = loaded < total
+  const moreAvailable = hasMore ?? loaded < total
 
   return (
     <div
@@ -45,15 +57,17 @@ export function LoadMoreControl({
       >
         {progressLabel}
       </span>
-      {hasMore && (
+      {moreAvailable && (
         <button
           type="button"
           className="btn btn-secondary btn-sm"
           aria-label={buttonAriaLabel}
           aria-controls={controls}
+          aria-busy={busy}
+          disabled={busy}
           onClick={onLoadMore}
         >
-          {buttonLabel}
+          {busy && busyLabel ? busyLabel : buttonLabel}
         </button>
       )}
     </div>

@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           java-version: "25"
           distribution: temurin
@@ -138,13 +138,14 @@ jobs:
           # double-quote-only grep silently reported 0% for every service on every run
           # (caught 2026-07-06 against run 28805099041: ledger really scored 65%, not 0%).
           # Accept both quote styles so a pitest quoting change can't zero the score again.
-          KILLED=$(grep -oE "status=['\"]KILLED['\"]" "$XML" | wc -l | tr -d ' ')
+          # PIT counts a timed-out mutant as detected, matching the enforced authz lane below.
+          DETECTED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l | tr -d ' ')
           if [ "$TOTAL" -eq "0" ]; then
             echo "::warning::No mutations generated for ${{ matrix.service }} domain layer — check targetClasses config"
             exit 0
           fi
-          SCORE=$(( KILLED * 100 / TOTAL ))
-          echo "Mutation score: ${SCORE}% (${KILLED}/${TOTAL} killed)"
+          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
+          echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
           if [ "$SCORE" -lt "70" ]; then
             echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.service }}"
           else
@@ -156,7 +157,7 @@ jobs:
   # (AuthorizeInterceptor scope derivation + OPA PDP call) is the fleet's security-critical
   # decision code — a surviving mutant there is an authorization check no test could tell
   # from its negation. The package is small (3 files, ~40s), so a blocking lane costs
-  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 109 killed);
+  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 110 detected);
   # raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
   # pitest is applied by init script, NOT the plugins DSL: any external versioned plugin
   # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
@@ -170,7 +171,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           java-version: "25"
           distribution: temurin
@@ -223,16 +224,16 @@ jobs:
           # TIMED_OUT mutants as detected (a hanging mutant is a caught mutant). Counting
           # only KILLED here undercounted CI by 4 points (59% vs PIT's 63%) and failed a
           # green Gradle step (run 33929681493).
-          KILLED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l | tr -d ' ')
+          DETECTED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l | tr -d ' ')
           if [ "$TOTAL" -eq "0" ]; then
             echo "::error::No mutations generated for the authz package — check targetClasses in pitest-authz.init.gradle"
             exit 1
           fi
-          # Round-half-up, matching PIT's displayed percentage: floor division of the
-          # 2026-09-05 baseline (109/174) gives 62% and would fail a lane PIT itself
-          # scored 63% — the floor this job enforces.
-          SCORE=$(( (KILLED * 100 + TOTAL / 2) / TOTAL ))
-          echo "Mutation score: ${SCORE}% (${KILLED}/${TOTAL} killed)"
+          # Round-half-up, matching PIT's displayed percentage. Keep the arithmetic
+          # explicit so a boundary ratio such as 109/174 (62.64%) is not floored to
+          # 62% while PIT displays 63%.
+          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
+          echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
           if [ "$SCORE" -lt "63" ]; then
             echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
             exit 1

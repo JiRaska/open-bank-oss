@@ -59,7 +59,8 @@ export default function AccountsPage() {
   // Inline hint for a value the operator clearly meant as an IBAN but mistyped
   // (right shape, failed checksum). Kept next to the input; never a backend leak.
   const [ibanHint, setIbanHint]         = useState<string | null>(null)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreUnavailable, setLoadMoreUnavailable] = useState<UnavailableKind | null>(null)
   const activeSearch = useRef<AbortController | null>(null)
 
   const kind = classifyQuery(query)
@@ -78,17 +79,21 @@ export default function AccountsPage() {
     setResult(null)
     setUnavailable(null)
     setIbanHint(null)
-    setVisibleCount(PAGE_SIZE)
+    setLoadingMore(false)
+    setLoadMoreUnavailable(null)
   }
 
-  async function search(value = query) {
+  async function search(value = query, cursor?: string) {
+    const continuing = Boolean(cursor)
     activeSearch.current?.abort()
     activeSearch.current = null
     const rawQuery = value
     const k = classifyQuery(rawQuery)
-    setIbanHint(null)
-    setUnavailable(null)
-    setVisibleCount(PAGE_SIZE)
+    if (!continuing) {
+      setIbanHint(null)
+      setUnavailable(null)
+      setLoadMoreUnavailable(null)
+    }
 
     if (k === 'empty') return
     if (k === 'iban_malformed') {
@@ -110,23 +115,29 @@ export default function AccountsPage() {
     const controller = new AbortController()
     activeSearch.current = controller
     const timeout = window.setTimeout(() => controller.abort(), 8000)
-    setLoading(true)
+    if (continuing) setLoadingMore(true)
+    else setLoading(true)
     try {
       // Strip glob wildcards (`*`, `?`) and normalize to upper-case before sending
       // as a fragment — IBANs are stored upper-case and the backend escapes `*`
       // literally, so "CZ*" would never match without this normalisation.
       const fragment = rawQuery.trim().replace(/[*?]/g, '').toUpperCase()
-      const url = k === 'iban'
+      const baseUrl = k === 'iban'
         ? `${ACCOUNT_SERVICE}/api/v1/accounts/iban/${normalizeIban(rawQuery)}`
         : k === 'fragment'
           ? `${ACCOUNT_SERVICE}/api/v1/accounts/search?q=${encodeURIComponent(fragment)}&limit=${PAGE_SIZE}`
           : `${ACCOUNT_SERVICE}/api/v1/accounts?partyId=${encodeURIComponent(rawQuery.trim())}&limit=${PAGE_SIZE}`
+      const url = cursor ? `${baseUrl}&cursor=${encodeURIComponent(cursor)}` : baseUrl
 
       const res = await fetch(url, { signal: controller.signal })
       if (activeSearch.current !== controller) return
       if (!res.ok) {
-        setResult(null)
-        setUnavailable({ kind: await classifyBffFailure(res) })
+        const failure = await classifyBffFailure(res)
+        if (continuing) setLoadMoreUnavailable(failure)
+        else {
+          setResult(null)
+          setUnavailable({ kind: failure })
+        }
         return
       }
       const body = await res.json()
@@ -135,19 +146,30 @@ export default function AccountsPage() {
         setResult({ data: [body as Account], pagination: { limit: 1, hasNextPage: false } })
       } else if (Array.isArray(body)) {
         setResult({ data: body as Account[], pagination: { limit: body.length, hasNextPage: false } })
+      } else if (continuing) {
+        setResult(previous => {
+          const accounts = new Map(previous?.data.map(account => [account.id, account]) ?? [])
+          for (const account of body.data as Account[]) accounts.set(account.id, account)
+          return { data: [...accounts.values()], pagination: body.pagination }
+        })
+        setLoadMoreUnavailable(null)
       } else {
         setResult(body as CursorPage<Account>)
       }
     } catch {
       if (activeSearch.current !== controller) return
       // Timeout / abort / network — the BFF or account-service didn't answer.
-      setResult(null)
-      setUnavailable({ kind: 'unreachable' })
+      if (continuing) setLoadMoreUnavailable('unreachable')
+      else {
+        setResult(null)
+        setUnavailable({ kind: 'unreachable' })
+      }
     } finally {
       window.clearTimeout(timeout)
       if (activeSearch.current === controller) {
         activeSearch.current = null
         setLoading(false)
+        setLoadingMore(false)
       }
     }
   }
@@ -159,7 +181,7 @@ export default function AccountsPage() {
     return true
   }) ?? []
 
-  const visible = filtered.slice(0, visibleCount)
+  const hasMore = Boolean(result?.pagination.hasNextPage && result.pagination.nextCursor)
   const queryHelpVisible = !ibanHint && !result && !unavailable
 
   return (
@@ -210,8 +232,10 @@ export default function AccountsPage() {
                   activeSearch.current?.abort()
                   activeSearch.current = null
                   setLoading(false)
+                  setLoadingMore(false)
                   setResult(null)
                   setUnavailable(null)
+                  setLoadMoreUnavailable(null)
                   setQuery(e.target.value)
                   setSelectedParty(null)
                   if (ibanHint) setIbanHint(null)
@@ -344,7 +368,7 @@ export default function AccountsPage() {
                     />
                   </td></tr>
                 )}
-                {!loading && visible.map(a => (
+                {!loading && filtered.map(a => (
                   <tr key={a.id}>
                     <td><span className="mono" style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 500 }}>{a.accountNumber}</span></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accountType}</span></td>
@@ -366,14 +390,29 @@ export default function AccountsPage() {
 
         {!unavailable && result && filtered.length > 0 && (
           <LoadMoreControl
-            loaded={visible.length}
+            loaded={filtered.length}
             total={filtered.length}
-            progressLabel={t(`Zobrazeno ${visible.length} z ${filtered.length} účtů`, `Showing ${visible.length} of ${filtered.length} accounts`)}
-            buttonLabel={t(`Zobrazit dalších ${Math.min(PAGE_SIZE, filtered.length - visible.length)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - visible.length)} more`)}
+            hasMore={hasMore}
+            busy={loadingMore}
+            progressLabel={t(`Zobrazeno ${filtered.length} účtů`, `Showing ${filtered.length} accounts`)}
+            buttonLabel={t('Načíst další účty', 'Load more accounts')}
+            busyLabel={t('Načítám další…', 'Loading more…')}
             buttonAriaLabel={t('Zobrazit další účty', 'Load more accounts')}
             controls="accounts-results"
-            onLoadMore={() => setVisibleCount(c => c + PAGE_SIZE)}
+            onLoadMore={() => void search(query, result?.pagination.nextCursor)}
           />
+        )}
+        {!unavailable && loadMoreUnavailable && (
+          <div style={{ padding: '0 16px 16px' }}>
+            <DataUnavailable
+              kind={loadMoreUnavailable}
+              service={t('Account-service', 'Account-service')}
+              feature={t('Další stránka účtů', 'Next account page')}
+              lang={language}
+              detail={t('Načtené účty zůstaly zachované. Zkuste načíst další stránku znovu.', 'Loaded accounts were preserved. Try loading the next page again.')}
+              dense
+            />
+          </div>
         )}
       </div>
     </div>
