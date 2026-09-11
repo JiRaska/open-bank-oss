@@ -7,6 +7,7 @@ package com.openbank.kyb.application
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
+import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
@@ -178,6 +179,8 @@ class BusinessOnboardingServiceTest {
         rule: RepresentationRule,
         reps: List<String>,
         form: LegalFormClass = LegalFormClass.LIMITED_COMPANY,
+        /** Register role per representative, positionally; defaults to `jednatel` for all. */
+        roles: List<String> = emptyList(),
     ) = RegistryExtract(
         identifier = ico,
         legalName = "Příklad s.r.o.",
@@ -187,7 +190,9 @@ class BusinessOnboardingServiceTest {
         registeredAddress = null,
         incorporatedOn = null,
         taxId = "CZ45274649",
-        representatives = reps.map { Representative(it, LocalDate.of(1980, 1, 1), "jednatelé", "jednatel", null) },
+        representatives = reps.mapIndexed { i, name ->
+            Representative(name, LocalDate.of(1980, 1, 1), "jednatelé", roles.getOrNull(i) ?: "jednatel", null)
+        },
         representationRule = rule,
         source = "ares",
         sourceRef = null,
@@ -326,5 +331,50 @@ class BusinessOnboardingServiceTest {
         service.sign(SignCommand(started.id, initiator, "cer-1"))
         assertThat(mandate.captured.role).isEqualTo("OWNER")
         assertThat(mandate.captured.authority).isEqualTo("SOLE")
+    }
+
+    @Test
+    fun `a review that COMPLETES an already-signed case still grants the mandates`(): Unit = runBlocking {
+        // reviewResolved can now finish a case whose signatures were already collected (#9711).
+        // grantMandates lives inside sign(), so that path could have produced an ACTIVE entity
+        // with NOBODY authorised to act for it — silent from every angle: the case reads
+        // complete, and every later request by its own representatives is refused.
+        coEvery { registry.lookup(ico, null) } returns
+            extract(
+                RepresentationRule(
+                    RepresentationMode.JOINT_N,
+                    2,
+                    "předseda spolu s místopředsedou",
+                    requiredRoles = listOf("predseda", "mistopredseda"),
+                ),
+                listOf("Jana Chairová", "Viktor Vice", "Milan Member"),
+                roles = listOf("předseda představenstva", "místopředseda představenstva", "člen představenstva"),
+            )
+        coEvery { parties.createEntityParty(any()) } returns entityParty
+        val mandates = mutableListOf<MandateRequest>()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+
+        val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+        service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Chairová", null))
+        val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1, 2)))
+        // Everyone identifies, so the offices ARE covered and signing opens.
+        invited.signers.filter { !it.isInitiator }.forEach {
+            service.claimInvitation(ClaimInvitationCommand(it.invitationToken!!, UUID.randomUUID()))
+        }
+        val member = service.get(started.id).signers.first { it.fullName == "Milan Member" }.partyId!!
+
+        // The vice never signs: chair + ordinary member reach the COUNT and miss an office.
+        service.sign(SignCommand(started.id, initiator, "cer-1"))
+        val shortfall = service.sign(SignCommand(started.id, member, "cer-2"))
+        assertThat(shortfall.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).describedAs("nothing is granted while the offices are short").isEmpty()
+
+        // The operator accepts the two collected signatures, dropping the office constraint.
+        val accepted = service.resolveReview(ResolveReviewCommand(started.id, 2, "operator-anna"))
+
+        assertThat(accepted.status).isIn(CaseStatus.SIGNED, CaseStatus.ACTIVE)
+        assertThat(mandates)
+            .describedAs("an entity that reaches SIGNED must carry a mandate per signature")
+            .hasSize(2)
     }
 }

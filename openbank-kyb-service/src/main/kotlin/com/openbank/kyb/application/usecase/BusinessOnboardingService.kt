@@ -192,6 +192,18 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             cmd.operator,
             cmd.requiredSignatures,
         )
+        // A review can now COMPLETE a case: `reviewResolved` finishes one whose signatures were
+        // already collected and satisfy what the operator just confirmed (#9711). That path has to
+        // do everything `sign` does on the same transition — grant the mandates and emit the
+        // signed/completed events — or the entity goes active with NOBODY authorised to act for
+        // it, which is silent: the case reads ACTIVE from every angle and every later request by
+        // its own representatives is refused.
+        if (resolved.status == CaseStatus.SIGNED || resolved.status == CaseStatus.ACTIVE) {
+            grantMandates(resolved)
+            val saved = cases.update(resolved, KybEvents.agreementSigned(resolved, now, cmd.operator))
+            if (saved.status == CaseStatus.ACTIVE) cases.update(saved, KybEvents.completed(saved, now))
+            return saved.also(::armTimers)
+        }
         return cases.update(resolved, KybEvents.registryVerified(resolved, now)).also(::armTimers)
     }
 
