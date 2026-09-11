@@ -266,6 +266,21 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
   )
 }
 
+/**
+ * The element focus should return to once a review dialog closes, or `null` when there is none.
+ *
+ * `document.activeElement` is NOT that answer on its own. It is `<body>` whenever nothing holds
+ * focus — a form submitted programmatically, or by Enter after the field blurred — and `<body>`
+ * is always `isConnected`, so storing it makes the caller's fallback unreachable and `.focus()`
+ * on it a no-op. The user then lands nowhere, which is the outcome returning focus exists to
+ * prevent. Only a focusable element other than the body is a real return target.
+ */
+function focusableReturnTarget(node: Element | null): HTMLElement | null {
+  if (!(node instanceof HTMLElement)) return null
+  if (node === document.body || node === document.documentElement) return null
+  return node
+}
+
 export default function PaymentsPage() {
   const { t } = useLanguage()
   return (
@@ -476,7 +491,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
-      reviewReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      reviewReturnFocusRef.current = focusableReturnTarget(document.activeElement)
       setPaymentReview('domestic')
       return
     }
@@ -542,7 +557,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
-      reviewReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      reviewReturnFocusRef.current = focusableReturnTarget(document.activeElement)
       setPaymentReview('sepa')
       return
     }
@@ -1067,9 +1082,19 @@ function PaymentsContent() {
                   }}
                   onCloseAutoFocus={event => {
                     event.preventDefault()
+                    // Three candidates in order, because the dialog closes for two different
+                    // reasons and they want different landings. Dismissed (Escape / Back), the
+                    // user is still editing and belongs IN the form — returning them to the
+                    // "New Payment" trigger would close the form they were working in. Completed,
+                    // the form is gone and the trigger is the only thing left.
                     const original = reviewReturnFocusRef.current
-                    const fallback = document.getElementById('new-payment-trigger')
-                    ;(original?.isConnected ? original : fallback)?.focus()
+                    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
+                    const trigger = document.getElementById('new-payment-trigger')
+                    const target =
+                      (original?.isConnected ? original : null)
+                      ?? (submit?.isConnected && !submit.disabled ? submit : null)
+                      ?? trigger
+                    target?.focus()
                   }}
                   onEscapeKeyDown={event => { if (creating) event.preventDefault() }}
                   onPointerDownOutside={event => { if (creating) event.preventDefault() }}
