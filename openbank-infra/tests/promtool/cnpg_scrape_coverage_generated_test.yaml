@@ -39,6 +39,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
@@ -196,6 +198,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
@@ -330,6 +334,8 @@ tests:
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
