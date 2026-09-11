@@ -75,6 +75,7 @@ jobs:
     outputs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
+      verification-modules: ${{ steps.detect.outputs.verification-modules }}
     steps:
       # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
       # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
@@ -95,6 +96,33 @@ jobs:
           # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
           # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
+
+          # Paths that cannot change a service compile input or Pact contract. Keep this
+          # executable instead of growing an opaque grep: the same function is exercised by
+          # positive and negative controls on every event before it can select a matrix.
+          is_inert_service_path() {
+            case "$1" in
+              openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
+                return 0 ;;
+              .github/workflows/*)
+                # These two files own the service build itself. A change to either must
+                # still select the canary below; all other workflow files are external
+                # orchestration and cannot affect a service binary or Pact.
+                case "$1" in
+                  .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) return 1 ;;
+                  *) return 0 ;;
+                esac ;;
+              *) return 1 ;;
+            esac
+          }
+          is_inert_service_path ".github/workflows/security-regression-test.yml" \
+            || { echo "selector self-test: unrelated workflow must be inert" >&2; exit 1; }
+          ! is_inert_service_path ".github/workflows/services-ci.yml" \
+            || { echo "selector self-test: service CI recipe must remain relevant" >&2; exit 1; }
+          ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
+            || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
+          ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
+            || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -118,15 +146,17 @@ jobs:
             # exists (main is squash-merged => each push is a single commit).
             FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
             echo "Push changed files:"; echo "$FILES"
-            # Inert = provably cannot change a compile input or a contract. Anchored so a
-            # service's own src/ (or ANY build.gradle.kts, openbank-libs, gradle/, contracts
-            # under pacts/) is NEVER matched here and thus never treated as inert. Feed grep
-            # a here-string, NOT `echo | grep` (pipefail + grep early-exit SIGPIPEs echo →
-            # racy false match, the same footgun documented on the PR path below).
-            RELEVANT=$(grep -vE '(^openbank-admin-ui/)|(^openbank-infra/)|(^docs/)|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
+            # Inert = provably cannot change a compile input or a contract. A service's
+            # source, any build input, Pact, or unknown automation path remains relevant and
+            # therefore keeps the conservative scoped/full-fleet behavior below.
+            RELEVANT=""
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
+            done <<< "$FILES"
             RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
             if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
-              echo "Decision: push changed only inert paths (release/docs/admin-ui/infra) -> build nothing."
+              echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build nothing."
               CHANGED=""
             else
               # Scope the main-push build instead of always full-fleeting (#1208/#2039). Full-fleet
@@ -338,6 +368,12 @@ jobs:
           # grep -v exits 1 when CHANGED is empty (PR touched no service module);
           # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
+          # The verification job used to checkout the repository and compute this same diff a
+          # second time, even though >90% of PRs change no module build file. Emit the exact
+          # comma-separated module set here so an empty set skips that runner at dispatch time.
+          VERIFY_MODULES=$(grep -E '^openbank-[^/]+/build\.gradle\.kts$' <<< "${FILES:-}" \
+            | cut -d/ -f1 | sort -u | paste -sd, - || true)
+          echo "verification-modules=${VERIFY_MODULES}" >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
             echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -405,43 +441,19 @@ jobs:
   verification-metadata:
     name: verification-metadata
     needs: [changes]
-    if: always()
+    if: needs.changes.result == 'success' && needs.changes.outputs.verification-modules != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
-      - name: Derive changed Gradle modules
-        id: mods
-        run: |
-          set -euo pipefail
-          base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            echo "modules=" >> "$GITHUB_OUTPUT"
-            echo "No usable base sha — skipping."; exit 0
-          fi
-          # Only module-level build files matter; a root or build-logic change is
-          # out of scope here and would fan out to the whole fleet.
-          # `|| true` on the grep is required, not defensive: under `set -o pipefail`
-          # a grep that matches nothing exits 1 and kills the step — which is the
-          # common case here, since most PRs touch no module build file. Measured on
-          # this very PR (#3233), whose own gate went red for exactly this reason.
-          mods="$(git diff --name-only "$base"...HEAD \
-                    | { grep -E '^openbank-[^/]+/build\.gradle\.kts$' || true; } \
-                    | cut -d/ -f1 | sort -u | paste -sd, -)"
-          echo "modules=${mods}" >> "$GITHUB_OUTPUT"
-          echo "changed modules: ${mods:-<none>}"
-
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin
           java-version: "25"
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-        if: steps.mods.outputs.modules != ''
         with:
           # READ-ONLY. This job cannot get an exact-key hit from setup-java's own
           # `cache: gradle` — that key hashes `**/*.gradle*`, and this job only runs
@@ -453,10 +465,9 @@ jobs:
           cache-read-only: true
 
       - name: Check verification metadata covers the changed modules
-        if: steps.mods.outputs.modules != ''
         run: |
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules "${{ steps.mods.outputs.modules }}" --enforce
+            --modules "${{ needs.changes.outputs.verification-modules }}" --enforce
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
@@ -484,10 +495,13 @@ jobs:
     steps:
       - name: Verify no service failed
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Changed-service detection did not succeed; build scope is unknown."; exit 1
+          fi
           if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
             echo "One or more service builds failed."; exit 1
           fi
-          if [ "${{ needs.verification-metadata.result }}" = "failure" ]; then
+          if [ "${{ needs.verification-metadata.result }}" = "failure" ] || [ "${{ needs.verification-metadata.result }}" = "cancelled" ]; then
             echo "verification-metadata check failed (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."

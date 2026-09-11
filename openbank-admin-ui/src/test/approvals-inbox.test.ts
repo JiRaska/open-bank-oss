@@ -121,6 +121,13 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
           { id: 'BL-1', action: 'billing.post', resourceId: 'fee-7', makerId: 'operator.j', createdAt: '2026-07-29T11:57:00Z' },
         ]), { status: 200 }))
       }
+      // Empty, not omitted: without an explicit branch this URL falls through to the agent
+      // catch-all below and doubles up P-1 under a different domain label — exactly the
+      // "unread source is indistinguishable from an empty one" trap this file's other tests
+      // are named for, just self-inflicted by an unguarded fallback instead of a missing fetch.
+      if (url.includes('communications/approvals') || url.includes('communication-service')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
       if (url.includes('delegations/approvals') || url.includes('delegation-service')) {
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'DG-1', delegationId: 'grant-7', operation: 'REINSTATE', proposedBy: 'operator.k', proposedAt: '2026-07-29T11:58:00Z' },
@@ -162,6 +169,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.balance).toBe('ok')
     expect(body.sources.billing).toBe('ok')
     expect(body.sources.delegation).toBe('ok')
+    expect(body.sources.communication).toBe('ok')
   })
 
   it('reads the durable delegation lifecycle queue instead of claiming it is empty', async () => {

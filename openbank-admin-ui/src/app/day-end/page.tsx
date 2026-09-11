@@ -17,7 +17,8 @@
 // The year-end close (EoY) is not wired yet — shown as an honest roadmap card
 // rather than faked status, per the read-only-consumer rule.
 
-import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
+import { Suspense, useEffect, useState, useCallback, useRef, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
@@ -32,7 +33,6 @@ import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import {
   parseCloseFailures, parseCloseRun, parseCloseRuns, parseReconciliationReport,
   type CloseFailure, type CloseRun, type ReconciliationReport,
@@ -413,6 +413,8 @@ function EomPanel() {
   const [triggering, setTriggering] = useState(false)
   const [triggerReviewOpen, setTriggerReviewOpen] = useState(false)
   const triggerButtonRef = useRef<HTMLButtonElement | null>(null)
+  const triggerCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
+  const workspaceRef = useRef<HTMLDivElement | null>(null)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
@@ -524,8 +526,8 @@ function EomPanel() {
 
   const closeTriggerReview = () => {
     if (triggering) return
+    triggerCloseFocusOverrideRef.current = null
     setTriggerReviewOpen(false)
-    requestAnimationFrame(() => triggerButtonRef.current?.focus())
   }
 
   const toggleFailures = useCallback(async (run: CloseRun) => {
@@ -606,7 +608,7 @@ function EomPanel() {
   }
 
   return (
-    <div>
+    <div ref={workspaceRef} role="region" aria-label={t('Pracovní plocha měsíční uzávěrky', 'Month-end close workspace')} tabIndex={-1}>
       {/* Toolbar: refresh + catch-up trigger */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
         <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
@@ -628,7 +630,7 @@ function EomPanel() {
               type="button"
               aria-label={t('Zkontrolovat catch-up uzávěrku', 'Review catch-up close')}
               className="btn btn-primary"
-              onClick={() => { setNotice(null); setTriggerReviewOpen(true) }}
+              onClick={() => { triggerCloseFocusOverrideRef.current = null; setNotice(null); setTriggerReviewOpen(true) }}
               disabled={triggering || running || unavailable !== null}
               title={t('Spustit dohánějící uzávěrku nyní (idempotentní)', 'Run a catch-up close now (idempotent)')}
             >
@@ -644,9 +646,15 @@ function EomPanel() {
         historyCount={runs.length}
         busy={triggering}
         error={notice?.ok === false ? notice.text : null}
+        triggerRef={triggerButtonRef}
+        closeFocusOverrideRef={triggerCloseFocusOverrideRef}
+        closeFocusFallbackRef={workspaceRef}
         onCancel={closeTriggerReview}
         onConfirm={async () => {
-          if (await trigger()) setTriggerReviewOpen(false)
+          if (await trigger()) {
+            triggerCloseFocusOverrideRef.current = workspaceRef.current
+            setTriggerReviewOpen(false)
+          }
         }}
       />}
 
@@ -808,44 +816,56 @@ function EomPanel() {
   )
 }
 
-function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCancel, onConfirm }: {
+function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, triggerRef, closeFocusOverrideRef, closeFocusFallbackRef, onCancel, onConfirm }: {
   latest: CloseRun | null
   historyCount: number
   busy: boolean
   error: string | null
+  triggerRef: RefObject<HTMLButtonElement | null>
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  closeFocusFallbackRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const { t, language } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = 'closing-catch-up-review-title'
-  const impactId = 'closing-catch-up-review-impact'
+  const backButtonRef = useRef<HTMLButtonElement>(null)
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const formatDate = (value: string | null) => value ? new Date(value).toLocaleDateString(locale) : '—'
   const period = latest ? `${formatDate(latest.periodFrom)} – ${formatDate(latest.periodTo)}` : t('zatím bez běhu', 'no run yet')
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'grid', placeItems: 'center', padding: 20 }}
-  >
-    <div className="card" style={{ width: 'min(600px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)' }} />
+      <Dialog.Content
+        className="card"
+        role="alertdialog"
+        aria-busy={busy}
+        onOpenAutoFocus={event => { event.preventDefault(); backButtonRef.current?.focus() }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const target = closeFocusOverrideRef.current?.isConnected
+            ? closeFocusOverrideRef.current
+            : triggerRef.current?.isConnected && !triggerRef.current.disabled
+              ? triggerRef.current
+              : closeFocusFallbackRef.current?.isConnected
+                ? closeFocusFallbackRef.current
+                : null
+          closeFocusOverrideRef.current = null
+          target?.focus()
+        }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onPointerDownOutside={event => event.preventDefault()}
+        onInteractOutside={event => event.preventDefault()}
+        style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(600px, calc(100vw - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+      >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <CalendarCheck2 size={20} aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
         <div>
-          <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{t('Spustit catch-up měsíční uzávěrku', 'Run monthly catch-up close')}</h2>
-          <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{t(
+          <Dialog.Title style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{t('Spustit catch-up měsíční uzávěrku', 'Run monthly catch-up close')}</Dialog.Title>
+          <Dialog.Description style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{t(
             'Statement-service určí chybějící období a přijme idempotentní běh po kapsách. Přijetí pouze potvrzuje zahájení — úspěch, přeskočení a chyby uvidíte až v historii běhu.',
             'Statement-service determines the missing period and accepts an idempotent per-pocket run. Acceptance only confirms the start — completion, skips, and failures appear later in run history.',
-          )}</p>
+          )}</Dialog.Description>
         </div>
       </div>
       <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning)', fontSize: 12.5, lineHeight: 1.5 }}>
@@ -859,11 +879,12 @@ function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCance
       </dl>
       {error && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-        <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button ref={backButtonRef} type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
         <button type="button" className="btn btn-primary" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}><Play size={13} aria-hidden="true" />{busy ? t('Spouštím…', 'Starting…') : t('Potvrdit spuštění', 'Confirm run')}</button>
       </div>
-    </div>
-  </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
 
 function RunRows({ run, expandable, isOpen, fState, excludedCount, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
