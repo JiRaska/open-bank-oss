@@ -96,6 +96,33 @@ jobs:
           # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
 
+          # Paths that cannot change a service compile input or Pact contract. Keep this
+          # executable instead of growing an opaque grep: the same function is exercised by
+          # positive and negative controls on every event before it can select a matrix.
+          is_inert_service_path() {
+            case "$1" in
+              openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
+                return 0 ;;
+              .github/workflows/*)
+                # These two files own the service build itself. A change to either must
+                # still select the canary below; all other workflow files are external
+                # orchestration and cannot affect a service binary or Pact.
+                case "$1" in
+                  .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) return 1 ;;
+                  *) return 0 ;;
+                esac ;;
+              *) return 1 ;;
+            esac
+          }
+          is_inert_service_path ".github/workflows/security-regression-test.yml" \
+            || { echo "selector self-test: unrelated workflow must be inert" >&2; exit 1; }
+          ! is_inert_service_path ".github/workflows/services-ci.yml" \
+            || { echo "selector self-test: service CI recipe must remain relevant" >&2; exit 1; }
+          ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
+            || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
+          ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
+            || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
@@ -118,15 +145,17 @@ jobs:
             # exists (main is squash-merged => each push is a single commit).
             FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
             echo "Push changed files:"; echo "$FILES"
-            # Inert = provably cannot change a compile input or a contract. Anchored so a
-            # service's own src/ (or ANY build.gradle.kts, openbank-libs, gradle/, contracts
-            # under pacts/) is NEVER matched here and thus never treated as inert. Feed grep
-            # a here-string, NOT `echo | grep` (pipefail + grep early-exit SIGPIPEs echo →
-            # racy false match, the same footgun documented on the PR path below).
-            RELEVANT=$(grep -vE '(^openbank-admin-ui/)|(^openbank-infra/)|(^docs/)|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
+            # Inert = provably cannot change a compile input or a contract. A service's
+            # source, any build input, Pact, or unknown automation path remains relevant and
+            # therefore keeps the conservative scoped/full-fleet behavior below.
+            RELEVANT=""
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
+            done <<< "$FILES"
             RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
             if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
-              echo "Decision: push changed only inert paths (release/docs/admin-ui/infra) -> build nothing."
+              echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build nothing."
               CHANGED=""
             else
               # Scope the main-push build instead of always full-fleeting (#1208/#2039). Full-fleet
