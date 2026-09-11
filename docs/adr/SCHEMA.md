@@ -37,7 +37,7 @@ followup: "#1234 — what is still unbuilt"     # required iff delivery-status: 
 **The block carries only what cannot be derived.** The ADR *number* comes from the
 filename and the *title* from the H1 — duplicating either in front-matter would create a
 second source of truth that can drift, which is the defect class this whole registry
-exists to prevent. That is also why `README.md`, `index.json` and `DIGEST.md` are
+exists to prevent. That is also why `README.md`, `index.json`, `DIGEST.md` and `CURRENT.md` are
 generated, never hand-edited.
 
 ## Fields
@@ -139,6 +139,6 @@ so this gate stays pure bash and runs in seconds on a docs-only PR. Therefore:
 Before pushing:
 
 ```bash
-bash docs/adr/gen-index.sh            # regenerates README.md, index.json, DIGEST.md
+bash docs/adr/gen-index.sh            # regenerates README.md, index.json, DIGEST.md, CURRENT.md
 bash .github/scripts/check-adr-registry.sh
 ```
