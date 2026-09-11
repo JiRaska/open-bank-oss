@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchHit
 import com.openbank.kyb.domain.model.Signer
 import com.openbank.kyb.domain.model.UboFinding
 import java.time.Instant
@@ -62,6 +63,38 @@ data class SignRequest(val signatureRef: String?)
 data class ResolveReviewRequest(val requiredSignatures: Int?)
 
 data class RejectRequest(val reason: String?)
+
+/**
+ * One row of a name search (issue #9707). Carries what tells two companies apart and nothing that
+ * could pass for a verified extract — no representatives, no rule, no status — so a client cannot
+ * bind a case from a search hit without going through `/lookup`.
+ */
+data class SearchHitResponse(
+    val scheme: String,
+    val identifier: String,
+    val name: String,
+    val legalFormCode: String?,
+    val legalForm: String?,
+    val registeredAddress: String?,
+) {
+    companion object {
+        fun from(h: RegistrySearchHit, legalForm: String?) = SearchHitResponse(
+            scheme = h.identifier.scheme.name,
+            identifier = h.identifier.value,
+            name = h.name,
+            legalFormCode = h.legalFormCode,
+            legalForm = legalForm,
+            registeredAddress = h.registeredAddress,
+        )
+    }
+}
+
+/**
+ * [totalMatches] can exceed `hits.size`; [tooManyMatches] means the register refused to answer at
+ * all (ARES caps at 1 000 matches and returns an error, not a page) and the customer should add a
+ * town or more of the name. Both are for the UI to say, not to hide.
+ */
+data class SearchResponse(val hits: List<SearchHitResponse>, val totalMatches: Int, val tooManyMatches: Boolean)
 
 data class SchemeResponse(
     val scheme: String,

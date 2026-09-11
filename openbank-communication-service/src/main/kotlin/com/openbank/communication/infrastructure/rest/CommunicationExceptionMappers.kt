@@ -5,6 +5,8 @@
 
 package com.openbank.communication.infrastructure.rest
 
+import com.openbank.communication.domain.GoldenSetEntryNotFoundException
+import com.openbank.communication.domain.GoldenSetEntryValidationException
 import com.openbank.communication.domain.PersonaNotFoundException
 import com.openbank.communication.domain.PlaybookVersionConflictException
 import com.openbank.communication.domain.PlaybookVersionNotFoundException
@@ -54,4 +56,12 @@ private fun status(s: Response.Status, e: Exception) = Response.status(s).entity
 
 @Provider class PlaybookVersionValidationMapper : ExceptionMapper<PlaybookVersionValidationException> {
     override fun toResponse(e: PlaybookVersionValidationException) = status(Response.Status.BAD_REQUEST, e)
+}
+
+@Provider class GoldenSetEntryNotFoundMapper : ExceptionMapper<GoldenSetEntryNotFoundException> {
+    override fun toResponse(e: GoldenSetEntryNotFoundException) = status(Response.Status.NOT_FOUND, e)
+}
+
+@Provider class GoldenSetEntryValidationMapper : ExceptionMapper<GoldenSetEntryValidationException> {
+    override fun toResponse(e: GoldenSetEntryValidationException) = status(Response.Status.BAD_REQUEST, e)
 }

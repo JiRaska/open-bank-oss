@@ -65,6 +65,40 @@ test.describe('Transaction ledger search recovery', () => {
     expect(requests).toBe(2)
   })
 
+  test('explains an empty result and offers a keyboard-accessible recovery action', async ({ page }) => {
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route =>
+      route.fulfill({
+        contentType: 'application/json',
+        // limit MUST be REQUEST_SIZE (PAGE_SIZE + 1 = 51), not PAGE_SIZE. The page sends the
+        // one-row lookahead and rejects any response whose `limit` does not echo what it asked
+        // for, so a 50 here is read as a corrupt result and renders "Failed to load" instead of
+        // the empty state this test is about. Every other mock in this file already returns 51.
+        body: JSON.stringify({ data: [], count: 0, limit: 51, offset: 0 }),
+      }),
+    )
+
+    await page.goto('/transactions')
+    await expect(page.getByRole('status')).toContainText('Find a transaction using the details you have')
+
+    await page.getByLabel('Filter by IBAN').fill('CZ6508000000192000145399')
+    await page.getByRole('button', { name: 'Search transactions' }).click()
+
+    const empty = page.getByRole('status')
+    await expect(empty).toContainText('No transactions match your search criteria')
+    await expect(empty).toContainText('not that the service is unavailable')
+
+    const clear = page.getByRole('button', { name: 'Clear search criteria' })
+    await clear.focus()
+    await expect(clear).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Filter by IBAN')).toHaveValue('')
+    await expect(clear).toHaveCount(0)
+
+    await page.locator('html').evaluate(element => element.classList.add('dark'))
+    const background = await page.locator('.ui-empty-state').evaluate(element => getComputedStyle(element).backgroundImage)
+    expect(background).not.toBe('none')
+  })
+
   test('rejects a malformed successful response without replacing verified money-path evidence', async ({ page }) => {
     let malformed = false
     await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => route.fulfill({
