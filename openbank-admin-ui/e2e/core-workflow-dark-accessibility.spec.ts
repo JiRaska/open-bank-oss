@@ -37,7 +37,7 @@ for (const { route, heading } of CORE_WORKFLOWS) {
     await page.locator('html').evaluate(element => element.classList.add('dark'))
     await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     if (route === '/approvals') {
-      await expect(page.getByRole('alert').filter({ hasText: /Agent (je nedostupný|unreachable)/ })).toBeVisible()
+      await expect(page.getByRole('status').filter({ hasText: /AI proposal queue|Fronta AI návrhů/ })).toBeVisible()
     }
     await page.waitForTimeout(300)
     const scan = await new AxeBuilder({ page })
