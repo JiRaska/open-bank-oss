@@ -52,6 +52,10 @@ object FeatureCatalogues {
             "updater exists because no decision path reads a settled money-flow feature at request " +
             "time yet. The online writer belongs with the first consumer, not ahead of it — a store " +
             "nobody reads cannot be shown to be right, and its parity test would assert nothing.",
+        "ENGAGEMENT_FEATURES" to
+            "#8792 / ADR-0282 phase 1. Declared for future campaign targeting and currently consumed " +
+            "by no online decision path. The first runtime consumer must add its online updater and " +
+            "FeatureParityIT coverage before moving this catalogue to ONLINE_SERVED.",
     )
 
     /** Every catalogue this module declares, by name. */
