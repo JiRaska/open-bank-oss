@@ -4,6 +4,7 @@
 
 package com.openbank.dispute.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.dispute.application.port.out.DisputeEvidenceRepository
 import com.openbank.dispute.application.port.out.DisputeRepository
 import com.openbank.dispute.application.port.out.DisputeTimelineRepository
@@ -226,13 +227,22 @@ class DisputeServiceTest {
             createdAt = now,
             updatedAt = now,
         )
+        val outbox = slot<List<OutboxMessage>>()
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
         // WITHDRAWN is terminal: withdraw (which delegates to update) now commits
         // dispute.resolved atomically via the two-arg overload (#8745).
-        every { disputeRepo.update(any(), any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { disputeRepo.update(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.withdraw(id, "customer").await().indefinitely()
+
+        // A withdrawal carries no remediation outcome, so the field must be JSON null -- not the
+        // four-character string "null" in a quoted field, which is what interpolating a null
+        // Kotlin reference into a quoted JSON value produces. Parsed rather than substring-matched:
+        // `contains("\"outcome\":null")` would also pass on a payload that is not valid JSON at all.
+        val node = ObjectMapper().readTree(outbox.captured.single().payload)
+        assertThat(node.get("outcome").isNull).isTrue()
+        assertThat(node.get("eventType").asText()).isEqualTo("dispute.resolved")
 
         assertThat(result.status).isEqualTo(DisputeStatus.WITHDRAWN)
         assertThat(result.resolution).isEqualTo(DisputeResolution.WITHDRAWN)
