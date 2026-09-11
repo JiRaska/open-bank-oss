@@ -162,6 +162,16 @@ openbank:
   rate-limit:
     enabled: true
     max-concurrent-requests: 150
+  # Merchant logo ingest (LogoFetcher) is OFF unless a host allowlist is supplied, and there is
+  # deliberately no key here to supply one. An endpoint that fetches an operator-named URL from
+  # inside the cluster is a server-side request forgery primitive; the allowlist is what bounds it,
+  # so enabling it has to be a decision someone makes per environment rather than a default that
+  # arrives with an upgrade. Set OPENBANK_MERCHANT_LOGO_FETCH_ALLOWED_HOSTS (comma-separated) in the
+  # environment's own manifest when that decision is taken.
+  #
+  # Do NOT write `allowed-hosts: ${VAR:}` here: an empty default does not make a property optional
+  # (SRCFG00014), it defines it as empty — which is a different thing and the case
+  # check-configproperty-supplied.py exists to catch.
   # ADR-0120 Phase 5: Temporal is the sole payment orchestrator (saga retired).
   #
   # ADR-0209 D1 (#2572): these keys used to sit under `openbank.transaction.orchestration.temporal`,

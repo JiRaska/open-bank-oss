@@ -4,9 +4,14 @@
 
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { APPROVAL_DOMAINS, type ApprovalSourceState } from '../src/lib/approvals/evidence'
+
+function approvalSources(overrides: Record<string, ApprovalSourceState> = {}) {
+  return Object.fromEntries(APPROVAL_DOMAINS.map(domain => [domain, overrides[domain] ?? 'not-configured']))
+}
 
 const proposal = {
-  id: 'proposal-42',
+  id: '11111111-1111-4111-8111-111111111142',
   title: 'Raise transaction monitoring threshold',
   rationale: 'The agent detected an evidence-backed false-positive cluster.',
   suggestedAction: 'Create a governed configuration change for human review.',
@@ -66,7 +71,7 @@ test.describe('approval workbench', () => {
           id: 'sct-inst-approval-7', domain: 'sepa-instant', action: 'payment.release',
           resourceId: 'payment-7', maker: 'maker.operator', proposedAt: '2026-08-31T11:59:00Z',
         }],
-        sources: { 'sepa-instant': 'ok', ledger: 'unavailable' },
+        sources: approvalSources({ 'sepa-instant': 'ok', ledger: 'unavailable' }),
       }),
     }))
     await page.route('**/api/governance/agent-identities', route => route.fulfill({
@@ -146,7 +151,7 @@ test.describe('approval workbench', () => {
       contentType: 'application/json',
       body: JSON.stringify({
         items: [billingApproval, balanceApproval, sanctionsApproval, notificationApproval],
-        sources: { sanctions: 'ok', notification: 'ok', balance: 'ok', billing: 'ok' },
+        sources: approvalSources({ sanctions: 'ok', notification: 'ok', balance: 'ok', billing: 'ok' }),
       }),
     }))
     await page.route('**/api/governance/agent-identities', route => route.fulfill({
