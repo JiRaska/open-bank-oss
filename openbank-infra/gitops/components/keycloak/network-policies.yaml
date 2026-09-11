@@ -71,6 +71,9 @@ spec:
               kubernetes.io/metadata.name: campaign
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: communication
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:

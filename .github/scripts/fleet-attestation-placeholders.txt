@@ -27,5 +27,5 @@
 # referral sandbox-d92d20f5) had reached exactly that state — every pin has since moved to a
 # real built tag — and two of them additionally justified themselves with prose main
 # contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
-# The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
-# that is the correct reading, not a missing file.
+
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-000000000

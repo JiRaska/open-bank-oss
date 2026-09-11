@@ -138,15 +138,14 @@ class CustomerBusinessResource(
     fun claim(@PathParam("token") token: String): Response {
         val me = human()
         // The token is the only caller-supplied value this class ever puts in a URL PATH, so it
-        // is checked for shape before it is used rather than merely encoded. URL-encoding alone
-        // does make injection impossible here (the host is a fixed prefix and UpstreamClient
-        // re-checks the whole URL against the allowed-host regex), but "impossible for two
-        // reasons a reader has to go and find" is what an SSRF finding looks like from outside —
-        // and it is what CodeQL reported. An invitation token is opaque and URL-safe by
-        // construction, so anything else is a malformed request, not a request to forward.
+        // is checked for shape before it is used. postToService constructs the allowed authority
+        // and this path as separate URI components, so the token cannot influence a host, query,
+        // fragment or user-info. An invitation token is opaque and URL-safe by construction, so
+        // anything else is a malformed request, not a request to forward.
         require(TOKEN.matches(token)) { "invitation token has an unexpected shape" }
-        return upstream.post(
-            "$kybServiceUrl$UPSTREAM/invitations/${enc(token)}/claim",
+        return upstream.postToService(
+            kybServiceUrl,
+            "$UPSTREAM/invitations/$token/claim",
             me.toString(),
             """{"partyId":"$me"}""",
             null,
