@@ -12,7 +12,12 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
-const ACCENT = '#6366f1'
+const ACCENT = 'var(--accent)'
+const ACCENT_TEXT = 'var(--accent-text)'
+const SUCCESS = 'var(--success)'
+const INFO = 'var(--info)'
+const WARNING = 'var(--warning)'
+const NEUTRAL = 'var(--text-secondary)'
 const INK = 'var(--text-primary)'
 const SUB = 'var(--text-secondary)'
 
@@ -38,15 +43,15 @@ export default function DocumentManagementDocsPage() {
 
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <Pill color="#059669" bg="#ecfdf5" border="#6ee7b7" Icon={CheckCircle} label={t('Fáze 1 (AdES/PAdES-B): ve výstavbě', 'Phase 1 (AdES/PAdES-B): shipping now')} />
-        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Circle} label={t('Fáze 2 (QES/QSeal/HSM): plánováno', 'Phase 2 (QES/QSeal/HSM): planned')} />
+        <Pill color="var(--success-text)" bg="var(--success-bg)" border="var(--success-border)" Icon={CheckCircle} label={t('Fáze 1 (AdES/PAdES-B): ve výstavbě', 'Phase 1 (AdES/PAdES-B): shipping now')} />
+        <Pill color="var(--text-primary)" bg="var(--surface-3)" border="var(--border-strong)" Icon={Circle} label={t('Fáze 2 (QES/QSeal/HSM): plánováno', 'Phase 2 (QES/QSeal/HSM): planned')} />
         <Link href="/docs/adr/0161-object-storage-standard-for-application-documents" style={{ textDecoration: 'none' }}>
-          <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0161" />
+          <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0161" />
         </Link>
         <Link href="/docs/adr/0162-document-management-templating-and-e-signature-architecture" style={{ textDecoration: 'none' }}>
-          <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0162" />
+          <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0162" />
         </Link>
-        <Pill color="#0891b2" bg="#ecfeff" border="#a5f3fc" Icon={ShieldAlert} label={t('mimo peněžní cestu', 'non-money-path')} />
+        <Pill color="var(--info-text)" bg="var(--info-bg)" border="var(--info-border)" Icon={ShieldAlert} label={t('mimo peněžní cestu', 'non-money-path')} />
       </div>
 
       {/* What it is */}
@@ -162,13 +167,13 @@ export default function DocumentManagementDocsPage() {
                 <td style={{ ...td, fontWeight: 700, color: INK }}>{t('Fáze 1', 'Phase 1')}</td>
                 <td style={{ ...td, color: SUB }}>{t('Zdokonalený el. podpis (AdES)', 'Advanced electronic signature (AdES)')}</td>
                 <td style={{ ...td, color: SUB }}>{t('Server aplikuje PAdES-B pečeť organizačním certifikátem + SCA-vázaný audit hash-chain jako důkaz', 'Server-applied PAdES-B seal with an organizational certificate + SCA-bound audit-chain evidence')}</td>
-                <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>{t('ve výstavbě', 'shipping now')}</span></td>
+                <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: 'var(--success-text)' }}>{t('ve výstavbě', 'shipping now')}</span></td>
               </tr>
               <tr style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={{ ...td, fontWeight: 700, color: INK }}>{t('Fáze 2', 'Phase 2')}</td>
                 <td style={{ ...td, color: SUB }}>{t('Kvalifikovaný el. podpis (QES/QSeal)', 'Qualified signature (QES/QSeal)')}</td>
                 <td style={{ ...td, color: SUB }}>{t('EU DSS (referenční eIDAS knihovna) produkuje PAdES-LTA, klíč v HSM/OpenBao (aktivuje dlouho odloženou ADR-0007 úschovu)', 'EU DSS (the eIDAS reference library) producing PAdES-LTA, keyed by HSM/OpenBao custody (activates the long-parked ADR-0007 QSeal custody)')}</td>
-                <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>{t('plánováno', 'planned')}</span></td>
+                <td style={td}><span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{t('plánováno', 'planned')}</span></td>
               </tr>
             </tbody>
           </table>
@@ -202,22 +207,22 @@ function ArchitectureFlowDiagram() {
 
   type Node = { id: string; x: number; y: number; w: number; h: number; color: string; titleCs: string; titleEn: string; subCs: string; subEn: string }
   const nodes: Node[] = [
-    { id: 'onboarding',      x: 20,  y: 104, w: 200, h: 64, color: '#16a34a', titleCs: 'Událost account.created', titleEn: 'account.created event', subCs: 'account-service → onboarding (ADR-0086)', subEn: 'account-service → onboarding trigger (ADR-0086)' },
-    { id: 'data',            x: 20,  y: 198, w: 200, h: 64, color: '#94a3b8', titleCs: 'Business data', titleEn: 'Business data', subCs: 'produkt / party / úvěr', subEn: 'product / party / loan' },
+    { id: 'onboarding',      x: 20,  y: 104, w: 200, h: 64, color: SUCCESS, titleCs: 'Událost account.created', titleEn: 'account.created event', subCs: 'account-service → onboarding (ADR-0086)', subEn: 'account-service → onboarding trigger (ADR-0086)' },
+    { id: 'data',            x: 20,  y: 198, w: 200, h: 64, color: NEUTRAL, titleCs: 'Business data', titleEn: 'Business data', subCs: 'produkt / party / úvěr', subEn: 'product / party / loan' },
     { id: 'editor',          x: 250, y: 10,  w: 280, h: 64, color: ACCENT,    titleCs: 'Editor šablon v admin-ui', titleEn: 'Admin-ui template editor', subCs: 'ROLE_COMPLIANCE · textarea + náhled', subEn: 'ROLE_COMPLIANCE · textarea + preview' },
     { id: 'registry',        x: 250, y: 104, w: 280, h: 64, color: ACCENT,    titleCs: 'Registr šablon', titleEn: 'Template registry', subCs: 'DRAFT → PUBLISHED → RETIRED, 1 aktuální/kód', subEn: 'DRAFT → PUBLISHED → RETIRED, 1 current/code' },
-    { id: 'render',          x: 250, y: 198, w: 280, h: 64, color: '#0284c7', titleCs: 'Vykreslení', titleEn: 'Render', subCs: 'TemplateRenderPort · bez pevné verze = aktuální', subEn: 'TemplateRenderPort · no pinned version = current' },
-    { id: 'pdf',             x: 250, y: 292, w: 280, h: 64, color: '#0284c7', titleCs: 'PDF', titleEn: 'PDF', subCs: 'WeasyPrint výchozí · Gotenberg volitelně', subEn: 'WeasyPrint default · Gotenberg opt-in' },
-    { id: 'store',           x: 560, y: 292, w: 200, h: 64, color: '#64748b', titleCs: 'Objektové úložiště', titleEn: 'Object store', subCs: 'S3 WORM / Postgres (ADR-0161)', subEn: 'S3 WORM / Postgres (ADR-0161)' },
-    { id: 'ceremony',        x: 250, y: 386, w: 280, h: 64, color: '#7c3aed', titleCs: 'Podpisová ceremonie', titleEn: 'Signature ceremony', subCs: 'orchestrace Temporal, více podepisujících', subEn: 'Temporal-orchestrated, multi-signer' },
-    { id: 'signer',          x: 250, y: 480, w: 280, h: 64, color: '#7c3aed', titleCs: 'Vazba podepisujícího', titleEn: 'Signer binding', subCs: 'SCA (ADR-0021) + souhlas', subEn: 'SCA (ADR-0021) + consent' },
-    { id: 'client_signature', x: 250, y: 574, w: 280, h: 74, color: '#059669', titleCs: 'ClientSignatureIssuerPort', titleEn: 'ClientSignatureIssuerPort', subCs: 'el. podpis klienta · jednorázový cert', subEn: 'client\'s e-signature · one-time cert' },
-    { id: 'openbao_pki',     x: 560, y: 574, w: 200, h: 64, color: '#64748b', titleCs: 'OpenBao PKI engine', titleEn: 'OpenBao PKI engine', subCs: 'pki-document-signing (vzor ADR-0031)', subEn: 'pki-document-signing (ADR-0031 pattern)' },
-    { id: 'bank_seal',       x: 250, y: 678, w: 280, h: 74, color: '#059669', titleCs: 'SignatureSealPort', titleEn: 'SignatureSealPort', subCs: 'el. pečeť banky · stabilní cert, aplikuje se poslední', subEn: 'the bank\'s e-seal · stable cert, applied last' },
-    { id: 'openbao_kv',      x: 560, y: 678, w: 200, h: 64, color: '#64748b', titleCs: 'OpenBao KV', titleEn: 'OpenBao KV', subCs: 'stabilní keystore banky (ESO)', subEn: 'stable bank keystore (ESO-projected)' },
-    { id: 'audit',           x: 560, y: 782, w: 200, h: 64, color: '#64748b', titleCs: 'Audit hash-chain', titleEn: 'Audit hash-chain', subCs: 'ADR-0133 nepopiratelnost', subEn: 'ADR-0133 non-repudiation' },
-    { id: 'kafka',           x: 250, y: 782, w: 280, h: 64, color: '#f59e0b', titleCs: 'Kafka událost', titleEn: 'Kafka event', subCs: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED', subEn: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED' },
-    { id: 'lend',            x: 250, y: 876, w: 280, h: 64, color: '#16a34a', titleCs: 'Lending / založení účtu', titleEn: 'Lending / account-opening', subCs: 'reagují asynchronně, nikdy neblokují', subEn: 'react, non-blocking (never a money-path gate)' },
+    { id: 'render',          x: 250, y: 198, w: 280, h: 64, color: INFO, titleCs: 'Vykreslení', titleEn: 'Render', subCs: 'TemplateRenderPort · bez pevné verze = aktuální', subEn: 'TemplateRenderPort · no pinned version = current' },
+    { id: 'pdf',             x: 250, y: 292, w: 280, h: 64, color: INFO, titleCs: 'PDF', titleEn: 'PDF', subCs: 'WeasyPrint výchozí · Gotenberg volitelně', subEn: 'WeasyPrint default · Gotenberg opt-in' },
+    { id: 'store',           x: 560, y: 292, w: 200, h: 64, color: NEUTRAL, titleCs: 'Objektové úložiště', titleEn: 'Object store', subCs: 'S3 WORM / Postgres (ADR-0161)', subEn: 'S3 WORM / Postgres (ADR-0161)' },
+    { id: 'ceremony',        x: 250, y: 386, w: 280, h: 64, color: ACCENT, titleCs: 'Podpisová ceremonie', titleEn: 'Signature ceremony', subCs: 'orchestrace Temporal, více podepisujících', subEn: 'Temporal-orchestrated, multi-signer' },
+    { id: 'signer',          x: 250, y: 480, w: 280, h: 64, color: ACCENT, titleCs: 'Vazba podepisujícího', titleEn: 'Signer binding', subCs: 'SCA (ADR-0021) + souhlas', subEn: 'SCA (ADR-0021) + consent' },
+    { id: 'client_signature', x: 250, y: 574, w: 280, h: 74, color: SUCCESS, titleCs: 'ClientSignatureIssuerPort', titleEn: 'ClientSignatureIssuerPort', subCs: 'el. podpis klienta · jednorázový cert', subEn: 'client\'s e-signature · one-time cert' },
+    { id: 'openbao_pki',     x: 560, y: 574, w: 200, h: 64, color: NEUTRAL, titleCs: 'OpenBao PKI engine', titleEn: 'OpenBao PKI engine', subCs: 'pki-document-signing (vzor ADR-0031)', subEn: 'pki-document-signing (ADR-0031 pattern)' },
+    { id: 'bank_seal',       x: 250, y: 678, w: 280, h: 74, color: SUCCESS, titleCs: 'SignatureSealPort', titleEn: 'SignatureSealPort', subCs: 'el. pečeť banky · stabilní cert, aplikuje se poslední', subEn: 'the bank\'s e-seal · stable cert, applied last' },
+    { id: 'openbao_kv',      x: 560, y: 678, w: 200, h: 64, color: NEUTRAL, titleCs: 'OpenBao KV', titleEn: 'OpenBao KV', subCs: 'stabilní keystore banky (ESO)', subEn: 'stable bank keystore (ESO-projected)' },
+    { id: 'audit',           x: 560, y: 782, w: 200, h: 64, color: NEUTRAL, titleCs: 'Audit hash-chain', titleEn: 'Audit hash-chain', subCs: 'ADR-0133 nepopiratelnost', subEn: 'ADR-0133 non-repudiation' },
+    { id: 'kafka',           x: 250, y: 782, w: 280, h: 64, color: WARNING, titleCs: 'Kafka událost', titleEn: 'Kafka event', subCs: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED', subEn: 'DOCUMENT_SIGNED · CEREMONY_COMPLETED' },
+    { id: 'lend',            x: 250, y: 876, w: 280, h: 64, color: SUCCESS, titleCs: 'Lending / založení účtu', titleEn: 'Lending / account-opening', subCs: 'reagují asynchronně, nikdy neblokují', subEn: 'react, non-blocking (never a money-path gate)' },
   ]
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]))
   const cx = (n: Node) => n.x + n.w / 2
@@ -239,44 +244,44 @@ function ArchitectureFlowDiagram() {
           {/* main spine */}
           <Arrow a={bottom(byId.editor)} b={top(byId.registry)} color={ACCENT} label={t('BFF · ADR-0056', 'BFF · ADR-0056')} />
           <Arrow a={bottom(byId.registry)} b={top(byId.render)} color={ACCENT} />
-          <Arrow a={right(byId.data)} b={left(byId.render)} color="#94a3b8" label={t('sloučit pole', 'merge fields')} />
+          <Arrow a={right(byId.data)} b={left(byId.render)} color={NEUTRAL} label={t('sloučit pole', 'merge fields')} />
           {/* Onboarding is the second (event-driven) trigger into render, alongside the
               admin-ui/API-driven path above — an elbowed connector, ADR-0162 D7. */}
           <path
             d={`M ${bottom(byId.onboarding).x} ${bottom(byId.onboarding).y} L ${bottom(byId.onboarding).x} 230 L ${left(byId.render).x} 230`}
-            fill="none" stroke="#16a34a" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#dm-ah)"
+            fill="none" stroke={SUCCESS} strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#dm-ah)"
           />
-          <text x={bottom(byId.onboarding).x + 4} y={188} fontSize={11} fill="#16a34a">
+          <text x={bottom(byId.onboarding).x + 4} y={188} fontSize={11} fill="var(--success-text)">
             {t('vyvolá render', 'triggers render')}
           </text>
-          <Arrow a={bottom(byId.render)} b={top(byId.pdf)} color="#0284c7" />
-          <Arrow a={right(byId.pdf)} b={left(byId.store)} color="#64748b" label="ObjectStorePort" />
-          <Arrow a={bottom(byId.pdf)} b={top(byId.ceremony)} color="#7c3aed" />
-          <Arrow a={bottom(byId.ceremony)} b={top(byId.signer)} color="#7c3aed" label={t('vazba SCA', 'SCA bind')} />
-          <Arrow a={bottom(byId.signer)} b={top(byId.client_signature)} color="#059669" label={t('SIGNED → ihned', 'SIGNED → immediately')} />
-          <Arrow a={left(byId.openbao_pki)} b={right(byId.client_signature)} color="#64748b" label={t('vydá cert', 'issues cert')} />
-          <Arrow a={bottom(byId.client_signature)} b={top(byId.bank_seal)} color="#059669" label={t('poslední signatář → pečeť', 'last signer → seal')} />
-          <Arrow a={left(byId.openbao_kv)} b={right(byId.bank_seal)} color="#64748b" label={t('keystore', 'keystore')} />
-          <Arrow a={right(byId.bank_seal)} b={left(byId.audit)} color="#64748b" label={t('hash-chain', 'hash-chain')} />
+          <Arrow a={bottom(byId.render)} b={top(byId.pdf)} color={INFO} />
+          <Arrow a={right(byId.pdf)} b={left(byId.store)} color={NEUTRAL} label="ObjectStorePort" />
+          <Arrow a={bottom(byId.pdf)} b={top(byId.ceremony)} color={ACCENT} />
+          <Arrow a={bottom(byId.ceremony)} b={top(byId.signer)} color={ACCENT} label={t('vazba SCA', 'SCA bind')} />
+          <Arrow a={bottom(byId.signer)} b={top(byId.client_signature)} color={SUCCESS} label={t('SIGNED → ihned', 'SIGNED → immediately')} />
+          <Arrow a={left(byId.openbao_pki)} b={right(byId.client_signature)} color={NEUTRAL} label={t('vydá cert', 'issues cert')} />
+          <Arrow a={bottom(byId.client_signature)} b={top(byId.bank_seal)} color={SUCCESS} label={t('poslední signatář → pečeť', 'last signer → seal')} />
+          <Arrow a={left(byId.openbao_kv)} b={right(byId.bank_seal)} color={NEUTRAL} label={t('keystore', 'keystore')} />
+          <Arrow a={right(byId.bank_seal)} b={left(byId.audit)} color={NEUTRAL} label={t('hash-chain', 'hash-chain')} />
           {/* Kafka event fires off the ceremony itself once complete, not off the
               seal detail — an elbowed connector on the left routes around
               signer/seal to stay faithful to the ADR-0162 mermaid edge
               `CE -->|event DOCUMENT_SIGNED| K`. */}
           <path
             d={`M ${left(byId.ceremony).x} ${left(byId.ceremony).y} L 120 ${left(byId.ceremony).y} L 120 ${left(byId.kafka).y} L ${left(byId.kafka).x} ${left(byId.kafka).y}`}
-            fill="none" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#dm-ah)"
+            fill="none" stroke={WARNING} strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#dm-ah)"
           />
-          <text x={124} y={(left(byId.ceremony).y + left(byId.kafka).y) / 2 - 6} fontSize={11} fill="#b45309">
+          <text x={124} y={(left(byId.ceremony).y + left(byId.kafka).y) / 2 - 6} fontSize={11} fill="var(--warning-text)">
             {t('událost po dokončení, neblokující', 'event on completion, non-blocking')}
           </text>
-          <Arrow a={bottom(byId.kafka)} b={top(byId.lend)} color="#16a34a" label={t('konzumuje', 'consumed by')} />
+          <Arrow a={bottom(byId.kafka)} b={top(byId.lend)} color={SUCCESS} label={t('konzumuje', 'consumed by')} />
         </svg>
         {nodes.map(n => (
           <div key={n.id} style={{
             position: 'absolute', left: n.x, top: n.y, width: n.w, height: n.h,
             borderRadius: 10, background: 'var(--surface-1)', border: '1px solid var(--border)',
             borderLeft: `4px solid ${n.color}`, padding: '8px 12px', display: 'flex', flexDirection: 'column',
-            justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+            justifyContent: 'center', boxShadow: 'var(--shadow-sm)',
           }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{t(n.titleCs, n.titleEn)}</div>
             <div style={{ fontSize: 10.5, color: SUB, marginTop: 2, lineHeight: 1.35 }}>{t(n.subCs, n.subEn)}</div>
@@ -292,7 +297,7 @@ function Arrow({ a, b, color, label }: { a: { x: number; y: number }; b: { x: nu
     <g>
       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={2} markerEnd="url(#dm-ah)" />
       {label && (
-        <text x={(a.x + b.x) / 2 + (a.x === b.x ? 8 : 0)} y={(a.y + b.y) / 2 - 4} fontSize={11} fill={color} textAnchor={a.x === b.x ? 'start' : 'middle'}>
+        <text x={(a.x + b.x) / 2 + (a.x === b.x ? 8 : 0)} y={(a.y + b.y) / 2 - 4} fontSize={11} fill="var(--text-primary)" textAnchor={a.x === b.x ? 'start' : 'middle'}>
           {label}
         </text>
       )}
@@ -322,4 +327,4 @@ function Pill({ color, bg, border, Icon, label }: { color: string; bg: string; b
 
 const th: React.CSSProperties = { padding: '10px 14px', fontWeight: 700, fontSize: 12 }
 const td: React.CSSProperties = { padding: '10px 14px', verticalAlign: 'top' }
-const linkBtn: React.CSSProperties = { fontSize: 12.5, fontWeight: 600, color: ACCENT, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '6px 12px', borderRadius: 8, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }
+const linkBtn: React.CSSProperties = { fontSize: 12.5, fontWeight: 600, color: ACCENT_TEXT, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '6px 12px', borderRadius: 8, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }

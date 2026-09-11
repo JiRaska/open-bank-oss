@@ -7,11 +7,11 @@ import { signInAsOperator } from './helpers/auth'
 
 const PARTY = {
   id: '05a02ef1-381c-40e7-b73f-d6855eead42e',
-  partyType: 'PERSON',
+  partyType: 'INDIVIDUAL',
   status: 'ACTIVE',
   legalName: 'Jan Novák',
   email: 'jan.novak@example.test',
-  kycStatus: 'VERIFIED',
+  kycStatus: 'APPROVED',
   createdAt: '2026-08-01T08:00:00Z',
   updatedAt: '2026-08-31T08:00:00Z',
 }
