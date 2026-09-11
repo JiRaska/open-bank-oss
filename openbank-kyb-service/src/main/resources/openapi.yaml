@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: OpenBank KYB Service API
-  # 1.1.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 is claimed by the open
-  # name-search PR (#9708); re-check against live main before merging, whoever lands second bumps.
+  # 1.2.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 shipped the name
+  # search (#9707); this is the next free minor as of live main.
   version: 1.3.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
@@ -71,6 +71,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RegistryExtract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/registry/search:
+    get:
+      tags: [KYB]
+      summary: Find a company by name, optionally narrowed by town
+      description: >-
+        For the customer who does not know their identifier. Returns only what tells two companies
+        apart; a chosen row still goes through /lookup, so a search hit can never bind a case by
+        itself. `tooManyMatches` is a distinct outcome, not an error: the register refuses to
+        answer a query above its match cap (ARES: 1 000) and the customer should narrow it.
+        404 when the register for `country` declares no name search (see `supportsNameSearch`
+        on /schemes).
+      operationId: searchRegistry
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, example: CZ }
+        - name: name
+          in: query
+          required: true
+          description: Free text matched against the registered company name (min 3 characters)
+          schema: { type: string, minLength: 3 }
+        - name: city
+          in: query
+          required: false
+          description: Narrowing hint matched against the registered seat; the seat is often an accountant's address, so absence of a match is not absence of the company
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Candidate rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -484,6 +528,25 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    SearchHit:
+      type: object
+      required: [scheme, identifier, name]
+      properties:
+        scheme: { type: string, example: CZ_ICO }
+        identifier: { type: string, example: "27074358" }
+        name: { type: string }
+        legalFormCode: { type: string, nullable: true }
+        legalForm: { type: string, nullable: true, description: Label from the country pack, when the code is known }
+        registeredAddress: { type: string, nullable: true }
+    SearchResponse:
+      type: object
+      required: [hits, totalMatches, tooManyMatches]
+      properties:
+        hits:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+        totalMatches: { type: integer, description: The register's own count; may exceed hits.length }
+        tooManyMatches: { type: boolean, description: The register refused the query as too broad; narrow it }
     Attestation:
       type: object
       required: [id, scheme, identifier, ruleTextHash, parsedMode, confirmedSigners, confirmedRoles, attestedBy, attestedAt]

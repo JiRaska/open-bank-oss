@@ -12,6 +12,8 @@ import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -33,11 +35,22 @@ interface RegistryAdapter {
     val source: String
     fun supports(scheme: IdentifierScheme): Boolean
     suspend fun lookup(identifier: LegalEntityIdentifier, declared: DeclaredEntity?): RegistryExtract?
+
+    /**
+     * Find candidates by name (issue #9707). **Null means this register cannot search**, which is a
+     * different answer from an empty result and has to stay that way: the UI offers the search box
+     * only where a register backs it, and silently showing a box that always finds nothing is worse
+     * than not offering one. Default so a register without the capability needs no code.
+     */
+    suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? = null
 }
 
 /** The router over every [RegistryAdapter]; what the use cases depend on. */
 interface BusinessRegistryPort {
     suspend fun lookup(identifier: LegalEntityIdentifier, declared: DeclaredEntity?): RegistryExtract?
+
+    /** Null when no adapter for [scheme] supports search; see [RegistryAdapter.search]. */
+    suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? = null
 }
 
 /** Short-lived cache of extracts so a lookup on the entry screen and the case start share one register call. */

@@ -16,6 +16,9 @@ import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchHit
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
@@ -61,6 +64,33 @@ class StubAresAdapter : RegistryAdapter {
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null
         }
+
+    /**
+     * Name search for the REST-surface ITs. "stavby" stands in for the over-cap case ARES answers
+     * with an error rather than a page, so the endpoint's third outcome is exercised without a
+     * live register.
+     */
+    override suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? {
+        if (!supports(scheme)) return null
+        if (query.name.lowercase().startsWith("stavby")) return RegistrySearchResult.tooMany(2818)
+        val all = listOf(
+            RegistrySearchHit(
+                LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, "45274649"),
+                "Příklad s.r.o.",
+                "112",
+                "Náměstí 1, 60200 Brno",
+            ),
+            RegistrySearchHit(
+                LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, "26185610"),
+                "Příklad Praha s.r.o.",
+                "112",
+                "Budějovická 778/3, 14000 Praha 4",
+            ),
+        ).filter { it.name.lowercase().contains(query.name.lowercase()) }
+        val hits =
+            query.city?.let { c -> all.filter { it.registeredAddress?.contains(c, ignoreCase = true) == true } } ?: all
+        return RegistrySearchResult(hits = hits, totalMatches = hits.size)
+    }
 
     private fun extract(id: LegalEntityIdentifier, form: LegalFormClass, rule: RepresentationRule, reps: List<String>) =
         RegistryExtract(

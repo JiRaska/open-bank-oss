@@ -8,6 +8,8 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
 import java.time.LocalDate
@@ -78,6 +80,26 @@ interface RepresentationAttestationUseCase {
 }
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
+
+/**
+ * Find a company by name instead of by identifier (issue #9707). [country] selects the register
+ * through the country pack; the scheme follows from it.
+ */
+data class SearchRegistryCommand(
+    val country: String,
+    val name: String,
+    val city: String? = null,
+    val limit: Int = RegistrySearchQuery.DEFAULT_LIMIT,
+)
+
+interface RegistrySearchUseCase {
+    /**
+     * Null when the register for [SearchRegistryCommand.country] cannot search — distinct from an
+     * empty result, so the caller can hide the search box rather than show one that never finds
+     * anything.
+     */
+    suspend fun search(cmd: SearchRegistryCommand): RegistrySearchResult?
+}
 
 interface RegistryLookupUseCase {
     /**

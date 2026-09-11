@@ -10,7 +10,8 @@
     "publicSource": "https://ares.gov.cz",
     "free": true,
     "listsRepresentatives": true,
-    "listsRepresentationRule": true
+    "listsRepresentationRule": true,
+    "supportsNameSearch": true
   },
   "uboRegister": {
     "name": "Evidence skutečných majitelů",
