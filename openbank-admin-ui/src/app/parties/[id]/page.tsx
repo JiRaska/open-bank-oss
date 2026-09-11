@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw, Bell, ChevronDown, Send, Clock } from 'lucide-react'
@@ -17,20 +17,10 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
+import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
+import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
 
 const PAGE_SIZE = 25
-
-interface Party {
-  id: string; partyType: string; status: string; legalName: string; tradingName?: string
-  email: string; phone?: string; kycStatus: string; taxId?: string; registrationNumber?: string
-  nationality?: string; dateOfBirth?: string; address?: { line1: string; city: string; postalCode: string; countryCode: string }
-  createdAt: string; updatedAt: string
-}
-
-interface KycCase {
-  id: string; status: string; checks: { checkType: string; status: string; result?: string }[]
-  reviewedBy?: string; createdAt: string; updatedAt: string
-}
 
 // The list endpoint's NotificationSummary (notification-service openapi.yaml 1.5.0).
 // Metadata only — `body` is deliberately absent here and is NOT fetched by this page.
@@ -45,33 +35,65 @@ function PartyDetailPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
-  const [party, setParty]     = useState<Party | null>(null)
-  const [kyc, setKyc]         = useState<KycCase | null>(null)
+  const [party, setParty]     = useState<PartyEvidence | null>(null)
+  const [kyc, setKyc]         = useState<KycCaseEvidence | null>(null)
+  const [kycUnavailable, setKycUnavailable] = useState<UnavailableKind>('no_data')
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [tab, setTab] = useState<'overview' | 'messages'>('overview')
+  const activeLoad = useRef<AbortController | null>(null)
 
   const canSeeMessages = hasPermission(roles, 'notifications:view')
 
   const load = useCallback(async () => {
+    activeLoad.current?.abort()
+    const controller = new AbortController()
+    activeLoad.current = controller
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])
     setLoading(true); setUnavailable(null)
+    setKyc(null); setKycUnavailable('no_data')
     try {
       const [partyRes, kycRes] = await Promise.allSettled([
-        fetch(svcUrl('party-service', `/api/v1/parties/${id}`), { signal: AbortSignal.timeout(5000) }),
-        fetch(svcUrl('kyc-service', `/api/v1/kyc/cases/party/${id}`), { signal: AbortSignal.timeout(5000) }),
+        fetch(svcUrl('party-service', `/api/v1/parties/${id}`), { signal }),
+        fetch(svcUrl('kyc-service', `/api/v1/kyc/cases/party/${id}`), { signal }),
       ])
+      if (controller.signal.aborted) return
       if (partyRes.status !== 'fulfilled') { setUnavailable({ kind: 'unreachable' }); return }
       if (!partyRes.value.ok) { setUnavailable({ kind: await classifyBffFailure(partyRes.value) }); return }
-      setParty(await partyRes.value.json())
+      const verifiedParty = parsePartyEvidence(await partyRes.value.json(), id)
+      if (!verifiedParty) { setUnavailable({ kind: 'error' }); return }
+      if (controller.signal.aborted) return
+      setParty(verifiedParty)
       // KYC is supplementary: a party with no case is normal, so a failure here degrades
       // that card rather than the page.
-      if (kycRes.status === 'fulfilled' && kycRes.value.ok) setKyc(await kycRes.value.json())
+      if (kycRes.status === 'fulfilled' && kycRes.value.ok) {
+        const verifiedKyc = parseKycCaseEvidence(await kycRes.value.json(), id)
+        if (verifiedKyc) setKyc(verifiedKyc)
+        else setKycUnavailable('error')
+      } else if (kycRes.status === 'fulfilled') {
+        const kind = await classifyBffFailure(kycRes.value)
+        setKycUnavailable(kind === 'not_found' ? 'no_data' : kind)
+      } else {
+        setKycUnavailable('unreachable')
+      }
     } catch {
-      setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+      if (!controller.signal.aborted) setUnavailable({ kind: 'unreachable' })
+    } finally {
+      if (activeLoad.current === controller) {
+        activeLoad.current = null
+        setLoading(false)
+      }
+    }
   }, [id])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => {
+      const controller = activeLoad.current
+      activeLoad.current = null
+      controller?.abort()
+    }
+  }, [load])
 
   if (loading) return (
     <div>
@@ -195,8 +217,8 @@ function PartyDetailPage() {
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
                   {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
                 </div>
-                {kyc.checks?.map(check => (
-                  <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
+                {kyc.checks.map(check => (
+                  <div key={check.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
                     <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
                     <StatusBadge status={check.status} />
                   </div>
@@ -208,7 +230,7 @@ function PartyDetailPage() {
                 )}
               </div>
             ) : (
-              <DataUnavailable kind="no_data" feature={t('Případ KYC', 'KYC case')} lang={language} dense />
+              <DataUnavailable kind={kycUnavailable} service="KYC-service" feature={t('Případ KYC', 'KYC case')} lang={language} dense />
             )}
 
             {/* Address */}
