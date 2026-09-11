@@ -12,6 +12,8 @@ info:
   #
   # Minor bump (1.6 -> 1.7): additive only — GET /approvals (the checker's queue, issue #5679)
   # plus two additive fields on ApprovalResponse (makerId, createdAt). No breaking change.
+  # The sequencing this file recorded has played out: #9670 took 1.8.0 and has merged (live main
+  # is 1.8.0), so 1.9.0 is correct and free. #9395 is queued behind this one at 1.10.0.
   version: 1.9.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
@@ -69,7 +71,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, PROCESSING, COMPLETED, REJECTED, RECALLED]
+            enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         - name: debtorAccountId
           in: query
           schema:
@@ -375,7 +377,10 @@ components:
       properties:
         targetStatus:
           type: string
-          enum: [PROCESSING, COMPLETED, REJECTED, RECALLED]
+          # A DELIBERATE SUBSET of SepaPaymentStatus: every value `canTransitionTo` can reach.
+          # RECEIVED is the entry state only — no transition targets it — so it is absent here
+          # while being present on the read filter above.
+          enum: [VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         reason:
           type: string
 
