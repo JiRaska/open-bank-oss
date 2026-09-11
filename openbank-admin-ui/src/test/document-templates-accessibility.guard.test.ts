@@ -3,13 +3,16 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const page = readFileSync(path.resolve(__dirname, '../app/document-templates/page.tsx'), 'utf8')
+const tabs = readFileSync(path.resolve(__dirname, '../components/ui/Tabs.tsx'), 'utf8')
 
 describe('document template authoring accessibility', () => {
   it('exposes the authoring modal as a labelled modal dialog', () => {
-    expect(page).toContain('role="dialog"')
-    expect(page).toContain('aria-modal="true"')
-    expect(page).toContain('aria-labelledby="template-editor-title"')
-    expect(page).toContain('id="template-editor-title"')
+    expect(page).toContain("import * as Dialog from '@radix-ui/react-dialog'")
+    expect(page).toContain('<Dialog.Content')
+    expect(page).toContain('<Dialog.Title')
+    expect(page).toContain('onOpenAutoFocus={event =>')
+    expect(page).toContain('onCloseAutoFocus={event =>')
+    expect(page).toContain('onEscapeKeyDown={event =>')
     expect(page).toContain('aria-label={t(\'Zavřít editor šablony\'')
   })
 
@@ -25,14 +28,15 @@ describe('document template authoring accessibility', () => {
   })
 
   it('uses an accessible roving-focus tab pattern with permanently addressable panels', () => {
-    expect(page).toContain('role="tablist"')
-    expect(page).toContain('role="tab"')
+    expect(page).toContain('<Tabs')
+    expect(tabs).toContain('role="tablist"')
+    expect(tabs).toContain('role="tab"')
     expect(page).toContain('role="tabpanel"')
-    expect(page).toContain('tabIndex={tab === tb.id ? 0 : -1}')
-    expect(page).toContain("event.key === 'ArrowRight'")
-    expect(page).toContain("event.key === 'ArrowLeft'")
-    expect(page).toContain("event.key === 'Home'")
-    expect(page).toContain("event.key === 'End'")
+    expect(tabs).toContain('tabIndex={selected ? 0 : -1}')
+    expect(tabs).toContain("event.key === 'ArrowRight'")
+    expect(tabs).toContain("event.key === 'ArrowLeft'")
+    expect(tabs).toContain("event.key === 'Home'")
+    expect(tabs).toContain("event.key === 'End'")
     expect(page).toContain('hidden={tab !== \'templates\'}')
     expect(page).toContain('hidden={tab !== \'documents\'}')
     expect(page).toContain('id="template-status-filter"')

@@ -72,7 +72,7 @@ export default async function SensorsIndexPage() {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
         {(['live', 'partial', 'planned'] as Status[]).map(s => (
           <div key={s} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: STATUS_META[s].color }} />
+            <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: STATUS_META[s].text }} />
             <span style={{ fontSize: 18, fontWeight: 650 }}>{counts[s]}</span>
             <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{STATUS_META[s].label[lang]}</span>
           </div>

@@ -35,7 +35,13 @@ ADR-0029):
    from the OpenAPI diff (`oasdiff`), never forced equal to the release version.
 4. **DB change ⇒ Flyway migration + rollback note. Event change ⇒ schema versioned backward-compatibly.**
    **Config change ⇒ no duplicate YAML keys** in `application.yaml` — SmallRye/SnakeYAML keep only the
-   *last* of a repeated mapping key and silently drop the rest (CI enforces this).
+   *last* of a repeated mapping key and silently drop the rest (CI enforces this). The same trap
+   reaches `.github/gates/gates.yaml` and every YAML a gate parses with `yaml.safe_load`, and there
+   it is worse: **a guard that READS a document cannot be the thing that notices the document is
+   malformed.** Two PRs added `budget_seconds` to the same five gates within an hour on 2026-09-05;
+   `gate-observability-declarations` read the duplicate, saw a budget, called it declared and passed,
+   while `yamllint` reddened `main` for the whole queue. `check-duplicate-yaml-keys.sh` now covers
+   that path too.
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
@@ -58,6 +64,11 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+
+Autonomous work is WIP-limited across every prefix in
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
+opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
+reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
 
 ## Build
 

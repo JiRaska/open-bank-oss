@@ -11,6 +11,7 @@ describe('accounts controls accessibility contract', () => {
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Vymazat filtry účtů', 'Reset account filters')}")
     expect(source).toContain("aria-label={t('Zobrazit další účty', 'Load more accounts')}")
-    expect(source).toContain('onClick={() => setVisibleCount(c => c + PAGE_SIZE)}')
+    expect(source).toContain('aria-busy={loadingMore}')
+    expect(source).toContain('onClick={() => void search(query, result?.pagination.nextCursor)}')
   })
 })

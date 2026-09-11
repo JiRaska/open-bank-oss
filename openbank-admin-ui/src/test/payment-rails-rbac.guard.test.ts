@@ -21,10 +21,13 @@ describe('payment rail consoles mirror backend read roles', () => {
   it('uses one permission at both edge, navigation, and page boundaries', () => {
     expect(permissionForPath('/swift')).toBe('payment-rails:view')
     expect(permissionForPath('/clearing')).toBe('payment-rails:view')
+    expect(permissionForPath('/sdd')).toBe('payment-rails:view')
     const sidebar = read('components/layout/Sidebar.tsx')
     expect(sidebar).toMatch(/href: '\/swift'[\s\S]*permission: 'payment-rails:view'/)
     expect(sidebar).toMatch(/href: '\/clearing'[\s\S]*permission: 'payment-rails:view'/)
+    expect(sidebar).toMatch(/href: '\/sdd'[\s\S]*permission: 'payment-rails:view'/)
     expect(read('app/swift/page.tsx')).toContain('<AuthGuard permission="payment-rails:view">')
     expect(read('app/clearing/page.tsx')).toContain('<AuthGuard permission="payment-rails:view">')
+    expect(read('app/sdd/page.tsx')).toContain('<AuthGuard permission="payment-rails:view">')
   })
 })
