@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const reviewRecord = {
-  scoreId: 'score-001',
+  scoreId: '11111111-1111-4111-8111-111111111111',
   amount: 125000,
   currency: 'CZK',
   rail: 'SCT_INST',
-  accountId: 'account-12345678',
-  counterpartyId: 'party-87654321',
+  accountId: '22222222-2222-4222-8222-222222222222',
+  counterpartyId: '33333333-3333-4333-8333-333333333333',
   verdict: 'REVIEW',
   score: 91,
   ruleVersion: 'fraud-rules-2026.08',
@@ -29,6 +29,25 @@ test.beforeEach(async ({ context, baseURL, page }) => {
       expires: '2099-01-01T00:00:00.000Z',
     }),
   }))
+})
+
+test('retains verified evidence when a refresh returns a non-review row', async ({ page }) => {
+  let wrongVerdict = false
+  await page.route('**/api/svc/fraud-service/api/v1/fraud/review-queue**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([{ ...reviewRecord, verdict: wrongVerdict ? 'ALLOW' : 'REVIEW' }]),
+  }))
+
+  await page.goto('/fraud')
+  await expect(page.getByText('fraud-rules-2026.08')).toBeVisible({ timeout: 20_000 })
+
+  wrongVerdict = true
+  await page.getByRole('button', { name: /Obnovit frontu podvodů|Refresh fraud queue/ }).click()
+
+  await expect(page.getByText('fraud-rules-2026.08')).toBeVisible()
+  await expect(page.getByText(/Zobrazen je poslední úspěšný snapshot|Showing the last successful snapshot/)).toBeVisible()
+  await expect(page.getByText('ALLOW')).toBeHidden()
 })
 
 test('retains the bounded fraud evidence snapshot when refresh fails', async ({ page }) => {

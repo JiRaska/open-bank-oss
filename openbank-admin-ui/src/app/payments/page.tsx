@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -17,6 +18,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { useSingleFlight, useIdempotencyKey, wasSkipped } from '@/lib/mutations/singleFlight'
+import { parseVopEvidence } from '@/lib/payments/vopEvidence'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -161,9 +163,14 @@ function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 
 function VopSection({ formData, setFormData }: { formData: SepaFormData; setFormData: React.Dispatch<React.SetStateAction<SepaFormData>> }) {
   const { t } = useLanguage()
-  const vopColor: Record<string, string> = {
-    idle: 'var(--text-tertiary)', match: '#16a34a', close_match: '#d97706',
-    no_match: '#dc2626', no_data: '#6366f1', loading: 'var(--text-tertiary)',
+  const requestRef = useRef(0)
+  const vopTone: Record<VopStatus, { text: string; bg: string; border: string }> = {
+    idle: { text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)' },
+    loading: { text: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)' },
+    match: { text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+    close_match: { text: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+    no_match: { text: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
+    no_data: { text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
   }
   const vopIcon = (s: VopStatus) => {
     if (s === 'loading') return <Clock size={16} />
@@ -177,14 +184,15 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
     close_match: 'CLOSE_MATCH — jméno se mírně liší', no_match: 'NO_MATCH — jméno nesouhlasí',
     no_data: 'NO_DATA — ověření nedostupné',
   }
+  const tone = vopTone[formData.vopStatus]
   return (
-    <div style={{ padding: '14px', borderRadius: '8px', border: `1px solid ${vopColor[formData.vopStatus]}44`, background: `${vopColor[formData.vopStatus]}08` }}>
+    <div style={{ padding: '14px', borderRadius: '8px', border: `1px solid ${tone.border}`, background: tone.bg }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-        <ShieldCheck size={14} style={{ color: formData.instant ? '#d97706' : 'var(--text-secondary)' }} />
+        <ShieldCheck size={14} style={{ color: formData.instant ? 'var(--warning-text)' : 'var(--text-secondary)' }} />
         <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Ověření příjemce (VoP)', 'Verification of Payee (VoP)')}</span>
         {formData.instant && (
           <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px',
-            background: '#d9770622', color: '#d97706' }}>{t('Povinné', 'Mandatory')}</span>
+            background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>{t('Povinné', 'Mandatory')}</span>
         )}
       </div>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
@@ -193,36 +201,45 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
           value={formData.creditorName} onChange={e => setFormData({ ...formData, vopStatus: 'idle', vopResult: null, creditorName: e.target.value })} />
         <button type="button" className="btn btn-secondary btn-sm" disabled={!formData.creditorIban || !formData.creditorName || formData.vopStatus === 'loading'}
           onClick={async () => {
+            const request = ++requestRef.current
+            const verifiedIban = formData.creditorIban
+            const verifiedName = formData.creditorName
             setFormData(prev => ({ ...prev, vopStatus: 'loading', vopResult: null }))
             try {
               const res = await fetch(`${VOP_API}/api/v1/vop/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ creditorIban: formData.creditorIban, creditorName: formData.creditorName }),
+                body: JSON.stringify({ creditorIban: verifiedIban, creditorName: verifiedName }),
+                signal: AbortSignal.timeout(8000),
               })
               if (!res.ok) {
                 // The service answered, but not with a verdict. That is not a payee mismatch —
                 // never render it as no_match, which would tell the operator the payee is wrong
                 // when we never actually checked.
-                setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+                setFormData(prev => request === requestRef.current && prev.creditorIban === verifiedIban && prev.creditorName === verifiedName
+                  ? { ...prev, vopStatus: 'no_data', vopResult: null }
+                  : prev)
                 return
               }
-              const body = await res.json() as { status: VopStatus; matchedName?: string | null }
-              // matchedName is only ever populated for close_match (ADR-0171 §6) — the backend
-              // will not echo a name on no_match, so there is nothing to guard here beyond
-              // rendering what we are given.
-              setFormData(prev => ({ ...prev, vopStatus: body.status, vopResult: body.matchedName ?? body.status }))
+              const evidence = parseVopEvidence(await res.json())
+              setFormData(prev => {
+                if (request !== requestRef.current || prev.creditorIban !== verifiedIban || prev.creditorName !== verifiedName) return prev
+                if (!evidence) return { ...prev, vopStatus: 'no_data', vopResult: null }
+                return { ...prev, vopStatus: evidence.status, vopResult: evidence.matchedName ?? evidence.status }
+              })
             } catch {
               // VoP is fail-open (ADR-0171 §3): an unreachable service must not block the payment,
               // but it must never look like a successful verification either.
-              setFormData(prev => ({ ...prev, vopStatus: 'no_data', vopResult: null }))
+              setFormData(prev => request === requestRef.current && prev.creditorIban === verifiedIban && prev.creditorName === verifiedName
+                ? { ...prev, vopStatus: 'no_data', vopResult: null }
+                : prev)
             }
           }}>
           <ShieldCheck size={12} />{t('Ověřit', 'Verify')}
         </button>
       </div>
       {formData.vopStatus !== 'idle' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: vopColor[formData.vopStatus] }}>
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: tone.text }}>
           {vopIcon(formData.vopStatus)}
           {vopLabel[formData.vopStatus]}
           {/* Only close_match carries a name — the backend never echoes one on no_match. */}
@@ -233,6 +250,21 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
       )}
     </div>
   )
+}
+
+/**
+ * The element focus should return to once a review dialog closes, or `null` when there is none.
+ *
+ * `document.activeElement` is NOT that answer on its own. It is `<body>` whenever nothing holds
+ * focus — a form submitted programmatically, or by Enter after the field blurred — and `<body>`
+ * is always `isConnected`, so storing it makes the caller's fallback unreachable and `.focus()`
+ * on it a no-op. The user then lands nowhere, which is the outcome returning focus exists to
+ * prevent. Only a focusable element other than the body is a real return target.
+ */
+function focusableReturnTarget(node: Element | null): HTMLElement | null {
+  if (!(node instanceof HTMLElement)) return null
+  if (node === document.body || node === document.documentElement) return null
+  return node
 }
 
 export default function PaymentsPage() {
@@ -283,14 +315,13 @@ function PaymentsContent() {
   const [paymentReview, setPaymentReview] = useState<'domestic' | 'sepa' | null>(null)
   const reviewBackRef = useRef<HTMLButtonElement>(null)
   const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const reviewReturnFocusRef = useRef<HTMLElement | null>(null)
   const domesticSubmitRef = useRef<HTMLButtonElement>(null)
   const sepaSubmitRef = useRef<HTMLButtonElement>(null)
 
   const returnToPaymentForm = () => {
-    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
     setPaymentReview(null)
     setCreateError(null)
-    window.requestAnimationFrame(() => submit?.focus())
   }
 
   // SCT Inst monitoring state
@@ -320,7 +351,7 @@ function PaymentsContent() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : t('Nepodařilo se načíst platby', 'Failed to load payments'))
     } finally { setLoading(false) }
-  }, [])
+  }, [t])
 
   const loadSct = useCallback(async () => {
     setSctLoading(true)
@@ -346,8 +377,15 @@ function PaymentsContent() {
     setSctLoading(false)
   }, [t])
 
-  useEffect(() => { load() }, [load])
-  useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
+  useEffect(() => {
+    if (activeTab !== 'sct-inst') return
+    const initialSctLoad = window.setTimeout(() => { void loadSct() }, 0)
+    return () => window.clearTimeout(initialSctLoad)
+  }, [activeTab, loadSct])
 
   const selectPaymentType = (t: CreateType) => {
     if (!canCreate) return
@@ -376,6 +414,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
+      reviewReturnFocusRef.current = focusableReturnTarget(document.activeElement)
       setPaymentReview('domestic')
       return
     }
@@ -441,6 +480,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
+      reviewReturnFocusRef.current = focusableReturnTarget(document.activeElement)
       setPaymentReview('sepa')
       return
     }
@@ -509,14 +549,14 @@ function PaymentsContent() {
     if (s === 'SETTLED') return { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' }
     if (s === 'TIMEOUT' || s === 'REJECTED') return { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' }
     if (s === 'RECALLED') return { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' }
-    return { bg: 'rgba(99,102,241,0.1)', text: '#6366f1', border: 'rgba(99,102,241,0.2)' }
+    return { bg: 'var(--accent-bg)', text: 'var(--accent-text)', border: 'var(--accent-border)' }
   }
   const timeoutCountdown = (timeoutAt?: string, status?: string) => {
     if (status !== 'PROCESSING' || !timeoutAt) return null
     // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
     const ms = new Date(timeoutAt).getTime() - Date.now()
-    if (ms <= 0) return <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 700 }}>TIMEOUT</span>
-    return <span style={{ fontSize: '11px', color: ms < 3000 ? 'var(--danger)' : 'var(--warning)', fontWeight: 600 }}>{(ms / 1000).toFixed(1)}s</span>
+    if (ms <= 0) return <span style={{ fontSize: '11px', color: 'var(--danger-text)', fontWeight: 700 }}>TIMEOUT</span>
+    return <span style={{ fontSize: '11px', color: ms < 3000 ? 'var(--danger-text)' : 'var(--warning-text)', fontWeight: 600 }}>{(ms / 1000).toFixed(1)}s</span>
   }
 
   return (
@@ -590,14 +630,14 @@ function PaymentsContent() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
             {[
-              { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, color: 'var(--accent)' },
-              { label: t('Vypořádáno', 'Settled'), value: sctSettled, icon: <CheckCircle2 size={16} />, color: '#16a34a' },
-              { label: t('Zpracovává se', 'Processing'), value: sctProcessing, icon: <Timer size={16} />, color: '#d97706' },
-              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Zap size={16} />, color: 'var(--accent)' },
+              { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, text: 'var(--accent-text)', bg: 'var(--accent-bg)' },
+              { label: t('Vypořádáno', 'Settled'), value: sctSettled, icon: <CheckCircle2 size={16} />, text: 'var(--success-text)', bg: 'var(--success-bg)' },
+              { label: t('Zpracovává se', 'Processing'), value: sctProcessing, icon: <Timer size={16} />, text: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Zap size={16} />, text: 'var(--accent-text)', bg: 'var(--accent-bg)' },
             ].map(k => (
               <div key={k.label} className="stat-card">
-                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
+                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: k.bg,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.text, marginBottom: '10px' }}>{k.icon}</div>
                 <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
               </div>
@@ -675,8 +715,8 @@ function PaymentsContent() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
               {[
                 { label: t('SEPA Platby', 'SEPA Payments'), value: sepaCount, color: 'var(--accent)' },
-                { label: t('Tuzemské Platby', 'Domestic Payments'), value: domesticCount, color: 'var(--green)' },
-                { label: t('Čekající / Zpracovává se', 'Pending / Processing'), value: pendingCount, color: 'var(--yellow)' },
+                { label: t('Tuzemské Platby', 'Domestic Payments'), value: domesticCount, color: 'var(--info-text)' },
+                { label: t('Čekající / Zpracovává se', 'Pending / Processing'), value: pendingCount, color: 'var(--warning-text)' },
               ].map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-value" style={{ color: s.color }}>{loading ? '—' : s.value}</div>
@@ -688,7 +728,7 @@ function PaymentsContent() {
 
           {canCreate && (
             <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
-              <button className="btn btn-primary" type="button" aria-expanded={showCreate === 'payment-type'} aria-controls="payment-create-type-panel" aria-label={t('Nová platba', 'New Payment')} onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
+              <button id="new-payment-trigger" className="btn btn-primary" type="button" aria-expanded={showCreate === 'payment-type'} aria-controls="payment-create-type-panel" aria-label={t('Nová platba', 'New Payment')} onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
                 <Plus size={14} aria-hidden="true" />
                 {t('Nová platba', 'New Payment')}
               </button>
@@ -708,7 +748,7 @@ function PaymentsContent() {
                         border: `1px solid var(--border)`, background: 'var(--surface-1)', cursor: 'pointer',
                         textAlign: 'left', transition: 'all 0.15s ease' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'var(--accent)18',
+                        <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'var(--accent-bg)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <Icon size={18} style={{ color: 'var(--accent)' }} />
                         </div>
@@ -717,7 +757,7 @@ function PaymentsContent() {
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t(opt.descCs, opt.descEn)}</div>
                         </div>
                       </div>
-                      <div style={{ fontSize: '11px', fontWeight: 600, color: opt.type === 'domestic-instant' || opt.type === 'sct-inst' ? '#d97706' : 'var(--text-tertiary)' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: opt.type === 'domestic-instant' || opt.type === 'sct-inst' ? 'var(--warning-text)' : 'var(--text-tertiary)' }}>
                         {t('Vypořádání:', 'Settlement:')} {opt.speed}
                       </div>
                     </button>
@@ -738,7 +778,7 @@ function PaymentsContent() {
                 </h2>
                 {domesticForm.instant && (
                   <span style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px',
-                    background: '#d9770622', color: '#d97706' }}>
+                    background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>
                     {t('OKAMŽITÁ PLATBA — settlement <10 sec, 24/7/365', 'INSTANT — settlement <10 sec, 24/7/365')}
                   </span>
                 )}
@@ -853,7 +893,7 @@ function PaymentsContent() {
                       onChange={e => setDomesticForm({ ...domesticForm, statementLabel: e.target.value })} />
                   </div>
                 </div>
-                {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
+                {createError && <div role="alert" style={{ color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
                   <button ref={domesticSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
@@ -875,7 +915,7 @@ function PaymentsContent() {
                 </h2>
                 {sepaForm.instant && (
                   <span style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px',
-                    background: '#0ea5e922', color: '#0ea5e9' }}>
+                    background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)' }}>
                     {t('SCT INST — settlement <10 sec, 24/7/365', 'SCT INST — settlement <10 sec, 24/7/365')}
                   </span>
                 )}
@@ -892,14 +932,14 @@ function PaymentsContent() {
                     <label htmlFor="sepa-creditor-iban" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN příjemce', 'Creditor IBAN')}</label>
                     <input id="sepa-creditor-iban" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
                       placeholder="CZ65 0800 0000 1920 0014 5399" value={sepaForm.creditorIban}
-                      onChange={e => setSepaForm({ ...sepaForm, creditorIban: e.target.value })} required />
+                      onChange={e => setSepaForm({ ...sepaForm, creditorIban: e.target.value, vopStatus: 'idle', vopResult: null })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
                     <label htmlFor="sepa-creditor-name" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
                     <input id="sepa-creditor-name" className="input" style={{ width: '100%' }} placeholder="John Doe" value={sepaForm.creditorName}
-                      onChange={e => setSepaForm({ ...sepaForm, creditorName: e.target.value })} required />
+                      onChange={e => setSepaForm({ ...sepaForm, creditorName: e.target.value, vopStatus: 'idle', vopResult: null })} required />
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>
                       {t('Max 70 znaků. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (bez diakritiky)', 'Max 70 chars. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (no diacritics)')}
                     </div>
@@ -935,7 +975,7 @@ function PaymentsContent() {
                   </div>
                 </div>
                 <VopSection formData={sepaForm} setFormData={setSepaForm} />
-                {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
+                {createError && <div role="alert" style={{ color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
                   <button ref={sepaSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
@@ -947,36 +987,43 @@ function PaymentsContent() {
           )}
 
           {paymentReview && (
-            <div
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="payment-create-review-title"
-              aria-describedby="payment-create-review-impact"
-              onKeyDown={event => {
-                if (event.key === 'Escape' && !creating) {
-                  returnToPaymentForm()
-                }
-                if (event.key === 'Tab') {
-                  const first = reviewBackRef.current
-                  const last = reviewConfirmRef.current
-                  if (event.shiftKey && document.activeElement === first) {
+            <Dialog.Root open onOpenChange={open => { if (!open && !creating) returnToPaymentForm() }}>
+              <Dialog.Portal>
+                <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)' }} />
+                <Dialog.Content
+                  className="card"
+                  role="alertdialog"
+                  aria-busy={creating}
+                  onOpenAutoFocus={event => {
                     event.preventDefault()
-                    last?.focus()
-                  } else if (!event.shiftKey && document.activeElement === last) {
+                    reviewBackRef.current?.focus()
+                  }}
+                  onCloseAutoFocus={event => {
                     event.preventDefault()
-                    first?.focus()
-                  }
-                }
-              }}
-              style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-            >
-              <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
-                <h2 id="payment-create-review-title" style={{ margin: 0, fontSize: 18 }}>
+                    // Three candidates in order, because the dialog closes for two different
+                    // reasons and they want different landings. Dismissed (Escape / Back), the
+                    // user is still editing and belongs IN the form — returning them to the
+                    // "New Payment" trigger would close the form they were working in. Completed,
+                    // the form is gone and the trigger is the only thing left.
+                    const original = reviewReturnFocusRef.current
+                    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
+                    const trigger = document.getElementById('new-payment-trigger')
+                    const target =
+                      (original?.isConnected ? original : null)
+                      ?? (submit?.isConnected && !submit.disabled ? submit : null)
+                      ?? trigger
+                    target?.focus()
+                  }}
+                  onEscapeKeyDown={event => { if (creating) event.preventDefault() }}
+                  onPointerDownOutside={event => { if (creating) event.preventDefault() }}
+                  style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(620px, calc(100% - 40px))', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}
+                >
+                <Dialog.Title style={{ margin: 0, fontSize: 18 }}>
                   {t('Zkontrolovat platební příkaz', 'Review payment order')}
-                </h2>
-                <p id="payment-create-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+                </Dialog.Title>
+                <Dialog.Description style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
                   {t('Potvrzením odešlete přesně tento příkaz platební službě. Přijetí příkazu ještě neznamená vypořádání; další stav a případné schválení řídí platební workflow.', 'Confirmation submits this exact order to the payment service. Acceptance is not settlement; subsequent status and any required approval remain controlled by the payment workflow.')}
-                </p>
+                </Dialog.Description>
                 {paymentReview === 'domestic' ? (
                   <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
                     <dt>{t('Typ', 'Type')}</dt><dd>{domesticForm.instant ? t('Domácí okamžitá', 'Domestic instant') : t('Domácí standardní', 'Domestic standard')}</dd>
@@ -1008,12 +1055,13 @@ function PaymentsContent() {
                     {creating ? t('Odesílám…', 'Submitting…') : t('Potvrdit a odeslat', 'Confirm and submit')}
                   </button>
                 </div>
-              </div>
-            </div>
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
           )}
 
           {createSuccess && (
-            <div className="card" style={{ padding: '16px', color: 'var(--green)', marginBottom: '16px', fontSize: '14px', fontWeight: 600 }}>
+            <div role="status" className="card" style={{ padding: '16px', color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', marginBottom: '16px', fontSize: '14px', fontWeight: 600 }}>
               {createSuccess}
             </div>
           )}
@@ -1041,7 +1089,7 @@ function PaymentsContent() {
             </div>
           </div>
 
-          {error && <div className="card" style={{ padding: '16px', color: 'var(--red)', marginBottom: '16px' }}>{error}</div>}
+          {error && <div role="alert" className="card" style={{ padding: '16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', marginBottom: '16px' }}>{error}</div>}
 
           {/* Payments table */}
           <div className="card" style={{ overflow: 'hidden' }}>
@@ -1075,7 +1123,7 @@ function PaymentsContent() {
                     onClick={() => { stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) }}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) } }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{p.id.slice(0, 8)}…</td>
-                    <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent)' : 'var(--green)' }}>{p.type}</span></td>
+                    <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent-text)' : 'var(--info-text)' }}>{p.type}</span></td>
                     <td>
                       <StatusBadge status={p.status} />
                     </td>

@@ -634,6 +634,11 @@ def trace_contract_evidence(service: Path) -> list[dict]:
     } for contract_id, row in sorted(results.items())]
 
 
+def pitest_mutation_score(detected: int, total: int) -> int | None:
+    """Return PIT's integer score: detected mutants, rounded half up."""
+    return (detected * 100 + total // 2) // total if total else None
+
+
 def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
@@ -663,15 +668,15 @@ def specialized_evidence(
         if mutation_file.exists():
             root = ET.parse(mutation_file).getroot()
             mutations = root.findall(".//mutation")
-            killed = sum(1 for item in mutations if item.attrib.get("status") == "KILLED")
-            score = round(killed * 100 / len(mutations), 2) if mutations else None
+            detected = sum(1 for item in mutations if item.attrib.get("status") in {"KILLED", "TIMED_OUT"})
+            score = pitest_mutation_score(detected, len(mutations))
             state = "skipped" if not mutations else (
                 "failed" if mutation_threshold is not None and score is not None and score < mutation_threshold else "passed"
             )
             target = f", target {mutation_threshold:g}%" if mutation_threshold is not None else ""
             specialized.append({"kind": "mutation", "state": state,
                                 "source": str(mutation_file),
-                                "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%{target})"})
+                                "detail": f"{detected}/{len(mutations)} detected ({score if score is not None else 'n/a'}%{target})"})
         else:
             specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
     if synthetic_summary:
@@ -766,6 +771,14 @@ def main() -> None:
             performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":true}}}}')
             mutation = service / "mutations.xml"
             mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
+            rounded_mutation = service / "rounded-mutations.xml"
+            rounded_mutation.write_text(
+                "<mutations>"
+                + '<mutation status="KILLED"/>' * 4
+                + '<mutation status="TIMED_OUT"/>'
+                + '<mutation status="SURVIVED"/>' * 3
+                + "</mutations>"
+            )
             # Negative control for the report discovery itself: a vitest/Playwright
             # `<testsuites>` file is not named TEST-*.xml, and globbing that Gradle
             # convention reported an empty Admin UI envelope while its suites passed.
@@ -1049,6 +1062,11 @@ def main() -> None:
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
             assert "target 70%" in specialized[1]["detail"]
+            rounded = specialized_evidence(None, str(rounded_mutation), mutation_threshold=63)
+            assert rounded == [{
+                "kind": "mutation", "state": "passed", "source": str(rounded_mutation),
+                "detail": "5/8 detected (63%, target 63%)",
+            }]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
