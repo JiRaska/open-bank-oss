@@ -38,7 +38,7 @@ Role: `ROLE_COMPLIANCE`, `ROLE_ADMIN`.
 
 | Metoda | Path | Popis |
 |---|---|---|
-| `POST` | `/` | GDPR Art. 17 výmaz vůči analytické vrstvě. Tělo `ErasureRequestDto { aggregateType, aggregateId }`. Vrací `ErasureDecision`: buď crypto-shred (`erased=true`), nebo **odmítnutí** pod zákonným hold (Art. 17(3)(b)) s auditovatelným `legalBasis`/`explanation`. |
+| `POST` | `/` | GDPR Art. 17 výmaz vůči analytické vrstvě. Tělo `ErasureRequestDto { aggregateType, aggregateId }`. Vrací `ErasureDecision`, jehož `outcome` má tři hodnoty: `ERASED` (crypto-shred), `REFUSED_LEGAL_HOLD` (zákonná překážka podle Art. 17(3)(b) výmaz přebíjí, s auditovatelným `legalBasis`/`explanation`) a `NO_BACKEND` (tento build nemá backend pro výmaz, žádost tedy zůstává nevyřízená — **není** to odmítnutí z právního důvodu, viz #9671). `erased` je odvozené z `outcome` a je true jen pro `ERASED`. |
 
 ## Chybový model
 
