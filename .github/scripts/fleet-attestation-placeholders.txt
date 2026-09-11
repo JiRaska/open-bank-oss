@@ -27,5 +27,24 @@
 # referral sandbox-d92d20f5) had reached exactly that state — every pin has since moved to a
 # real built tag — and two of them additionally justified themselves with prose main
 # contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
-# The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
-# that is the correct reading, not a missing file.
+# The file was deliberately empty of entries for a while; the gate reporting 0 allowlisted
+# placeholders was the correct reading then, and is again the moment the entry below goes.
+
+# openbank-communication-service :: sandbox-000000000 (ADR-0285).
+#
+# Classified ABSENT by the gate, not UNATTESTED — the distinction this file's STRICT SCOPE turns
+# on. `sandbox-000000000` is the first-registration placeholder: the service's gitops manifest
+# pins a tag that has never been built or pushed, so there is no image in ECR to attest. The gate
+# reads `FLEET ATTESTATION GATE: FAIL — 1 of 66 declared image(s) not deployable`, and because
+# that job runs on every pull request, one unbuilt service reddens the whole queue.
+#
+# The justification, stated so a later reader can falsify it — the earlier vop entry is on record
+# above for asserting the opposite of what main said:
+#   * openbank-communication-service HAS a Dockerfile (checked on origin/main).
+#   * It IS in auto-deploy.yml's ALL_SERVICES (checked on origin/main).
+#   * It HAS a version.txt (0.1.0), so it is a registered released component.
+# So this is NOT "a service that cannot be built" — it is one that simply has not been built yet.
+# Its first real deploy replaces the pin with a built tag, at which point this entry stops
+# matching and `--check-placeholders` fails on it until it is deleted. Self-clearing by design;
+# do not pre-emptively remove it while the pin still reads sandbox-000000000.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-000000000
