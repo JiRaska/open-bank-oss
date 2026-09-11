@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use client'
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Children, cloneElement, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Activity, ChevronDown, ExternalLink, RefreshCw } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import styles from './ContextualInsights.module.css'
@@ -83,38 +83,82 @@ export function ContextualInsights({
       <p className={styles.freshness}>{from && to
         ? t('Živá data · UTC · období je převzaté z této stránky', 'Live data · UTC · period follows this page')
         : t('Živá data · UTC · posledních 24 hodin', 'Live data · UTC · last 24 hours')}</p>
-      <div className={styles.grid}>
+      <GrafanaPanelGrid key={`${dashboardUid}-${theme}-${refresh}-${from}-${to}`}>
         {panels.map(panel => {
           const params = new URLSearchParams(commonParams)
           params.set('panelId', String(panel.id))
           params.set('refresh', '1m')
-          return <article key={panel.id} className={styles.panel}>
-            <div className={styles.panelCopy}>
-              <h3>{t(panel.titleCs, panel.titleEn)}</h3>
-              <p>{t(panel.descriptionCs, panel.descriptionEn)}</p>
-            </div>
-            <GrafanaPanel key={`${panel.id}-${theme}-${refresh}`} src={`/tools/grafana/d-solo/${dashboardUid}?${params}`} title={t(panel.titleCs, panel.titleEn)} tall={panel.height === 'trend'} />
-          </article>
+          return <GrafanaPanelCard key={panel.id} panel={panel}
+            src={`/tools/grafana/d-solo/${dashboardUid}?${params}`} />
         })}
-      </div>
+      </GrafanaPanelGrid>
     </div>}
   </section>
 }
 
-function GrafanaPanel({ src, title, tall }: { src: string; title: string; tall: boolean }) {
+function GrafanaPanelGrid({ children }: { children: ReactNode }) {
+  const [activeCount, setActiveCount] = useState(1)
+  return <div className={styles.grid}>{Children.map(children, (card, index) => {
+    if (!isValidElement<GrafanaPanelCardProps>(card)) return card
+    return cloneElement(card, {
+      enabled: index < activeCount,
+      onReady: () => setActiveCount(value => Math.max(value, index + 2)),
+    })
+  })}</div>
+}
+
+interface GrafanaPanelCardProps {
+  panel: InsightPanel
+  src: string
+  enabled?: boolean
+  onReady?: () => void
+}
+
+function GrafanaPanelCard({ panel, src, enabled = false, onReady }: GrafanaPanelCardProps) {
+  const { t } = useLanguage()
+  return <article className={styles.panel}>
+    <div className={styles.panelCopy}>
+      <h3>{t(panel.titleCs, panel.titleEn)}</h3>
+      <p>{t(panel.descriptionCs, panel.descriptionEn)}</p>
+    </div>
+    <GrafanaPanel src={src} title={t(panel.titleCs, panel.titleEn)} tall={panel.height === 'trend'} enabled={enabled} onReady={onReady} />
+  </article>
+}
+
+function GrafanaPanel({ src, title, tall, enabled, onReady }: {
+  src: string
+  title: string
+  tall: boolean
+  enabled: boolean
+  onReady?: () => void
+}) {
   const { t } = useLanguage()
   const [state, setState] = useState<'loading' | 'ready' | 'slow' | 'unavailable'>('loading')
   const frame = useRef<HTMLIFrameElement>(null)
+  const onReadyRef = useRef(onReady)
 
   useEffect(() => {
-    setState('loading')
+    onReadyRef.current = onReady
+  }, [onReady])
+
+  const markReady = useCallback(() => {
+    try {
+      const path = frame.current?.contentWindow?.location.pathname
+      const doc = frame.current?.contentDocument
+      if (!path?.startsWith('/tools/grafana/d-solo/') || !doc) return false
+      setState('ready')
+      onReadyRef.current?.()
+      return true
+    } catch { return false }
+  }, [])
+
+  useEffect(() => {
+    if (!enabled) return
     const started = Date.now()
     let slowShown = false
     const poll = window.setInterval(() => {
       try {
-        const doc = frame.current?.contentDocument
-        if (doc?.querySelector('[data-testid="data-testid Panel header"], [data-testid^="data-testid Panel header "], .panel-content, .react-grid-layout')) {
-          setState('ready')
+        if (markReady()) {
           window.clearInterval(poll)
           return
         }
@@ -130,7 +174,7 @@ function GrafanaPanel({ src, title, tall }: { src: string; title: string; tall: 
       }
     }, 500)
     return () => window.clearInterval(poll)
-  }, [src])
+  }, [enabled, markReady, src])
 
   return <div className={`${styles.frameWrap} ${tall ? styles.frameTrend : ''}`}>
     {state === 'loading' && <div className={styles.skeleton} role="status"><span>{t('Načítám data…', 'Loading data…')}</span></div>}
@@ -142,7 +186,7 @@ function GrafanaPanel({ src, title, tall }: { src: string; title: string; tall: 
       <Activity size={18} aria-hidden="true" />
       <span>{t('Panel teď není dostupný', 'Panel is unavailable right now')}</span>
     </div>}
-    <iframe ref={frame} src={src} title={title} scrolling="no" onLoad={() => setState('ready')}
-      className={state === 'ready' ? styles.frameReady : styles.frameHidden} />
+    {enabled && <iframe ref={frame} src={src} title={title} scrolling="no" onLoad={markReady}
+      className={state === 'ready' ? styles.frameReady : styles.frameHidden} />}
   </div>
 }
