@@ -190,6 +190,12 @@ export default function CompliancePacksPage() {
         ? t('Pack aktivován. Guard ho používá okamžitě, bez restartu služby.',
             'Pack activated. The origination guard uses it immediately — no service restart.')
         : t('Návrh zamítnut.', 'Proposal rejected.'))
+      // The trigger that opened this dialog is a row button for a proposal that has just been
+      // decided, so `load()` below is about to remove it. Clearing the ref BEFORE closing makes
+      // `onCloseAutoFocus` fall through to the pending-proposals region instead of focusing a
+      // button that is still connected for a few more milliseconds and then is not — which lands
+      // focus on <body> and loses the operator's place.
+      reviewReturnFocusRef.current = null
       setReview(null)
       await load()
     } catch {
@@ -249,7 +255,7 @@ export default function CompliancePacksPage() {
         </div>
       )}
 
-      <div id="compliance-pack-pending-heading" tabIndex={-1} className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <CheckCircle2 aria-hidden="true" size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
@@ -292,7 +298,14 @@ export default function CompliancePacksPage() {
         </table>
       </div>
 
-      <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div
+        id="compliance-pack-pending-heading"
+        role="region"
+        tabIndex={-1}
+        aria-label={t('Návrhy compliance packů', 'Compliance pack proposals')}
+        className="section-title"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
         <Clock aria-hidden="true" size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>

@@ -210,6 +210,11 @@ export default function DocumentTemplatesPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const modalCloseRef = useRef<HTMLButtonElement>(null)
   const modalReturnFocusRef = useRef<HTMLElement | null>(null)
+  // Unsaved-draft guard (#9187). main's merge of this page rebuilt the editor on Radix and kept
+  // the focus-return half; this is the other half — closing a DIRTY editor must ask first.
+  const [discardEditorOpen, setDiscardEditorOpen] = useState(false)
+  const [editorBaseline, setEditorBaseline] = useState('')
+  const discardCancelRef = useRef<HTMLButtonElement>(null)
   const [editingTemplate, setEditingTemplate] = useState<DocumentTemplate | null>(null)
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
@@ -362,10 +367,35 @@ export default function DocumentTemplatesPage() {
     previewRequestIdRef.current++
   }
 
+  // The baseline is what the editor opened WITH; dirty is any divergence from it. Comparing
+  // against a snapshot rather than tracking edits means a change that is typed and then undone
+  // correctly reads as clean, and no per-field wiring can be forgotten.
+  const editorSnapshot = useCallback(
+    (draft: Partial<DocumentTemplate>, sample: string) => JSON.stringify({ draft, sample }),
+    [],
+  )
+  const editorDirty = canEdit && editorBaseline !== editorSnapshot(formData, sampleDataText)
+
+  function requestEditorClose() {
+    if (saving) return
+    if (editorDirty) {
+      setDiscardEditorOpen(true)
+      return
+    }
+    setModalOpen(false)
+  }
+
+  function discardEditor() {
+    setDiscardEditorOpen(false)
+    setModalOpen(false)
+  }
+
   const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
     modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(null)
-    setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
+    const next = { code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
@@ -374,7 +404,9 @@ export default function DocumentTemplatesPage() {
   const openEditModal = (event: React.MouseEvent<HTMLButtonElement>, tpl: DocumentTemplate) => {
     modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(tpl)
-    setFormData({ ...tpl })
+    const next = { ...tpl }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
@@ -594,7 +626,7 @@ export default function DocumentTemplatesPage() {
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
-        <Dialog.Root open onOpenChange={open => { if (!open && !saving) setModalOpen(false) }}>
+        <Dialog.Root open onOpenChange={open => { if (!open) requestEditorClose() }}>
           <Dialog.Portal>
             <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.65)' }} />
             <Dialog.Content
@@ -620,7 +652,18 @@ export default function DocumentTemplatesPage() {
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
               </Dialog.Title>
-              <button ref={modalCloseRef} type="button" disabled={saving} aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              {/* Radix warns when a Dialog.Content has no description, and a screen reader then
+                  announces the title alone — "New Template" says nothing about what the form does.
+                  Visually hidden rather than rendered: the header is a title/close row and has no
+                  space for a sentence, but the accessible name still needs one. */}
+              <Dialog.Description style={{
+                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+                overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+              }}>
+                {t('Upravte metadata, HTML obsah a vzorová data. Náhled se obnovuje automaticky.',
+                   'Edit metadata, HTML content and sample data. The preview refreshes automatically.')}
+              </Dialog.Description>
+              <button ref={modalCloseRef} type="button" disabled={saving} aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={requestEditorClose} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -799,7 +842,7 @@ export default function DocumentTemplatesPage() {
                 )}
               </fieldset>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zavřít', 'Close')}</button>
+                <button type="button" className="btn btn-secondary" onClick={requestEditorClose} disabled={saving}>{t('Zavřít', 'Close')}</button>
                 {canEdit && (
                   <button type="submit" className="btn btn-primary" disabled={saving}>
                     {saving ? t('Ukládám…', 'Saving…') : t('Uložit šablonu', 'Save Template')}
@@ -807,6 +850,30 @@ export default function DocumentTemplatesPage() {
                 )}
               </div>
             </form>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
+      {discardEditorOpen && (
+        <Dialog.Root open onOpenChange={open => { if (!open) setDiscardEditorOpen(false) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,0.72)' }} />
+            <Dialog.Content
+              role="alertdialog"
+              className="card"
+              onOpenAutoFocus={event => { event.preventDefault(); discardCancelRef.current?.focus() }}
+              onCloseAutoFocus={event => { event.preventDefault(); modalCloseRef.current?.focus() }}
+              style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(440px, calc(100vw - 32px))', padding: 20 }}
+            >
+              <Dialog.Title style={{ margin: 0, fontSize: 17 }}>{t('Zahodit neuložené změny?', 'Discard unsaved changes?')}</Dialog.Title>
+              <Dialog.Description style={{ margin: '8px 0 0', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {t('Změny šablony a ukázkových dat nejsou uložené. Po zahození je nelze obnovit.', 'Template and sample-data changes have not been saved. They cannot be recovered after discarding.')}
+              </Dialog.Description>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <Dialog.Close asChild><button ref={discardCancelRef} type="button" className="btn btn-secondary">{t('Pokračovat v úpravách', 'Keep editing')}</button></Dialog.Close>
+                <button type="button" className="btn btn-danger" onClick={discardEditor}>{t('Zahodit změny', 'Discard changes')}</button>
+              </div>
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
