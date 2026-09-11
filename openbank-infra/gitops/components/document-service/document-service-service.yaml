@@ -405,19 +405,9 @@ spec:
     - name: management
       port: 8088
       targetPort: management
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: document-service
-  namespace: documents
-  labels:
-    app.kubernetes.io/name: document-service
-    prometheus: kube-prometheus
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: document-service
-  podMetricsEndpoints:
-    - port: management
-      path: /q/metrics
+# Scraped by the fleet-wide PodMonitor observability/openbank-services (it selects any pod
+# with an app.kubernetes.io/name label, in this namespace, on the port named `management` at
+# /q/metrics). A per-service PodMonitor/ServiceMonitor here would be a SECOND scrape pool over
+# the identical URL: Prometheus then stores every series twice under two `job` labels, and an
+# alert over them fires once per pool. Measured 2026-09-07 on the sandbox --
+# BillingOutboxDeadLettered held two instances differing only by job= -- so do not re-add one.
