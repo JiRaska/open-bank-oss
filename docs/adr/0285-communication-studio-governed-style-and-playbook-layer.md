@@ -1,13 +1,14 @@
 ---
 date: 2026-09-06
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, admin-ui, governance, notifications]
 summary: "Split every customer- and staff-facing prompt into an immutable git core and a business-editable style/playbook layer served by a new communication-service, edited in admin-ui under four-eyes and evals-on-publish."
+followup: "#9703 — copilot does not consume the style layer (D5 consumer, baseline fallback, style_version in audit); ROLE_COMMS_* declared in the realm, not role_action_matrix (D6)"
 ---
 
 # ADR-0285 — Communication Studio: governed style and playbook layer for bots and staff
@@ -236,6 +237,23 @@ change to which model a persona uses (that is `ModelGateway` config and ADR-0175
 - Phase 2 splits `customer-copilot/system.v1` into two registry files with an identical composed
   result; the registry's "shipped prompts are immutable" rule is honoured by keeping `system.v1`
   in the listing.
+
+## Delivery check
+
+`delivery-status` is a claim; these are the commands that falsify it. Run them on
+`origin/main`; every row must hold before the status can read `shipped`. Measured
+2026-09-11, retroactively, after seven PRs had landed against a status that still said
+`planned` — which is why this section exists.
+
+| Decision | Command | Expected | 2026-09-11 |
+|---|---|---|---|
+| D1 registry split | `grep -n 'core.v1, style.v1' openbank-libs/governance/prompts/registry.yaml` | one line | holds (#9165) |
+| D3 four-eyes | `grep -n 'commstyle.publish' openbank-libs/governance/rules.yaml` under `four_eyes.actions`; `grep -n commstyle-publish openbank-libs/governance/policies/rest.rego` | both non-empty | holds (#9150) |
+| D5 service | `cat openbank-communication-service/version.txt`; `ls openbank-infra/gitops/components/communication/` | a version; a Rollout, OPA bundle, TLS, secret | holds (0.1.0) |
+| D5 consumer | `git grep -il 'communication' openbank-copilot-service/src/main` | non-empty, and `style_version` written to the audit envelope | **fails** — empty (#9703) |
+| D6 roles | `grep -n 'ROLE_COMMS_' openbank-libs/governance/rules.yaml` inside `authz.role_action_matrix` | two role keys with `commstyle.*` grants | **fails** — roles exist only in `realm-template.json` (#9703) |
+| D7 admin-ui | `ls openbank-admin-ui/src/app/communication/` | `page.tsx`, `[personaId]`, `edit/` | holds (#9173, #9634) |
+| D4 evals-on-publish | the publish endpoint refuses a draft whose golden-set replay regresses | a rejected publish in a test | not yet measured — golden-set editor is CRUD only (#9634) |
 
 ## Compliance impact
 
