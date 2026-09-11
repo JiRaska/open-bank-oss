@@ -17,6 +17,7 @@ import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalo
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -44,6 +45,7 @@ class MerchantGeoResolutionTest {
     private lateinit var repository: PanacheTransactionRepository
     private lateinit var catalog: MerchantCatalogRepository
     private lateinit var locations: MerchantLocationRepository
+    private lateinit var categoryOverrides: TransactionCategoryOverrideRepository
     private lateinit var resource: TransactionResource
 
     private val accountId: UUID = UUID.randomUUID()
@@ -54,7 +56,11 @@ class MerchantGeoResolutionTest {
         repository = mockk()
         catalog = mockk()
         locations = mockk()
-        resource = TransactionResource(useCase, repository, catalog, locations)
+        // The customer-category read path is not what this test is about; an empty override map
+        // keeps `category` resolving from the catalogue so the geo assertions stay about geo.
+        categoryOverrides = mockk()
+        coEvery { categoryOverrides.findFor(any(), any()) } returns emptyMap()
+        resource = TransactionResource(useCase, repository, catalog, categoryOverrides, locations)
     }
 
     private fun transaction(description: String) = Transaction(
