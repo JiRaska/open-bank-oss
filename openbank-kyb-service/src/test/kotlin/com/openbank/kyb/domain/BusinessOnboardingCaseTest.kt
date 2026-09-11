@@ -347,4 +347,161 @@ class BusinessOnboardingCaseTest {
             .isEqualTo(CaseStatus.MANUAL_REVIEW)
         assertThat(wrongPerson.reviewReason).contains("predseda")
     }
+
+    @Test
+    fun `over-inviting cannot let the WRONG pair sign — the offices are re-checked at signature`() {
+        // The hole this closes. cosignersInvited permits more invitees than the rule needs, so the
+        // people who actually turn up are a subset of the people who were checked — and a subset
+        // that reaches the COUNT can miss an office. Chair + vice is the rule; chair + ordinary
+        // member is what signs.
+        val reps = listOf(
+            rep("Jana Chairová").copy(role = "předseda představenstva"),
+            rep("Viktor Vice").copy(role = "místopředseda představenstva"),
+            rep("Milan Member").copy(role = "člen představenstva"),
+        )
+        val ex = extract(
+            reps = reps,
+            rule = RepresentationRule(
+                RepresentationMode.JOINT_N,
+                2,
+                "předseda spolu s místopředsedou",
+                requiredRoles = listOf("predseda", "mistopredseda"),
+            ),
+        )
+        var case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .entityPartyCreated(UUID.randomUUID(), now)
+            .initiatorMatched(0, "Jana Chairová", null, now)
+
+        // Inviting both the vice and the member passes: the invited SET covers the offices.
+        case = case.cosignersInvited(listOf(1, 2), listOf("tok-vice", "tok-member"), now)
+
+        // Only the member turns up. The count is reached, so signing must NOT open on it alone.
+        case = case.signerIdentified("tok-member", UUID.randomUUID(), now)
+        assertThat(case.status)
+            .describedAs("two identified people reach the count and do not cover predseda + mistopredseda")
+            .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
+
+        // And even if it somehow did, the terminal transition refuses the wrong pair.
+        val forced = case.copy(status = CaseStatus.READY_TO_SIGN)
+        val afterChair = forced.signed(initiator, "ceremony-chair", now)
+        val member = forced.signers.first { it.fullName == "Milan Member" }.partyId!!
+        val done = afterChair.signed(member, "ceremony-member", now)
+
+        assertThat(done.status)
+            .describedAs("chair + ordinary member must never bind a chair + vice-chair rule")
+            .isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(done.reviewReason).contains("do not cover")
+    }
+
+    @Test
+    fun `mistopredseda does not satisfy predseda — the office must BEGIN a word`() {
+        // fold("místopředseda představenstva") CONTAINS "predseda". A substring test therefore
+        // let two vice-chairs — and boards routinely have more than one — satisfy a chair + vice
+        // rule with no chair anywhere on the agreement.
+        val reps = listOf(
+            rep("Viktor Vice").copy(role = "místopředseda představenstva"),
+            rep("Vilma Vice").copy(role = "místopředseda představenstva"),
+        )
+        val ex = extract(
+            reps = reps,
+            rule = RepresentationRule(
+                RepresentationMode.JOINT_N,
+                2,
+                "předseda spolu s místopředsedou",
+                requiredRoles = listOf("predseda", "mistopredseda"),
+            ),
+        )
+        val case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .initiatorMatched(0, "Viktor Vice", null, now)
+
+        assertThatThrownBy { case.cosignersInvited(listOf(1), listOf("tok-1"), now) }
+            .isInstanceOf(CaseTransitionException::class.java)
+            .hasMessageContaining("predseda")
+    }
+
+    @Test
+    fun `a coverable set is never refused because of the order the signers happen to be listed in`() {
+        // The other half of the same defect: greedy first-fit. With the vice listed first, an
+        // assignment that let `predseda` take him would then find no one for `mistopredseda` and
+        // reject a genuine chair + vice pair.
+        val reps = listOf(
+            rep("Viktor Vice").copy(role = "místopředseda představenstva"),
+            rep("Jana Chairová").copy(role = "předseda představenstva"),
+        )
+        val ex = extract(
+            reps = reps,
+            rule = RepresentationRule(
+                RepresentationMode.JOINT_N,
+                2,
+                "předseda spolu s místopředsedou",
+                requiredRoles = listOf("predseda", "mistopredseda"),
+            ),
+        )
+        val case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .initiatorMatched(0, "Viktor Vice", null, now)
+
+        assertThat(case.cosignersInvited(listOf(1), listOf("tok-1"), now).status)
+            .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
+    }
+
+    @Test
+    fun `resolving a review keeps the office constraint enforceable instead of merely recording it`() {
+        // reviewResolved SET requiredSignerRoles and nothing enforced them: the case went
+        // INITIATOR_MATCHED -> recomputeReadiness, which compared counts only. So a one-signature
+        // office rule could be completed by whoever happened to be the initiator.
+        val reps = listOf(
+            rep("Milan Member").copy(role = "člen představenstva"),
+            rep("Jana Chairová").copy(role = "předseda představenstva"),
+        )
+        val ex = extract(
+            reps = reps,
+            rule = RepresentationRule(RepresentationMode.SOLE, 1, "jedná předseda", requiredRoles = listOf("predseda")),
+        )
+        val inReview = started()
+            .registryVerified(ex, attested(ex, signers = 1, roles = listOf("predseda")), now)
+            .initiatorMatched(0, "Milan Member", null, now)
+        assertThat(inReview.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+
+        // The operator re-supplies the office. An ordinary member must still not become ready.
+        val resolved = inReview.reviewResolved(1, now, listOf("predseda"))
+        assertThat(resolved.status)
+            .describedAs("the member does not hold the office the operator just re-stated")
+            .isNotEqualTo(CaseStatus.READY_TO_SIGN)
+    }
+
+    @Test
+    fun `a resolved review stores the office normalised, so the console shows one constraint not two`() {
+        // Matching is insensitive to case and diacritics either way (holdsOffice folds), so this is
+        // about what is PERSISTED and echoed in CaseResponse — an operator's "Předseda " and a
+        // colleague's "predseda" must not read as two different constraints.
+        val ex = extract(
+            reps = listOf(rep("Jana Chairová").copy(role = "předseda představenstva")),
+            rule = RepresentationRule(RepresentationMode.SOLE, 1, "jedná předseda"),
+        )
+        val inReview = started().registryVerified(ex, unattested(ex), now)
+
+        val resolved = inReview.reviewResolved(1, now, listOf("  Předseda  ", "", "   "))
+
+        assertThat(resolved.requiredSignerRoles).containsExactly("predseda")
+    }
+
+    @Test
+    fun `an office typed with Czech capitals and diacritics still matches the register wording`() {
+        // The signer side is folded; the operator side was only trimmed. "Předseda" would have
+        // produced an office that could never match "předseda představenstva".
+        val reps = listOf(rep("Jana Chairová").copy(role = "předseda představenstva"), rep("Petr Svoboda"))
+        val ex = extract(
+            reps = reps,
+            rule = RepresentationRule(RepresentationMode.SOLE, 1, "jedná předseda", requiredRoles = listOf("predseda")),
+        )
+
+        val case = started()
+            .registryVerified(ex, attested(ex, signers = 1, roles = listOf("Předseda")), now)
+            .initiatorMatched(0, "Jana Chairová", null, now)
+
+        assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+    }
 }

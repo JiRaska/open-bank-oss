@@ -9,6 +9,7 @@ import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
 import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
+import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
@@ -86,7 +87,12 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
             parsedMode = rule.mode,
             parsedSigners = rule.requiredSigners,
             confirmedSigners = cmd.confirmedSigners,
-            confirmedRoles = cmd.confirmedRoles.map { it.trim() }.filter { it.isNotBlank() },
+            // Folded, not merely trimmed: the signer side is compared after the parser's fold, so
+            // an operator typing "Předseda" would otherwise store an office that can never match
+            // "předseda představenstva" as the register spells it.
+            confirmedRoles = cmd.confirmedRoles
+                .map { CzechRepresentationRuleParser.fold(it) }
+                .filter { it.isNotBlank() },
             attestedBy = cmd.operator,
             attestedAt = now,
             note = cmd.note,

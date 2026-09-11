@@ -31,6 +31,15 @@ import java.text.Normalizer
  * `CzechRepresentationRuleParserTest.a written-form second signature outranks the solo opening`,
  * which is the test that fails if the branches are ever reordered.
  *
+ * **What that ordering does NOT give you is a structural guarantee, and this KDoc used to claim
+ * one.** [soleForbidden] is lexical coverage: a second-signature clause phrased with none of its
+ * markers still reaches [sole]. Measured counter-examples, all answered SOLE before the markers
+ * below were added — *"Ředitel jedná samostatně vždy s prokuristou"*, *"…je nutná též účast
+ * prokuristy"*. The vocabulary is wider now, and it is still a list. **Nothing here binds an
+ * agreement:** since #9711 the only consumer of this verdict is the SUGGESTION on the operator's
+ * confirmation form, and a human confirms the rule per entity. Read a SOLE verdict as "no marker
+ * matched", never as "one signature is enough".
+ *
  * Measured over 142 live *způsob jednání* texts (2026-09-11): 97 SOLE, 10 JOINT_N, 6 role-
  * constrained, 2 JOINT_ALL, 26 UNKNOWN — and **none** of the 97 SOLE texts demands a second
  * signature.
@@ -104,6 +113,15 @@ object CzechRepresentationRuleParser {
                 "\\bspolecn(?:e|y|ym|ou|eho|a|i)\\b",
                 "\\bspolu\\b",
                 "\\bsouhlas\\w*",
+                // A second person named without any counting or joint word: a prokurista's
+                // participation, or a clause merely REQUIRING something further.
+                "\\bprokurist\\w*",
+                "\\bucast\\w*",
+                "\\bspolupodpis\\w*",
+                "\\b(?:tez|rovnez|zaroven)\\b",
+                "\\bnutn\\w*",
+                "\\b(?:treba|vyzaduje|vyzadov\\w*|predepsan\\w*)\\b",
+                "\\bpripoj\\w*",
                 "\\bpodpis(?:u|y|ech|em)\\b",
                 // a condition, an exception or a threshold
                 "\\w+-li\\b",

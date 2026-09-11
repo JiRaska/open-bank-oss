@@ -164,31 +164,68 @@ data class BusinessOnboardingCase(
      * office list exists to stop; matching without distinctness lets ONE person who happens to be
      * both chair and member satisfy a two-office rule on their own signature.
      *
-     * Matching is by substring over the register's own role wording after the parser's folding, so
-     * the office `predseda` matches `předseda představenstva` as the register spells it. A signer
-     * with no register role (a manually added one) fills no office.
+     * **Matching is at a WORD BOUNDARY, not by substring.** The obvious `role.contains(office)`
+     * is wrong for the one pair the Czech register uses most: `mistopredseda predstavenstva`
+     * CONTAINS `predseda`, so two vice-chairs — and boards routinely have more than one — would
+     * satisfy a `predseda` + `mistopredseda` rule with no chair on the agreement. An office
+     * therefore has to begin a word: it matches `předseda představenstva` and not
+     * `místopředseda představenstva`, and an operator may still type a stem (`predsed`).
+     *
+     * **The assignment is a real bipartite matching, not greedy first-fit.** Greedy also fails on
+     * ordering: with offices [predseda, mistopredseda] and signers listed vice-chair first, a
+     * first-fit that let `predseda` take the vice-chair would then reject a genuine chair+vice
+     * pair. The sets here are tiny (a statutory body, a handful of offices), so an augmenting-path
+     * search costs nothing and cannot answer "no" to a coverable set.
      */
-    private fun requireOfficesCovered(ex: RegistryExtract, chosen: List<Signer>) {
-        if (requiredSignerRoles.isEmpty()) return
+    private fun requireOfficesCovered(ex: RegistryExtract, chosen: List<Signer>, stage: String) {
+        val offices = requiredSignerRoles.filter { it.isNotBlank() }
+        if (offices.isEmpty()) return
         val roles = chosen.map { s ->
-            s.representativeIndex?.let { CzechRepresentationRuleParser.fold(ex.representatives[it].role.orEmpty()) }
+            // getOrNull: a sole trader's initiatorMatched does not bounce an out-of-range index,
+            // and a raw IndexOutOfBounds here would surface as an unmapped 500.
+            s.representativeIndex
+                ?.let { ex.representatives.getOrNull(it) }
+                ?.let { CzechRepresentationRuleParser.fold(it.role.orEmpty()) }
         }
-        val taken = BooleanArray(roles.size)
-        val unfilled = requiredSignerRoles.filter { office ->
-            val slot = roles.indices.firstOrNull { !taken[it] && roles[it]?.contains(office) == true }
-            if (slot == null) {
-                true
-            } else {
-                taken[slot] = true
-                false
-            }
+        val assignedTo = IntArray(roles.size) { -1 }
+        val unfilled = offices.filterIndexed { officeIdx, office ->
+            !assign(officeIdx, office, offices, roles, assignedTo, BooleanArray(roles.size))
         }
         if (unfilled.isNotEmpty()) {
             throw CaseTransitionException(
-                "the representation rule requires ${requiredSignerRoles.joinToString(", ")}; " +
-                    "no distinct selected signer holds: ${unfilled.joinToString(", ")}",
+                "the representation rule requires ${offices.joinToString(", ")}; " +
+                    "$stage does not cover: ${unfilled.joinToString(", ")}",
             )
         }
+    }
+
+    /** One augmenting step: seat [officeIdx] on a free signer, displacing an earlier office if it can re-seat. */
+    private fun assign(
+        officeIdx: Int,
+        office: String,
+        offices: List<String>,
+        roles: List<String?>,
+        assignedTo: IntArray,
+        visited: BooleanArray,
+    ): Boolean {
+        for (i in roles.indices) {
+            if (visited[i] || !holdsOffice(roles[i], office)) continue
+            visited[i] = true
+            val incumbent = assignedTo[i]
+            if (incumbent == -1 || assign(incumbent, offices[incumbent], offices, roles, assignedTo, visited)) {
+                assignedTo[i] = officeIdx
+                return true
+            }
+        }
+        return false
+    }
+
+    /** [office] must BEGIN a word of the register's role wording; see [requireOfficesCovered]. */
+    private fun holdsOffice(role: String?, office: String): Boolean {
+        if (role == null) return false
+        val folded = CzechRepresentationRuleParser.fold(office)
+        if (folded.isEmpty()) return false
+        return Regex("(^|\\W)" + Regex.escape(folded)).containsMatchIn(role)
     }
 
     private fun roleSuffix(roles: List<String>) = if (roles.isEmpty()) "" else ", offices: ${roles.joinToString(", ")}"
@@ -239,7 +276,7 @@ data class BusinessOnboardingCase(
         if (requireNotNull(requiredSignatures) > 1) return next
         if (requiredSignerRoles.isEmpty()) return next.copy(status = CaseStatus.READY_TO_SIGN)
         return try {
-            next.requireOfficesCovered(ex, next.signers)
+            next.requireOfficesCovered(ex, next.signers, "the initiator")
             next.copy(status = CaseStatus.READY_TO_SIGN)
         } catch (e: CaseTransitionException) {
             next.copy(status = CaseStatus.MANUAL_REVIEW, reviewReason = e.message, updatedAt = at)
@@ -297,7 +334,7 @@ data class BusinessOnboardingCase(
         if (all.size < required) {
             throw CaseTransitionException("the representation rule needs $required signers; ${all.size} selected")
         }
-        requireOfficesCovered(ex, all)
+        requireOfficesCovered(ex, all, "the selected signers")
         return copy(status = CaseStatus.AWAITING_COSIGNERS, signers = all, updatedAt = at)
     }
 
@@ -346,6 +383,19 @@ data class BusinessOnboardingCase(
         }
         val next = copy(signers = updated, updatedAt = at)
         if (next.signedCount < requireNotNull(requiredSignatures)) return next
+        // The offices are re-checked over the people who actually SIGNED. Checking them only when
+        // co-signers were invited is not enough: invitations may exceed the count, so a rule of
+        // "chair plus one member" could be satisfied on paper by inviting chair, vice and member
+        // and then completed by chair + member, with the agreement bound by the wrong pair.
+        val signed = next.signers.filter { it.status == SignerStatus.SIGNED }
+        if (!next.officesCovered(signed)) {
+            return next.copy(
+                status = CaseStatus.MANUAL_REVIEW,
+                reviewReason = "signatures collected do not cover the offices the rule names " +
+                    "(${requiredSignerRoles.filter { it.isNotBlank() }.joinToString(", ")})",
+                updatedAt = at,
+            )
+        }
         return if (entityPartyActive) next.copy(status = CaseStatus.ACTIVE) else next.copy(status = CaseStatus.SIGNED)
     }
 
@@ -376,7 +426,14 @@ data class BusinessOnboardingCase(
         require(requiredSignatures >= 1) { "at least one signature is required" }
         val next = copy(
             requiredSignatures = requiredSignatures,
-            requiredSignerRoles = requiredSignerRoles,
+            // Normalised on the way IN, not as a safety guard — `holdsOffice` folds and
+            // `requireOfficesCovered` drops blanks at match time, so matching is already
+            // insensitive to both. What this fixes is what gets STORED and rendered: without it
+            // `CaseResponse.requiredSignerRoles` echoes an operator's "Předseda " back to the
+            // console, and two spellings of one office look like two different constraints.
+            requiredSignerRoles = requiredSignerRoles
+                .map { CzechRepresentationRuleParser.fold(it) }
+                .filter { it.isNotBlank() },
             reviewReason = null,
             updatedAt = at,
         )
@@ -389,14 +446,26 @@ data class BusinessOnboardingCase(
 
     private fun recomputeReadiness(at: Instant): BusinessOnboardingCase {
         val required = requiredSignatures ?: return this
-        val identified = signers.count { it.status == SignerStatus.IDENTIFIED || it.status == SignerStatus.SIGNED }
+        val verified = signers.filter { it.status == SignerStatus.IDENTIFIED || it.status == SignerStatus.SIGNED }
         val collecting = status == CaseStatus.AWAITING_COSIGNERS || status == CaseStatus.INITIATOR_MATCHED
-        return if (collecting &&
-            identified >= required
-        ) {
+        // The count alone is not enough to OPEN signing. `cosignersInvited` permits more invitees
+        // than the rule needs on purpose, so the people who actually turn up are a subset of the
+        // people who were checked — and a subset that reaches the count can miss an office.
+        return if (collecting && verified.size >= required && officesCovered(verified)) {
             copy(status = CaseStatus.READY_TO_SIGN, updatedAt = at)
         } else {
             this
+        }
+    }
+
+    /** [requireOfficesCovered] as a predicate, for the paths that must not throw. */
+    private fun officesCovered(chosen: List<Signer>): Boolean {
+        val ex = extract ?: return requiredSignerRoles.none { it.isNotBlank() }
+        return try {
+            requireOfficesCovered(ex, chosen, "")
+            true
+        } catch (_: CaseTransitionException) {
+            false
         }
     }
 
