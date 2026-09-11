@@ -1,0 +1,222 @@
+# Communication Studio (ADR-0285 phase 2) first deployment stage. Replicas stay at zero
+# until the image pipeline has produced and attested the pinned source image; activation
+# is a separate reviewed step (mirrors referral/referral-service.yaml exactly).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: communication-service
+  namespace: communication
+  labels:
+    app.kubernetes.io/name: communication-service
+    app.kubernetes.io/part-of: communication
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: communication-service
+  template:
+    metadata:
+      annotations:
+        # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
+        # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
+        openbank.tech/policy-checksum: "a21008b0c1d79683"
+      labels:
+        app.kubernetes.io/name: communication-service
+        app.kubernetes.io/part-of: communication
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: communication-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8158
+            - name: https
+              containerPort: 8443
+            - name: management
+              containerPort: 8086
+          env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/communication-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/communication-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://communication-db-rw.communication.svc:5432/openbank_communication
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://communication-db-rw.communication.svc:5432/openbank_communication
+            - name: POSTGRES_USER
+              value: openbank
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: communication-db-app
+                  key: password
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.communication.svc:6379
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: communication-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_MANAGEMENT_PORT
+              value: "8086"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: communication-tls
+              mountPath: /mnt/communication-tls
+              readOnly: true
+        # OPA policy-decision sidecar (ADR-0034 D5) — same pattern as notification-service.
+        # Without it every @Authorize endpoint (commstyle.publish, commstyle.approval.*)
+        # fails CLOSED: authz.enforce defaults true and the produced
+        # OpaSidecarPolicyDecisionPoint gets connection-refused on localhost:8181 → 503 for
+        # the whole publish/approval path.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: communication-tls
+          secret:
+            secretName: communication-service-internal-tls
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: communication-service-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: communication-service
+  namespace: communication
+  labels:
+    app.kubernetes.io/name: communication-service
+    app.kubernetes.io/part-of: communication
+spec:
+  selector:
+    app.kubernetes.io/name: communication-service
+  ports:
+    - name: http
+      port: 8158
+      targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
+    - name: management
+      port: 8086
+      targetPort: management
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: communication-service
+  namespace: communication
+  labels:
+    app.kubernetes.io/name: communication-service
+    app.kubernetes.io/part-of: communication
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: communication-service
+  podMetricsEndpoints:
+    - port: management
+      path: /q/metrics
+      interval: 30s
