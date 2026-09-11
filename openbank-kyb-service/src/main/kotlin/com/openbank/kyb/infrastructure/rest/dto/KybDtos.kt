@@ -8,6 +8,9 @@ import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Signer
 import com.openbank.kyb.domain.model.UboFinding
 import java.time.Instant
@@ -59,7 +62,104 @@ data class ClaimInvitationRequest(val partyId: UUID?)
 
 data class SignRequest(val signatureRef: String?)
 
-data class ResolveReviewRequest(val requiredSignatures: Int?)
+data class ResolveReviewRequest(val requiredSignatures: Int?, val requiredSignerRoles: List<String>? = null)
+
+/** An operator confirms how one entity is represented (#9711). */
+data class AttestRepresentationRequest(
+    val confirmedSigners: Int?,
+    /**
+     * The offices that must sign, when the register names them. Empty or absent means a plain count
+     * — any listed representatives may sign.
+     */
+    val confirmedRoles: List<String>? = null,
+    /**
+     * Hash of the rule text the operator actually read, taken from the decision response. Rejected
+     * when it no longer matches the register, so a rule that changed while the form was open cannot
+     * be confirmed unseen.
+     */
+    val ruleTextHash: String?,
+    val note: String? = null,
+)
+
+data class AttestationResponse(
+    val id: UUID,
+    val scheme: String,
+    val identifier: String,
+    val ruleTextHash: String,
+    val ruleText: String?,
+    val parsedMode: String,
+    val parsedSigners: Int?,
+    val confirmedSigners: Int,
+    val confirmedRoles: List<String>,
+    val attestedBy: String,
+    val attestedAt: Instant,
+    val supersededAt: Instant?,
+    val note: String?,
+) {
+    companion object {
+        fun from(a: RepresentationAttestation) = AttestationResponse(
+            id = a.id,
+            scheme = a.identifier.scheme.name,
+            identifier = a.identifier.value,
+            ruleTextHash = a.ruleTextHash,
+            ruleText = a.ruleText,
+            parsedMode = a.parsedMode.name,
+            parsedSigners = a.parsedSigners,
+            confirmedSigners = a.confirmedSigners,
+            confirmedRoles = a.confirmedRoles,
+            attestedBy = a.attestedBy,
+            attestedAt = a.attestedAt,
+            supersededAt = a.supersededAt,
+            note = a.note,
+        )
+    }
+}
+
+/**
+ * What the review form renders. [state] is `ATTESTED` | `UNATTESTED` | `SUPERSEDED`; a SUPERSEDED
+ * decision carries [previous] so the operator is told the rule CHANGED rather than shown a blank
+ * form for a company they may recognise.
+ */
+data class RepresentationDecisionResponse(
+    val state: String,
+    val ruleText: String?,
+    val ruleTextHash: String,
+    val parserSuggestsSigners: Int?,
+    val parserSuggestsRoles: List<String>,
+    val parserMode: String,
+    val attestation: AttestationResponse?,
+    val previous: AttestationResponse?,
+) {
+    companion object {
+        fun from(d: RepresentationDecision): RepresentationDecisionResponse = when (d) {
+            is RepresentationDecision.Attested -> RepresentationDecisionResponse(
+                state = "ATTESTED",
+                ruleText = d.attestation.ruleText,
+                ruleTextHash = d.attestation.ruleTextHash,
+                parserSuggestsSigners = d.attestation.parsedSigners,
+                parserSuggestsRoles = emptyList(),
+                parserMode = d.attestation.parsedMode.name,
+                attestation = AttestationResponse.from(d.attestation),
+                previous = null,
+            )
+
+            is RepresentationDecision.Unattested -> ruleOnly("UNATTESTED", d.rule, null)
+            is RepresentationDecision.Superseded -> ruleOnly("SUPERSEDED", d.rule, d.previous)
+        }
+
+        private fun ruleOnly(state: String, rule: RepresentationRule, previous: RepresentationAttestation?) =
+            RepresentationDecisionResponse(
+                state = state,
+                ruleText = rule.sourceText,
+                ruleTextHash = RepresentationAttestation.hashOf(rule.sourceText),
+                parserSuggestsSigners = rule.requiredSigners,
+                parserSuggestsRoles = rule.requiredRoles,
+                parserMode = rule.mode.name,
+                attestation = null,
+                previous = previous?.let { AttestationResponse.from(it) },
+            )
+    }
+}
 
 data class RejectRequest(val reason: String?)
 

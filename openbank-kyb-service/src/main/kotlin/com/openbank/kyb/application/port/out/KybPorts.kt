@@ -12,6 +12,7 @@ import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
@@ -56,6 +57,26 @@ interface BusinessOnboardingCaseRepository {
     /** Cases the party initiated OR is a signer on. */
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
+}
+
+/**
+ * The per-entity store of human confirmations of a representation rule (#9711).
+ *
+ * [findActive] is keyed by identifier AND rule-text hash together, which is the whole point: a
+ * company that amends its způsob jednání keeps its IČO, so a lookup by identifier alone would carry
+ * the old confirmation onto the new rule. [findLatestFor] answers the identifier alone and exists
+ * only to TELL a reviewer that the rule changed — never to make a decision.
+ */
+interface RepresentationAttestationRepository {
+    suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String): RepresentationAttestation?
+
+    /** The most recent active attestation for the entity, whatever rule text it was about. */
+    suspend fun findLatestFor(identifier: LegalEntityIdentifier): RepresentationAttestation?
+
+    /** Persists the new attestation and supersedes every earlier active one for the same identifier. */
+    suspend fun attest(attestation: RepresentationAttestation): RepresentationAttestation
+
+    suspend fun listFor(identifier: LegalEntityIdentifier): List<RepresentationAttestation>
 }
 
 interface KybOutboxRepository : OutboxRepository {

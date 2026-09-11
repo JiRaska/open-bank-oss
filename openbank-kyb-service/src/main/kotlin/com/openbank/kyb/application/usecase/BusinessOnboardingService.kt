@@ -60,6 +60,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     @Inject lateinit var timers: BusinessOnboardingWorkflowPort
 
+    @Inject lateinit var representation: RepresentationAttestationService
+
     @Inject lateinit var clock: Clock
 
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
@@ -87,7 +89,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                 metrics.caseStarted(it.identifier.scheme.name, it.status.name)
                 armTimers(it)
             }
-        val verified = started.registryVerified(extract, now)
+        val verified = started.registryVerified(extract, representation.decide(extract), now)
         val withParty = if (verified.status == CaseStatus.REGISTRY_VERIFIED) {
             verified.entityPartyCreated(parties.createEntityParty(entityPartyRequest(verified.id, extract)), now)
         } else {
@@ -176,7 +178,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
-        var resolved = case.reviewResolved(cmd.requiredSignatures, now)
+        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
                 resolved.entityPartyCreated(

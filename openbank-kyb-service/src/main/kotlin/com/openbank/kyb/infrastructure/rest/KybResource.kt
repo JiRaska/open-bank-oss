@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.infrastructure.rest
 
+import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
@@ -11,6 +12,7 @@ import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
+import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
@@ -19,6 +21,8 @@ import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
+import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -26,6 +30,7 @@ import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
 import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
 import com.openbank.kyb.infrastructure.rest.dto.MatchInitiatorRequest
 import com.openbank.kyb.infrastructure.rest.dto.RejectRequest
+import com.openbank.kyb.infrastructure.rest.dto.RepresentationDecisionResponse
 import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
 import com.openbank.kyb.infrastructure.rest.dto.SchemeResponse
 import com.openbank.kyb.infrastructure.rest.dto.SignRequest
@@ -71,6 +76,8 @@ class KybResource {
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
 
     @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var representation: RepresentationAttestationUseCase
 
     @Inject lateinit var identity: SecurityIdentity
 
@@ -308,8 +315,76 @@ class KybResource {
     @Operation(summary = "Operator confirms a manually attested extract / power of attorney and sets the signer count")
     suspend fun resolveReview(@PathParam("id") id: UUID, request: ResolveReviewRequest?): Response {
         val required = requireNotNull(request?.requiredSignatures) { "requiredSignatures is required" }
-        val case = onboarding.resolveReview(ResolveReviewCommand(id, required, identity.principal?.name ?: "operator"))
+        val case = onboarding.resolveReview(
+            ResolveReviewCommand(
+                id,
+                required,
+                identity.principal?.name ?: "operator",
+                request.requiredSignerRoles.orEmpty(),
+            ),
+        )
         return Response.ok(CaseResponse.from(case, null)).build()
+    }
+
+    // --- representation attestation (#9711) --------------------------------------------------
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "What the attestation store says about this entity's CURRENT register rule text")
+    suspend fun representationDecision(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val decision = representation.decisionFor(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(RepresentationDecisionResponse.from(decision)).build()
+    }
+
+    @POST
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Operator confirms how this entity is represented; supersedes any earlier confirmation")
+    suspend fun attestRepresentation(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+        request: AttestRepresentationRequest?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
+        val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
+        val attested = representation.attest(
+            AttestRepresentationCommand(
+                scheme = IdentifierScheme.valueOf(scheme.uppercase()),
+                identifier = identifier,
+                ruleTextHash = hash,
+                confirmedSigners = signers,
+                confirmedRoles = request.confirmedRoles.orEmpty(),
+                operator = identity.principal?.name ?: "operator",
+                note = request.note,
+            ),
+        )
+        return Response.ok(AttestationResponse.from(attested)).build()
+    }
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}/history")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Every confirmation ever made for this entity, superseded ones included")
+    suspend fun representationHistory(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val rows = representation.history(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+        return Response.ok(rows.map { AttestationResponse.from(it) }).build()
     }
 
     @POST

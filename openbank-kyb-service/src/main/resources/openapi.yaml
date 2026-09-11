@@ -1,7 +1,9 @@
 openapi: 3.1.0
 info:
   title: OpenBank KYB Service API
-  version: 1.1.0
+  # 1.1.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 is claimed by the open
+  # name-search PR (#9708); re-check against live main before merging, whoever lands second bumps.
+  version: 1.3.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -310,6 +312,62 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/representation/{scheme}/{identifier}:
+    get:
+      tags: [KYB]
+      summary: What the attestation store says about this entity's current register rule text
+      operationId: representationDecision
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentationDecision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [KYB]
+      summary: Operator confirms how this entity is represented; supersedes any earlier confirmation
+      operationId: attestRepresentation
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttestRepresentationRequest'
+      responses:
+        '200':
+          description: The stored attestation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attestation'
+        '409':
+          description: The register rule text changed since the form was opened; re-read and confirm again
+  /api/v1/kyb/representation/{scheme}/{identifier}/history:
+    get:
+      tags: [KYB]
+      summary: Every confirmation ever made for this entity, superseded ones included
+      operationId: representationHistory
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Attestations, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attestation'
   /api/v1/kyb/cases/{id}/reject:
     post:
       tags: [KYB]
@@ -369,6 +427,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    reprScheme:
+      name: scheme
+      in: path
+      required: true
+      schema: { type: string }
+    reprIdentifier:
+      name: identifier
+      in: path
+      required: true
+      schema: { type: string }
     caseId:
       name: id
       in: path
@@ -416,6 +484,69 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    Attestation:
+      type: object
+      required: [id, scheme, identifier, ruleTextHash, parsedMode, confirmedSigners, confirmedRoles, attestedBy, attestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scheme: { type: string }
+        identifier: { type: string }
+        ruleTextHash:
+          type: string
+          description: SHA-256 of the register rule text after case/diacritic/whitespace folding.
+        ruleText: { type: string, nullable: true }
+        parsedMode:
+          type: string
+          description: What the heuristic parser said when the operator was asked. Recorded to measure the parser, never to gate on.
+        parsedSigners: { type: integer, nullable: true }
+        confirmedSigners:
+          type: integer
+          minimum: 1
+          description: What the human decided. This is what binds an agreement.
+        confirmedRoles:
+          type: array
+          items: { type: string }
+          description: The offices that must sign. Empty means a plain count — any listed representatives may sign.
+        attestedBy: { type: string }
+        attestedAt: { type: string, format: date-time }
+        supersededAt: { type: string, format: date-time, nullable: true }
+        note: { type: string, nullable: true }
+    AttestRepresentationRequest:
+      type: object
+      required: [confirmedSigners, ruleTextHash]
+      properties:
+        confirmedSigners: { type: integer, minimum: 1 }
+        confirmedRoles:
+          type: array
+          items: { type: string }
+        ruleTextHash:
+          type: string
+          description: Hash of the text the operator actually read; a mismatch answers 409.
+        note: { type: string }
+    RepresentationDecision:
+      type: object
+      required: [state, ruleTextHash, parserMode, parserSuggestsRoles]
+      properties:
+        state:
+          type: string
+          enum: [ATTESTED, UNATTESTED, SUPERSEDED]
+          description: >-
+            SUPERSEDED means this entity HAS been confirmed before and the register text has since
+            changed — the old confirmation must not be reused.
+        ruleText: { type: string, nullable: true }
+        ruleTextHash: { type: string }
+        parserSuggestsSigners: { type: integer, nullable: true }
+        parserSuggestsRoles:
+          type: array
+          items: { type: string }
+        parserMode: { type: string }
+        attestation:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+        previous:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+          description: The confirmation that was superseded, so the reviewer is told what changed.
     UboFinding:
       type: object
       properties:

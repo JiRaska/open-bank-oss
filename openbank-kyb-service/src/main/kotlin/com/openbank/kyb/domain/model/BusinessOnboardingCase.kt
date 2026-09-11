@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.domain.model
 
+import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.libs.domain.identifiers.Ids
 import java.time.Instant
 import java.time.LocalDate
@@ -64,6 +65,12 @@ data class BusinessOnboardingCase(
     val extract: RegistryExtract?,
     val entityPartyId: UUID?,
     val requiredSignatures: Int?,
+    /**
+     * The offices the attested rule requires, when it names them (#9711). Empty means the rule is a
+     * plain count and any listed representatives may sign; non-empty means [cosignersInvited] must
+     * be able to cover every office from the chosen signers' register roles.
+     */
+    val requiredSignerRoles: List<String> = emptyList(),
     val signers: List<Signer>,
     val reviewReason: String?,
     /** The entity party has passed the KYC + AML gate (ADR-0267) — may arrive before or after the last signature. */
@@ -76,12 +83,22 @@ data class BusinessOnboardingCase(
 
     val signedCount: Int get() = signers.count { it.status == SignerStatus.SIGNED }
 
-    /** The register record has been fetched. Decides between the automatic path and manual review. */
-    fun registryVerified(extract: RegistryExtract, at: Instant): BusinessOnboardingCase {
+    /**
+     * The register record has been fetched. Decides between the automatic path and manual review.
+     *
+     * [decision] is what the attestation store says about THIS entity's current rule text (#9711).
+     * The parser's own verdict never reaches [requiredSignatures] any more: it is a suggestion the
+     * operator sees, and only [RepresentationDecision.Attested] — a human's confirmation of this
+     * exact text — lets a case proceed automatically. Everything else reviews.
+     */
+    fun registryVerified(
+        extract: RegistryExtract,
+        decision: RepresentationDecision,
+        at: Instant,
+    ): BusinessOnboardingCase {
         require(status == CaseStatus.IDENTIFIER_ENTERED || status == CaseStatus.MANUAL_REVIEW) {
             "registry verification is not applicable in status $status"
         }
-        val required = extract.representationRule.signaturesRequired(extract.representatives.size)
         return when {
             extract.status != EntityStatus.ACTIVE -> review(extract, "entity is ${extract.status} in the register", at)
             extract.verification == ExtractVerification.UNVERIFIED -> review(
@@ -89,27 +106,99 @@ data class BusinessOnboardingCase(
                 "extract awaits operator attestation",
                 at,
             )
-            // Named offices, not a count: the register says WHO signs, and no signature total can
-            // express that, so a human confirms the signatories against the source text (#9709).
-            extract.representationRule.isRoleConstrained -> review(
-                extract,
-                "representation rule names the signing offices " +
-                    "(${extract.representationRule.requiredRoles.joinToString(", ")}): " +
-                    "${extract.representationRule.sourceText}",
-                at,
-            )
-            required == null -> review(
-                extract,
-                "representation rule could not be parsed: ${extract.representationRule.sourceText}",
-                at,
-            )
-            else -> copy(
-                status = CaseStatus.REGISTRY_VERIFIED,
-                extract = extract,
-                requiredSignatures = required,
-                updatedAt = at,
+            else -> applyRepresentation(extract, decision, at)
+        }
+    }
+
+    private fun applyRepresentation(
+        extract: RegistryExtract,
+        decision: RepresentationDecision,
+        at: Instant,
+    ): BusinessOnboardingCase = when (decision) {
+        is RepresentationDecision.Attested -> {
+            val a = decision.attestation
+            if (a.confirmedRoles.isNotEmpty()) {
+                // The operator confirmed the rule names WHICH offices sign. Who signs is checked
+                // against those offices when co-signers are invited; the count alone is not enough.
+                copy(
+                    status = CaseStatus.REGISTRY_VERIFIED,
+                    extract = extract,
+                    requiredSignatures = a.confirmedSigners,
+                    requiredSignerRoles = a.confirmedRoles,
+                    updatedAt = at,
+                )
+            } else {
+                copy(
+                    status = CaseStatus.REGISTRY_VERIFIED,
+                    extract = extract,
+                    requiredSignatures = a.confirmedSigners,
+                    requiredSignerRoles = emptyList(),
+                    updatedAt = at,
+                )
+            }
+        }
+
+        // The rule text CHANGED since the last confirmation. Say so rather than present a blank
+        // form: this is the event the whole control exists for, and a reviewer who is not told
+        // will re-confirm from memory of a company they have seen before.
+        is RepresentationDecision.Superseded -> review(
+            extract,
+            "representation rule CHANGED since it was confirmed by ${decision.previous.attestedBy} " +
+                "on ${decision.previous.attestedAt} (then: ${decision.previous.confirmedSigners} signature(s)" +
+                "${roleSuffix(decision.previous.confirmedRoles)}). Register now says: " +
+                "${decision.rule.sourceText}",
+            at,
+        )
+
+        is RepresentationDecision.Unattested -> review(
+            extract,
+            "representation rule awaits confirmation — parser suggests ${suggestion(decision.rule)}: " +
+                "${decision.rule.sourceText}",
+            at,
+        )
+    }
+
+    /**
+     * Every named office must be filled by a DISTINCT chosen signer (#9711). Counting alone lets a
+     * chair-plus-member rule be satisfied by two ordinary members, which is the exact mistake the
+     * office list exists to stop; matching without distinctness lets ONE person who happens to be
+     * both chair and member satisfy a two-office rule on their own signature.
+     *
+     * Matching is by substring over the register's own role wording after the parser's folding, so
+     * the office `predseda` matches `předseda představenstva` as the register spells it. A signer
+     * with no register role (a manually added one) fills no office.
+     */
+    private fun requireOfficesCovered(ex: RegistryExtract, chosen: List<Signer>) {
+        if (requiredSignerRoles.isEmpty()) return
+        val roles = chosen.map { s ->
+            s.representativeIndex?.let { CzechRepresentationRuleParser.fold(ex.representatives[it].role.orEmpty()) }
+        }
+        val taken = BooleanArray(roles.size)
+        val unfilled = requiredSignerRoles.filter { office ->
+            val slot = roles.indices.firstOrNull { !taken[it] && roles[it]?.contains(office) == true }
+            if (slot == null) {
+                true
+            } else {
+                taken[slot] = true
+                false
+            }
+        }
+        if (unfilled.isNotEmpty()) {
+            throw CaseTransitionException(
+                "the representation rule requires ${requiredSignerRoles.joinToString(", ")}; " +
+                    "no distinct selected signer holds: ${unfilled.joinToString(", ")}",
             )
         }
+    }
+
+    private fun roleSuffix(roles: List<String>) = if (roles.isEmpty()) "" else ", offices: ${roles.joinToString(", ")}"
+
+    private fun suggestion(rule: RepresentationRule) = when {
+        rule.isRoleConstrained ->
+            "${rule.requiredSigners} signature(s) from named offices " +
+                "(${rule.requiredRoles.joinToString(", ")})"
+        rule.mode == RepresentationMode.UNKNOWN -> "nothing — it could not parse the text"
+        else -> "${rule.mode} / ${rule.requiredSigners ?: "all"} signature(s)"
     }
 
     private fun review(extract: RegistryExtract, reason: String, at: Instant) =
@@ -144,7 +233,17 @@ data class BusinessOnboardingCase(
         val signer =
             initiatorSigner(representativeIndex, rep?.fullName ?: claimedName, rep?.dateOfBirth ?: dateOfBirth, at)
         val next = copy(status = CaseStatus.INITIATOR_MATCHED, signers = listOf(signer), updatedAt = at)
-        return if (requireNotNull(requiredSignatures) <= 1) next.copy(status = CaseStatus.READY_TO_SIGN) else next
+        // A one-signature rule is ready immediately — unless it NAMES the office, in which case the
+        // initiator has to actually hold it. Without this clause a single-office rule would skip
+        // the check in `cosignersInvited` entirely, because it never invites anyone.
+        if (requireNotNull(requiredSignatures) > 1) return next
+        if (requiredSignerRoles.isEmpty()) return next.copy(status = CaseStatus.READY_TO_SIGN)
+        return try {
+            next.requireOfficesCovered(ex, next.signers)
+            next.copy(status = CaseStatus.READY_TO_SIGN)
+        } catch (e: CaseTransitionException) {
+            next.copy(status = CaseStatus.MANUAL_REVIEW, reviewReason = e.message, updatedAt = at)
+        }
     }
 
     private fun initiatorSigner(index: Int?, name: String, dob: LocalDate?, at: Instant) = Signer(
@@ -198,6 +297,7 @@ data class BusinessOnboardingCase(
         if (all.size < required) {
             throw CaseTransitionException("the representation rule needs $required signers; ${all.size} selected")
         }
+        requireOfficesCovered(ex, all)
         return copy(status = CaseStatus.AWAITING_COSIGNERS, signers = all, updatedAt = at)
     }
 
@@ -267,10 +367,19 @@ data class BusinessOnboardingCase(
     }
 
     /** An operator has confirmed a manually attested extract or accepted a power of attorney. */
-    fun reviewResolved(requiredSignatures: Int, at: Instant): BusinessOnboardingCase {
+    fun reviewResolved(
+        requiredSignatures: Int,
+        at: Instant,
+        requiredSignerRoles: List<String> = emptyList(),
+    ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
-        val next = copy(requiredSignatures = requiredSignatures, reviewReason = null, updatedAt = at)
+        val next = copy(
+            requiredSignatures = requiredSignatures,
+            requiredSignerRoles = requiredSignerRoles,
+            reviewReason = null,
+            updatedAt = at,
+        )
         return if (initiator == null) {
             next.copy(status = CaseStatus.REGISTRY_VERIFIED)
         } else {

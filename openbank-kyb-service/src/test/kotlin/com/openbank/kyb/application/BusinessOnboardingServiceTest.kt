@@ -18,9 +18,11 @@ import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.RegistryExtractCache
+import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.application.usecase.BusinessOnboardingService
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.RegistryLookupService
+import com.openbank.kyb.application.usecase.RepresentationAttestationService
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.EntityStatus
@@ -31,6 +33,8 @@ import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
@@ -111,6 +115,16 @@ class BusinessOnboardingServiceTest {
             cacheTtl = Duration.ofHours(24)
         }
         coEvery { cache.find(any(), any()) } returns null
+        // Every rule these tests use has been confirmed by an operator (#9711); they are about the
+        // onboarding flow that FOLLOWS confirmation. `PreAttested` answers the human's confirmation
+        // for whatever rule text is asked about — the confirmation itself is exercised in
+        // RepresentationAttestationServiceTest and the flow's dependence on it in
+        // BusinessOnboardingCaseTest.
+        val representation = AlwaysConfirmed().apply {
+            this.attestations = NoStore()
+            this.lookup = lookup
+            this.clock = clock
+        }
         var n = 0
         service = BusinessOnboardingService().apply {
             cases = repo
@@ -122,7 +136,42 @@ class BusinessOnboardingServiceTest {
             this.metrics = this@BusinessOnboardingServiceTest.metrics
             this.timers = this@BusinessOnboardingServiceTest.timers
             this.clock = clock
+            this.representation = representation
         }
+    }
+
+    /**
+     * Treats every rule as already confirmed by an operator, on the register's own numbers. These
+     * tests are about the onboarding flow that FOLLOWS confirmation; the confirmation itself is
+     * exercised by RepresentationAttestationServiceTest, and the flow's dependence on it — that an
+     * unconfirmed rule cannot proceed — by BusinessOnboardingCaseTest.
+     */
+    private class AlwaysConfirmed : RepresentationAttestationService() {
+        override suspend fun decide(extract: RegistryExtract) = RepresentationDecision.Attested(
+            RepresentationAttestation(
+                id = UUID.randomUUID(),
+                identifier = extract.identifier,
+                ruleTextHash = RepresentationAttestation.hashOf(extract.representationRule.sourceText),
+                ruleText = extract.representationRule.sourceText,
+                parsedMode = extract.representationRule.mode,
+                parsedSigners = extract.representationRule.requiredSigners,
+                confirmedSigners = extract.representationRule.requiredSigners
+                    ?: extract.representatives.size.coerceAtLeast(1),
+                confirmedRoles = extract.representationRule.requiredRoles,
+                attestedBy = "operator-test",
+                attestedAt = Instant.parse("2026-09-11T10:00:00Z"),
+            ),
+        )
+    }
+
+    private class NoStore : RepresentationAttestationRepository {
+        override suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String) = null
+
+        override suspend fun findLatestFor(identifier: LegalEntityIdentifier) = null
+
+        override suspend fun attest(attestation: RepresentationAttestation) = attestation
+
+        override suspend fun listFor(identifier: LegalEntityIdentifier) = emptyList<RepresentationAttestation>()
     }
 
     private fun extract(
