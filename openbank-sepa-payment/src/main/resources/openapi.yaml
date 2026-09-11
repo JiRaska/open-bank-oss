@@ -3,10 +3,16 @@
 openapi: 3.1.0
 info:
   title: SEPA Payment Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
-  # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
-  # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.8.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): CORRECTION —
+  # CreateSepaPaymentRequest never described what SepaPaymentResource parses (see below).
+  #
+  # 1.9 and not 1.8: #9670 corrects this same file's STATUS vocabularies and takes 1.8.0. The two
+  # touch different schemas and do not conflict in content, but info.version is one number, so
+  # they are SEQUENCED — #9670 first. If #9670 is closed rather than merged, drop this to 1.8.0.
+  #
+  # Minor bump (1.6 -> 1.7): additive only — GET /approvals (the checker's queue, issue #5679)
+  # plus two additive fields on ApprovalResponse (makerId, createdAt). No breaking change.
+  version: 1.9.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
