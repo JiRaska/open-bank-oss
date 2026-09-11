@@ -82,10 +82,11 @@ permissions:
   contents: read
 
 concurrency:
-  # Never two workers at once: two runs would pick the same issue, because the claim (a
-  # pushed `agent/` branch) does not exist until one of them is well underway.
-  group: agent-issue-worker
-  cancel-in-progress: false
+  # Work remains globally serial: two workers would pick the same unclaimed issue. PR
+  # validation is independent per PR and a newer head supersedes its older queued/running
+  # validation; sharing the work lane made unrelated PRs wait behind a 45-minute worker.
+  group: ${{ github.event_name == 'pull_request' && format('agent-issue-worker-pr-{0}', github.event.pull_request.number) || 'agent-issue-worker-work' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   admission:
