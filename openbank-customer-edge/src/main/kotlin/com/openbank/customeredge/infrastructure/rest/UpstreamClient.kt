@@ -79,27 +79,11 @@ class UpstreamClient {
     @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file")
     lateinit var tlsTrustCertificateFile: Optional<String>
 
-    // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
-    // URI.create() with no host check of its own — it relies entirely on callers building `url`
-    // from a fixed @ConfigProperty base + a validated path segment (true today, per review, but
-    // not enforced). This allowlist is the defense-in-depth backstop: reject any target whose
-    // host doesn't match a known-safe suffix before a request ever leaves the process.
-    // ".svc" covers every in-cluster upstream base URL (Kubernetes Service DNS, e.g.
-    // account-service.accounts.svc); 127.0.0.1/localhost cover UpstreamClientTest's throwaway
-    // loopback HTTP server. Adjust via config, not by loosening the check in code.
-    @ConfigProperty(
-        name = "openbank.upstream.allowed-host-suffixes",
-        defaultValue = ".svc,127.0.0.1,localhost",
-    )
-    var allowedHostSuffixes: String = ".svc,127.0.0.1,localhost"
-
     /**
-     * Rejects [url] unless it matches [allowedHostSuffixes], via a regex match against the raw
-     * string — CodeQL's java/ssrf query specifically recognizes a regex check as a sanitizing
-     * barrier (unlike a host check performed after URI.create()). URI.create() only runs once
-     * validation has already passed. A leading "." in an entry (e.g. ".svc") matches any host
-     * ending in that domain suffix; anything else (e.g. "127.0.0.1", "localhost") must match the
-     * whole host exactly.
+     * Rejects [url] unless it targets Kubernetes Service DNS or loopback. The allowlist is a
+     * compile-time constant rather than runtime configuration: a compromised ConfigMap cannot turn
+     * this shared HTTP primitive into an arbitrary network client. URI creation happens only after
+     * the complete raw URL passes the recognized SSRF barrier.
      *
      * `inline`: every caller (get/patch/put/delete/post) invokes this as a separate function,
      * and CodeQL's SSRF barrier recognition does not follow the sanitizer across that call
@@ -108,26 +92,30 @@ class UpstreamClient {
      * site, which is what the barrier recognition needs to see.
      */
     private inline fun validatedUri(url: String): URI {
-        val entries = allowedHostSuffixes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        val alternatives = entries.joinToString("|") { entry ->
-            if (entry.startsWith(".")) {
-                "[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*" + Regex.escape(entry)
-            } else {
-                Regex.escape(entry)
-            }
-        }
-        val pattern = Regex("^https?://(?:$alternatives)(?::\\d+)?(?:/.*)?$")
-        require(pattern.matches(url)) {
-            "refusing upstream call to disallowed host in url " +
-                "(configure openbank.upstream.allowed-host-suffixes to permit it)"
-        }
+        require(SAFE_UPSTREAM_URL.matches(url)) { "refusing upstream call to disallowed host" }
         return URI.create(url)
+    }
+
+    /**
+     * Builds an upstream URI while keeping the trusted service authority structurally separate
+     * from a caller-derived path. A path can never replace the host, user-info, query or fragment.
+     */
+    private inline fun structuredUri(baseUrl: String, path: String): URI {
+        require(SAFE_UPSTREAM_BASE_URL.matches(baseUrl)) { "refusing upstream call to disallowed host" }
+        require(path.startsWith('/') && !path.startsWith("//")) { "upstream path must be absolute and hostless" }
+        require('?' !in path && '#' !in path) { "upstream path must not contain a query or fragment" }
+        val base = URI.create(baseUrl)
+        return URI(base.scheme, null, base.host, base.port, path, null, null)
     }
 
     companion object {
         const val PARTY_HEADER = "X-Customer-Party-Id"
         const val IDEMPOTENCY_REPLAY_HEADER = "X-Idempotency-Replayed"
         private const val TOKEN_REFRESH_BUFFER_SECONDS = 60L
+        private val SAFE_UPSTREAM_URL =
+            Regex("^https?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.svc|127\\.0\\.0\\.1|localhost)(?::\\d+)?(?:/.*)?$")
+        private val SAFE_UPSTREAM_BASE_URL =
+            Regex("^https?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.svc|127\\.0\\.0\\.1|localhost)(?::\\d+)?/?$")
         private val JSON = com.fasterxml.jackson.databind.ObjectMapper()
     }
 
@@ -400,9 +388,9 @@ class UpstreamClient {
     // Idempotency-aware POST: forwards the caller's Idempotency-Key (required by some upstreams,
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.
-    fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
+    private fun post(uri: URI, partyId: String, body: String, idempotencyKey: String?): Response {
         val request = HttpRequest.newBuilder()
-            .uri(validatedUri(url))
+            .uri(uri)
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Content-Type", "application/json")
@@ -411,9 +399,29 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        jsonResponse(r)
+        return jsonResponse(r)
+    }
+
+    fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
+        post(validatedUri(url), partyId, body, idempotencyKey)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** POST to a fixed service authority with a separately constructed caller-derived path. */
+    fun postToService(
+        baseUrl: String,
+        path: String,
+        partyId: String,
+        body: String,
+        idempotencyKey: String? = null,
+    ): Response = try {
+        post(structuredUri(baseUrl, path), partyId, body, idempotencyKey)
+    } catch (e: Exception) {
+        // Do not log path: it may contain an opaque invitation or recovery token.
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }

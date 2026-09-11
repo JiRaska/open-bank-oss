@@ -2223,6 +2223,20 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: ci-reconcile-selector-selftest
+    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
+      expired, and duplicate runs and asserts the exact retry and flake matrices.
+    budget_seconds: 10
+    rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
+    review_after: "2027-03-11"
+    min_subjects: 3
+    run: |
+      python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
     group: registry
@@ -5060,7 +5074,13 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    # The subject is the SOURCE CORPUS, not the finding count — measured, not assumed:
+    # check-raw-colour-literal-ratchet.py line 151 prints `SUBJECTS={files_scanned}`, and a run
+    # today reports `SUBJECTS=297  # admin-ui source files scanned for raw hex colours`.
+    # So the floor does not fight the ratchet: findings may reach zero while the corpus stays ~297.
+    # `min_subjects: 1` would make this gate green about a run that scanned a single file — the
+    # exact no-op a floor exists to refuse.
+    min_subjects: 200   # 297 source files scanned 2026-09-11; findings may reach zero
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
@@ -5139,10 +5159,10 @@ gates:
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
   - id: workflow-supply-chain
-    name: "workflow action pins and bounded agent admission"
+    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
     group: supplychain
     mode: enforced
-    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs."
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
     budget_seconds: 15
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned

@@ -295,7 +295,63 @@ def _gh(args):
         raise Undetermined(f"gh {' '.join(args)} returned non-JSON: {e}") from e
 
 
+def parse_name_status_z(raw):
+    """Return (changed paths, added paths) from `git diff --name-status -z`."""
+    fields = raw.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    files, added = [], set()
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        index += 1
+        width = 2 if status.startswith(("R", "C")) else 1
+        if index + width > len(fields):
+            raise Undetermined("git diff returned malformed name-status data")
+        paths = fields[index:index + width]
+        index += width
+        path = paths[-1]
+        files.append(path)
+        if status == "A":
+            added.add(path)
+    return files, frozenset(added)
+
+
+def fetch_event_pr(n):
+    """Read identity from the event and paths from the already-checked-out PR diff."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    base = os.environ.get("PR_DIFF_BASE", "")
+    head = os.environ.get("GITHUB_SHA", "HEAD")
+    if not event_path or not base or not os.path.exists(event_path):
+        return None
+    try:
+        with open(event_path) as fh:
+            pull = json.load(fh).get("pull_request") or {}
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        raise Undetermined(f"could not read pull_request event: {e}") from e
+    if int(pull.get("number") or 0) != n:
+        return None
+    user = pull.get("user") or {}
+    head_data = pull.get("head") or {}
+    author = user.get("login") or ""
+    branch = head_data.get("ref") or ""
+    if not author or not branch:
+        raise Undetermined(f"PR #{n}: event omitted author/headRefName")
+    proc = subprocess.run(
+        ["git", "diff", "--name-status", "--find-renames", "-z", base, head],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise Undetermined(f"git diff {base} {head} failed (rc={proc.returncode}): {proc.stderr.strip()}")
+    files, added = parse_name_status_z(proc.stdout)
+    is_bot = user.get("type") == "Bot" or author.endswith("[bot]")
+    return author, is_bot, branch, files, added
+
+
 def fetch_pr(n):
+    local = fetch_event_pr(n)
+    if local is not None:
+        return local
     pr = _gh(["pr", "view", str(n), "--json", "author,headRefName"])
     author = (pr.get("author") or {}).get("login") or ""
     is_bot = bool((pr.get("author") or {}).get("is_bot"))
@@ -524,13 +580,31 @@ def self_test():
             if len(toks) < 20:
                 failures.append(f"live rules.yaml yields only {len(toks)} protected tokens — the derivation is broken")
 
+    # The CI fast path derives paths from the checked-out merge diff. Preserve regular,
+    # added, renamed and copied records, including spaces, without a REST files call.
+    try:
+        parsed_files, parsed_added = parse_name_status_z(
+            "M\0plain.kt\0A\0new file.kt\0R100\0old.kt\0renamed.kt\0C090\0source.kt\0copy.kt\0"
+        )
+        if parsed_files != ["plain.kt", "new file.kt", "renamed.kt", "copy.kt"]:
+            failures.append(f"name-status parser returned wrong paths: {parsed_files}")
+        if parsed_added != frozenset({"new file.kt"}):
+            failures.append(f"name-status parser returned wrong added paths: {parsed_added}")
+        try:
+            parse_name_status_z("R100\0only-old.kt\0")
+            failures.append("malformed rename was accepted")
+        except Undetermined:
+            pass
+    except Undetermined as e:
+        failures.append(f"valid name-status fixture was rejected: {e}")
+
     if failures:
         print("SELF-TEST FAILED — the guard is not falsifiable as written:")
         for f in failures:
             print(f"  x {f}")
         return 1
     print(
-        f"self-test OK — {len(cases)} classifier cases + 4 undetermined cases, "
+        f"self-test OK — {len(cases)} classifier cases + 4 undetermined cases + diff parser, "
         f"every block clause independently reached"
     )
     return 0

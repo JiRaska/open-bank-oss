@@ -1426,7 +1426,11 @@ components:
         The acting principal is the authenticated JWT subject (server-side), never a client-supplied
         field, so only the audit reason is carried in the body.
       properties:
-        reason: { type: string, nullable: true }
+        writtenOffBy:
+          type: string
+        reason:
+          type: string
+          nullable: true
     RescheduleRequest:
       type: object
       description: >-
