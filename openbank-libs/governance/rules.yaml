@@ -218,6 +218,72 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2026-09-30"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
+    # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
+    # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
+    # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
+    # That generated document is not being produced. Across three independent CI runs and every
+    # service that REACHES the script — one with no committed openapi.yaml is skipped a step
+    # earlier by the workflow's own guard (openbank-simulation, run 33949966927) — billing,
+    # interest, swift (run 33949966927),
+    # document (33949973656), customer-edge (33949914172) — the script printed
+    #
+    #   ##[notice] <svc>: no generated schema at <svc>/build/openapi-generated/openapi.yaml
+    #              ... Not a finding.
+    #
+    # and returned 0 BEFORE reaching its count line ("{checked} request schema(s) compared,
+    # {findings} finding(s)"), so no count is emitted at all. Zero request schemas have been
+    # compared. Verification note: the word is "compared", not "checked" — grepping the wrong
+    # one returns empty across every run and reads as a confirmation while measuring nothing.
+    #
+    # CAUSE SETTLED 2026-09-05 by running the same command locally (isolated Gradle home,
+    # BUILD SUCCESSFUL in 12m24s): store-schema-directory is relative TO THE SUBPROJECT, not to
+    # the repo root, so "<svc>/build/openapi-generated" wrote to
+    #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
+    # a directory nothing reads. The document was produced the whole time, one level away.
+    # Fixed in _service-ci.yml by passing "build/openapi-generated".
+    #
+    # FIRST REAL OUTPUT, same run, one service: "2 request schema(s) compared, 21 finding(s)"
+    # — openbank-interest-service publishes InterestRateConfig with ratePercent, tierMin,
+    # tierMax, validFrom, validTo, calculationMethod, none of which exist on the request DTO,
+    # while the DTO's annualRate, dayCount, effectiveFrom/To, minBalance/maxBalance and
+    # rateType are unpublished. Same shape as kyc #5895: a client generated from that document
+    # cannot call the endpoint.
+    #
+    # FLEET NUMBER, measured the same day by building all 52 services that carry an
+    # openapi.yaml (one Gradle invocation, --continue, BUILD SUCCESSFUL in 25m14s) and running
+    # this checker over each generated document:
+    #
+    #   121 request schemas compared    122 findings    17 of 52 services affected
+    #   88 parsed-not-published (a DTO property the spec omits)
+    #   34 published-not-parsed (a spec property no DTO has -- a client sends it, it is ignored)
+    #
+    #   pid 27 · interest 21 · domestic-payment 13 · dispute 12 · standing-order 10 · sca 8 ·
+    #   consent 8 · sepa-payment 6 · clearing 6 · balance 3 · kyc 2 · then 1 each for party,
+    #   lending, document, transaction, sanctions, swift.  35 services are clean.
+    #
+    # MONEY PATH is in the published-not-parsed half, which is the half a client acts on:
+    #   CreateSepaPaymentRequest.currencyCode, .requestedExecutionDate
+    #   CreateDomesticPaymentRequest.currencyCode, .message
+    #   PlaceHoldRequest.expiresAt
+    # each declared in the spec, absent from the DTO -- sent by a generated client and silently
+    # dropped. So the backlog behind this date is REAL and was never a false-positive-rate
+    # question. 122 is the number to burn down (issue #8828); advisory until it is near zero.
+    #
+    # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
+    # would graduate a check that examines nothing, and the green would then be load-bearing.
+    # A missing generated document currently reads identically to a clean service — the same
+    # "could not look" encoded as "looked and found nothing" that check-fleet-attestations.sh
+    # deliberately separates (it exits 2 and says "NOT a verdict"). This script does not.
+    #
+    # The work behind this date is therefore a BUILD fix — find why the Quarkus scanner writes
+    # no document — plus making the missing-document case distinguishable from a clean one.
+    # Only then is a false-positive measurement even meaningful.
+    blocked_on: "the gate is a no-op: the generated schema it compares against is not produced by
+      the build, so it returned 'Not a finding' with 0 request schemas checked on every service
+      that built in runs 33949966927 / 33949973656 / 33949914172 (measured 2026-09-05). Flipping
+      it would enforce a check that examines nothing. Fix the build so Quarkus emits
+      build/openapi-generated/openapi.yaml, and make a missing document distinguishable from a
+      clean service, before this date means anything."
     # openapi_route_conformance (above) is ROUTE SET ONLY — it does not read schemas, so aml's
     # invented request/response fields passed it clean (#2312). This is the request half of that
     # gap, using the document Quarkus itself generates
