@@ -11,13 +11,16 @@ import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Banknote, Search, RefreshCw, Plus, Zap, Globe, CheckCircle2, XCircle,
-  Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight
+  Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight, ChevronDown
 } from 'lucide-react'
 import { stashRow } from '@/lib/services/rowHandoff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { useSingleFlight, useIdempotencyKey, wasSkipped } from '@/lib/mutations/singleFlight'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { parsePaymentListPage, type PaymentListItem, type PaymentSource } from '@/lib/payments/paymentListContract'
 import { parseVopEvidence } from '@/lib/payments/vopEvidence'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
@@ -33,18 +36,23 @@ const SEPA_INSTANT_API = '/api/svc/sepa-instant'
 // The BFF key is the k8s Service name: in-cluster it resolves to
 // http://<key>.<namespace>.svc:<port> (see api/svc/[service]/[...path]/route.ts).
 const VOP_API          = '/api/svc/vop-service'
+const PAYMENT_PAGE_SIZE = 50
 
 type Tab = 'all' | 'domestic' | 'sepa' | 'sct-inst'
 type CreateType = 'domestic-standard' | 'domestic-instant' | 'sepa' | 'sct-inst'
 type VopStatus = 'idle' | 'loading' | 'match' | 'close_match' | 'no_match' | 'no_data'
 
-interface Payment {
-  id: string; type: 'SEPA' | 'DOMESTIC'
-  status: string; amount: number; currency: string
-  debtorIban?: string; creditorIban?: string
-  creditorAccountNumber?: string; creditorBankCode?: string
-  creditorName?: string; remittanceInfo?: string
-  createdAt: string
+type Payment = PaymentListItem
+
+type PaymentPageResult =
+  | { ok: true; items: Payment[]; hasMore: boolean }
+  | { ok: false; failure: UnavailableKind }
+
+interface SourceEvidence {
+  failure: UnavailableKind | null
+  hasMore: boolean
+  nextOffset: number
+  loadingMore: boolean
 }
 
 interface SctInstPayment {
@@ -123,14 +131,20 @@ function emptySepa(instant: boolean): SepaFormData {
     bic: '', endToEndId: '', remittanceInfo: '', purposeCode: '', vopStatus: 'idle', vopResult: null }
 }
 
-async function fetchPayments(url: string, type: 'SEPA' | 'DOMESTIC'): Promise<Payment[]> {
+async function fetchPayments(url: string, type: PaymentSource, offset: number): Promise<PaymentPageResult> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
-    if (!res.ok) return []
-    const data = await res.json()
-    const items = Array.isArray(data) ? data : data.items ?? data.content ?? []
-    return items.map((p: Record<string, unknown>) => ({ ...p, type })) as Payment[]
-  } catch { return [] }
+    const params = new URLSearchParams({ limit: String(PAYMENT_PAGE_SIZE), offset: String(offset) })
+    const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(5000) })
+    if (!res.ok) {
+      const failure = res.status === 404
+        ? 'not_deployed'
+        : res.status === 502 ? 'unreachable' : await classifyBffFailure(res)
+      return { ok: false, failure }
+    }
+    const data = await res.json().catch(() => null)
+    const items = parsePaymentListPage(data, type, PAYMENT_PAGE_SIZE)
+    return items ? { ok: true, items, hasMore: items.length === PAYMENT_PAGE_SIZE } : { ok: false, failure: 'error' }
+  } catch { return { ok: false, failure: 'unreachable' } }
 }
 
 function formatAmount(n: number, currency: string, locale: string) {
@@ -291,7 +305,11 @@ function PaymentsContent() {
   const [activeTab, setActiveTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'all')
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [sourceEvidence, setSourceEvidence] = useState<Record<PaymentSource, SourceEvidence>>({
+    SEPA: { failure: null, hasMore: false, nextOffset: 0, loadingMore: false },
+    DOMESTIC: { failure: null, hasMore: false, nextOffset: 0, loadingMore: false },
+  })
+  const sourceGeneration = useRef<Record<PaymentSource, number>>({ SEPA: 0, DOMESTIC: 0 })
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'SEPA' | 'DOMESTIC'>('ALL')
 
@@ -341,17 +359,76 @@ function PaymentsContent() {
   }, [router])
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
-    try {
-      const [sepa, domestic] = await Promise.all([
-        fetchPayments(SEPA_API, 'SEPA'),
-        fetchPayments(DOMESTIC_API, 'DOMESTIC'),
-      ])
-      setPayments([...sepa, ...domestic].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t('Nepodařilo se načíst platby', 'Failed to load payments'))
-    } finally { setLoading(false) }
-  }, [t])
+    setLoading(true)
+    const generation = {
+      SEPA: ++sourceGeneration.current.SEPA,
+      DOMESTIC: ++sourceGeneration.current.DOMESTIC,
+    }
+    const [sepa, domestic] = await Promise.all([
+      fetchPayments(SEPA_API, 'SEPA', 0),
+      fetchPayments(DOMESTIC_API, 'DOMESTIC', 0),
+    ])
+    if (generation.SEPA !== sourceGeneration.current.SEPA || generation.DOMESTIC !== sourceGeneration.current.DOMESTIC) return
+    const outcomes: Record<PaymentSource, PaymentPageResult> = { SEPA: sepa, DOMESTIC: domestic }
+    // A 401 means the operator's evidence boundary has disappeared. Never keep a
+    // previously authorized payment from either source visible while the session
+    // refresh catches up, even when the sibling request happened to finish with 200.
+    if ((!sepa.ok && sepa.failure === 'unauthorized') || (!domestic.ok && domestic.failure === 'unauthorized')) {
+      setPayments([])
+      setSourceEvidence({
+        SEPA: { failure: 'unauthorized', hasMore: false, nextOffset: 0, loadingMore: false },
+        DOMESTIC: { failure: 'unauthorized', hasMore: false, nextOffset: 0, loadingMore: false },
+      })
+      setLoading(false)
+      return
+    }
+    setPayments((['SEPA', 'DOMESTIC'] as const)
+      .flatMap(type => outcomes[type].ok ? outcomes[type].items : [])
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)))
+    setSourceEvidence(Object.fromEntries((['SEPA', 'DOMESTIC'] as const).map(type => {
+      const outcome = outcomes[type]
+      return [type, outcome.ok
+        ? { failure: null, hasMore: outcome.hasMore, nextOffset: PAYMENT_PAGE_SIZE, loadingMore: false }
+        : { failure: outcome.failure, hasMore: false, nextOffset: 0, loadingMore: false }]
+    })) as Record<PaymentSource, SourceEvidence>)
+    setLoading(false)
+  }, [])
+
+  const loadMorePayments = useCallback(async (type: PaymentSource) => {
+    const current = sourceEvidence[type]
+    if (!current.hasMore || current.loadingMore) return
+    const generation = ++sourceGeneration.current[type]
+    setSourceEvidence(previous => ({ ...previous, [type]: { ...previous[type], loadingMore: true, failure: null } }))
+    const url = type === 'SEPA' ? SEPA_API : DOMESTIC_API
+    const outcome = await fetchPayments(url, type, current.nextOffset)
+    if (generation !== sourceGeneration.current[type]) return
+    if (!outcome.ok) {
+      if (outcome.failure === 'unauthorized') {
+        sourceGeneration.current.SEPA += 1
+        sourceGeneration.current.DOMESTIC += 1
+        setPayments([])
+        setSourceEvidence({
+          SEPA: { failure: 'unauthorized', hasMore: false, nextOffset: 0, loadingMore: false },
+          DOMESTIC: { failure: 'unauthorized', hasMore: false, nextOffset: 0, loadingMore: false },
+        })
+        return
+      }
+      setSourceEvidence(previous => ({ ...previous, [type]: { ...previous[type], loadingMore: false, failure: outcome.failure } }))
+      return
+    }
+    setPayments(previous => [...previous, ...outcome.items.filter(item => !previous.some(existing => existing.type === type && existing.id === item.id))]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)))
+    setSourceEvidence(previous => ({ ...previous, [type]: {
+      failure: null,
+      hasMore: outcome.hasMore,
+      nextOffset: current.nextOffset + PAYMENT_PAGE_SIZE,
+      loadingMore: false,
+    } }))
+  }, [sourceEvidence])
+
+  const handleLoadMorePayments = (event: React.MouseEvent<HTMLButtonElement>) => {
+    void loadMorePayments(event.currentTarget.dataset.paymentSource as PaymentSource)
+  }
 
   const loadSct = useCallback(async () => {
     setSctLoading(true)
@@ -533,6 +610,11 @@ function PaymentsContent() {
   const sepaCount     = payments.filter(p => p.type === 'SEPA').length
   const domesticCount = payments.filter(p => p.type === 'DOMESTIC').length
   const pendingCount  = payments.filter(p => p.status === 'PENDING' || p.status === 'PROCESSING').length
+  const visibleSources: PaymentSource[] = activeTab === 'sepa' || (activeTab === 'all' && typeFilter === 'SEPA')
+    ? ['SEPA']
+    : activeTab === 'domestic' || (activeTab === 'all' && typeFilter === 'DOMESTIC') ? ['DOMESTIC'] : ['SEPA', 'DOMESTIC']
+  const visibleFailures = visibleSources.filter(type => sourceEvidence[type].failure !== null)
+  const allVisibleSourcesUnavailable = !loading && visibleFailures.length === visibleSources.length
 
   // ── SCT Inst monitoring ─────────────────────────────────────────
   const sctSettled = sctPayments.filter(p => p.status === 'SETTLED').length
@@ -714,9 +796,9 @@ function PaymentsContent() {
           {activeTab === 'all' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
               {[
-                { label: t('SEPA Platby', 'SEPA Payments'), value: sepaCount, color: 'var(--accent)' },
-                { label: t('Tuzemské Platby', 'Domestic Payments'), value: domesticCount, color: 'var(--info-text)' },
-                { label: t('Čekající / Zpracovává se', 'Pending / Processing'), value: pendingCount, color: 'var(--warning-text)' },
+                { label: t('Načtené SEPA platby', 'Loaded SEPA payments'), value: sourceEvidence.SEPA.failure ? '—' : sepaCount, color: 'var(--accent)' },
+                { label: t('Načtené tuzemské platby', 'Loaded domestic payments'), value: sourceEvidence.DOMESTIC.failure ? '—' : domesticCount, color: 'var(--info-text)' },
+                { label: t('Načtené čekající / zpracovávané', 'Loaded pending / processing'), value: visibleFailures.length ? '—' : pendingCount, color: 'var(--warning-text)' },
               ].map(s => (
                 <div key={s.label} className="stat-card">
                   <div className="stat-value" style={{ color: s.color }}>{loading ? '—' : s.value}</div>
@@ -1089,7 +1171,17 @@ function PaymentsContent() {
             </div>
           </div>
 
-          {error && <div role="alert" className="card" style={{ padding: '16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', marginBottom: '16px' }}>{error}</div>}
+          {!loading && visibleFailures.map(type => (
+            <div className="card" key={type} style={{ padding: 0, marginBottom: '12px' }}>
+              <DataUnavailable
+                kind={sourceEvidence[type].failure!}
+                service={type === 'SEPA' ? 'SEPA payment-service' : 'Domestic payment-service'}
+                feature={t(`${type} platby`, `${type} payments`)}
+                lang={language}
+                dense
+              />
+            </div>
+          ))}
 
           {/* Payments table */}
           <div className="card" style={{ overflow: 'hidden' }}>
@@ -1110,9 +1202,11 @@ function PaymentsContent() {
                 {loading && Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>{Array.from({ length: 8 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '120px' : '80px' }} /></td>)}</tr>
                 ))}
-                {!loading && filtered.length === 0 && (
+                {!loading && !allVisibleSourcesUnavailable && filtered.length === 0 && (
                   <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                    {t('Nebyly nalezeny žádné platby', 'No payments found')}
+                    {visibleFailures.length
+                      ? t('V dostupném zdroji nebyly nalezeny žádné platby', 'No payments found in the available source')
+                      : t('Nebyly nalezeny žádné platby', 'No payments found')}
                   </td></tr>
                 )}
                 {!loading && filtered.map(p => (
@@ -1138,6 +1232,23 @@ function PaymentsContent() {
                 ))}
               </tbody>
             </table>
+            {!loading && visibleSources.map(type => sourceEvidence[type].hasMore || sourceEvidence[type].loadingMore ? (
+              <div key={type} style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={sourceEvidence[type].loadingMore}
+                  aria-busy={sourceEvidence[type].loadingMore}
+                  data-payment-source={type}
+                  onClick={handleLoadMorePayments}
+                >
+                  <ChevronDown size={13} aria-hidden="true" />
+                  {sourceEvidence[type].loadingMore
+                    ? t(`Načítám další ${type}…`, `Loading more ${type}…`)
+                    : t(`Načíst další ${type} platby`, `Load more ${type} payments`)}
+                </button>
+              </div>
+            ) : null)}
           </div>
         </>
       )}
