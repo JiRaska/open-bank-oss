@@ -12,8 +12,8 @@
 #   The decision stays human. This never merges, never approves, never enables auto-merge.
 #
 # SCOPE, AND WHY IT IS THIS NARROW
-#   Only PRs from `agent/` branches — the output of our own issue worker. Not other people's
-#   PRs, and not the release/deploy bots.
+#   Only PRs matching the reviewed branch prefixes in `rules.yaml` — the output of our own
+#   autonomous workers. Not other people's PRs, and not the release/deploy bots.
 #
 #   That is not timidity, it is a measured fact: on 2026-08-22 a read-only pass over a 51-PR
 #   queue found 46 of them protected (an agent may not land there at all), 4 more on live
@@ -53,15 +53,17 @@ on:
       - .github/scripts/agent-admission.py
       - .github/scripts/test-agent-admission.py
       - .github/scripts/agent-review-claude-cli/**
+      - .github/agent-prompts/pr-steward.md
 
 permissions:
   contents: read
 
 concurrency:
-  # Separate from the issue worker's group: they do different jobs and must not block each
-  # other. But two stewards at once would race on the same branch, so this group is serial.
-  group: agent-pr-steward
-  cancel-in-progress: false
+  # Work remains globally serial so two stewards cannot race on one branch. PR validation
+  # gets a per-PR lane and superseding heads cancel stale work instead of queueing behind an
+  # unrelated 45-minute steward run.
+  group: ${{ github.event_name == 'pull_request' && format('agent-pr-steward-pr-{0}', github.event.pull_request.number) || 'agent-pr-steward-work' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
