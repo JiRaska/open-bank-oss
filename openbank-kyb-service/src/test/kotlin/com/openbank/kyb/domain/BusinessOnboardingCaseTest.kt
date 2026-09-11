@@ -378,9 +378,13 @@ class BusinessOnboardingCaseTest {
 
         // Only the member turns up. The count is reached, so signing must NOT open on it alone.
         case = case.signerIdentified("tok-member", UUID.randomUUID(), now)
+        // Not merely "does not open signing": it goes to review NAMING the shortfall. Leaving it in
+        // AWAITING_COSIGNERS would be safe and silent, and the invitation-TTL timer would abandon
+        // the case without anyone learning why.
         assertThat(case.status)
             .describedAs("two identified people reach the count and do not cover predseda + mistopredseda")
-            .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
+            .isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(case.reviewReason).contains("not covered").contains("mistopredseda")
 
         // And even if it somehow did, the terminal transition refuses the wrong pair.
         val forced = case.copy(status = CaseStatus.READY_TO_SIGN)
@@ -503,5 +507,86 @@ class BusinessOnboardingCaseTest {
             .initiatorMatched(0, "Jana Chairová", null, now)
 
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+    }
+
+    private fun chairViceMember() = listOf(
+        rep("Jana Chairová").copy(role = "předseda představenstva"),
+        rep("Viktor Vice").copy(role = "místopředseda představenstva"),
+        rep("Milan Member").copy(role = "člen představenstva"),
+    )
+
+    private fun chairViceRule(reps: List<Representative>) = extract(
+        reps = reps,
+        rule = RepresentationRule(
+            RepresentationMode.JOINT_N,
+            2,
+            "předseda spolu s místopředsedou",
+            requiredRoles = listOf("predseda", "mistopredseda"),
+        ),
+    )
+
+    @Test
+    fun `accepting an already-signed case from review COMPLETES it instead of wedging it`() {
+        // The trap: signed() sends the wrong pair to review, and the obvious remedy — accept it,
+        // clearing the offices — used to land in READY_TO_SIGN with every signer already SIGNED.
+        // signed() refuses a SIGNED signer, so nothing could finish it: two valid signatures
+        // collected, entity never activated, and no timer watches READY_TO_SIGN.
+        val ex = chairViceRule(chairViceMember())
+        var case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .entityPartyCreated(UUID.randomUUID(), now)
+            .initiatorMatched(0, "Jana Chairová", null, now)
+            .cosignersInvited(listOf(1, 2), listOf("tok-vice", "tok-member"), now)
+        case = case.signerIdentified("tok-member", UUID.randomUUID(), now)
+        val member = case.signers.first { it.fullName == "Milan Member" }.partyId!!
+        case = case.copy(status = CaseStatus.READY_TO_SIGN)
+            .signed(initiator, "ceremony-chair", now)
+            .signed(member, "ceremony-member", now)
+        assertThat(case.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+
+        val accepted = case.reviewResolved(2, now, emptyList())
+
+        assertThat(accepted.status)
+            .describedAs("the operator accepted two collected signatures; the case must finish")
+            .isIn(CaseStatus.SIGNED, CaseStatus.ACTIVE)
+    }
+
+    @Test
+    fun `an office shortfall never stalls in silence — it says what is missing`() {
+        // The declining branch of recomputeReadiness used to return the case unchanged: no reason,
+        // no status change. On AWAITING_COSIGNERS the invitation-TTL timer then ABANDONED it, and
+        // the office shortfall was never surfaced anywhere.
+        val ex = chairViceRule(chairViceMember())
+        var case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .initiatorMatched(2, "Milan Member", null, now)
+            .cosignersInvited(listOf(1, 0), listOf("tok-vice", "tok-chair"), now)
+
+        // Only the other ordinary-office holder verifies; the count is met, the offices are not.
+        case = case.signerIdentified("tok-vice", UUID.randomUUID(), now)
+
+        assertThat(case.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(case.reviewReason)
+            .describedAs("a case that stops moving must name why, or it is abandoned unexplained")
+            .contains("not covered")
+            .contains("predseda")
+    }
+
+    @Test
+    fun `a female chair satisfies a predseda office`() {
+        // Not a regression, but the offices are now re-checked at SIGNATURE — so a company chaired
+        // by a woman would have failed only after the signatures were collected.
+        val reps = listOf(
+            rep("Jana Chairová").copy(role = "předsedkyně představenstva"),
+            rep("Viktor Vice").copy(role = "místopředsedkyně představenstva"),
+        )
+        val ex = chairViceRule(reps)
+
+        val case = started()
+            .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
+            .initiatorMatched(0, "Jana Chairová", null, now)
+
+        assertThat(case.cosignersInvited(listOf(1), listOf("tok-1"), now).status)
+            .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
     }
 }

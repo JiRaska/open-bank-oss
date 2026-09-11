@@ -172,6 +172,32 @@ class CzechRepresentationRuleParserTest {
     }
 
     @Test
+    fun `the register's standard signing-manner sentence is still a SOLE rule`() {
+        // "…připojí svůj podpis" is the register's boilerplate for HOW one signs, not a second
+        // signature. A `pripoj` marker blocked it and would have made a large slice of genuinely
+        // solo texts permanently UNKNOWN.
+        assertThat(
+            mode(
+                "Za společnost jedná jednatel samostatně a podepisuje se tak, že k obchodní firmě " +
+                    "společnosti připojí svůj podpis.",
+            ).mode,
+        ).isEqualTo(RepresentationMode.SOLE)
+    }
+
+    @Test
+    fun `a prokurista acting alone is SOLE, and acting WITH someone is not`() {
+        // Blocking every mention of a prokurista would make a whole class of solo rules UNKNOWN —
+        // "Prokurista jedná samostatně" is one, and the pairing below is common.
+        assertThat(mode("Prokurista jedná samostatně.").mode).isEqualTo(RepresentationMode.SOLE)
+        assertThat(mode("Jednatel jedná samostatně. Prokurista jedná samostatně.").mode)
+            .isEqualTo(RepresentationMode.SOLE)
+
+        // …and the joint shape the marker exists for must NOT read as solo.
+        assertThat(mode("Ředitel jedná samostatně vždy s prokuristou.").mode)
+            .isNotEqualTo(RepresentationMode.SOLE)
+    }
+
+    @Test
     fun `the whitelist tolerates exactly the three solo shapes that carry a harmless marker`() {
         // Each of these is unambiguously solo and carries a word the whitelist would otherwise
         // reject: a "-li" introducing the head-count, an internal body's consent, the register's

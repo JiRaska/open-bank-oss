@@ -40,9 +40,10 @@ import java.text.Normalizer
  * confirmation form, and a human confirms the rule per entity. Read a SOLE verdict as "no marker
  * matched", never as "one signature is enough".
  *
- * Measured over 142 live *způsob jednání* texts (2026-09-11): 97 SOLE, 10 JOINT_N, 6 role-
- * constrained, 2 JOINT_ALL, 26 UNKNOWN — and **none** of the 97 SOLE texts demands a second
- * signature.
+ * Measured over 142 live *způsob jednání* texts, 2026-09-12, after the marker set last changed:
+ * **97 SOLE, 10 JOINT_N, 7 role-constrained, 2 JOINT_ALL, 26 UNKNOWN** — and none of the 97 SOLE
+ * texts carries a second-signature marker. Re-measure when the markers move; a distribution quoted
+ * above a classifier that has since changed is a claim with a shelf life.
  *
  * ## Word order
  *
@@ -113,15 +114,19 @@ object CzechRepresentationRuleParser {
                 "\\bspolecn(?:e|y|ym|ou|eho|a|i)\\b",
                 "\\bspolu\\b",
                 "\\bsouhlas\\w*",
-                // A second person named without any counting or joint word: a prokurista's
-                // participation, or a clause merely REQUIRING something further.
-                "\\bprokurist\\w*",
+                // A second person named without any counting or joint word: a prokurista acting
+                // WITH someone, or a clause merely REQUIRING something further.
+                //
+                // `s prokuristou`, not `prokurist\\w*`: "Prokurista jedná samostatně" is a genuine
+                // sole rule, and so is the very common pairing "Jednatel jedná samostatně.
+                // Prokurista jedná samostatně." Blocking every mention would make a whole class
+                // of solo rules permanently UNKNOWN.
+                "\\b(?:s|se)\\s+prokurist\\w*",
                 "\\bucast\\w*",
                 "\\bspolupodpis\\w*",
                 "\\b(?:tez|rovnez|zaroven)\\b",
                 "\\bnutn\\w*",
                 "\\b(?:treba|vyzaduje|vyzadov\\w*|predepsan\\w*)\\b",
-                "\\bpripoj\\w*",
                 "\\bpodpis(?:u|y|ech|em)\\b",
                 // a condition, an exception or a threshold
                 "\\w+-li\\b",

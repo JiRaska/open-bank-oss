@@ -83,6 +83,8 @@ data class BusinessOnboardingCase(
 
     val signedCount: Int get() = signers.count { it.status == SignerStatus.SIGNED }
 
+    private val signedSigners: List<Signer> get() = signers.filter { it.status == SignerStatus.SIGNED }
+
     /**
      * The register record has been fetched. Decides between the automatic path and manual review.
      *
@@ -178,25 +180,22 @@ data class BusinessOnboardingCase(
      * search costs nothing and cannot answer "no" to a coverable set.
      */
     private fun requireOfficesCovered(ex: RegistryExtract, chosen: List<Signer>, stage: String) {
-        val offices = requiredSignerRoles.filter { it.isNotBlank() }
-        if (offices.isEmpty()) return
-        val roles = chosen.map { s ->
-            // getOrNull: a sole trader's initiatorMatched does not bounce an out-of-range index,
-            // and a raw IndexOutOfBounds here would surface as an unmapped 500.
-            s.representativeIndex
-                ?.let { ex.representatives.getOrNull(it) }
-                ?.let { CzechRepresentationRuleParser.fold(it.role.orEmpty()) }
-        }
-        val assignedTo = IntArray(roles.size) { -1 }
-        val unfilled = offices.filterIndexed { officeIdx, office ->
-            !assign(officeIdx, office, offices, roles, assignedTo, BooleanArray(roles.size))
-        }
+        val unfilled = copy(extract = ex).officeShortfall(chosen)
         if (unfilled.isNotEmpty()) {
             throw CaseTransitionException(
-                "the representation rule requires ${offices.joinToString(", ")}; " +
+                "the representation rule requires " +
+                    "${requiredSignerRoles.filter { it.isNotBlank() }.joinToString(", ")}; " +
                     "$stage does not cover: ${unfilled.joinToString(", ")}",
             )
         }
+    }
+
+    private fun foldedRoles(ex: RegistryExtract, chosen: List<Signer>): List<String?> = chosen.map { s ->
+        // getOrNull: a sole trader's initiatorMatched does not bounce an out-of-range index, and a
+        // raw IndexOutOfBounds here would surface as an unmapped 500.
+        s.representativeIndex
+            ?.let { ex.representatives.getOrNull(it) }
+            ?.let { CzechRepresentationRuleParser.fold(it.role.orEmpty()) }
     }
 
     /** One augmenting step: seat [officeIdx] on a free signer, displacing an earlier office if it can re-seat. */
@@ -223,10 +222,23 @@ data class BusinessOnboardingCase(
     /** [office] must BEGIN a word of the register's role wording; see [requireOfficesCovered]. */
     private fun holdsOffice(role: String?, office: String): Boolean {
         if (role == null) return false
-        val folded = CzechRepresentationRuleParser.fold(office)
+        val folded = masculine(CzechRepresentationRuleParser.fold(office))
         if (folded.isEmpty()) return false
-        return Regex("(^|\\W)" + Regex.escape(folded)).containsMatchIn(role)
+        return Regex("(^|\\W)" + Regex.escape(folded)).containsMatchIn(masculine(role))
     }
+
+    /**
+     * Rewrites the feminine spellings the register actually uses to the masculine stem, on BOTH
+     * sides, so `předsedkyně představenstva` satisfies an office of `predseda`.
+     *
+     * An explicit list rather than suffix-stripping: trimming `-kyně`/`-ka` generically would make
+     * unrelated words collide, and the register's vocabulary of statutory offices is small enough
+     * to enumerate. Without this a company chaired by a woman parses as covering no office at all —
+     * and since the offices are now re-checked at SIGNATURE, that surfaces only after the
+     * signatures have been collected, which is the worst moment to discover it.
+     */
+    private fun masculine(folded: String): String =
+        FEMININE_OFFICES.entries.fold(folded) { acc, (f, m) -> acc.replace(f, m) }
 
     private fun roleSuffix(roles: List<String>) = if (roles.isEmpty()) "" else ", offices: ${roles.joinToString(", ")}"
 
@@ -387,12 +399,13 @@ data class BusinessOnboardingCase(
         // co-signers were invited is not enough: invitations may exceed the count, so a rule of
         // "chair plus one member" could be satisfied on paper by inviting chair, vice and member
         // and then completed by chair + member, with the agreement bound by the wrong pair.
-        val signed = next.signers.filter { it.status == SignerStatus.SIGNED }
-        if (!next.officesCovered(signed)) {
+        val shortfall = next.officeShortfall(next.signedSigners)
+        if (shortfall.isNotEmpty()) {
             return next.copy(
                 status = CaseStatus.MANUAL_REVIEW,
-                reviewReason = "signatures collected do not cover the offices the rule names " +
-                    "(${requiredSignerRoles.filter { it.isNotBlank() }.joinToString(", ")})",
+                reviewReason = "signatures collected do not cover the offices the rule names: " +
+                    "${shortfall.joinToString(", ")}. Resolve by inviting someone who holds them, " +
+                    "or by accepting the case with those offices removed.",
                 updatedAt = at,
             )
         }
@@ -437,39 +450,78 @@ data class BusinessOnboardingCase(
             reviewReason = null,
             updatedAt = at,
         )
-        return if (initiator == null) {
-            next.copy(status = CaseStatus.REGISTRY_VERIFIED)
-        } else {
-            next.copy(status = CaseStatus.INITIATOR_MATCHED).recomputeReadiness(at)
+        if (initiator == null) return next.copy(status = CaseStatus.REGISTRY_VERIFIED)
+        // An already fully-signed case must be COMPLETABLE from here. `signed()` sends a case to
+        // review when the collected signatures miss an office, and the obvious remedy — accept it,
+        // clearing the office list — used to land in READY_TO_SIGN with every signer already
+        // SIGNED: `signed()` refuses a SIGNED signer, so nothing could ever finish it. Two valid
+        // signatures collected, entity never activated, and no timer watches READY_TO_SIGN.
+        if (next.signedCount >= requiredSignatures && next.officeShortfall(next.signedSigners).isEmpty()) {
+            return if (next.entityPartyActive) {
+                next.copy(status = CaseStatus.ACTIVE)
+            } else {
+                next.copy(status = CaseStatus.SIGNED)
+            }
         }
+        return next.copy(status = CaseStatus.INITIATOR_MATCHED).recomputeReadiness(at)
     }
 
     private fun recomputeReadiness(at: Instant): BusinessOnboardingCase {
         val required = requiredSignatures ?: return this
         val verified = signers.filter { it.status == SignerStatus.IDENTIFIED || it.status == SignerStatus.SIGNED }
         val collecting = status == CaseStatus.AWAITING_COSIGNERS || status == CaseStatus.INITIATOR_MATCHED
+        if (!collecting || verified.size < required) return this
         // The count alone is not enough to OPEN signing. `cosignersInvited` permits more invitees
         // than the rule needs on purpose, so the people who actually turn up are a subset of the
         // people who were checked — and a subset that reaches the count can miss an office.
-        return if (collecting && verified.size >= required && officesCovered(verified)) {
-            copy(status = CaseStatus.READY_TO_SIGN, updatedAt = at)
-        } else {
-            this
-        }
+        val shortfall = officeShortfall(verified)
+        if (shortfall.isEmpty()) return copy(status = CaseStatus.READY_TO_SIGN, updatedAt = at)
+        // Declining SILENTLY is what made this dangerous to get wrong: the case kept its old
+        // status with no reason recorded, and AWAITING_COSIGNERS is covered by the invitation-TTL
+        // timer — so an office shortfall ended as an ABANDONED case that never said why.
+        return review(
+            requireNotNull(extract),
+            "everyone expected has verified, but the offices the rule names are not covered: " +
+                shortfall.joinToString(", "),
+            at,
+        )
     }
 
-    /** [requireOfficesCovered] as a predicate, for the paths that must not throw. */
-    private fun officesCovered(chosen: List<Signer>): Boolean {
-        val ex = extract ?: return requiredSignerRoles.none { it.isNotBlank() }
-        return try {
-            requireOfficesCovered(ex, chosen, "")
-            true
-        } catch (_: CaseTransitionException) {
-            false
+    /**
+     * The offices [chosen] cannot cover, for the paths that must not throw. Empty means covered.
+     *
+     * Returns the shortfall rather than a boolean because every caller needs to SAY what is
+     * missing: a case that stops moving without naming the reason is the failure mode this whole
+     * check exists to avoid, one step later.
+     */
+    private fun officeShortfall(chosen: List<Signer>): List<String> {
+        val offices = requiredSignerRoles.filter { it.isNotBlank() }
+        if (offices.isEmpty()) return emptyList()
+        val ex = extract ?: return offices
+        val roles = foldedRoles(ex, chosen)
+        val assignedTo = IntArray(roles.size) { -1 }
+        return offices.filterIndexed { i, office ->
+            !assign(i, office, offices, roles, assignedTo, BooleanArray(roles.size))
         }
     }
 
     companion object {
+        /**
+         * The feminine spellings the register uses, mapped to the masculine stem — applied to both
+         * the operator's office and the register's role, so `předsedkyně představenstva` satisfies
+         * `predseda`. An explicit list, not suffix-stripping: trimming `-kyně`/`-ka` generically
+         * would make unrelated words collide, and the vocabulary of statutory offices is small.
+         */
+        val FEMININE_OFFICES = mapOf(
+            "mistopredsedkyne" to "mistopredseda",
+            "predsedkyne" to "predseda",
+            "jednatelka" to "jednatel",
+            "prokuristka" to "prokurista",
+            "reditelka" to "reditel",
+            "clenka" to "clen",
+            "spolecnice" to "spolecnik",
+        )
+
         fun start(id: UUID, identifier: LegalEntityIdentifier, initiatorPartyId: UUID, at: Instant) =
             BusinessOnboardingCase(
                 id = id,
