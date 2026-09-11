@@ -5,10 +5,27 @@ import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { PAYMENT_INSIGHTS } from '@/components/insights/catalog'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
-afterEach(() => { cleanup(); vi.useRealTimers() })
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
+
+function blockGrafanaUntilExplicitLoad() {
+  vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockImplementation(() => {
+    throw new DOMException('Cross-origin frame')
+  })
+}
+
+function completeGrafanaLoad(panel: HTMLElement) {
+  const doc = document.implementation.createHTMLDocument()
+  Object.defineProperty(panel, 'contentDocument', { configurable: true, value: doc })
+  Object.defineProperty(panel, 'contentWindow', {
+    configurable: true,
+    value: { location: { pathname: '/tools/grafana/d-solo/openbank-sla' } },
+  })
+  fireEvent.load(panel)
+}
 
 it('presents selected Grafana panels as native, period-aware insight cards', () => {
   vi.useFakeTimers()
+  blockGrafanaUntilExplicitLoad()
   render(<LanguageProvider initialLanguage="en">
     <ContextualInsights dashboardUid="openbank-sla" panels={PAYMENT_INSIGHTS}
       titleCs="Zdraví plateb" titleEn="Payment health"
@@ -22,22 +39,26 @@ it('presents selected Grafana panels as native, period-aware insight cards', () 
   expect(controlled).toHaveAttribute('role', 'region')
   expect(controlled).toHaveAccessibleName('Payment health')
   const panel = screen.getByTitle('Payment success rate')
+  expect(document.querySelectorAll('iframe')).toHaveLength(1)
   expect(panel).toHaveAttribute('src', expect.stringContaining('/tools/grafana/d-solo/openbank-sla?'))
   expect(panel).toHaveAttribute('src', expect.stringContaining('panelId=6'))
   expect(panel).toHaveAttribute('src', expect.stringContaining('kiosk=1'))
   expect(panel).toHaveAttribute('src', expect.stringContaining('from=1788220800000'))
   expect(screen.getByRole('link', { name: 'Detailed analysis' }).getAttribute('href')).not.toContain('kiosk=')
 
-  const doc = document.implementation.createHTMLDocument()
-  doc.body.innerHTML = '<div class="panel-content"></div>'
-  Object.defineProperty(panel, 'contentDocument', { value: doc })
+  fireEvent.load(panel)
+  expect(document.querySelectorAll('iframe')).toHaveLength(1)
+
+  completeGrafanaLoad(panel)
   act(() => vi.advanceTimersByTime(500))
   expect(panel).toBeVisible()
+  expect(document.querySelectorAll('iframe')).toHaveLength(2)
   expect(screen.queryAllByText('Loading data…')).toHaveLength(PAYMENT_INSIGHTS.length - 1)
 })
 
 it('recovers when Grafana becomes ready after the slow-connection warning', () => {
   vi.useFakeTimers()
+  blockGrafanaUntilExplicitLoad()
   render(<LanguageProvider initialLanguage="en">
     <ContextualInsights dashboardUid="openbank-slo" panels={PAYMENT_INSIGHTS.slice(0, 1)}
       titleCs="Dopad" titleEn="Impact" descriptionCs="Stav" descriptionEn="Health" defaultOpen />
@@ -45,21 +66,20 @@ it('recovers when Grafana becomes ready after the slow-connection warning', () =
   const panel = screen.getByTitle('Payment success rate')
   act(() => vi.advanceTimersByTime(20_500))
   expect(screen.getByText('Connection is taking longer; still trying…')).toBeInTheDocument()
-  const doc = document.implementation.createHTMLDocument()
-  doc.body.innerHTML = '<div class="panel-content"></div>'
-  Object.defineProperty(panel, 'contentDocument', { value: doc })
+  completeGrafanaLoad(panel)
   act(() => vi.advanceTimersByTime(500))
   expect(panel).toBeVisible()
   expect(screen.queryByText('Connection is taking longer; still trying…')).not.toBeInTheDocument()
 })
 
 it('reveals a panel when its Grafana frame finishes loading', () => {
+  blockGrafanaUntilExplicitLoad()
   render(<LanguageProvider initialLanguage="en">
     <ContextualInsights dashboardUid="openbank-slo" panels={PAYMENT_INSIGHTS.slice(0, 1)}
       titleCs="Dopad" titleEn="Impact" descriptionCs="Stav" descriptionEn="Health" defaultOpen />
   </LanguageProvider>)
   const panel = screen.getByTitle('Payment success rate')
-  fireEvent.load(panel)
+  completeGrafanaLoad(panel)
   expect(panel).toBeVisible()
   expect(screen.queryByText('Loading data…')).not.toBeInTheDocument()
 })
