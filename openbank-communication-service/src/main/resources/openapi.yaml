@@ -1,7 +1,14 @@
 openapi: 3.0.3
 info:
   title: OpenBank Communication Service
-  version: 1.0.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  # 1.0.0 -> 1.1.0 (#9602, MERGED): additive — the ADR-0285 phase 3 playbook layer.
+  # 1.1.0 -> 1.2.0 (#9633, this): additive — the ADR-0285 D4 golden-set documents.
+  # The sequencing both files recorded has played out: #9602 landed at 1.1.0 (live main), so 1.2.0
+  # is the next free minor rather than a collision. Neither branch could stay at 1.0.0 — main
+  # holds it, and `openapi-version-not-taken` reads the base tip, so an unchanged version on an
+  # additive change fails that gate and `api-contract-gate` both.
+  version: 1.2.0
 paths:
   /api/v1/personas/{personaKey}/style-versions:
     post:
@@ -38,3 +45,50 @@ paths:
       summary: Approve or reject a pending commstyle.publish approval
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       responses: {"200": {description: Decided}, "404": {description: No such pending approval}}
+  /api/v1/personas/{personaKey}/playbook-versions:
+    post:
+      summary: Draft a new playbook version (call script + approved answers) for a persona (D3 lint runs before persistence)
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"201": {description: Created}, "400": {description: Rejected by lint or validation}}
+  /api/v1/personas/playbook-versions/{id}/submit:
+    post:
+      summary: DRAFT -> IN_REVIEW, the maker's declaration this is ready for a checker
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Submitted}, "409": {description: Conflict}}
+  /api/v1/personas/playbook-versions/{id}/publish:
+    post:
+      summary: Publish (four-eyes-gated, commstyle.publish — same action as style; the draft's own maker is refused)
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Published}, "202": {description: Paused pending a checker decision}, "409": {description: Conflict}}
+  /api/v1/personas/playbook-versions/{id}/retire:
+    post:
+      summary: Retire a still-published playbook version without a replacement
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Retired}, "409": {description: Conflict}}
+  /api/v1/personas/{personaKey}/playbook/published:
+    get:
+      summary: The composed, published playbook (call script + approved answers) a consumer caches (D5)
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: The published playbook}, "404": {description: No published version}}
+  /api/v1/personas/{personaKey}/playbook/search:
+    get:
+      summary: Keyword retrieval over the persona's published approved answers (D2/D7 agent-assist)
+      parameters:
+        - {name: personaKey, in: path, required: true, schema: {type: string}}
+        - {name: q, in: query, required: true, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer}}
+      responses: {"200": {description: Ranked hits, possibly empty}}
+  /api/v1/personas/{personaKey}/golden-set:
+    post:
+      summary: Create a golden-set entry (D4) — CRUD only, no replay/publish gate wired yet
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"201": {description: Created}, "400": {description: Validation failed}}
+    get:
+      summary: List a persona's golden-set entries
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: Golden-set entries, possibly empty}}
+  /api/v1/personas/golden-set/{id}:
+    delete:
+      summary: Delete a golden-set entry
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"204": {description: Deleted}, "404": {description: No such entry}}

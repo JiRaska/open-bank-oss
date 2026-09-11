@@ -68,6 +68,11 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
  * is still a number nothing will ever count.
  *
  * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
+ *
+ * `exposure` remains persisted for audit of historical grants but is refused on new offers until
+ * document delivery can create a transformed artifact and atomically enforce every declared view
+ * constraint. Returning the original object bytes with a redaction, watermark or view-count field
+ * merely echoed would be a confidentiality defect.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
@@ -76,6 +81,9 @@ class DelegationUnsupportedConstraintException(val code: String, message: String
 
         /** ADR-0249 D5 — a spend capability with no cumulative ceiling at all. */
         const val CODE_SPEND_WITHOUT_CEILING = "SPEND_WITHOUT_CEILING"
+
+        /** Exposure needs transformed-artifact and atomic view-count enforcement before it can be offered. */
+        const val CODE_EXPOSURE_UNSUPPORTED = "EXPOSURE_UNSUPPORTED"
     }
 }
 
@@ -171,11 +179,33 @@ class DelegationService(
     }
 
     private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
+        rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         rejectUnenforcedCeilings(command)
         rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
         return verifyEligibility(command)
+    }
+
+    private fun rejectUnsupportedExposure(command: DelegationCandidate) {
+        if (command.exposure != null) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
+                message = "exposure is not supported: this platform cannot yet transform the shared object " +
+                    "or atomically enforce redaction, watermark or maxViews. Omit exposure; existing " +
+                    "historical exposure grants remain readable for audit but never authorize access.",
+            )
+        }
+    }
+
+    private fun rejectLegacyExposure(grant: DelegationGrant) {
+        if (grant.exposure != null) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
+                message = "this historical grant carries unsupported exposure metadata and cannot be activated " +
+                    "or reinstated until transformed-artifact enforcement exists",
+            )
+        }
     }
 
     override suspend fun accept(
@@ -186,6 +216,7 @@ class DelegationService(
     ): DelegationGrant {
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
+        rejectLegacyExposure(grant)
         verifyAndConsumeSca(
             sessionId = scaSessionId,
             expectedPartyId = granteePartyId,
@@ -308,6 +339,7 @@ class DelegationService(
     override suspend fun reinstate(delegationId: UUID): DelegationGrant {
         val grant = delegationRepository.findById(delegationId)
             ?: throw DelegationNotFoundException(delegationId)
+        rejectLegacyExposure(grant)
         val reinstated = grant.reinstate(OffsetDateTime.now(clock))
         return delegationRepository.save(
             reinstated,
@@ -355,7 +387,9 @@ class DelegationService(
         val now = OffsetDateTime.now(clock)
         val grant = delegationRepository
             .findActiveByGranteeAndResource(command.granteePartyId, command.resourceType, command.resourceId)
-            .firstOrNull { it.isActiveOn(now) && it.covers(command.capability, command.amount) }
+            .firstOrNull {
+                it.exposure == null && it.isActiveOn(now) && it.covers(command.capability, command.amount)
+            }
             ?: return DelegationCheckResult.Denied(
                 "no active delegation covers ${command.capability} on " +
                     "${command.resourceType}/${command.resourceId} for party ${command.granteePartyId}",

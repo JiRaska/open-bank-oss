@@ -499,6 +499,10 @@ jobs:
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
+      # Only the services whose image actually reached the registry. Everything after
+      # the push keys off this, never off the changed set (#9714).
+      pushed_services: ${{ steps.push.outputs.pushed }}
+      failed_services: ${{ steps.push.outputs.failed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -524,7 +528,7 @@ jobs:
       # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
@@ -605,6 +609,7 @@ jobs:
           SERVICES='${{ needs.changes.outputs.services }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
+          PUSHED=(); FAILED_SVCS=()
 
           docker buildx create --use --name ob-deploy-builder \
             --driver docker-container >/dev/null 2>&1 || \
@@ -678,13 +683,36 @@ jobs:
             push_one "$svc" &
             PIDS+=($!); SVCS+=("$svc"); RUNNING=$(( RUNNING + 1 ))
             if [ "$RUNNING" -ge "$MAX_PARALLEL" ]; then
-              wait "${PIDS[0]}" || { echo "FAIL: ${SVCS[0]}"; FAILED=1; }
+              if wait "${PIDS[0]}"; then PUSHED+=("${SVCS[0]}"); else echo "FAIL: ${SVCS[0]}"; FAILED_SVCS+=("${SVCS[0]}"); FAILED=1; fi
               PIDS=("${PIDS[@]:1}"); SVCS=("${SVCS[@]:1}"); RUNNING=$(( RUNNING - 1 ))
             fi
           done
-          for pid in "${PIDS[@]}"; do wait "$pid" || FAILED=1; done
+          for idx in "${!PIDS[@]}"; do
+            if wait "${PIDS[$idx]}"; then PUSHED+=("${SVCS[$idx]}"); else echo "FAIL: ${SVCS[$idx]}"; FAILED_SVCS+=("${SVCS[$idx]}"); FAILED=1; fi
+          done
 
-          [ "$FAILED" -eq 0 ] || { echo "One or more docker pushes failed"; exit 1; }
+          # A push that fails for ONE service must not strand the deploy of every other
+          # service in the same run. It used to: this line exited 1, so `Gitops PR`,
+          # `can-i-deploy` and `Deploy signal` were skipped as job dependents. Measured
+          # 2026-09-11 — openbank-communication-service had no ECR repository (its gitops
+          # image pin exists, so ecr-service-repositories.tf derives one, but
+          # platform-tofu.yml applies on workflow_dispatch only and had not been run) and
+          # auto-deploy failed EVERY run for 2.5 days: last success 2026-09-09T05:48Z, 76 of
+          # the following 100 runs red, nothing deployed fleet-wide (#9714).
+          #
+          # The run still goes red, and still names what failed — the `push-failures` job
+          # does that. What changes is WHEN: after the services that pushed cleanly have
+          # been signed, scanned, attested and deployed. One service's failure stops being
+          # everyone else's.
+          printf '%s\n' ${PUSHED[@]+"${PUSHED[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/pushed.json"
+          printf '%s\n' ${FAILED_SVCS[@]+"${FAILED_SVCS[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/failed.json"
+          {
+            echo "pushed=$(cat "$RUNNER_TEMP/pushed.json")"
+            echo "failed=$(cat "$RUNNER_TEMP/failed.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> pushed: $(cat "$RUNNER_TEMP/pushed.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
       # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
@@ -695,7 +723,7 @@ jobs:
       - name: Sign images (cosign v2 + KMS)
         run: |
           set -uo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
           # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
@@ -749,7 +777,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
 
@@ -799,7 +827,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -uo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
           # post-attest proof all live in the shared helper, which every build-push-*.sh
@@ -878,7 +906,7 @@ jobs:
         id: collect
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
 
           # Emit { "openbank-account-service": "sandbox-abc1234", … }
@@ -970,7 +998,7 @@ jobs:
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
           # a group name silently stops the job being created (#3082/#3084); an env var has no
           # such ceiling.
-          SERVICES: ${{ needs.changes.outputs.services }}
+          SERVICES: ${{ needs.build-push.outputs.pushed_services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
@@ -1016,12 +1044,16 @@ jobs:
     # record-deployment for every other service in it, deadlocking the broker's view of
     # reality against itself with no self-healing path. Never runs if build-push itself
     # failed (nothing built to deploy) or was cancelled/skipped.
+    # The last clause: every push failing leaves nothing to pin, and without it this job opens
+    # a gitops PR whose image-tag set is empty — a no-op PR for a run that deployed nothing
+    # (#9714).
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
       github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
-      needs.can-i-deploy.result != 'cancelled'
+      needs.can-i-deploy.result != 'cancelled' &&
+      needs.build-push.outputs.pushed_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
       contents: write
@@ -1179,7 +1211,7 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Changed services:** ${{ needs.changes.outputs.services }}
+            **Deployed services:** ${{ needs.build-push.outputs.pushed_services }}
 
             Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
             triggering commit). ArgoCD syncs automatically after merge.
@@ -1336,4 +1368,42 @@ jobs:
           echo "::error::deploy for ${RUN_SHA::8} did not land — gitops-pr ended ${GITOPS_PR_RESULT} after build-push succeeded (services: ${CHANGED_SERVICES})"
           # Fail the job (only this new, non-blocking job — nothing downstream needs it) so the
           # run's overall status flags red and is findable without opening every job's log.
+          exit 1
+
+  # ── the run's red light for a failed push ────────────────────────────────────────────────
+  # `Docker push` no longer exits non-zero when one service fails, because a job failure skips
+  # every dependent job and so stranded the deploy of every HEALTHY service in the same run
+  # (#9714: 2.5 days, 76 of 100 runs, nothing deployed, one undeclared ECR repository). The
+  # failure has to stay just as visible, so it lands here instead — after gitops-pr and
+  # deploy-signal have done their work for the services that did push.
+  #
+  # `always()` is load-bearing: without it this job is skipped whenever an earlier job fails,
+  # which is exactly the case it exists to report.
+  push-failures:
+    name: Push failures
+    needs: [build-push, gitops-pr, deploy-signal]
+    if: ${{ always() && needs.build-push.outputs.failed_services != '' && needs.build-push.outputs.failed_services != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report the services whose image never reached the registry
+        env:
+          FAILED_SERVICES: ${{ needs.build-push.outputs.failed_services }}
+          PUSHED_SERVICES: ${{ needs.build-push.outputs.pushed_services }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## Docker push failed"
+            echo
+            echo "Failed: \`${FAILED_SERVICES}\`"
+            echo "Pushed and deployed normally: \`${PUSHED_SERVICES}\`"
+            echo
+            echo "These services are running whatever image they ran before this commit."
+            echo "A missing ECR repository is the recurring cause — the repository set is"
+            echo "derived in \`openbank-infra/aws/envs/sandbox-platform/ecr-service-repositories.tf\`"
+            echo "from the gitops image pins, and \`platform-tofu.yml\` applies on"
+            echo "workflow_dispatch only, so a new service's pin is not a repository until"
+            echo "someone runs that apply."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::error::docker push failed for ${FAILED_SERVICES} — those services did not deploy"
           exit 1

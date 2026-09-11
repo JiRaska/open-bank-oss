@@ -28,37 +28,16 @@ import {
   type ApprovalSortOrder,
   type DomainApprovalItem,
 } from '@/lib/approvals/triage'
-
-interface Proposal {
-  id: string
-  title: string
-  rationale: string
-  suggestedAction: string
-  proposedBy: string
-  proposedAt: string
-  state: 'PROPOSED' | 'APPROVED' | 'REJECTED'
-  decidedBy: string | null
-  decidedAt: string | null
-  decisionReason: string | null
-  modelId: string | null
-  agent?: { id: string; displayName: string; icon: 'bot' | 'user'; charterKnown: boolean }
-}
-
-interface InboxItem extends Omit<DomainApprovalItem, 'domain'> {
-  id: string
-  domain: ApprovalDomain | 'agent'
-  action: string
-  resourceId: string | null
-  maker: string | null
-  proposedAt: string | null
-}
+import { parseAgentProposalList, parseApprovalInbox, type AgentProposal as Proposal, type ApprovalInboxItem as InboxItem } from '@/lib/approvals/evidence'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 type DecisionIntent = { proposal: Proposal; approve: boolean }
 
 const STATE_META: Record<string, { color: string; bg: string; border: string; Icon: React.ElementType; cs: string; en: string }> = {
-  PROPOSED: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
-  APPROVED: { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2, cs: 'Schváleno', en: 'Approved' },
-  REJECTED: { color: '#dc2626', bg: '#fef2f2', border: '#fca5a5', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
+  PROPOSED: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
+  APPROVED: { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2, cs: 'Schváleno', en: 'Approved' },
+  REJECTED: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
 }
 
 export default function ApprovalsPage() {
@@ -71,6 +50,7 @@ export default function ApprovalsPage() {
   const [domainItems, setDomainItems] = useState<InboxItem[]>([])
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [domainLoadFailed, setDomainLoadFailed] = useState(false)
+  const [agentLoadFailure, setAgentLoadFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const flight = useSingleFlight()
   const [decisionIntent, setDecisionIntent] = useState<DecisionIntent | null>(null)
@@ -87,32 +67,34 @@ export default function ApprovalsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [proposalsResult, inboxResult] = await Promise.allSettled([
+    const [proposalsResult, inboxResult] = await Promise.all([
       fetch('/api/agent/proposals?state=all', { cache: 'no-store' }).then(async response => {
-        if (!response.ok) throw new Error('agent proposals unavailable')
-        const data = await response.json()
-        return Array.isArray(data) ? data as Proposal[] : []
-      }),
-      fetch('/api/approvals/pending', { cache: 'no-store' }).then(async response => {
-        if (!response.ok) throw new Error('domain approvals unavailable')
-        const inbox = await response.json()
-        return {
-          items: Array.isArray(inbox.items) ? inbox.items as InboxItem[] : [],
-          sources: inbox.sources && typeof inbox.sources === 'object' ? inbox.sources as Record<string, string> : {},
+        if (!response.ok) {
+          const failure = response.status === 502
+            ? 'unreachable' as const
+            : response.status === 401 || response.status === 403 ? 'unauthorized' as const : await classifyBffFailure(response)
+          return { ok: false as const, failure }
         }
-      }),
+        const proposals = parseAgentProposalList(await response.json().catch(() => null))
+        return proposals ? { ok: true as const, proposals } : { ok: false as const, failure: 'error' as const }
+      }).catch(() => ({ ok: false as const, failure: 'unreachable' as const })),
+      fetch('/api/approvals/pending', { cache: 'no-store' }).then(async response => {
+        if (!response.ok) return { ok: false as const }
+        const inbox = parseApprovalInbox(await response.json().catch(() => null))
+        return inbox ? { ok: true as const, inbox } : { ok: false as const }
+      }).catch(() => ({ ok: false as const })),
     ])
 
-    if (proposalsResult.status === 'fulfilled') {
-      setRows(proposalsResult.value)
-      setError(null)
+    if (proposalsResult.ok) {
+      setRows(proposalsResult.proposals)
+      setAgentLoadFailure(null)
     } else {
-      setError('unreachable')
+      setAgentLoadFailure(proposalsResult.failure)
     }
 
-    if (inboxResult.status === 'fulfilled') {
-      setDomainItems(inboxResult.value.items)
-      setDomainSources(inboxResult.value.sources)
+    if (inboxResult.ok) {
+      setDomainItems(inboxResult.inbox.items)
+      setDomainSources(inboxResult.inbox.sources)
       setDomainLoadFailed(false)
     } else {
       // Retain any last successful snapshot, but never let it look current or empty.
@@ -121,7 +103,10 @@ export default function ApprovalsPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   // Charter lookup is deliberately a separate read from the queue: a registry that cannot be
   // read must degrade the IDENTITY column only, never blank the queue itself.
@@ -236,7 +221,7 @@ export default function ApprovalsPage() {
       {domainLoadFailed && (
         <div className="card" role="alert" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+          color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
             'Doménovou schvalovací frontu se nepodařilo načíst. Případná zobrazená data jsou z posledního úspěšného načtení; prázdný seznam neznamená, že nic nečeká.',
@@ -247,7 +232,7 @@ export default function ApprovalsPage() {
       {unavailableSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+          color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
             `Fronta není úplná — nepodařilo se načíst: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
@@ -258,7 +243,7 @@ export default function ApprovalsPage() {
       {notConfiguredSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
-          color: '#475569', background: '#f8fafc', border: '1px solid #cbd5e1',
+          color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)',
         }}>
           {t(
             `Část fronty zatím není napojená: ${notConfiguredSources.join(', ')}. Rozhodnutí z těchto domén se zde nezobrazí, dokud jejich read endpoint nebude dostupný.`,
@@ -310,7 +295,7 @@ export default function ApprovalsPage() {
           return <div key={`${item.domain}:${item.id}`} data-testid={`domain-approval-${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{
               fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
-              color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', flexShrink: 0,
+              color: 'var(--info-text)', background: 'var(--info-bg)', border: '1px solid var(--info-border)', flexShrink: 0,
             }}>
               {item.domain}
             </span>
@@ -322,7 +307,7 @@ export default function ApprovalsPage() {
                 {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
               </div>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>
             {workbenchHref && <Link href={workbenchHref} className="btn btn-secondary" aria-label={t(`Otevřít řízenou kontrolu žádosti ${item.id}`, `Open governed review for approval ${item.id}`)} style={{ fontSize: 11, textDecoration: 'none' }}>
@@ -335,7 +320,26 @@ export default function ApprovalsPage() {
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
         {t('Čeká na rozhodnutí (AI agent)', 'Pending (AI agent)')} ({pending.length})
       </div>
-      {!loading && pending.length === 0 && (
+      {!loading && agentLoadFailure && (
+        <div className="card" style={{ padding: 0, marginBottom: 12 }}>
+          <DataUnavailable
+            kind={agentLoadFailure}
+            service={t('Agent-service', 'Agent-service')}
+            feature={t('Fronta AI návrhů', 'AI proposal queue')}
+            lang={language}
+            dense
+            title={rows.length > 0 ? t('Zobrazuji poslední ověřené návrhy', 'Showing the last verified proposals') : undefined}
+            detail={rows.length > 0
+              ? t('Nové načtení selhalo. Návrhy níže pocházejí z poslední úspěšné obnovy a nemusí být aktuální.', 'The refresh failed. Proposals below come from the last successful read and may be stale.')
+              : undefined}
+          >
+            <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+              <RefreshCw aria-hidden="true" size={13} /> {t('Zkusit znovu', 'Retry')}
+            </button>
+          </DataUnavailable>
+        </div>
+      )}
+      {!loading && !agentLoadFailure && pending.length === 0 && (
         <div className="card" style={{ padding: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
           {t('Žádné návrhy nečekají na schválení. Agent může návrh vytvořit nástrojem draft_ticket.', 'No proposals awaiting approval. The agent can create one via the draft_ticket tool.')}
         </div>
@@ -354,10 +358,10 @@ export default function ApprovalsPage() {
           const aiGenerated = p.agent ? p.agent.icon === 'bot' : /assistant|agent|\bai\b/i.test(p.proposedBy)
           const ProposerIcon = aiGenerated ? Bot : UserRound
           return (
-            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? '#d97706' : m.color}` }}>
+            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? 'var(--warning-text)' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? '#fffbeb' : 'var(--surface-2)', color: aiGenerated ? '#b45309' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
+                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? 'var(--warning-bg)' : 'var(--surface-2)', color: aiGenerated ? 'var(--warning-text)' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
                   {p.title}
                   <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
@@ -366,7 +370,7 @@ export default function ApprovalsPage() {
                 </span>
               </div>
               {cautionAi && !registryLoading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                   {t(
                     'Tento návrh vytvořila AI. Nezakládá žádnou autoritu — než schválíš, nezávisle ověř, že je legitimní a žádaný (ADR-0080).',
@@ -386,11 +390,11 @@ export default function ApprovalsPage() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Can permission="agent:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodování vyžaduje oprávnění agenta.', 'Decision access requires agent authorization.')}</span>}>
                   <button type="button" aria-label={t(`Zkontrolovat a schválit návrh ${p.title}`, `Review and approve proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, true, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--success-border)', background: 'var(--success-bg)', color: 'var(--success-text)', cursor: 'pointer' }}>
                     <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                   </button>
                   <button type="button" aria-label={t(`Zkontrolovat a zamítnout návrh ${p.title}`, `Review and reject proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, false, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--danger-border)', background: 'var(--danger-bg)', color: 'var(--danger-text)', cursor: 'pointer' }}>
                     <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                   </button>
                 </Can>
