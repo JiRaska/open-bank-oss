@@ -3379,6 +3379,7 @@ autonomous_agent_prs:
   # scope would cover nothing at all.
   agent_branch_prefixes:
     - agent/
+    - codex/
   # High blast radius, not money-path by the list above.
   extra_protected_tokens:
     - payment
