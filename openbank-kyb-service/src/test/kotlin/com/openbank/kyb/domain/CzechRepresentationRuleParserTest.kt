@@ -137,4 +137,52 @@ class CzechRepresentationRuleParserTest {
             .isTrue()
         assertThat(rule.signaturesRequired(6)).isNull()
     }
+
+    /**
+     * THE test of this file. Every text below demands more than one signature, or names who must
+     * sign, and each was chosen because a positive solo pattern matches it: an opening solo clause
+     * followed by a second-signer clause, a negated solo, a consent of a second director, a
+     * threshold. Written first against the previous parser, 7 of the 14 answered SOLE. They pass
+     * now only because SOLE is withheld whenever any second-person, condition, negation or amount
+     * marker is present — disable that whitelist and this goes red. A SOLE verdict on ANY of these
+     * would let the bank contract the company on a signature the register does not accept.
+     */
+    @Test
+    fun `no text that involves a second person or a condition can ever answer SOLE`() {
+        listOf(
+            "Jednatel jedná samostatně ve věcech do 100 000 Kč; jinak jednají oba jednatelé.",
+            "Za společnost jednají oba jednatelé.",
+            "K platnosti právního jednání je třeba podpisu obou jednatelů.",
+            "Jednatelé nejednají samostatně; jednají vždy dva jednatelé.",
+            "Samostatně nemůže jednat žádný jednatel.",
+            "Žádný člen představenstva není oprávněn jednat samostatně.",
+            "Jednatelé jednají společným jednáním dvou jednatelů.",
+            "Za společnost podepisují dva jednatelé společným podpisem.",
+            "Jednatel jedná samostatně, s výjimkou převodu nemovitostí, kde je třeba podpisu obou jednatelů.",
+            "Za společnost jedná předseda představenstva samostatně nebo dva členové představenstva společně.",
+            "Jednatel jedná samostatně pouze se souhlasem druhého jednatele.",
+            "Jednatel jedná samostatně vyjma věcí nad 1 000 000 Kč, kde jedná spolu s druhým jednatelem.",
+            "Předseda představenstva a místopředseda představenstva.",
+            "Společnost zastupuje předseda představenstva spolu s prokuristou.",
+        ).forEach {
+            val r = mode(it)
+            assertThat(r.mode).describedAs(it).isNotEqualTo(RepresentationMode.SOLE)
+            assertThat(r.signaturesRequired(4) ?: 0).describedAs(it).isNotEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `the whitelist tolerates exactly the three solo shapes that carry a harmless marker`() {
+        // Each of these is unambiguously solo and carries a word the whitelist would otherwise
+        // reject: a "-li" introducing the head-count, an internal body's consent, the register's
+        // own "Počet členů statutárního orgánu" line. The tolerance is per shape, not per word —
+        // "se souhlasem druhého jednatele" stays blocked (see the test above).
+        listOf(
+            "Jednatel jedná jménem společnosti samostatně. Má-li společnost více jednatelů, je každý z jednatelů " +
+                "oprávněn jednat jménem společnosti zcela samostatně.",
+            "Jménem společnosti jedná a podepisuje jednatel samostatně. Jednatel je oprávněn zcizovat a zatěžovat " +
+                "nemovitosti jen se souhlasem valné hromady.",
+            "Jednatel zastupuje společnost samostatně a v plném rozsahu. Počet členů statutárního orgánu: 1",
+        ).forEach { assertThat(mode(it).mode).describedAs(it).isEqualTo(RepresentationMode.SOLE) }
+    }
 }

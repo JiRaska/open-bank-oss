@@ -56,7 +56,7 @@ object CzechRepresentationRuleParser {
     private const val NUM = "\\b(\\d+|jeden|jedna|jednoho|dva|dve|dvou|dvema|tri|trech|tremi|ctyri|ctyr|ctyrmi)\\b"
     private const val SIGNER = "(?:jednatele|jednatelu|jednatel|clenove|cleny|clenu|clena|clen|spolecniku|spolecnici)"
     private const val OFFICE = "(?:predseda|predsedy|predsedou|mistopredseda|mistopredsedy|mistopredsedou|" +
-        "reditel|reditele|jednatel|jednatele|clen|clena|clenem)"
+        "reditel|reditele|jednatel|jednatele|clen|clena|clenem|prokurista|prokuristou)"
 
     private val jointlyAll =
         listOf(
@@ -80,7 +80,40 @@ object CzechRepresentationRuleParser {
      * and `podpisu předsedy a místopředsedy`. Doubles as the SOLE veto; see the class KDoc.
      */
     private val secondSignature =
-        Regex("(?:alespon|nejmene|minimalne)\\s*$NUM\\s*$SIGNER|podpis\\w*\\s+predsedy\\s+a\\s+mistopredsedy")
+        Regex(
+            "(?:alespon|nejmene|minimalne)\\s*$NUM\\s*$SIGNER" +
+                "|podpis\\w*\\s+predsedy\\s+a\\s+mistopredsedy" +
+                "|\\b(?:oba|obou|obema)\\b(?:\\s+dva)?\\s+$SIGNER" +
+                "|\\bdruh(?:eho|ym|y)\\s+$SIGNER",
+        )
+
+    /**
+     * Anything that says another person, a condition, a threshold or a negation is in play. While
+     * one of these is present the text is NOT a plain solo rule, whatever else it also says, and
+     * the SOLE verdict is withheld — a joint pattern may still claim it, otherwise it is UNKNOWN
+     * and a human reads it. This is the whole safety design (see the class KDoc): SOLE is the one
+     * verdict that can cost the bank a signature, so it is a whitelist, never a fallback.
+     */
+    private val soleForbidden =
+        Regex(
+            listOf(
+                // another signer, by count or by name
+                "\\b(?:dva|dve|dvou|dvema|tri|trech|tremi|ctyri|ctyr|ctyrmi|oba|obou|obema|druh\\w*|dalsi\\w*|jin\\w+)\\b",
+                "\\d",
+                // joint wording in any inflection: společně, společný, společným, společnou — not společnost/společník
+                "\\bspolecn(?:e|y|ym|ou|eho|a|i)\\b",
+                "\\bspolu\\b",
+                "\\bsouhlas\\w*",
+                "\\bpodpis(?:u|y|ech|em)\\b",
+                // a condition, an exception or a threshold
+                "\\w+-li\\b",
+                "\\b(?:pokud|jestlize|ledaze|vyjma|krome|vyjimk\\w*|vsak|avsak|nad|prevys\\w*|castk\\w*|hodnot\\w*|kc)\\b",
+                // negation
+                "\\b(?:ne(?:jedna|jednaji|zastupuje|zastupuji|muze|mohou|ni|jsou|smi|smeji|lze))\\b",
+                "\\bzadn\\w+",
+                "\\bneni\\s+opravnen",
+            ).joinToString("|"),
+        )
 
     /**
      * A pair of NAMED offices. `spolu s` and a plain `a` both occur, so neither literal can be
@@ -102,8 +135,8 @@ object CzechRepresentationRuleParser {
      * characters of it) and that is only safe because [secondSignature] and *společně* veto this
      * branch outright — widening the window cannot reach across a joint clause.
      */
-    private val solo = Regex("($OFFICE|kazdy|kterykoli)[^.]{0,80}(samostatne|sam\\b)")
-    private val soloAdverbFirst = Regex("(samostatne)[^.]{0,80}($OFFICE)")
+    private val solo = Regex("($OFFICE|kazdy|kterykoli)[^.]{0,120}(samostatne|sam\\b)")
+    private val soloAdverbFirst = Regex("(samostatne)[^.]{0,120}($OFFICE)")
     private val soloBare = Regex("(?:jedna|jednaji|zastupuje|zastupuji|podepisuje)\\s+(?:\\w+\\s+){0,3}samostatne")
 
     /** The register does sometimes hold the whole rule as one word. */
@@ -130,7 +163,7 @@ object CzechRepresentationRuleParser {
      * satisfying that rule.
      */
     private fun roleConstrained(t: String, raw: String): RepresentationRule? {
-        if (!t.contains(JOINT_WORD) && !t.contains("spolu s")) return null
+        if (!jointWord.containsMatchIn(t) && !t.contains("spolu s")) return null
         roleQualifier.find(t)?.let { q ->
             return RepresentationRule(
                 RepresentationMode.JOINT_N,
@@ -158,7 +191,9 @@ object CzechRepresentationRuleParser {
      * *společně* without matching any counting pattern, and must not fall through to SOLE.
      */
     private fun sole(t: String, raw: String): RepresentationRule? {
-        if (t.contains(JOINT_WORD)) return null
+        if (jointWord.containsMatchIn(t)) return null
+        val blocked = soleForbidden.findAll(t).map { it.value }.filterNot { forbiddenTolerated(t, it) }.toList()
+        if (blocked.isNotEmpty()) return null
         val matched = soloShort.matches(t) ||
             solo.containsMatchIn(t) ||
             soloAdverbFirst.containsMatchIn(t) ||
@@ -167,12 +202,34 @@ object CzechRepresentationRuleParser {
     }
 
     /**
+     * The one shape the whitelist would otherwise lose that is unambiguously solo: *Má-li společnost
+     * více jednatelů, jedná každý z nich samostatně.* The `-li` there introduces the count of
+     * representatives, not a second signature, and only that word is tolerated — and only when
+     * the text also says *každý … samostatně*.
+     */
+    private fun forbiddenTolerated(t: String, hit: String): Boolean = when {
+        hit.endsWith("-li") -> moreThanOne.containsMatchIn(t) && kazdySolo.containsMatchIn(t)
+        // consent of an INTERNAL body is a restriction on the representative, not a second signer
+        hit.startsWith("souhlas") -> internalConsent.containsMatchIn(t)
+        // the register appends its own head-count line; the digit there is metadata, not a rule
+        hit == "1" || hit.all { it.isDigit() } -> headCountLine.containsMatchIn(t)
+        else -> false
+    }
+
+    private val moreThanOne = Regex("vice\\s+$SIGNER|$SIGNER\\s+vice")
+    private val internalConsent =
+        Regex("souhlas\\w*\\s+(?:valne hromady|dozorci rady|spravni rady|jedineho spolecnika)")
+    private val headCountLine = Regex("pocet clenu statutarniho organu:?\\s*\\d+")
+
+    private val kazdySolo = Regex("\\bkazd\\w+\\b[^.]{0,60}samostatne")
+
+    /**
      * "Jednatel jedná samostatně; v záležitostech nad X Kč jednají dva jednatelé společně." — a
      * threshold-conditional rule. The framework agreement is the higher-value act, so the STRICTER
      * count applies; with no count stated, two, never one.
      */
     private fun conditional(t: String, raw: String): RepresentationRule? {
-        if (!t.contains(SOLO_WORD) || !t.contains(JOINT_WORD)) return null
+        if (!t.contains(SOLO_WORD) || !jointWord.containsMatchIn(t)) return null
         return RepresentationRule(RepresentationMode.JOINT_N, countIn(t) ?: PAIR, raw)
     }
 
@@ -182,7 +239,9 @@ object CzechRepresentationRuleParser {
     private fun countOf(token: String): Int? = (token.toIntOrNull() ?: numberWords[token])?.takeIf { it >= 1 }
 
     private const val SOLO_WORD = "samostatne"
-    private const val JOINT_WORD = "spolecne"
+
+    /** *společně* in any inflection (společný, společným …) — never *společnost* or *společník*. */
+    private val jointWord = Regex("\\bspolecn(?:e|y|ym|ou|eho|a|i)\\b")
     private const val PAIR = 2
 
     /** Lower-case, diacritics stripped, whitespace collapsed — so `společně` and `spolecne` are one token. */
