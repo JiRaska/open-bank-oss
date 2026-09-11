@@ -95,6 +95,20 @@ class MergeSweepApprovalBindingIT {
         override fun getConfigOverrides() = mapOf(
             "authz.four-eyes.enforce" to "true",
             "authz.enforce" to "true",
+            // This module runs three DB-touching @Scheduled beans — StuckSagaGauge (every 30s),
+            // TransactionOutboxBacklogGauge and TransactionOutboxDispatcher — and none of them is
+            // a subject of this test. Left on, they contend with it for the reactive pool, and the
+            // pool is what gives first: CI failed all four steps with
+            // `SqlClientPool$ProxyConnection ... NoStackTraceThrowable: Timeout`, spaced at exactly
+            // 30s (the StuckSagaGauge interval), with that scheduler failing on the identical stack
+            // in the same window. A SocketTimeoutException at the RestAssured call is the symptom;
+            // the starved connection is the cause.
+            //
+            // Scoped to THIS profile deliberately, never to the module: disabling the scheduler
+            // fleet-wide in tests is how a dead scheduler becomes invisible, which this repo has
+            // already paid for once (#2148). The tests that exist to prove a scheduler runs
+            // re-enable it in their own profile and shrink the cron.
+            "quarkus.scheduler.enabled" to "false",
         )
 
         override fun getEnabledAlternatives() = setOf<Class<*>>(AlwaysFourEyesPdp::class.java)
