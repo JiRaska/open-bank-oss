@@ -57,6 +57,11 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   // finrep-service is invisible to the browser and the page can only show mock data.
   'finrep-service':         { container: 'openbank-finrep-service',         port: 8140 },
   'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
+  // ADR-0285 phase 2: style-version draft/submit/publish/retire + the commstyle.publish
+  // four-eyes queue. replicas: 0 until activated (openbank-communication-service PR) — routed
+  // here regardless, same as every other entry; a scaled-to-zero backend surfaces as a normal
+  // upstream connection failure, not a special case this map needs to know about.
+  'communication-service':  { container: 'openbank-communication-service',  port: 8158 },
 }
 
 // In-cluster, the upstream address must be the real Service DNS
