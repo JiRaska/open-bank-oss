@@ -5,7 +5,12 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.16.0
+  # 1.16.0 -> 1.17.0 (#9044): additive — optional termsVersion/termsUrl/termsEffectiveFrom on
+  # OpenAccountRequest and the Account response. termsVersion is use-case-REQUIRED for
+  # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
+  # opening other account types are unaffected; term-deposit openings come only from
+  # customer-edge, updated in the same change).
+  version: 1.17.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -1253,6 +1258,19 @@ components:
         legalName:
           type: string
           description: Legal name of the account holder for sanctions screening (ADR-0032 §C).
+        termsVersion:
+          type: string
+          description: >-
+            Terms version the account is opened under (#9044). REQUIRED when accountType is
+            TERM_DEPOSIT (400 otherwise) — a term deposit must never open without a record of
+            the terms it was opened under.
+        termsUrl:
+          type: string
+          description: Snapshot of the terms document URL at opening (#9044).
+        termsEffectiveFrom:
+          type: string
+          format: date
+          description: Snapshot of the terms document effective-from date at opening (#9044).
 
     CloseAccountRequest:
       type: object
@@ -1308,6 +1326,17 @@ components:
           nullable: true
         nickname:
           type: string
+          nullable: true
+        termsVersion:
+          type: string
+          nullable: true
+          description: Terms version the account was opened under (#9044); null = pre-V24 account.
+        termsUrl:
+          type: string
+          nullable: true
+        termsEffectiveFrom:
+          type: string
+          format: date
           nullable: true
 
     RenameAccountRequest:
