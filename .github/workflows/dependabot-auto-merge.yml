@@ -3,9 +3,8 @@
 # Policy: auto-merge PATCH Dependabot PRs (gradle, npm) once CI is green.
 # Everything else stays open for human review:
 #   - Minor + major bumps (any ecosystem) — minors regularly carry new transitive
-#     dependencies; the Gradle graph has no PR-time vuln gate (dependency-review
-#     doesn't parse Gradle and there is no gradle.lockfile for Trivy fs), so an
-#     auto-merged minor is an uninspected supply-chain entry point.
+#     dependencies and deserve semantic review even though dependency-submission
+#     plus dependency-review scan the submitted Gradle graph for known CVEs.
 #   - github-actions bumps (any size) — a version bump swaps the pinned commit SHA
 #     for NEW action code that then runs in CI with contents:write/id-token:write.
 #     A human must eyeball the diff of what will execute with those permissions.
