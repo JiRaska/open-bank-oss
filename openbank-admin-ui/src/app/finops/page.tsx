@@ -280,7 +280,7 @@ function DailySpendTrend({ daily, currency }: { daily: DailyCost[]; currency: st
     <div style={{ marginBottom: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Activity size={14} style={{ color: '#6366f1' }} />
+          <Activity size={14} style={{ color: 'var(--accent)' }} />
           <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
             {t('Denní trend výdajů', 'Daily spend trend')}
           </span>
@@ -302,14 +302,14 @@ function DailySpendTrend({ daily, currency }: { daily: DailyCost[]; currency: st
         role="img" aria-label={t('Graf denních cloudových výdajů', 'Daily cloud spend chart')}>
         <defs>
           <linearGradient id="spendGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0.02" />
           </linearGradient>
         </defs>
         <line x1={padL} y1={avgY} x2={W - padR} y2={avgY} stroke="var(--text-tertiary)" strokeWidth="1" strokeDasharray="4 4" opacity="0.5" />
         <path d={area} fill="url(#spendGrad)" />
-        <path d={line} fill="none" stroke="#6366f1" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={xAt(n - 1)} cy={yAt(last.amount)} r="3.5" fill="#6366f1" />
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xAt(n - 1)} cy={yAt(last.amount)} r="3.5" fill="var(--accent)" />
       </svg>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
         <span>{fmtDate(daily[0].date)}</span>
@@ -402,13 +402,13 @@ function FinOpsContent() {
     return <DataUnavailable kind={unavailable.kind} service="finops" feature={t('FinOps přehled', 'FinOps overview')} lang={language} />
   }
 
-  const tierColor = lifecycle?.currentTier === 'standard' ? '#16a34a'
-    : lifecycle?.currentTier === 'extended' ? '#d97706'
-    : '#dc2626'
+  const tierColor = lifecycle?.currentTier === 'standard' ? 'var(--success-text)'
+    : lifecycle?.currentTier === 'extended' ? 'var(--warning-text)'
+    : 'var(--danger-text)'
 
-  const runwayColor = lifecycle?.runwayStatus === 'ok' ? '#16a34a'
-    : lifecycle?.runwayStatus === 'warn' ? '#d97706'
-    : '#dc2626'
+  const runwayColor = lifecycle?.runwayStatus === 'ok' ? 'var(--success-text)'
+    : lifecycle?.runwayStatus === 'warn' ? 'var(--warning-text)'
+    : 'var(--danger-text)'
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
@@ -484,7 +484,7 @@ function FinOpsContent() {
               sub={costs?.available
                 ? t(`${costs.services.length} služeb · ${costs.periodStart}→${costs.periodEnd}`, `${costs.services.length} services · ${costs.periodStart}→${costs.periodEnd}`)
                 : t('Cost Explorer snapshot není k dispozici', 'No Cost Explorer snapshot')}
-              color='#16a34a'
+              color='var(--success-text)'
               accent
             />
             <KpiCard
@@ -494,7 +494,7 @@ function FinOpsContent() {
               sub={rightSizing?.available
                 ? t(`služeb silně naddimenzovaných (CPU<30% req)`, `services heavily over-provisioned (CPU<30% req)`)
                 : t('Prometheus nedostupný', 'Prometheus unavailable')}
-              color='#d97706'
+              color='var(--warning-text)'
               accent={Boolean(rightSizing?.available && rightSizing.highSavingsCount > 0)}
             />
           </div>
@@ -518,7 +518,7 @@ function FinOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <DollarSign size={16} style={{ color: '#16a34a' }} />
+                <DollarSign size={16} style={{ color: 'var(--success-text)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Celkové měsíční náklady — AWS Cost Explorer', 'Total Monthly Cloud Spend — AWS Cost Explorer')}
                 </span>
@@ -580,8 +580,8 @@ function FinOpsContent() {
                 <>
                   {/* PROMINENT TOTAL */}
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginBottom: '20px',
-                    padding: '16px 20px', borderRadius: '12px', background: 'rgba(22,163,74,0.05)', border: '1px solid #86efac' }}>
-                    <span style={{ fontSize: '48px', fontWeight: 900, color: '#16a34a', letterSpacing: '-0.05em', lineHeight: 1 }}>
+                    padding: '16px 20px', borderRadius: '12px', background: 'var(--success-bg)', border: '1px solid var(--success-border)' }}>
+                    <span style={{ fontSize: '48px', fontWeight: 900, color: 'var(--success-text)', letterSpacing: '-0.05em', lineHeight: 1 }}>
                       ${costs.total.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                     <div>
@@ -621,7 +621,7 @@ function FinOpsContent() {
                         </div>
                         {delta !== null && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700,
-                            color: up ? '#dc2626' : '#16a34a' }}>
+                            color: up ? 'var(--danger-text)' : 'var(--success-text)' }}>
                             {up ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
                             {up ? '+' : ''}{delta.toFixed(1)}% {t('vs. předchozích 7 dní', 'vs. prior 7 days')}
                           </span>
@@ -641,7 +641,7 @@ function FinOpsContent() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                       {domains.map(({ domain, amount }) => {
                         const pct = costs.total > 0 ? (amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[domain] ?? '#6366f1'
+                        const color = DOMAIN_COLOR[domain] ?? 'var(--accent)'
                         return (
                           <div key={domain} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontSize: '12px', fontWeight: 700, color, width: '110px', flexShrink: 0 }}>{domain}</span>
@@ -666,7 +666,7 @@ function FinOpsContent() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
                       {costs.services.map(svc => {
                         const pct = costs.total > 0 ? (svc.amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[(svc as ServiceCost).domain ?? 'Platform'] ?? '#6366f1'
+                        const color = DOMAIN_COLOR[(svc as ServiceCost).domain ?? 'Platform'] ?? 'var(--accent)'
                         return (
                           <div key={svc.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />
@@ -691,7 +691,7 @@ function FinOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Server size={16} style={{ color: '#6366f1' }} />
+                <Server size={16} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Amazon EKS — přehled verzí', 'Amazon EKS Version Lifecycle')}
                 </span>
@@ -723,10 +723,10 @@ function FinOpsContent() {
                     <tr key={v.version}
                       style={{
                         borderBottom: '1px solid var(--border)',
-                        background: v.isCurrent ? 'rgba(99,102,241,0.04)' : 'transparent',
+                        background: v.isCurrent ? 'var(--accent-bg)' : 'transparent',
                       }}>
-                      <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: v.isCurrent ? 800 : 500, color: v.isCurrent ? '#6366f1' : 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                        {v.isCurrent && <span style={{ marginRight: '6px', fontSize: '10px', background: '#6366f1', color: '#fff', padding: '1px 5px', borderRadius: '4px', verticalAlign: 'middle' }}>CURRENT</span>}
+                      <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: v.isCurrent ? 800 : 500, color: v.isCurrent ? 'var(--accent-text)' : 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                        {v.isCurrent && <span style={{ marginRight: '6px', fontSize: '10px', background: 'var(--accent)', color: 'var(--text-inverse)', padding: '1px 5px', borderRadius: '4px', verticalAlign: 'middle' }}>CURRENT</span>}
                         {v.version}
                       </td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{v.eksRelease}</td>
@@ -736,7 +736,7 @@ function FinOpsContent() {
                         {v.tier === 'standard' ? (
                           <RunwayBar days={v.daysToStandardEnd} max={365} />
                         ) : v.tier === 'upcoming' ? (
-                          <span style={{ fontSize: '11px', color: '#6366f1' }}>{t('Chystá se', 'Upcoming')}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--accent-text)' }}>{t('Chystá se', 'Upcoming')}</span>
                         ) : (
                           <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
                         )}
@@ -753,10 +753,10 @@ function FinOpsContent() {
             {lifecycle.runwayStatus !== 'ok' && (
               <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '8px',
                 padding: '10px 14px', borderRadius: '8px',
-                background: lifecycle.runwayStatus === 'warn' ? '#fef9c3' : '#fee2e2',
-                border: `1px solid ${lifecycle.runwayStatus === 'warn' ? '#fde047' : '#fca5a5'}` }}>
-                <AlertTriangle size={14} style={{ color: lifecycle.runwayStatus === 'warn' ? '#d97706' : '#dc2626', flexShrink: 0 }} />
-                <span style={{ fontSize: '12px', color: lifecycle.runwayStatus === 'warn' ? '#92400e' : '#991b1b' }}>
+                background: lifecycle.runwayStatus === 'warn' ? 'var(--warning-bg)' : 'var(--danger-bg)',
+                border: `1px solid ${lifecycle.runwayStatus === 'warn' ? 'var(--warning-border)' : 'var(--danger-border)'}` }}>
+                <AlertTriangle size={14} style={{ color: lifecycle.runwayStatus === 'warn' ? 'var(--warning-text)' : 'var(--danger-text)', flexShrink: 0 }} />
+                <span style={{ fontSize: '12px', color: lifecycle.runwayStatus === 'warn' ? 'var(--warning-text)' : 'var(--danger-text)' }}>
                   {lifecycle.runwayStatus === 'warn'
                     ? t(
                         `Pouze ${lifecycle.daysToStandardEnd} dní standard. podpory — naplánuj upgrade (ADR-0054 vyžaduje ≥${lifecycle.minRunwayDays} dní).`,
@@ -774,7 +774,7 @@ function FinOpsContent() {
           {/* Platform Components */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <Database size={16} style={{ color: '#6366f1' }} />
+              <Database size={16} style={{ color: 'var(--accent)' }} />
               <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                 {t('Platformní komponenty — verze a životní cyklus', 'Platform Components — Version Lifecycle')}
               </span>
@@ -790,7 +790,7 @@ function FinOpsContent() {
               {lifecycle.components.map(svc => {
                 const runway = svc.daysRemaining
                 const rcolor = runway == null ? 'var(--text-tertiary)'
-                  : runway > 365 ? '#16a34a' : runway > 180 ? '#d97706' : '#dc2626'
+                  : runway > 365 ? 'var(--success-text)' : runway > 180 ? 'var(--warning-text)' : 'var(--danger-text)'
                 return (
                   <div key={svc.name} style={{ padding: '14px 16px', borderRadius: '10px',
                     border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -832,7 +832,7 @@ function FinOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Cpu size={16} style={{ color: '#6366f1' }} />
+                <Cpu size={16} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Efektivita JVM heapu', 'JVM Heap Efficiency')}
                 </span>
@@ -897,15 +897,15 @@ function FinOpsContent() {
                         </td>
                         <td style={{ padding: '9px 12px' }}>
                           {svc.efficiency === 'underutilised' ? (
-                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#ede9fe', color: '#6366f1' }}>
+                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: 'var(--accent-bg)', color: 'var(--accent-text)' }}>
                               {t('Nevytíženo', 'Underutilised')}
                             </span>
                           ) : svc.efficiency === 'high' ? (
-                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#fee2e2', color: '#dc2626' }}>
+                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: 'var(--danger-bg)', color: 'var(--danger-text)' }}>
                               {t('Vysoké', 'High')}
                             </span>
                           ) : svc.efficiency === 'normal' ? (
-                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#dcfce7', color: '#16a34a' }}>
+                            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: 'var(--success-bg)', color: 'var(--success-text)' }}>
                               {t('OK', 'OK')}
                             </span>
                           ) : (
@@ -924,13 +924,13 @@ function FinOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Bot size={16} style={{ color: '#6366f1' }} />
+                <Bot size={16} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('AI & agentní náklady', 'AI & Agent Costs')}
                 </span>
                 {!aiCosts?.available && (
                   <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-                    background: '#fef9c3', color: '#92400e' }}>
+                    background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
                     {t('Langfuse bridge není nasazen', 'Langfuse bridge not deployed')}
                   </span>
                 )}
@@ -964,9 +964,9 @@ function FinOpsContent() {
               <>
                 {/* Hero metrics */}
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '24px', marginBottom: '20px',
-                  padding: '14px 18px', borderRadius: '10px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                  padding: '14px 18px', borderRadius: '10px', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>
                   <div>
-                    <div style={{ fontSize: '32px', fontWeight: 900, color: '#6366f1', letterSpacing: '-0.04em', lineHeight: 1 }}>
+                    <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--accent-text)', letterSpacing: '-0.04em', lineHeight: 1 }}>
                       ${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
@@ -980,7 +980,7 @@ function FinOpsContent() {
                   ) : (
                     <>
                       <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                        background: '#dcfce7', color: '#16a34a' }}>
+                        background: 'var(--success-bg)', color: 'var(--success-text)' }}>
                         {aiCosts.selfHostedPct}% self-hosted vLLM
                       </span>
                       <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
@@ -1013,16 +1013,16 @@ function FinOpsContent() {
                     </div>
                     {aiCosts.agents.map(agent => {
                       const burnCfg = {
-                        low:      { color: '#16a34a', bg: '#dcfce7', label: t('Nízký', 'Low') },
-                        normal:   { color: '#2563eb', bg: '#dbeafe', label: t('Normální', 'Normal') },
-                        high:     { color: '#d97706', bg: '#fef3c7', label: t('Vysoký', 'High') },
-                        exceeded: { color: '#dc2626', bg: '#fee2e2', label: t('Překročen', 'Exceeded') },
+                        low:      { color: 'var(--success-text)', bg: 'var(--success-bg)', label: t('Nízký', 'Low') },
+                        normal:   { color: 'var(--info-text)', bg: 'var(--info-bg)', label: t('Normální', 'Normal') },
+                        high:     { color: 'var(--warning-text)', bg: 'var(--warning-bg)', label: t('Vysoký', 'High') },
+                        exceeded: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', label: t('Překročen', 'Exceeded') },
                       }[agent.burnRate]
                       const budgetPct = agent.budgetUsedPct
                       const budgetColor = budgetPct == null ? 'var(--text-tertiary)'
-                        : budgetPct > 100 ? '#dc2626'
-                        : budgetPct > 80  ? '#d97706'
-                        : '#16a34a'
+                        : budgetPct > 100 ? 'var(--danger-text)'
+                        : budgetPct > 80  ? 'var(--warning-text)'
+                        : 'var(--success-text)'
                       return (
                         <div key={agent.agentId} style={{ display: 'grid', gridTemplateColumns: '160px 100px 1fr 90px 90px', gap: '12px',
                           alignItems: 'center', padding: '8px', borderRadius: '8px', background: 'var(--surface-2)' }}>
@@ -1064,7 +1064,7 @@ function FinOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <TrendingDown size={16} style={{ color: '#d97706' }} />
+                <TrendingDown size={16} style={{ color: 'var(--warning-text)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Right-sizing — efektivita zdrojů Kubernetes', 'Right-sizing — Kubernetes Resource Efficiency')}
                 </span>
@@ -1132,13 +1132,13 @@ function FinOpsContent() {
                     </thead>
                     <tbody>
                       {rightSizing.services.map(svc => {
-                        const potColor = svc.savingsPotential === 'high' ? '#dc2626'
-                          : svc.savingsPotential === 'medium' ? '#d97706'
-                          : svc.savingsPotential === 'low' ? '#16a34a'
+                        const potColor = svc.savingsPotential === 'high' ? 'var(--danger-text)'
+                          : svc.savingsPotential === 'medium' ? 'var(--warning-text)'
+                          : svc.savingsPotential === 'low' ? 'var(--success-text)'
                           : 'var(--text-tertiary)'
-                        const potBg = svc.savingsPotential === 'high' ? '#fee2e2'
-                          : svc.savingsPotential === 'medium' ? '#fef3c7'
-                          : svc.savingsPotential === 'low' ? '#dcfce7'
+                        const potBg = svc.savingsPotential === 'high' ? 'var(--danger-bg)'
+                          : svc.savingsPotential === 'medium' ? 'var(--warning-bg)'
+                          : svc.savingsPotential === 'low' ? 'var(--success-bg)'
                           : 'var(--surface-2)'
                         const potLabel = svc.savingsPotential === 'high'
                           ? t('Vysoký', 'High')
@@ -1149,7 +1149,7 @@ function FinOpsContent() {
                           : '—'
                         const effBar = (pct: number | null) => {
                           if (pct === null) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>
-                          const c = pct < 30 ? '#dc2626' : pct < 60 ? '#d97706' : '#16a34a'
+                          const c = pct < 30 ? 'var(--danger-text)' : pct < 60 ? 'var(--warning-text)' : 'var(--success-text)'
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <div style={{ width: '50px', height: '4px', background: 'var(--surface-3)', borderRadius: '2px', overflow: 'hidden' }}>
@@ -1182,11 +1182,11 @@ function FinOpsContent() {
                             <td style={{ padding: '8px 10px', minWidth: '100px' }}>
                               {effBar(svc.memory.efficiencyPct)}
                             </td>
-                            <td style={{ padding: '8px 10px', color: svc.vpaRecommendation.cpuMillicores != null ? '#6366f1' : 'var(--text-tertiary)',
+                            <td style={{ padding: '8px 10px', color: svc.vpaRecommendation.cpuMillicores != null ? 'var(--accent-text)' : 'var(--text-tertiary)',
                               fontSize: '11px', fontFamily: 'monospace', fontWeight: svc.vpaRecommendation.cpuMillicores != null ? 700 : 400 }}>
                               {svc.vpaRecommendation.cpuMillicores ?? '—'}
                             </td>
-                            <td style={{ padding: '8px 10px', color: svc.vpaRecommendation.memoryMiB != null ? '#6366f1' : 'var(--text-tertiary)',
+                            <td style={{ padding: '8px 10px', color: svc.vpaRecommendation.memoryMiB != null ? 'var(--accent-text)' : 'var(--text-tertiary)',
                               fontSize: '11px', fontFamily: 'monospace', fontWeight: svc.vpaRecommendation.memoryMiB != null ? 700 : 400 }}>
                               {svc.vpaRecommendation.memoryMiB ?? '—'}
                             </td>
@@ -1212,7 +1212,7 @@ function FinOpsContent() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ padding: '16px 20px', borderRadius: 'var(--r-lg)', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <DollarSign size={14} style={{ color: '#16a34a' }} />
+                <DollarSign size={14} style={{ color: 'var(--success-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Kalkulace nákladů', 'Cost Calculation')}
                 </span>
@@ -1224,7 +1224,7 @@ function FinOpsContent() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span>{t('Extended tier sazba', 'Extended tier rate')}</span>
-                  <span style={{ fontWeight: 600, fontFamily: 'monospace', color: '#dc2626' }}>$0.60/hr</span>
+                  <span style={{ fontWeight: 600, fontFamily: 'monospace', color: 'var(--danger-text)' }}>$0.60/hr</span>
                 </div>
                 <div style={{ borderTop: '1px solid var(--border)', marginTop: '8px', paddingTop: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -1235,7 +1235,7 @@ function FinOpsContent() {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>{t('Roční úspora vs. extended', 'Annual savings vs extended')}</span>
-                    <span style={{ fontWeight: 700, color: '#16a34a', fontFamily: 'monospace' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--success-text)', fontFamily: 'monospace' }}>
                       +${lifecycle.annualSavingsVsExtended.toLocaleString(locale)}
                     </span>
                   </div>
@@ -1245,7 +1245,7 @@ function FinOpsContent() {
 
             <div style={{ padding: '16px 20px', borderRadius: 'var(--r-lg)', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <Info size={14} style={{ color: '#6366f1' }} />
+                <Info size={14} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Governance', 'Governance')}
                 </span>
