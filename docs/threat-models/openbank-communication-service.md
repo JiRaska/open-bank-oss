@@ -2,12 +2,15 @@
 
 ## Scope
 
-ADR-0285 phases 2-3. This service owns the editable "style" layer (tone, formality, form of
-address, vocabulary, signature) and the "playbook" layer (call scripts as a step tree, approved
-answers) of every conversational prompt, for a closed, deploy-time persona catalogue. It never
-stores the immutable safety "core" (that stays git-only, per ADR-0285 D1) and never stores the
-customer's own data — the content is bank-authored prose about *how* the bank talks and what it
-says in recurring situations, not customer PII.
+ADR-0285 phases 2-3, plus the golden-set CRUD slice of phase 4 (D4). This service owns the
+editable "style" layer (tone, formality, form of address, vocabulary, signature) and the
+"playbook" layer (call scripts as a step tree, approved answers) of every conversational prompt,
+for a closed, deploy-time persona catalogue. It also stores each persona's golden set —
+question/expected-properties pairs D4 uses to replay a draft before publish — but does NOT yet
+run that replay; see the residual risk below. It never stores the immutable safety "core" (that
+stays git-only, per ADR-0285 D1) and never stores the customer's own data — the content is
+bank-authored prose about *how* the bank talks and what it says in recurring situations, plus
+test fixtures for checking that, not customer PII.
 
 ## Why this service exists, as a threat
 
@@ -25,6 +28,7 @@ independent, mandatory controls exist because of that (ADR-0285 D3), not one:
 | An editor writes injection-shaped, PII-shaped, or secret-shaped content into a call-script step or an approved answer | Identical linter, identical call site (`CommunicationPlaybookService.draft`) — the playbook layer is exactly as much an injection surface as style, and gets the same D3 control #1 with no exceptions carved out for it. |
 | A single compromised or careless editor publishes a weakened playbook straight to production | `commstyle.publish` — the SAME action name and SAME four-eyes mechanism as style (D3's own text: "publishing a style OR playbook version"); no separate, weaker gate was introduced for playbook content. |
 | Approved-answer search surfaces a not-yet-reviewed or stale answer to an operator | `searchApprovedAnswers` reads only `findPublished` — the four-eyes-gated, currently-live version; a DRAFT/IN_REVIEW answer is invisible to search by construction, the same way it is invisible to `GET .../published`. |
+| An editor writes injection-shaped content into a golden-set `question` | Not treated as a threat here, deliberately: a golden-set entry is a TEST INPUT ("what might a customer ask"), and a legitimate entry may need to look adversarial to check the composed prompt's defence against it. `CommunicationGoldenSetService`'s KDoc names this explicitly. No four-eyes control applies for the same reason — see the residual risk below for what DOES bound the blast radius (nothing reads golden-set entries yet). |
 
 ## Trust boundaries
 
@@ -78,3 +82,17 @@ and attested.
   service has its own pgvector infrastructure (mirrors `EmbeddingProducer` +
   `PgVectorPassageIndex` + `HybridHelpRetrieval`'s RRF fusion exactly), never a gap silently left
   open.
+- **Golden-set entries are stored but never replayed — D4's actual publish-blocking gate is not
+  built in this slice, and nothing here changes that a publish today is four-eyes-only.** D4
+  requires publishing a style/playbook draft to first replay it against the persona's golden set
+  through "the real composing service" (core + style + playbook, on a synthetic customer) and
+  block publication on a regression. Building that means the cross-service prompt-composition
+  wiring ADR-0285's own delivery phases stage separately from phases 2-3's four-eyes-only publish
+  (phase 4, after adoption groundwork), and is deliberately NOT part of this change — same
+  judgement as the deferred `CopilotChatService.systemPrompt()` composition wiring (a live
+  customer-facing safety prompt, needing careful eval-replay verification before any code touches
+  it). Consequence: `CommunicationGoldenSetService`/`CommunicationGoldenSetResource` are pure CRUD
+  today — an editor can create, list and delete entries, and nothing in the system ever reads one
+  back except that same CRUD API. No blast radius exists yet because no consumer exists yet;
+  wiring the replay engine is the next, separately-reviewed change, and IS the safety mechanism
+  this slice's own scope cut is protecting — not a shortcut around it.

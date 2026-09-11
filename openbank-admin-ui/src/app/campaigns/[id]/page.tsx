@@ -4,9 +4,10 @@
 
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -17,7 +18,6 @@ import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
 import { CampaignAttentionFunnel, type CampaignAttentionMetric } from '@/components/campaigns/CampaignAttentionFunnel'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 interface Campaign {
   id: string
@@ -208,6 +208,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [actingAction, setActingAction] = useState<string | null>(null)
   const [actionIntent, setActionIntent] = useState<string | null>(null)
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const actionCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
+  const campaignWorkspaceRef = useRef<HTMLElement>(null)
   const [duplicating, setDuplicating] = useState(false)
 
   /**
@@ -274,8 +276,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
   const closeActionReview = () => {
     if (actingAction !== null) return
+    actionCloseFocusOverrideRef.current = null
     setActionIntent(null)
-    requestAnimationFrame(() => actionTriggerRef.current?.focus())
   }
 
   const actionsFor = (state?: string): string[] => {
@@ -501,7 +503,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const nextAction = campaignNextAction()
 
   return <AuthGuard permission="campaign:view">
-    <div className="space-y-6">
+    <section
+      ref={campaignWorkspaceRef}
+      tabIndex={-1}
+      aria-label={t('Pracovní plocha kampaně', 'Campaign workspace')}
+      className="space-y-6"
+    >
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
         <ArrowLeft className="h-4 w-4" /> {t('Kampaně', 'Campaigns')}
       </Link>
@@ -526,6 +533,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 type="button"
                 onClick={event => {
                   actionTriggerRef.current = event.currentTarget
+                  actionCloseFocusOverrideRef.current = null
                   setActionError(null)
                   setActionIntent(a)
                 }}
@@ -554,9 +562,16 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         action={actionIntent}
         busy={actingAction === actionIntent}
         error={actionError}
+        closeFocusOverrideRef={actionCloseFocusOverrideRef}
+        triggerRef={actionTriggerRef}
         onCancel={closeActionReview}
         onConfirm={async () => {
-          if (await runAction(actionIntent)) setActionIntent(null)
+          if (await runAction(actionIntent)) {
+            // Enrol keeps the campaign ACTIVE and its trigger remains a valid continuation point.
+            // State transitions replace the action set, so those land on the stable workspace.
+            actionCloseFocusOverrideRef.current = actionIntent === 'enrol' ? null : campaignWorkspaceRef.current
+            setActionIntent(null)
+          }
         }}
       />}
 
@@ -1039,22 +1054,22 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           </section>
         </>
       )}
-    </div>
+    </section>
   </AuthGuard>
 }
 
-function CampaignActionReviewDialog({ campaign, action, busy, error, onCancel, onConfirm }: {
+function CampaignActionReviewDialog({ campaign, action, busy, error, closeFocusOverrideRef, triggerRef, onCancel, onConfirm }: {
   campaign: Campaign
   action: string
   busy: boolean
   error: string | null
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  triggerRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const { t } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `campaign-${campaign.id}-action-title`
-  const impactId = `campaign-${campaign.id}-action-impact`
+  const backRef = useRef<HTMLButtonElement>(null)
   const label = ({
     submit: t('Odeslat ke schválení', 'Submit for approval'),
     activate: t('Schválit a spustit', 'Approve and activate'),
@@ -1072,25 +1087,30 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, onCancel, o
     close: t('Kampaň se uzavře a tato lifecycle akce není běžně vratná. Dosavadní výsledky a auditní stopa zůstanou dostupné.', 'The campaign closes and this lifecycle action is not normally reversible. Existing outcomes and audit history remain available.'),
   } as Record<string, string>)[action] ?? t('Ověřte dopad před změnou stavu kampaně.', 'Review the impact before changing campaign state.')
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    className="fixed inset-0 z-[1200] grid place-items-center bg-slate-950/70 p-5"
-  >
-    <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 z-[1200] bg-slate-950/70" />
+      <Dialog.Content
+        role="alertdialog"
+        aria-busy={busy}
+        onOpenAutoFocus={event => { event.preventDefault(); backRef.current?.focus() }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const override = closeFocusOverrideRef.current
+          const trigger = triggerRef.current
+          const target = override?.isConnected ? override : trigger?.isConnected ? trigger : null
+          target?.focus()
+        }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onInteractOutside={event => event.preventDefault()}
+        className="fixed inset-0 z-[1200] grid place-items-center p-5"
+      >
+        <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><Megaphone className="h-5 w-5" aria-hidden="true" /></span>
         <div>
-          <h2 id={titleId} className="text-lg font-semibold text-slate-950">{label}</h2>
-          <p id={impactId} className="mt-1 text-sm leading-6 text-slate-600">{impact}</p>
+          <Dialog.Title className="text-lg font-semibold text-slate-950">{label}</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm leading-6 text-slate-600">{impact}</Dialog.Description>
         </div>
       </div>
       <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
@@ -1104,9 +1124,11 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, onCancel, o
       </dl>
       {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
-        <button type="button" autoFocus disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
         <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Provádím změnu…', 'Applying change…') : t('Potvrdit akci', 'Confirm action')}</button>
       </div>
-    </div>
-  </div>
+        </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
