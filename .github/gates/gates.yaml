@@ -5153,10 +5153,10 @@ gates:
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
   - id: workflow-supply-chain
-    name: "workflow action pins and bounded agent admission"
+    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
     group: supplychain
     mode: enforced
-    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs."
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
     budget_seconds: 15
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
