@@ -9,7 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
-const ACCENT = '#6366f1'
+const ACCENT = 'var(--accent-text)'
 const INK = 'var(--text-primary)'
 const SUB = 'var(--text-secondary)'
 
@@ -17,10 +17,10 @@ type Bilingual = [string, string]
 type Verdict = 'pass' | 'conditional' | 'risk' | 'missing'
 
 const VERDICT_STYLE: Record<Verdict, { color: string; bg: string; border: string; cs: string; en: string }> = {
-  pass: { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', cs: 'projde', en: 'pass' },
-  conditional: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', cs: 'projde s podmínkami', en: 'pass with conditions' },
-  risk: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', cs: 'může změnit návrh', en: 'may change the design' },
-  missing: { color: '#64748b', bg: '#f8fafc', border: '#cbd5e1', cs: 'nezačato', en: 'not started' },
+  pass: { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', cs: 'projde', en: 'pass' },
+  conditional: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', cs: 'projde s podmínkami', en: 'pass with conditions' },
+  risk: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', cs: 'může změnit návrh', en: 'may change the design' },
+  missing: { color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', cs: 'nezačato', en: 'not started' },
 }
 
 type Area = { id: string; Icon: React.ElementType; title: Bilingual; verdict: Verdict; summary: Bilingual; items: { label: Bilingual; note: Bilingual }[] }

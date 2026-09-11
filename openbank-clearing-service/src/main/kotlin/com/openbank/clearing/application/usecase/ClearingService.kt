@@ -33,6 +33,9 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
+// TooManyFunctions: the idempotency violation detector (ADR-0298) pushes the use-case facade
+// to the threshold; splitting it out would scatter the submit path's replay logic.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class ClearingService(
     private val batchRepo: ClearingBatchRepository,
@@ -67,8 +70,27 @@ class ClearingService(
             createdAt = now,
             updatedAt = now,
         )
-        return itemRepo.save(item)
+        // Idempotent replay (ADR-0298, #8351): a payment enters clearing exactly once, so the
+        // natural key is paymentId. A retried POST replays the existing item instead of stacking
+        // a second PENDING row the clearing cycle would sweep into a batch — the same payment
+        // settled twice. Check-first covers the retry window; uq_clearing_items_payment (V9) is
+        // the DB backstop, and a lost race re-reads the winner rather than erroring the caller.
+        return itemRepo.findByPaymentId(request.paymentId).flatMap { existing ->
+            existing.firstOrNull()?.let { Uni.createFrom().item(it) }
+                ?: itemRepo.save(item).onFailure(this::isPaymentUniqueViolation)
+                    .recoverWithUni { _: Throwable ->
+                        itemRepo.findByPaymentId(request.paymentId)
+                            .map { winners -> winners.first() }
+                    }
+        }
     }
+
+    private fun isPaymentUniqueViolation(t: Throwable): Boolean = generateSequence(t) { it.cause }
+        .filterIsInstance<java.sql.SQLException>()
+        .any {
+            it.message?.contains("uq_clearing_items_payment") == true &&
+                (it.sqlState == "23505" || it.message.orEmpty().contains("(23505)"))
+        }
 
     override fun getBatch(id: UUID): Uni<ClearingBatch?> = batchRepo.findById(id)
 
