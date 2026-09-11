@@ -12,15 +12,17 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { formatLocalDate, formatMinorUnits, parseStandingOrders, type StandingOrder } from '@/lib/standing-orders/standingOrderContract'
 
-interface StandingOrder {
-  id: string; debtorAccountId: string; creditorAccountId: string; creditorName: string
-  amount: number; currency: string; frequency: string; status: string
-  nextExecutionDate: string; description: string
+const FREQ_LABELS: Record<StandingOrder['frequency'], [string, string]> = {
+  ONCE: ['Jednorázově', 'Once'], DAILY: ['Denně', 'Daily'], WEEKLY: ['Týdně', 'Weekly'],
+  BIWEEKLY: ['Každé dva týdny', 'Every two weeks'], MONTHLY: ['Měsíčně', 'Monthly'],
+  QUARTERLY: ['Čtvrtletně', 'Quarterly'], ANNUALLY: ['Ročně', 'Annually'],
 }
-
-const FREQ_LABELS: Record<string, string> = {
-  DAILY: 'Denně', WEEKLY: 'Týdně', MONTHLY: 'Měsíčně', QUARTERLY: 'Čtvrtletně', YEARLY: 'Ročně'
+const PAYMENT_TYPE_LABELS: Record<StandingOrder['paymentType'], [string, string]> = {
+  SEPA_CREDIT: ['SEPA převod', 'SEPA credit transfer'],
+  DOMESTIC: ['Domácí platba', 'Domestic payment'],
+  INTERNAL: ['Vnitrobankovní převod', 'Internal transfer'],
 }
 
 export default function StandingOrdersPage() {
@@ -35,22 +37,24 @@ export default function StandingOrdersPage() {
   // a scaled-down service as "down" and always claimed "running on port 8121".)
   const { data, loading, unavailable, waking, reload } = useServiceResource<StandingOrder[]>(
     svcUrl('standing-order-service', '/api/v1/standing-orders'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as StandingOrder[]) : ((raw as { standingOrders?: StandingOrder[] }).standingOrders ?? [])) },
+    { select: parseStandingOrders },
   )
   const orders = data ?? []
 
   const filtered = orders.filter(o =>
     o.creditorName?.toLowerCase().includes(search.toLowerCase()) ||
-    o.description?.toLowerCase().includes(search.toLowerCase()) ||
+    o.remittanceInfo?.toLowerCase().includes(search.toLowerCase()) ||
+    o.creditorIban?.toLowerCase().includes(search.toLowerCase()) ||
+    o.paymentType?.toLowerCase().includes(search.toLowerCase()) ||
     o.currency?.includes(search.toUpperCase())
   )
 
   return (
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <PageHeader icon={<Repeat size={20} aria-hidden="true" />} title={t('Trvalé příkazy', 'Standing Orders')} subtitle={t('Trvalé příkazy a opakované platby — SEPA SCT', 'Standing orders and recurring payments — SEPA SCT')} actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader icon={<Repeat size={20} aria-hidden="true" />} title={t('Trvalé příkazy', 'Standing Orders')} subtitle={t('Jednorázové i opakované platby napříč podporovanými platebními typy', 'One-off and recurring payments across supported payment types')} actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <ServiceStatusBadge
-              label="standing-order :8121"
+              label="standing-order-service"
               loading={loading}
               waking={waking}
               unavailable={unavailable}
@@ -77,11 +81,13 @@ export default function StandingOrdersPage() {
             </span>
           </div>} />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
           {[
             { label: t('Celkem příkazů', 'Total orders'), value: orders.length, icon: <Repeat size={16} aria-hidden="true" />, color: 'var(--accent)' },
             { label: t('Aktivní', 'Active'), value: orders.filter(o => o.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },
-            { label: t('Pozastavené', 'Suspended'), value: orders.filter(o => o.status === 'SUSPENDED').length, icon: <Clock size={16} aria-hidden="true" />, color: 'var(--warning)' },
+            { label: t('Pozastavené', 'Paused'), value: orders.filter(o => o.status === 'PAUSED').length, icon: <Clock size={16} aria-hidden="true" />, color: 'var(--warning)' },
+            { label: t('Vyžadují pozornost', 'Needs attention'), value: orders.filter(o => o.status === 'FAILED').length, icon: <XCircle size={16} aria-hidden="true" />, color: 'var(--danger)' },
+            { label: t('Dokončené', 'Completed'), value: orders.filter(o => o.status === 'COMPLETED').length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },
             { label: t('Zrušené', 'Cancelled'), value: orders.filter(o => o.status === 'CANCELLED').length, icon: <XCircle size={16} aria-hidden="true" />, color: 'var(--danger)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
@@ -116,7 +122,7 @@ export default function StandingOrdersPage() {
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {[t('Příjemce', 'Recipient'), t('Částka', 'Amount'), t('Frekvence', 'Frequency'), t('Příští platba', 'Next run'), t('Status', 'Status'), t('Popis', 'Description')].map(h => (
+                {[t('Příjemce', 'Recipient'), t('Částka', 'Amount'), t('Typ platby', 'Payment type'), t('Frekvence', 'Frequency'), t('Příští platba', 'Next run'), t('Status', 'Status'), t('Popis', 'Description')].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
@@ -126,20 +132,21 @@ export default function StandingOrdersPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{o.creditorName}</td>
                   <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)' }}>
-                    {o.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {o.currency}
+                    {formatMinorUnits(o.amountMinorUnits, numberLocale)} {o.currency}
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t(FREQ_LABELS[o.frequency] ?? o.frequency, o.frequency)}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t(...PAYMENT_TYPE_LABELS[o.paymentType])}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t(...FREQ_LABELS[o.frequency])}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <Calendar size={11} aria-hidden="true" style={{ color: 'var(--text-tertiary)' }} />
-                    {o.nextExecutionDate ? new Date(o.nextExecutionDate).toLocaleDateString(numberLocale) : '—'}
+                    {formatLocalDate(o.nextExecutionDate, numberLocale)}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                      background: o.status === 'ACTIVE' ? 'var(--success-bg)' : o.status === 'SUSPENDED' ? 'var(--warning-bg)' : 'var(--surface-3)',
-                      color: o.status === 'ACTIVE' ? 'var(--success-text)' : o.status === 'SUSPENDED' ? 'var(--warning-text)' : 'var(--text-tertiary)',
-                      border: `1px solid ${o.status === 'ACTIVE' ? 'var(--success-border)' : o.status === 'SUSPENDED' ? 'var(--warning-border)' : 'var(--border)'}` }}>{o.status}</span>
+                      background: o.status === 'ACTIVE' || o.status === 'COMPLETED' ? 'var(--success-bg)' : o.status === 'PAUSED' ? 'var(--warning-bg)' : o.status === 'FAILED' ? 'var(--danger-bg)' : 'var(--surface-3)',
+                      color: o.status === 'ACTIVE' || o.status === 'COMPLETED' ? 'var(--success-text)' : o.status === 'PAUSED' ? 'var(--warning-text)' : o.status === 'FAILED' ? 'var(--danger-text)' : 'var(--text-tertiary)',
+                      border: `1px solid ${o.status === 'ACTIVE' || o.status === 'COMPLETED' ? 'var(--success-border)' : o.status === 'PAUSED' ? 'var(--warning-border)' : o.status === 'FAILED' ? 'var(--danger-border)' : 'var(--border)'}` }}>{o.status}</span>
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.description}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.remittanceInfo ?? '—'}</td>
                 </tr>
               ))}</tbody>
             </table>

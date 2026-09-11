@@ -1,0 +1,51 @@
+# Single-owner sandbox Postgres for Communication Studio style/playbook versions and audit
+# evidence (ADR-0285).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: communication-db
+  namespace: communication
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      max_wal_size: "512MB"
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/communication-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: openbank_communication
+      owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: communication-db-daily
+  namespace: communication
+spec:
+  schedule: "0 52 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: communication-db

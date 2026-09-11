@@ -3,16 +3,23 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
+import { edgeGeometry, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import {
+  parseGovernanceLineage,
+  type GovernanceLineageService as GovService,
+  type LineageDomain as Domain,
+  type LineageRelation as Rel,
+  type LineageRole as Role,
+} from '@/lib/governance/lineage-evidence'
 
 // ---------------------------------------------------------------------------
 // Data-lineage flow (ADR-0071). Companion to the service map, but the graph here
@@ -24,28 +31,17 @@ import { layoutBands } from '@/components/topology/layout'
 // the service map — NOT hand-authored.
 // ---------------------------------------------------------------------------
 
-type Role = 'producer' | 'consumer' | 'both' | 'internal'
-type Domain = 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
-type Rel = 'api' | 'topic' | 'datastore' | 'unknown'
-type LinkNode = { serviceName: string; relationType: Rel; description?: string }
-type GovService = {
-  serviceName: string
-  dataDomain: Domain | null
-  dataLineageRole: Role | null
-  lineage?: { upstream?: LinkNode[]; downstream?: LinkNode[]; interfaces?: { apis?: string[]; topics?: string[]; datastores?: string[] } }
-}
-
 const DOMAIN_META: Record<Domain, { color: string; cs: string; en: string }> = {
-  core:           { color: '#2563eb', cs: 'Jádro',         en: 'Core' },
-  payments:       { color: '#7c3aed', cs: 'Platby',        en: 'Payments' },
-  compliance:     { color: '#dc2626', cs: 'Compliance',    en: 'Compliance' },
-  identity:       { color: '#059669', cs: 'Identita',      en: 'Identity' },
-  'open-banking': { color: '#d97706', cs: 'Open Banking',  en: 'Open Banking' },
-  platform:       { color: '#6b7280', cs: 'Platforma',     en: 'Platform' },
+  core:           { color: 'var(--map-core)', cs: 'Jádro',         en: 'Core' },
+  payments:       { color: 'var(--map-payment)', cs: 'Platby',        en: 'Payments' },
+  compliance:     { color: 'var(--map-compliance)', cs: 'Compliance',    en: 'Compliance' },
+  identity:       { color: 'var(--map-identity)', cs: 'Identita',      en: 'Identity' },
+  'open-banking': { color: 'var(--map-psd2)', cs: 'Open Banking',  en: 'Open Banking' },
+  platform:       { color: 'var(--map-platform)', cs: 'Platforma',     en: 'Platform' },
 }
 const DOMAIN_ORDER: Domain[] = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
 
-const REL_COLOR: Record<Rel, string> = { api: '#2563eb', topic: '#8b5cf6', datastore: '#059669', unknown: '#94a3b8' }
+const REL_COLOR: Record<Rel, string> = { api: 'var(--map-core)', topic: 'var(--map-payment)', datastore: 'var(--map-identity)', unknown: 'var(--map-platform)' }
 const REL_DASHED: Record<Rel, boolean> = { api: false, topic: true, datastore: false, unknown: false }
 const relLabel = (r: Rel, t: (cs: string, en: string) => string) => ({ api: 'API', topic: t('téma', 'topic'), datastore: t('úložiště', 'datastore'), unknown: t('jiné', 'other') }[r])
 const roleLabel = (r: Role | null, t: (cs: string, en: string) => string) =>
@@ -75,23 +71,47 @@ export default function LineageFlowPage() {
   const [relFilter, setRelFilter] = useState<'all' | Rel>('all')
   const [domFilter, setDomFilter] = useState<'all' | Domain>('all')
   const [flow, setFlow] = useFlowAnimation()
-  const [isChecking, setIsChecking] = useState(false)
+  const [isChecking, setIsChecking] = useState(true)
+  const [hasVerifiedSnapshot, setHasVerifiedSnapshot] = useState(false)
+  const requestRef = useRef(0)
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const request = ++requestRef.current
     setIsChecking(true)
     setUnavailable(null)
     try {
-      const res = await fetch('/api/catalog/governance', { cache: 'no-store' })
-      if (!res.ok) { setServices([]); setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' }); return }
-      const data = await res.json() as { services?: GovService[]; available?: boolean }
-      const list = Array.isArray(data.services) ? data.services : []
-      setServices(list)
-      if (!list.length) setUnavailable({ kind: 'no_data' })
+      const res = await fetch('/api/catalog/governance', { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+      if (request !== requestRef.current) return
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          setServices([])
+          setSelected(null)
+          setHasVerifiedSnapshot(false)
+        }
+        setUnavailable({ kind: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable' })
+        return
+      }
+      const evidence = parseGovernanceLineage(await res.json())
+      if (request !== requestRef.current) return
+      if (!evidence) { setUnavailable({ kind: 'error' }); return }
+      if (!evidence.available) { setUnavailable({ kind: 'not_deployed' }); return }
+      setServices(evidence.services)
+      setSelected(current => current && evidence.services.some(service => service.serviceName === current) ? current : null)
+      setHasVerifiedSnapshot(true)
+      if (!evidence.services.length) setUnavailable({ kind: 'no_data' })
     } catch {
-      setServices([]); setUnavailable({ kind: 'unreachable' })
-    } finally { setIsChecking(false) }
-  }
-  useEffect(() => { load() }, [])
+      if (request === requestRef.current) setUnavailable({ kind: 'unreachable' })
+    } finally {
+      if (request === requestRef.current) setIsChecking(false)
+    }
+  }, [])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => {
+      window.clearTimeout(initialLoad)
+      requestRef.current += 1
+    }
+  }, [load])
 
   const byId = Object.fromEntries(services.map(s => [s.serviceName, s]))
   const known = new Set(services.map(s => s.serviceName))
@@ -143,10 +163,25 @@ export default function LineageFlowPage() {
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
 
-      {unavailable ? (
+      {isChecking && !hasVerifiedSnapshot && !unavailable ? (
+        <div className="card" role="status" aria-live="polite" data-testid="lineage-loading" style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>
+          <RefreshCw aria-hidden="true" size={15} className="animate-spin" />{' '}{t('Načítám ověřenou datovou lineage…', 'Loading verified data lineage…')}
+        </div>
+      ) : unavailable && !services.length ? (
         <DataUnavailable kind={unavailable.kind} service="governance" feature={t('datová lineage', 'data lineage')} dense />
       ) : (
         <>
+          {unavailable ? (
+            <div className="card" style={{ padding: 0, marginBottom: 16 }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service="governance"
+                feature={t('Aktualizace datové lineage', 'Data lineage refresh')}
+                detail={t('Zobrazuje se poslední ověřená mapa; novější vztahy mohou chybět.', 'Showing the last verified map; newer relationships may be missing.')}
+                dense
+              />
+            </div>
+          ) : null}
           {/* Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div role="group" aria-label={t('Filtrování domén', 'Domain filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -156,8 +191,8 @@ export default function LineageFlowPage() {
                   style={{
                     padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                     border: `1px solid ${domFilter === key ? 'var(--accent)' : 'var(--border)'}`,
-                    background: domFilter === key ? 'var(--accent)' : 'var(--surface)',
-                    color: domFilter === key ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+                    color: domFilter === key ? 'var(--accent-text)' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+                    background: domFilter === key ? 'var(--accent-bg)' : 'var(--surface)',
                   }}>
                   {key === 'all' ? t('Vše', 'All') : domLabel(key)}
                 </button>
@@ -171,8 +206,8 @@ export default function LineageFlowPage() {
                   style={{
                     padding: '4px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                     border: `1px solid ${relFilter === r ? (r === 'all' ? 'var(--accent)' : REL_COLOR[r as Rel]) : 'var(--border)'}`,
-                    background: relFilter === r ? (r === 'all' ? 'var(--accent)' : REL_COLOR[r as Rel]) : 'var(--surface)',
-                    color: relFilter === r ? '#fff' : 'var(--text-secondary)',
+                    background: relFilter === r ? `color-mix(in srgb, ${r === 'all' ? 'var(--accent)' : REL_COLOR[r as Rel]} 14%, var(--surface))` : 'var(--surface)',
+                    color: relFilter === r ? (r === 'all' ? 'var(--accent-text)' : REL_COLOR[r as Rel]) : 'var(--text-secondary)',
                   }}>
                   {r === 'all' ? t('Vše', 'All') : relLabel(r as Rel, t)}
                 </button>
@@ -184,7 +219,7 @@ export default function LineageFlowPage() {
                   display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
                   borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                   border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
-                  background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
+                  background: flow ? 'var(--accent-bg)' : 'var(--surface)', color: flow ? 'var(--accent-text)' : 'var(--text-secondary)',
                 }}>
                 {flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />}{t('Tok', 'Flow')}
               </button>
@@ -209,7 +244,7 @@ export default function LineageFlowPage() {
                 {LAYOUT.bands.map(b => (
                   <g key={b.key}>
                     <rect x={CANVAS_PAD - 12} y={b.y} width={WIDTH - (CANVAS_PAD - 12) * 2} height={b.h} rx="16"
-                      fill={`${DOMAIN_META[b.key].color}0a`} stroke={`${DOMAIN_META[b.key].color}33`} strokeWidth="1" />
+                      fill={`color-mix(in srgb, ${DOMAIN_META[b.key].color} 4%, transparent)`} stroke={`color-mix(in srgb, ${DOMAIN_META[b.key].color} 24%, var(--border))`} strokeWidth="1" />
                     <text x={CANVAS_PAD} y={b.y + 19} fontSize="11" fill={DOMAIN_META[b.key].color} fontWeight="700" letterSpacing="0.08em">
                       {domLabel(b.key).toUpperCase()} · {b.count}
                     </text>
@@ -227,7 +262,7 @@ export default function LineageFlowPage() {
                   const pid = pathId('ln', e.from, e.to, i)
                   return (
                     <g key={i} opacity={dim ? 0.08 : touches ? 1 : 0.42} style={{ transition: 'opacity 0.15s' }}>
-                      <path id={pid} d={d} fill="none" stroke={touches ? mixHex(color, '#000000', 0.15) : color}
+                      <path id={pid} d={d} fill="none" stroke={touches ? `color-mix(in srgb, ${color} 85%, var(--text-primary))` : color}
                         strokeWidth={touches ? 2 : 1.2} strokeDasharray={REL_DASHED[e.type] ? '5,4' : undefined}
                         markerEnd={`url(#ln-arrow-${e.type})`} />
                       {flow && <FlowParticle pathId={pid} color={color} dur={2.6 + (i % 6) * 0.24} begin={(i % 8) * 0.16} r={2.3} />}
@@ -248,9 +283,9 @@ export default function LineageFlowPage() {
                       onClick={() => setSelected(v => v === s.serviceName ? null : s.serviceName)}
                       onMouseEnter={() => setHovered(s.serviceName)} onMouseLeave={() => setHovered(h => h === s.serviceName ? null : h)}>
                       <rect x={x} y={y} width={p.w} height={PILL_H} rx={PILL_H / 2}
-                        fill={isSel ? color : 'var(--surface)'} stroke={color} strokeWidth={isSel ? 1.9 : 1.2} filter="url(#ln-shadow)" />
+                        fill={isSel ? `color-mix(in srgb, ${color} 16%, var(--surface))` : 'var(--surface)'} stroke={color} strokeWidth={isSel ? 1.9 : 1.2} filter="url(#ln-shadow)" />
                       <circle cx={x + 13} cy={p.cy} r={3.5} fill={color} />
-                      <text x={x + 23} y={p.cy + 4} fontSize="10.5" fontWeight="600" fill={isSel ? '#fff' : 'var(--text-primary)'}>{prettyName(s.serviceName)}</text>
+                      <text x={x + 23} y={p.cy + 4} fontSize="10.5" fontWeight="600" fill="var(--text-primary)">{prettyName(s.serviceName)}</text>
                     </g>
                   )
                 })}
@@ -274,7 +309,7 @@ export default function LineageFlowPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
                   <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: DOMAIN_META[domainOf(selectedSvc)].color }} />
                   <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{prettyName(selectedSvc.serviceName)}</div>
-                  <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `${DOMAIN_META[domainOf(selectedSvc)].color}1a`, color: DOMAIN_META[domainOf(selectedSvc)].color }}>
+                  <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `color-mix(in srgb, ${DOMAIN_META[domainOf(selectedSvc)].color} 12%, transparent)`, color: 'var(--text-primary)' }}>
                     {roleLabel(selectedSvc.dataLineageRole, t)}
                   </div>
                 </div>
@@ -286,9 +321,9 @@ export default function LineageFlowPage() {
                   <div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{t('ROZHRANÍ', 'INTERFACES')}</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {(selectedSvc.lineage?.interfaces?.apis ?? []).map((a, i) => <span key={`a${i}`} style={{ fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '2px 6px', borderRadius: '4px' }}>API: {a}</span>)}
-                      {(selectedSvc.lineage?.interfaces?.topics ?? []).map((tp, i) => <span key={`t${i}`} style={{ fontSize: '10px', background: '#f3e8ff', color: '#6b21a8', padding: '2px 6px', borderRadius: '4px' }}>{t('téma', 'topic')}: {tp}</span>)}
-                      {(selectedSvc.lineage?.interfaces?.datastores ?? []).map((ds, i) => <span key={`d${i}`} style={{ fontSize: '10px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px' }}>DB: {ds}</span>)}
+                      {(selectedSvc.lineage?.interfaces?.apis ?? []).map((a, i) => <span key={`a${i}`} style={{ fontSize: '10px', background: 'var(--info-bg)', color: 'var(--info-text)', padding: '2px 6px', borderRadius: '4px' }}>API: {a}</span>)}
+                      {(selectedSvc.lineage?.interfaces?.topics ?? []).map((tp, i) => <span key={`t${i}`} style={{ fontSize: '10px', background: 'var(--accent-bg)', color: 'var(--accent-text)', padding: '2px 6px', borderRadius: '4px' }}>{t('téma', 'topic')}: {tp}</span>)}
+                      {(selectedSvc.lineage?.interfaces?.datastores ?? []).map((ds, i) => <span key={`d${i}`} style={{ fontSize: '10px', background: 'var(--success-bg)', color: 'var(--success-text)', padding: '2px 6px', borderRadius: '4px' }}>DB: {ds}</span>)}
                       {!(selectedSvc.lineage?.interfaces?.apis?.length || selectedSvc.lineage?.interfaces?.topics?.length || selectedSvc.lineage?.interfaces?.datastores?.length) && (
                         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('žádná deklarovaná', 'none declared')}</span>
                       )}
@@ -331,8 +366,8 @@ export default function LineageFlowPage() {
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Propojení', 'Connections')}: {selectedEdges.length}</div>
                   <a href={`/services/${prettyName(selectedSvc.serviceName)}/docs`} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 12px',
-                    background: 'var(--accent-bg)', color: 'var(--accent)', borderRadius: 'var(--r-md)', fontSize: '12px',
-                    fontWeight: 600, textDecoration: 'none', marginTop: '4px', border: '1px solid var(--accent-border, transparent)',
+                    background: 'var(--accent-bg)', color: 'var(--accent-text)', borderRadius: 'var(--r-md)', fontSize: '12px',
+                    fontWeight: 600, textDecoration: 'none', marginTop: '4px', border: '1px solid var(--accent-border)',
                   }}>
                     <BookOpen size={14} /> {t('Dokumentace služby', 'Service documentation')}
                   </a>
