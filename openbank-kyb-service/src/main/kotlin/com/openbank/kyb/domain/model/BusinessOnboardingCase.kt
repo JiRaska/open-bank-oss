@@ -89,6 +89,15 @@ data class BusinessOnboardingCase(
                 "extract awaits operator attestation",
                 at,
             )
+            // Named offices, not a count: the register says WHO signs, and no signature total can
+            // express that, so a human confirms the signatories against the source text (#9709).
+            extract.representationRule.isRoleConstrained -> review(
+                extract,
+                "representation rule names the signing offices " +
+                    "(${extract.representationRule.requiredRoles.joinToString(", ")}): " +
+                    "${extract.representationRule.sourceText}",
+                at,
+            )
             required == null -> review(
                 extract,
                 "representation rule could not be parsed: ${extract.representationRule.sourceText}",
