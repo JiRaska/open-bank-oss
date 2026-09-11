@@ -77,6 +77,14 @@ dependencies {
     // protobuf reached the test classpath via grpc; excluding grpc means naming it directly.
     // Version matches the fleet pin in openbank.dependency-vulnerability-pins.
     testImplementation("com.google.protobuf:protobuf-java:4.35.0")
+    constraints {
+        // temporal-serviceclient -> protobuf-java-util requests Guava 31.1 on the compile
+        // classpath. The runtime happened to select 32.0.1 via temporal-sdk, but compile kept
+        // the vulnerable coordinate and dependency submission correctly reported it as
+        // GHSA-7g45-4rm6-3mm3 / GHSA-5mg8-w23w-74h3. Keep both test classpaths on one patched
+        // release; this module does not apply the fleet vulnerability-pin convention plugin.
+        testImplementation("com.google.guava:guava:33.6.0-jre")
+    }
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
     compileOnly("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
     compileOnly("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
