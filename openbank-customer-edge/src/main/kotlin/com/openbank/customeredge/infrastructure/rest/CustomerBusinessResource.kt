@@ -70,10 +70,16 @@ class CustomerBusinessResource(
      * Find a company by NAME rather than by identifier (#9707). The entry screen for a founder who
      * does not know their own IČO — it lives on an invoice, not in anyone's head.
      *
-     * Read-only over a public register and creates nothing, like `/lookup` and `/schemes`. Every
-     * parameter is shape-checked before it reaches a URL rather than merely encoded: the same
-     * reasoning as the invitation token below, and the reason a bad `limit` is a 400 here instead
-     * of an upstream round trip.
+     * Read-only over a public register and creates nothing, like `/lookup` and `/schemes`.
+     *
+     * **What actually protects the upstream URL is [enc], and it is the only thing.** `country` is
+     * additionally pinned to a two-letter shape and `limit` is an integer in a bounded range, so
+     * neither can carry a metacharacter — but `name` and `city` are free text by nature: they are
+     * length-bounded and percent-encoded, not shape-checked, because a company name legitimately
+     * contains `&`, `/` and `#`. Unlike [claim] below, this route uses [UpstreamClient.get], whose
+     * host regex constrains the authority and permits any path or query; so the encoding is
+     * load-bearing rather than a second line of defence. `CustomerBusinessResourceTest` asserts the
+     * encoded form of both parameters for exactly that reason.
      */
     @GET
     @Path("/search")
@@ -214,16 +220,28 @@ class CustomerBusinessResource(
         ),
     ).build()
 
-    private companion object {
+    // Not private: the search bounds are asserted by CustomerBusinessResourceTest, and a test that
+    // hard-codes the number instead would keep passing when the bound moves.
+    internal companion object {
         const val UPSTREAM = "/api/v1/kyb"
 
         /** An invitation token is opaque, URL-safe and bounded; anything else is malformed. */
         val TOKEN = Regex("^[A-Za-z0-9_-]{8,128}$")
         val COUNTRY = Regex("^[A-Za-z]{2}$")
 
-        /** Mirrors kyb-service's own floor and caps; a shorter term matches tens of thousands of names. */
+        /**
+         * [MIN_TERM] and [MAX_LIMIT] mirror kyb-service's own `RegistrySearchQuery` exactly, so the
+         * two sides cannot disagree about what is too short to be worth asking a public register,
+         * or about how many rows may come back.
+         *
+         * [MAX_TERM] mirrors NOTHING — kyb-service requires only that the name is not blank. It is
+         * a bound on what this edge will put in a URL, not a claim about what the register accepts,
+         * and it is set well above any real company name for that reason: at 100 it silently made
+         * long-named entities unsearchable, and Czech cooperative and association names run past
+         * that routinely.
+         */
         const val MIN_TERM = 3
-        const val MAX_TERM = 100
+        const val MAX_TERM = 500
         const val MAX_LIMIT = 50
     }
 }
