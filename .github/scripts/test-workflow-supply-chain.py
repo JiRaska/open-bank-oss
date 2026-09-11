@@ -34,6 +34,15 @@ class SupplyChainTest(unittest.TestCase):
             self.assertTrue(guard.findings(name, {'on': {'workflow_run': {}}, 'jobs': {}}))
             self.assertFalse(guard.findings(name, {'on': {'workflow_run': {'branches': ['main']}}, 'jobs': {}}))
 
+    def test_pull_request_workflow_requires_concurrency(self):
+        path = guard.ROOT / '.github/workflows/dependency-review.yml'
+        original = yaml.safe_load(path.read_text())
+        self.assertFalse(guard.findings(path.name, original))
+        mutated = copy.deepcopy(original)
+        mutated.pop('concurrency')
+        self.assertIn('pull_request workflow must bound superseded runs with concurrency',
+                      guard.findings(path.name, mutated))
+
     def test_agent_regressions_against_real_workflows(self):
         for name, key in [('agent-issue-worker.yml', 'worker'), ('agent-pr-steward.yml', 'steward')]:
             original = yaml.safe_load((guard.ROOT / '.github/workflows' / name).read_text())
@@ -53,6 +62,34 @@ class SupplyChainTest(unittest.TestCase):
                     job.pop('needs')
                 with self.subTest(name=name, mutation=mutation):
                     self.assertTrue(guard.findings(name, doc))
+
+            concurrency_mutation = copy.deepcopy(original)
+            concurrency_mutation['concurrency'] = {
+                'group': name,
+                'cancel-in-progress': False,
+            }
+            self.assertIn('agent PR validation must use a superseding per-PR concurrency lane',
+                          guard.findings(name, concurrency_mutation))
+
+    def test_steward_scope_uses_the_same_authority_as_admission(self):
+        workflow = yaml.safe_load(
+            (guard.ROOT / '.github/workflows/agent-pr-steward.yml').read_text())
+        rules = yaml.safe_load(
+            (guard.ROOT / 'openbank-libs/governance/rules.yaml').read_text())
+        prompt = (guard.ROOT / '.github/agent-prompts/pr-steward.md').read_text()
+        self.assertFalse(guard.steward_scope_findings(prompt, rules, workflow))
+
+        bad_prompt = prompt.replace('openbank-libs/governance/rules.yaml', 'a-local-list')
+        self.assertTrue(guard.steward_scope_findings(bad_prompt, rules, workflow))
+
+        bad_workflow = copy.deepcopy(workflow)
+        events = bad_workflow.get('on', bad_workflow.get(True))
+        events['pull_request']['paths'].remove('.github/agent-prompts/pr-steward.md')
+        self.assertTrue(guard.steward_scope_findings(prompt, rules, bad_workflow))
+
+        bad_rules = copy.deepcopy(rules)
+        bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = []
+        self.assertTrue(guard.steward_scope_findings(prompt, bad_rules, workflow))
 
 
 if __name__ == '__main__':
