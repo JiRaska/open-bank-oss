@@ -190,6 +190,12 @@ export default function CompliancePacksPage() {
         ? t('Pack aktivován. Guard ho používá okamžitě, bez restartu služby.',
             'Pack activated. The origination guard uses it immediately — no service restart.')
         : t('Návrh zamítnut.', 'Proposal rejected.'))
+      // The trigger that opened this dialog is a row button for a proposal that has just been
+      // decided, so `load()` below is about to remove it. Clearing the ref BEFORE closing makes
+      // `onCloseAutoFocus` fall through to the pending-proposals region instead of focusing a
+      // button that is still connected for a few more milliseconds and then is not — which lands
+      // focus on <body> and loses the operator's place.
+      reviewReturnFocusRef.current = null
       setReview(null)
       await load()
     } catch {
