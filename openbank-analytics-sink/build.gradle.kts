@@ -39,6 +39,11 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // The INITIAL_LOAD backfill source sweeps account-service's registry over REST rather than
+    // reading another service's database. Both are Quarkus extensions already used by 44 modules
+    // here, not new third-party libraries.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)

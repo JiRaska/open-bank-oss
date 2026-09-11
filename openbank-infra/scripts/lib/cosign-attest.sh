@@ -229,11 +229,32 @@ cosign_attest_slsa_provenance() {
   invocation_id="$(jq -r '.metadata.buildInvocationId' "$predicate")"
 
   echo "==> cosign attest (slsaprovenance) ${image}"
+  local attest_out
+  attest_out="$(mktemp "${TMPDIR:-/tmp}/cosign-slsa-attest.XXXXXX")"
   if ! COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type slsaprovenance \
-       --predicate "$predicate" "$image"; then
+       --predicate "$predicate" "$image" >"$attest_out" 2>&1; then
+    # Immutable-tag ECR repositories (ecr_immutable_repositories) reject the push of the
+    # sha256-<digest>.att tag once the cyclonedx attestation has created it: cosign's legacy
+    # attestation model APPENDS to that one tag, so the second (SLSA) attestation dies with
+    # `TAG_INVALID ... tag is immutable` (#8981). That is a registry constraint, not a missing
+    # attestation capability — and the kyverno SLSA-provenance policy is Audit-only, so an
+    # image without the SLSA envelope still deploys (signature + SBOM policies are Enforce
+    # and stay fatal above). Tolerate exactly this signature; every other failure is fatal.
+    if grep -q 'TAG_INVALID' "$attest_out" && grep -qi 'immutable' "$attest_out"; then
+      echo "WARNING: SLSA attestation for ${image} rejected by the immutable-tag repository" >&2
+      echo "         (TAG_INVALID: the .att tag already exists from the SBOM attestation and" >&2
+      echo "         cosign legacy attest must append to it). Tolerated: the kyverno SLSA" >&2
+      echo "         provenance policy is Audit-only, so deploy is not gated on this envelope;" >&2
+      echo "         signature + SBOM attestations landed and remain enforced. Tracked as #8981." >&2
+      rm -f "$attest_out"
+      return 0
+    fi
     echo "ERROR: cosign attest (slsaprovenance) failed for ${image}." >&2
+    cat "$attest_out" >&2
+    rm -f "$attest_out"
     return 1
   fi
+  rm -f "$attest_out"
 
   echo "==> cosign verify-attestation (slsaprovenance) ${image}"
   if ! envelopes="$(COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" \
@@ -244,8 +265,14 @@ cosign_attest_slsa_provenance() {
 
   # Bind the verify to THIS run: require our buildInvocationId among the verified envelopes
   # (same append-only .att trap as the SBOM binding above — any-match is not proof).
+  # CASING TRAP (measured against cosign v2.4.3, run 33984244416 + local repro): cosign does
+  # NOT embed the predicate verbatim — it parses it into its Go struct and re-marshals, and
+  # the struct's json tag is `buildInvocationID` (capital D), not the SLSA v0.2 spec spelling
+  # `buildInvocationId`. The envelope therefore carries `buildInvocationID` and a binding on
+  # the spec spelling matches nothing. Accept both spellings.
   if ! printf '%s\n' "$envelopes" | jq -e -s --arg id "$invocation_id" \
-       '[ .[] | try (.payload | @base64d | fromjson | .predicate.metadata.buildInvocationId) catch empty ]
+       '[ .[] | try (.payload | @base64d | fromjson
+          | .predicate.metadata | (.buildInvocationId // .buildInvocationID)) catch empty ]
         | index($id) != null' >/dev/null 2>&1; then
     echo "ERROR: cosign verify-attestation for ${image} verified no envelope carrying this" >&2
     echo "       run's provenance (buildInvocationId=${invocation_id})." >&2

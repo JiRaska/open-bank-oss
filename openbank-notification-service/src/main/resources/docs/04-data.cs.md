@@ -45,7 +45,7 @@ Každý soubor migrace nese inline **poznámku k rollbacku** (např. V6: `DROP T
 
 #### Šablony nesoucí tajemství
 
-`OTP_CODE` a `PASSWORD_RESET` renderují do těla zprávy autentizační tajemství. To se doručí
+`OTP_CODE` renderuje do těla zprávy autentizační tajemství. To se doručí
 zákazníkovi, ale **nikdy se neukládá**: `NotificationConsumer` uloží místo něj
 `TemplateSensitivity.REDACTED_BODY` a `NotificationResource` redaguje ještě jednou při čtení
 (dvě nezávislé kontroly, stejný tvar jako ADR-0059 D3). V9 vyčistila řádky zapsané předtím.
@@ -94,7 +94,7 @@ Unique `(platform, token)` → opětovná registrace provede upsert; index `(par
 | Pole | Klasifikace | Kontrola |
 |---|---|---|
 | `notifications.recipient` | přímé PII (e-mail / telefon) | maskováno v logu (PiiMask); nevystaveno v oversight signálech |
-| `notifications.body` / `subject` | možné PII | šablony s tajemstvím (OTP_CODE, PASSWORD_RESET) se doručí, ale neukládají — redakce při zápisu i při čtení; do oversightu neegrešuje žádná šablona |
+| `notifications.body` / `subject` | možné PII | šablony s tajemstvím (OTP_CODE) se doručí, ale neukládají — redakce při zápisu i při čtení; do oversightu neegrešuje žádná šablona |
 | `notifications.party_id`, `device_tokens.party_id` | pseudonymní identifikátor | vazba na party-service |
 | `device_tokens.token` | PII-adjacentní token poskytovatele | jen pro zápis přes REST, maskovaný v logu |
 | `dispatch_control_log.actor` / `dispatch_resume_proposal.*_by` | identita operátora | audit-logováno, jen interní |

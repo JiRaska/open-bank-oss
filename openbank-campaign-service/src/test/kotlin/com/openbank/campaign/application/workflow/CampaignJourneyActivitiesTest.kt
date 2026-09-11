@@ -9,12 +9,14 @@ import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -56,6 +58,7 @@ class CampaignJourneyActivitiesTest {
         id = campaignId,
         name = "test",
         goal = "loans",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("actives", 1),
         steps = listOf(CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         state = CampaignState.ACTIVE,
@@ -215,6 +218,7 @@ class CampaignJourneyActivitiesTest {
                 notificationSend,
                 bannerPlacement,
                 metrics,
+                CreditOfferGatePort { true },
                 dryRun = false,
             )
     }

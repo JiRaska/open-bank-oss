@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.KycService
 import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.kyc.domain.model.SubjectType
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -88,7 +89,10 @@ class PartyEventConsumer {
             return
         }
         EventRetry.withRetry(log, "PARTY_CREATED KYC case", partyId) {
-            val (case, created) = kycService.openCaseForParty(partyId)
+            // ADR-0284 D5: the subject type comes from the party type on the event — a company
+            // gets the KYB check set, not an identity-document scan.
+            val subjectType = SubjectType.fromPartyType(node.path("partyType").asText(null))
+            val (case, created) = kycService.openCaseForParty(partyId, subjectType)
             if (created) {
                 log.infof("[party-events-in] Auto-opened KYC case %s for party %s", case.id, partyId)
             } else {

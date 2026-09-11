@@ -60,6 +60,35 @@ class PartyApiIT {
     }
 
     @Test
+    @Order(3)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET parties with an unparseable status filter is a 400, not the unfiltered list`() {
+        // #9038: runCatching{}.getOrNull() used to drop the condition, answering every party
+        // with a 200 to a typo.
+        Given {
+            queryParam("status", "ACTVE")
+        } When {
+            get("/api/v1/parties")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @Order(3)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET parties with a valid status filter still answers 200`() {
+        Given {
+            queryParam("status", "ACTIVE")
+        } When {
+            get("/api/v1/parties")
+        } Then {
+            statusCode(200)
+            body("items", notNullValue())
+        }
+    }
+
+    @Test
     @Order(4)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `POST parties creates individual party and returns 201`() {
@@ -283,6 +312,19 @@ class PartyApiIT {
             get("/api/v1/parties/$id/gdpr-export")
         } Then {
             statusCode(403)
+        }
+    }
+
+    @Test
+    @Order(17)
+    fun `GET party by id with no identity at all returns 401`() {
+        // The VoP hop-2 path (GET /api/v1/parties/{id}). A recorded 401 pact cannot survive
+        // provider replay — the replay TestAuthMechanism authenticates every request — so the
+        // negative case is asserted here instead (#8552 class).
+        Given { this } When {
+            get("/api/v1/parties/${java.util.UUID.randomUUID()}")
+        } Then {
+            statusCode(401)
         }
     }
 

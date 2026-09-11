@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication'
   action: string
   resourceId: string | null
   maker: string | null
@@ -83,6 +83,7 @@ type SepaPaymentApproval = LendingApproval
 // an `opsmessage.compose` four-eyes decision parked at 202 was discoverable only by whoever had
 // been handed its id out of band.
 type NotificationApproval = LendingApproval
+type CommunicationApproval = LendingApproval
 
 // party-service serves the same shared PendingApproval shape. This source turns the approval id
 // returned from a parked `party.merge` into a visible checker hand-off before its 24-hour TTL.
@@ -100,6 +101,13 @@ type BalanceApproval = LendingApproval
 // billing-service serves the shared PendingApproval shape for gated fee-posting actions.
 // Listing is read-only; posting and reversal controls remain entirely service-owned.
 type BillingApproval = LendingApproval
+type DelegationApproval = {
+  id: string
+  delegationId: string
+  operation: 'SUSPEND' | 'REINSTATE' | 'REVOKE'
+  proposedBy: string
+  proposedAt: string
+}
 type AgentProposal = {
   id: string
   suggestedAction: string
@@ -370,9 +378,49 @@ async function billingPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function delegationPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl(
+    'delegation-service',
+    'delegation',
+    8126,
+    '/api/v1/delegations/approvals',
+    { state: 'PROPOSED', limit: '50' },
+  ), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as DelegationApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id,
+      domain: 'delegation' as const,
+      action: `delegation.${r.operation.toLowerCase()}`,
+      resourceId: r.delegationId,
+      maker: r.proposedBy,
+      proposedAt: r.proposedAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
+}
+
+async function communicationPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('communication-service', 'communication', 8158, '/api/v1/communications/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as CommunicationApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'communication' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
 }
 
 async function agentPending(headers: HeadersInit): Promise<SourceResult> {
@@ -397,7 +445,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -414,9 +462,11 @@ export async function GET() {
     consentPending(headers).catch(() => unavailable),
     balancePending(headers).catch(() => unavailable),
     billingPending(headers).catch(() => unavailable),
+    delegationPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
+    communicationPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -437,7 +487,9 @@ export async function GET() {
       consent: consent.state,
       balance: balance.state,
       billing: billing.state,
+      delegation: delegation.state,
       agent: agent.state,
+      communication: communication.state,
     },
   })
 }

@@ -95,6 +95,17 @@ class DelegatedSpendBindingEntity {
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
 
+    /**
+     * ADR-0252: the record that created this projection was a synthetic customer's (#8630).
+     *
+     * Persisted rather than inferred: the finalizer that turns this row into an outbox event runs
+     * on a scheduler with no record and no request context, so ambient MDC/baggage is not
+     * available to it — the same argument `OutboxMessage.synthetic` makes for the outbox row.
+     * Monotonic: a later revision may raise it, never clear it.
+     */
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
+
     fun toDomain(): DelegatedSpendBinding = DelegatedSpendBinding(
         snapshot = DelegatedSpendReservationSnapshot(
             eventId = lastEventId,

@@ -32,6 +32,14 @@ data class OpenAccountCommand(
      * (canDebit/canCredit both require ACTIVE).
      */
     val initialStatus: AccountStatus = AccountStatus.ACTIVE,
+    /**
+     * Terms version + document reference the account is opened under (#9044). The use case
+     * REQUIRES a non-blank [termsVersion] for TERM_DEPOSIT; other account types may carry it
+     * but are not required to.
+     */
+    val termsVersion: String? = null,
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 )
 
 data class CloseAccountCommand(val accountId: UUID, val reason: String?, val requestedBy: UUID)
@@ -133,6 +141,14 @@ interface AuthorizationUseCase {
         partyId: UUID,
         role: com.openbank.account.domain.model.AuthorizationRole,
     ): Boolean
+
+    /**
+     * Everyone who can act on an account right now, from BOTH stores the payment guard consults.
+     *
+     * Built for the account owner's transparency view. Returns an empty list for an unknown
+     * account rather than throwing, so a caller cannot use it as an existence oracle.
+     */
+    suspend fun effectiveAccess(accountId: UUID): List<com.openbank.account.domain.model.AccountAccessEntry>
 
     /**
      * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated

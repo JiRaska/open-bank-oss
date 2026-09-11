@@ -93,11 +93,11 @@ spec:
         - alert: SecurityEmailNotDelivered
           expr: |
             (sum(openbank_notification_email_sends_total{
-              template=~"OTP_CODE|SCA_APPROVAL|PASSWORD_RESET", outcome!="ACCEPTED"
+              template=~"OTP_CODE|SCA_APPROVAL", outcome!="ACCEPTED"
             }) or vector(0))
             -
             (sum(openbank_notification_email_sends_total{
-              template=~"OTP_CODE|SCA_APPROVAL|PASSWORD_RESET", outcome!="ACCEPTED"
+              template=~"OTP_CODE|SCA_APPROVAL", outcome!="ACCEPTED"
             } offset 15m) or vector(0)) > 0
           for: 0m
           labels:

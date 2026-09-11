@@ -204,6 +204,7 @@ locals {
     # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
     # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
     campaign         = { namespace = "campaign", sa = "campaign-db" }
+    communication    = { namespace = "communication", sa = "communication-db" }
     referral         = { namespace = "referral", sa = "referral-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
@@ -233,6 +234,7 @@ locals {
     # backups" has no judgement left to exercise, so advisory just made it mergeable. The gate
     # is now enforced.
     delegation = { namespace = "delegation", sa = "delegation-db" }
+    kyb        = { namespace = "kyb", sa = "kyb-db" }
     # Added by #3555 with their barmanObjectStore + ScheduledBackup in the same change — the two
     # clusters that still declared NO backup at all, out of 55. Both are `instances: 1`, so they
     # had neither a replica nor a recovery point: a lost EBS volume was total data loss.

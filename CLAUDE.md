@@ -65,6 +65,11 @@ or an **enhancement** — not for architectural decisions (→ `docs/adr`), ques
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
 
+Autonomous work is WIP-limited across every prefix in
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
+opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
+reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
+
 ## Build
 
 ```

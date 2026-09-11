@@ -6,6 +6,7 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -23,6 +24,7 @@ class CampaignStateMachineTest {
         id = UUID.randomUUID(),
         name = "Podzimní vklady",
         goal = "Zvýšit vklady",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("saver-high-balance", 1),
         steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, mapOf("offerTitle" to "5.2 %"), 0)),
         state = CampaignState.DRAFT,
@@ -43,6 +45,7 @@ class CampaignStateMachineTest {
             CampaignDefinition(
                 name = "Jarní vklady",
                 goal = "Zvýšit spoření",
+                productKind = CampaignProductKind.NONE,
                 segmentRef = SegmentRef("saver-high-balance", 1),
                 steps = listOf(
                     CampaignStep(
@@ -63,6 +66,7 @@ class CampaignStateMachineTest {
                 CampaignDefinition(
                     name = "Nesmí projít",
                     goal = "",
+                    productKind = CampaignProductKind.NONE,
                     segmentRef = SegmentRef("saver-high-balance", 1),
                     steps = emptyList(),
                 ),
@@ -136,5 +140,49 @@ class CampaignStateMachineTest {
         assertEquals(setOf(Channel.EMAIL, Channel.PUSH, Channel.BANNER), Channel.entries.toSet())
         assertThrows<IllegalArgumentException> { Channel.valueOf("SMS") }
         assertThrows<IllegalArgumentException> { Channel.valueOf("IN_APP") }
+    }
+
+    // ── ADR-0269 rule 1: the product kind, and when it may still change ──────────────────────
+
+    @Test
+    fun `a revision may still change the product kind while the campaign is a DRAFT`() {
+        val revised = draft().revise(
+            CampaignDefinition(
+                name = "Podzimní vklady",
+                goal = "Zvýšit vklady",
+                productKind = CampaignProductKind.UNSECURED,
+                segmentRef = SegmentRef("saver-high-balance", 1),
+                steps = draft().steps,
+            ),
+        )
+        assertEquals(CampaignProductKind.UNSECURED, revised.productKind)
+    }
+
+    @Test
+    fun `the product kind is frozen once the campaign leaves DRAFT`() {
+        // Fixed at publish, and in fact earlier: submission is the point of no return. A kind that
+        // could change under an ACTIVE campaign would change which consent governs the parties it
+        // has already enrolled, retroactively.
+        val submitted = draft().submit()
+        assertThrows<IllegalArgumentException> {
+            submitted.revise(
+                CampaignDefinition(
+                    name = submitted.name,
+                    goal = submitted.goal,
+                    productKind = CampaignProductKind.REVOLVING,
+                    segmentRef = submitted.segmentRef,
+                    steps = submitted.steps,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `only NONE is not credit`() {
+        // The gate branches on isCredit, so a new member added to the enum later must be a
+        // deliberate decision about which side of that line it falls on, not a default.
+        assertEquals(false, CampaignProductKind.NONE.isCredit)
+        CampaignProductKind.entries.filter { it != CampaignProductKind.NONE }
+            .forEach { assertEquals(true, it.isCredit, "$it must count as credit") }
     }
 }

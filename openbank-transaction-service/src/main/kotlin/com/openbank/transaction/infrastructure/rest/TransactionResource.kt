@@ -111,8 +111,8 @@ class TransactionResource(
                 referenceNumber = referenceNumber,
                 endToEndId = endToEndId,
                 counterpartyName = counterparty,
-                status = status?.let { runCatching { TransactionStatus.valueOf(it) }.getOrNull() },
-                type = type?.let { runCatching { TransactionType.valueOf(it) }.getOrNull() },
+                status = parseEnumParam<TransactionStatus>("status", status),
+                type = parseEnumParam<TransactionType>("type", type),
                 dateFrom = dateFrom?.let { LocalDate.parse(it) },
                 dateTo = dateTo?.let { LocalDate.parse(it) },
                 amountMin = amountMin,
@@ -166,8 +166,8 @@ class TransactionResource(
             initiatedByPartyId = request.initiatedByPartyId,
             scaChallengeId = request.scaChallengeId,
             scaExemption = request.scaExemption,
-            rail = request.rail?.let { runCatching { PaymentRail.valueOf(it) }.getOrNull() },
-            instructionType = request.instructionType?.let { runCatching { InstructionType.valueOf(it) }.getOrNull() },
+            rail = parseEnumParam<PaymentRail>("rail", request.rail),
+            instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))
@@ -349,6 +349,13 @@ data class TransactionResponse(
  * and a head-office pin on a "where you spent" map would be fiction. [source] is always `ENRICHED`
  * here; the field exists so a client never has to infer whether a name is the bank's or the
  * acquirer's.
+ *
+ * [logoUrl] is ORIGIN-RELATIVE and always points back at whichever host served this response. That
+ * is the whole design: the catalogue also records where a logo was obtained from, and putting THAT
+ * URL here instead would make every statement render fire a request at a third-party CDN carrying
+ * the customer's IP address and the merchant they paid — a spending profile leaving the bank
+ * through an `<img>` tag. The bytes are ingested once and served from this bank's own origin, so
+ * the field is a path and never an external link.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class MerchantResponse(
@@ -361,9 +368,20 @@ data class MerchantResponse(
 
 data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
 
+/**
+ * How much of the content hash goes in the logo URL. A 64-bit prefix: the token only has to
+ * distinguish one merchant's successive logos from each other, and a full hash makes every
+ * statement row longer for nothing.
+ */
+private const val LOGO_VERSION_CHARS = 16
+
 private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
     cleanName = cleanName,
-    logoUrl = logoUrl,
+    // Null when no logo has been ingested — absence stays absence, and a client renders whatever
+    // it renders today. The hash makes the URL change whenever the bytes do, which is what lets
+    // the logo route answer with a year-long immutable cache and still correct a wrong logo the
+    // moment it is replaced.
+    logoUrl = logoEtag?.let { "/api/v1/merchants/$descriptorKey/logo?size=64&v=${it.take(LOGO_VERSION_CHARS)}" },
     category = category,
     // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
     // half-populated row can never become a pin at latitude 0.
@@ -396,3 +414,21 @@ private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity>
 
 private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
     CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)
+
+/**
+ * Strict enum parsing for request inputs (issue #8699). The previous
+ * `runCatching { X.valueOf(it) }.getOrNull()` turned an unparseable value into a LEGAL null, and
+ * null then did two different wrong things: on the search filters it DROPPED the condition, so
+ * `?status=FAILDE` returned every transaction with a 200 (while a malformed date three lines
+ * below correctly 400s), and on the initiate path it persisted a money-path debit with
+ * `rail = null` under a 201. Absent and unparseable must stay distinguishable: absent stays null,
+ * unparseable is the caller's error — IllegalArgumentException, which libs-runtime maps to 400
+ * (#526: never a service-local mapper).
+ */
+private inline fun <reified E : Enum<E>> parseEnumParam(name: String, raw: String?): E? {
+    raw ?: return null
+    return enumValues<E>().firstOrNull { it.name == raw }
+        ?: throw IllegalArgumentException(
+            "'$name' has unknown value '$raw' (allowed: ${enumValues<E>().joinToString()})",
+        )
+}

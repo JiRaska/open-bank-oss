@@ -6,6 +6,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { hasPermission, permissionForPath } from "@/lib/auth/roles"
 import { isPublicSurface } from "@/lib/auth/publicSurface"
+import { scriptSourceDirective } from "@/lib/security/contentSecurityPolicy"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
@@ -23,12 +24,13 @@ const GLITCHTIP_ORIGIN = (() => {
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    scriptSourceDirective(nonce, process.env.NODE_ENV === 'development'),
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: blob:",
     `connect-src 'self' ${KC_URL} ${GLITCHTIP_ORIGIN}`,
-    "frame-src 'self'",
+    // Grafana OAuth navigates its frame to our identity provider before returning.
+    `frame-src 'self' ${new URL(KC_URL).origin}`,
     "frame-ancestors 'self'",
     "object-src 'none'",
     "base-uri 'self'",
@@ -121,6 +123,12 @@ export const config = {
     // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
     // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
     // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
-    "/((?!api/auth|api/gate|_next/static|_next/image|brand/|favicon.ico|robots.txt).*)",
+    // api/security/kpis/metrics is excluded so the in-cluster Prometheus ServiceMonitor
+    // (servicemonitor-admin-ui.yaml) can scrape it: Prometheus cannot hold a console
+    // session, and a 302-to-login would read as a permanently-down target. The series it
+    // exposes are aggregate posture gauges (counts and percentages from the weekly CI
+    // snapshot), not secrets — the same exposure class as every Quarkus /q/metrics pod
+    // scraped cluster-wide. The human-facing JSON sibling /api/security/kpis stays gated.
+    "/((?!api/auth|api/gate|api/security/kpis/metrics|_next/static|_next/image|brand/|favicon.ico|robots.txt).*)",
   ],
 }

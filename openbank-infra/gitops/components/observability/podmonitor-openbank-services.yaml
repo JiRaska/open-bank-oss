@@ -61,6 +61,7 @@ spec:
       - balances
       - billing
       - campaign
+      - communication
       - consent
       - control-liveness-sentinel
       - customer-edge
@@ -81,6 +82,7 @@ spec:
       - kyc
       - ledger
       - lending
+      - kyb
       - notifications
       - onboarding
       - party

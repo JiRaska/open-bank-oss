@@ -166,8 +166,15 @@ and drop the lattice.
 Two further corrections the collapse makes moot but which are worth recording. `WELCOME` is **not**
 marketing: its rendered body ("Thank you for joining OpenBank, {name}") promotes no product. The
 first draft inherited that label from an unexamined comment in `OversightWebhook.kt` — and had it
-been right, D6's marketing hard-deny would have made the **live onboarding flow non-compliant
-today**, which the draft never noticed. And the first draft used the name `MARKETING` on both this
+been right, D6's marketing hard-deny would have refused it.
+
+> **Correction, 2026-09-05 (#8568).** That sentence originally said the hard-deny would have made
+> "the live onboarding flow non-compliant today". It would not have: `WELCOME` has **no producer**
+> — nothing anywhere emits it, verified by emission shape rather than by name — so there is no live
+> flow to make non-compliant. The correction above stands on its own merits; only the claim about
+> live impact was wrong. Kept in the enum for now: the onboarding moment it would occupy already
+> carries `KYC_APPROVED` and then `ACCOUNT_OPENED`, so a third greeting is a product decision about
+> replacing one of those, not an omission to fill. And the first draft used the name `MARKETING` on both this
 axis and D6's, so one template was simultaneously deliverable (D1) and refused (D6). Sensitivity and
 purpose are orthogonal, and now only one of them uses the word.
 

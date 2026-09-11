@@ -315,6 +315,7 @@ jobs:
       # that need them are set here rather than in the manifest.
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_REF: ${{ github.base_ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical
@@ -430,18 +431,57 @@ jobs:
       # creation-time base and both claimed the same openapi info.version (#481 x #524).
       # Exported per shard because every shard may hold a `needs_base: true` gate; a gate
       # that reads it while it is empty is failed by run-gates.py rather than run vacuously.
+      #
+      # The previous HEAD^2 shortcut did not survive contact with this job's fetch-depth: 1
+      # checkout: the merge commit's parent objects are not in the object database, so
+      # `rev-parse --verify HEAD^2` fails and every long-lived PR fell back to the
+      # creation-time base.sha. A branch that had absorbed main since opening then diffed
+      # the whole absorbed window — measured 2026-09-06 on #8334: a ~17-file notification
+      # PR reported 620 touched money-path files (security-checklist-money-path) and 33
+      # "changed" contract tests (adversarial-contract-test), all of them main's own merged
+      # work. Deepen the base branch until the TRUE merge-base resolves; branch refs are
+      # fetchable here while arbitrary shas are not (verified 2026-09-06: `git fetch origin
+      # <sha>` answers "couldn't find remote ref" for short shas and works for full ones,
+      # but a ref fetch is the stable path).
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
         if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          base="${EVENT_BASE_SHA}"
-          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
-          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
-            base="$(git rev-parse 'HEAD^1')"
-          else
-            git fetch --depth=1 origin "${base}" 2>/dev/null || true
+          base=""
+          git fetch -q --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          for _ in 1 2 3 4 5 6 7 8; do
+            if base="$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null)"; then break; fi
+            git fetch -q --deepen=400 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          done
+          if [ -z "${base}" ]; then
+            echo "::warning::merge-base against origin/${BASE_REF} did not resolve after deepening; falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
+            base="${EVENT_BASE_SHA}"
+          fi
+          # Every gate runs `git diff "${PR_DIFF_BASE}...HEAD"`, and the THREE-DOT form needs the
+          # merge-base of the two — not merely the base object. In a shallow checkout those are
+          # different properties: measured 2026-09-07 against this remote, with the base fetched by
+          # sha and `git cat-file -e` answering yes, `git diff A...HEAD` still exits 128 while
+          # `A..HEAD` works, because the shared history is cut. Deepening is what fixes it: after
+          # `--deepen`, merge-base resolves and the three-dot diff succeeds.
+          #
+          # So the invariant to guarantee here is `git merge-base <base> HEAD` resolving, and the
+          # bug this replaces is that the fallback above sets a base without re-checking it. Three
+          # gates then died with `exit status 128` and the runner rendered each as that gate's
+          # FINDING rather than an error — credential-deadline-ratchet, adversarial-contract-test
+          # and security-checklist-money-path all reported plausible, actionable defects on
+          # #9077/#9086/#9098 having evaluated nothing (issue #9100).
+          if ! git merge-base "${base}" HEAD >/dev/null 2>&1; then
+            echo "merge-base ${base}..HEAD does not resolve yet — unshallowing so gates can diff."
+            git fetch -q --unshallow origin 2>/dev/null || git fetch -q --deepen=2000 origin 2>/dev/null || true
+          fi
+          if ! git merge-base "${base}" HEAD >/dev/null 2>&1; then
+            echo "::error::No merge-base between ${base} and HEAD in this checkout, so every gate that"
+            echo "::error::diffs against PR_DIFF_BASE would exit 128 and be reported as a FINDING."
+            echo "::error::This is a checkout/fetch failure, not a policy violation. Re-run the job, or"
+            echo "::error::merge origin/${BASE_REF} into the branch so the base is in its own history."
+            exit 1
           fi
           echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
@@ -685,29 +725,3 @@ jobs:
   # `edited` pull_request event (PR-body fixes re-evaluate the check) without
   # re-running this whole workflow on every description edit.
   # ---------------------------------------------------------------------------
-
-  # ---------------------------------------------------------------------------
-  # Dependency review — fails a PR that introduces a known-vulnerable dependency.
-  # Requires the Dependency Graph + GitHub Advanced Security, which on a PRIVATE
-  # repo is a paid GHAS add-on (not bundled with Free or Pro). The job therefore
-  # auto-skips while the repo is private and activates the moment it goes public
-  # (where GHAS is free). Until then, Trivy fs scan + Dependabot cover vulnerable
-  # dependency detection.
-  # ---------------------------------------------------------------------------
-  dependency-review:
-    name: Dependency review
-    if: github.event_name == 'pull_request' && github.event.repository.private == false
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Dependency review
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5
-        with:
-          fail-on-severity: high
-          # See dependency-review.yml for the full rationale: starlette is pinned
-          # below its patched versions by schemathesis==3.39.16's own dependency
-          # declaration, and schemathesis is only used as a CI-only fuzzing CLI
-          # (never serves traffic), so the flagged ASGI-server code paths don't
-          # apply here.
-          allow-ghsas: GHSA-wqp7-x3pw-xc5r, GHSA-82w8-qh3p-5jfq

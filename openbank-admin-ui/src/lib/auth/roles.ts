@@ -23,6 +23,12 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
+  // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
+  // decides the commstyle.publish four-eyes queue) — never the same person on the same
+  // draft, enforced server-side (CommunicationStyleService.publish).
+  COMMS_EDITOR: "ROLE_COMMS_EDITOR",
+  COMMS_APPROVER: "ROLE_COMMS_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -62,6 +68,9 @@ export const PERMISSIONS = {
   // Lending compliance-pack reads include the operational lending roles accepted by
   // CompliancePackResource.listActive; maker/checker writes remain compliance/admin only.
   "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  // Credit-risk console (ADR-0230 D1): the same set CreditRiskResource admits — the desk that may
+  // read the ADR-0214 evidence bundle, and nobody wider (it exposes every applicant's income).
+  "lending:risk:view":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -199,6 +208,17 @@ export const PERMISSIONS = {
   // MCP agent-service accepts only these human roles; keep demo out of the tool cockpit and
   // expose compliance's authorized read/execute path instead.
   "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Communication Studio (ADR-0285 D6, phase 1). Read-only projection of the ADR-0148 prompt
+  // registry: what each channel says today and which layer is locked. Deliberately WIDER than
+  // agent:view — the audience is the business units that talk to customers (contact centre,
+  // back-office, complaints), not the agent cockpit. The dedicated ROLE_COMMS_EDITOR /
+  // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
+  // put two role vocabularies in the console for a surface that cannot yet be written to.
+  "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
+  // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
+  "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
+  "communication:style:decide":  [ROLES.ADMIN, ROLES.COMMS_APPROVER],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
@@ -244,13 +264,13 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
-  ['transactions:view', ['/transactions']],
-  ['payment-rails:view', ['/swift', '/clearing']],
+  ['transactions:view', ['/transactions', '/merchants']],
+  ['payment-rails:view', ['/swift', '/clearing', '/sdd']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],
   ['payments:view', [
-      '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant',
+      '/payments', '/product-catalog', '/standing-orders', '/sepa-instant',
       '/fx', '/fees', '/lending',
   ]],
   ['interest:view', ['/interest']],
@@ -258,6 +278,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
+    // ADR-0286: the warehouse-backed risk reporting surface. Each registry entry also carries
+    // its own permission at the BFF boundary — this prefix only gates the page shell.
+    '/reporting',
   ]],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
@@ -265,6 +288,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['campaign:view', ['/campaigns']],
   ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
+  ['lending:risk:view', ['/lending/risk']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
@@ -272,6 +296,13 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
+  // Longest-prefix-wins: '/communication/edit' must be registered so it beats the bare
+  // '/communication' entry below for anything under it, since ROUTE_PREFIXES only does a
+  // startsWith match (no wildcards) — a dynamic segment can only differentiate a permission
+  // when it comes AFTER the differentiating literal, which is why the editor lives at
+  // /communication/edit/[personaKey], not /communication/[personaId]/edit.
+  ['communication:style:propose', ['/communication/edit']],
+  ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]

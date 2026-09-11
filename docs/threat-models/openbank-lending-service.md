@@ -483,6 +483,42 @@ therefore fail-**open** while reading as fail-closed.
 `init` gate does not run until first use, which for a rarely-exercised path can be never — the
 warning that the code cannot fire would itself never fire.
 
+## 9e. The credit-offer eligibility read surface (ADR-0269 rule 2, #8918) — STRIDE supplement
+
+`GET /api/v1/lending/credit-offers/eligibility/{partyId}` is a NEW inbound REST surface on a
+money-path service, so it is modelled here before it is wired (ADR-0030 D2).
+
+It exposes a decision the service already made in-process. The gate calls itself the one place a
+credit offer is cleared, and that was true of its intent and false of its reach: it had no wire
+surface, so the only caller was `CustomerQuoteResource` asking the PULL question. Every push
+surface ADR-0269 governs had no way to ask, which is why rule 2's distress floor was enforced
+nowhere on that side.
+
+The sensitivity is the point: an allowed/suppressed pair plus a reason code is a statement about a
+named person's financial distress — `ARREARS`, `INSOLVENCY`, `HARDSHIP`. It is a smaller disclosure
+than the underlying facts and a real one.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **E**levation of privilege | A backend service reaches other lending endpoints through the door opened for this read | The OPA rule `service-credit-offer-eligibility` is scoped to ONE action and one principal. Tests assert the same identity gets nothing else from it, and that the edge does not inherit it. The action is read-only and has no write counterpart to be confused with. |
+| **I**nformation disclosure | A caller enumerates party ids and harvests who is in arrears | Callers are in-repo M2M on the shared `openbank-services` client, so this is every backend service at once — accepted for a single read, and the reason it is not widened. The route is not on the customer edge and no customer token reaches it. Rate limiting and per-caller identity are NOT solved here: the shared client cannot distinguish campaign-service from any other, which is a known limit of the current M2M model (ADR-0206 D5) rather than something this route introduces. |
+| **S**poofing the surface | A caller asks the PULL question to skip the consent half | `OfferSurface.PUSH` is fixed in code and is not a parameter. PULL's consent exemption exists for a customer who asked; making the surface caller-supplied would hand that exemption to anyone who passed the right string. |
+| **T**ampering / misleading | An unreachable gate is read as permission | The route answers a decision or an error and never "probably fine". Callers must fail closed; `SIGNALS_UNAVAILABLE` already suppresses inside the gate rather than guessing. The failure direction is stated in the OpenAPI description so a caller cannot claim it was undocumented. |
+| **R**epudiation | The bank cannot show why a customer was or was not marketed to | `policyVersion` is in the response, so a decision can be tied to the decision-table version that produced it (ADR-0213). The reason code is contract, not a log line. |
+| **D**oS / availability | A large campaign sweep multiplies one DB read plus one analytics profile call per party | Real and unsolved here: this slice reduces the volume by moving the check to delivery rather than enrolment, but not the unit cost. Caching would need an explicit freshness bound, because a stale "not in distress" outlives the arrears that ended it — the harmful direction. Recorded in #8918 rather than inherited by accident. |
+
+**Update (#8918 part 2): the caller now exists.** campaign-service consumes this route before every
+credit send, which turns a declared-but-unused surface into a live cross-namespace ingress edge —
+`campaign` was added to this namespace's allowed ingress by `gen-network-policies.py`.
+
+What that changes, and what it does not:
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | A second namespace can now reach an endpoint that states whether a named party is in arrears | The edge is declared, generated and reviewable rather than ambient — an undeclared caller is still DROPPED by the same policy. The blast radius is unchanged in kind: the shared `openbank-services` principal already made this readable by any backend service, which is the limitation recorded above, not one this edge introduces. |
+| **D**oS / availability | A campaign sweep drives call volume into lending | Reduced, not solved: the check sits at DELIVERY rather than enrolment, so the volume is what is actually being sent today rather than everyone in a segment. Unit cost (one DB read + one analytics call per party) is unchanged and is recorded in #8918. |
+| **T**ampering | A lending outage is read by the caller as permission to market | campaign-service raises rather than answering "not allowed": an outage is retriable infrastructure state, never a customer-policy suppression, so nothing is sent AND nothing is recorded as a distress refusal. |
+
 ## 10. Change log
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
@@ -660,3 +696,31 @@ warning that the code cannot fire would itself never fire.
   impact of a candidate parameter set before it merges. No new endpoint, no authz change, no
   behavior change to computed values (the defaults themselves are untouched). Rollback: revert
   the commit; the `model_version` column is additive and unread by pre-change code.
+- **2026-09-07** — Creation-POST idempotency (ADR-0297, burn-down #8351): the two application
+  creation POSTs (`/api/v1/lending/applications`, `/api/v1/lending/intake/applications`) accept
+  an optional `Idempotency-Key` / `X-Request-ID` replayed for 300 s per party via the shared
+  Redis `IdempotencyStore`; collateral registration replays the still-PENDING identical twin
+  (caller tuple), closing the path where a transport retry stacked a duplicate a checker could
+  approve twice — two approved identical items would double-count against the loan's LGD;
+  compliance-pack proposals replay on the pack `contentHash` while PROPOSED; intake quotes are
+  pure computations with no persistence. The 17 lifecycle POSTs were re-verified as guarded by
+  the aggregate state machine. No new caller, route or role; the optional key changes nothing
+  for clients that do not send it. Rollback: revert the commit.
+
+## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
+
+`CreditRiskResource` adds four read-only endpoints under `/api/v1/lending/risk`
+(`decisions`, `decisions/summary`, `portfolio`, `policy`) for the admin-ui credit-risk console
+and notebook export. No mutation: the console renders decisions and never makes them
+(ADR-0227 D4 keeps disposal in the approval inbox). What changes the trust picture is the
+**breadth of one read**: a single call returns every evaluated applicant's affordability inputs
+(income, existing debt service, age, residency) and the book-wide stage/ECL picture.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all four paths. |
+| **I**nfo disclosure | Bulk export of PII via `limit` | Clamped server-side to 1..1000 (`CreditRiskInsightService.MAX_LIMIT`); the endpoint is a console read, not a data feed — the warehouse (ADR-0022) is the sanctioned bulk path once the lending topic is wired to the sink (tracked). |
+| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; the affordability ratios call the ASSESSMENT leg's own `OriginationDecisionService.affordabilityRatios`, so a console figure and an engine figure cannot diverge. The total-DSTI figure (`dstiIncludingExistingDebt`) is labelled as **not** what the engine reads. |
+| **R**epudiation | "Which policy produced this?" | Every row carries the pinned table versions and input hash; `/policy` reports `codeSeeded=true` while `StarterCreditPolicy` is the binding, so a reader knows the tables cannot have been changed without a reviewed commit. |
+| **D**oS | Repeated book-wide reads | Two `GROUP BY` aggregates and two capped, indexed reads (`decided_engine_at`, `disbursed_at`, `(loan_id, period)`); no joins over installments. Same rate-limit posture as the other reads. |
+| **S**poofing / **E**oP | n/a | No write path; no identity is taken from the request. |

@@ -124,6 +124,9 @@ class LendingServiceTest {
     private fun stubClaim(claimed: Int = 1) {
         every { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) } returns
             Uni.createFrom().item(claimed)
+        // The ASSESSMENT leg claims through the decision-carrying overload instead, so both must be
+        // stubbed for a walk that crosses that state.
+        every { applications.compareAndSetDecision(any(), any()) } returns Uni.createFrom().item(claimed)
     }
 
     private fun verifyClaims(times: Int) =
@@ -242,6 +245,18 @@ class LendingServiceTest {
         assertThat(result.decisionPriceBand).isEqualTo("PRIME")
         assertThat(result.decisionInputHash).hasSize(64)
         assertThat(evidenceSlot.map { it.eventType }).contains("credit.decision.evaluated")
+
+        // The claim must carry the evidence into the database, not just into the response. Until
+        // `compareAndSetDecision` existed the ASSESSMENT leg claimed through `compareAndSetStatus`,
+        // which writes neither outcome nor price band, so every engine column stayed NULL while
+        // these very assertions passed against the in-memory copy.
+        val claimed = slot<LoanApplication>()
+        verify(exactly = 1) { applications.compareAndSetDecision(capture(claimed), OriginationState.ASSESSMENT) }
+        assertThat(claimed.captured.decisionOutcome).isEqualTo("APPROVE")
+        assertThat(claimed.captured.decisionPriceBand).isEqualTo("PRIME")
+        assertThat(claimed.captured.decisionInputHash).isEqualTo(result.decisionInputHash)
+        assertThat(claimed.captured.decidedEngineAt).isNotNull()
+        verify(exactly = 0) { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -1343,6 +1358,7 @@ class LendingServiceTest {
             haircut = BigDecimal("0.40"),
         )
         every { valuation.revalue("VEHICLE", eur("5000.00")) } returns Uni.createFrom().item(eur("5000.00"))
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
         val saved = slot<Collateral>()
         every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
 
@@ -1362,6 +1378,59 @@ class LendingServiceTest {
 
         assertThatThrownBy { service.register(loanId, request, "").await().indefinitely() }
             .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a retried register with the same tuple replays the original PENDING collateral`() {
+        // ADR-0297 (#8351): a retried POST with an identical caller tuple must not stack a
+        // duplicate PENDING row that a checker could approve twice.
+        val loanId = LoanId.random()
+        val request = CollateralRequest(
+            type = CollateralType.VEHICLE,
+            description = "van",
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+        )
+        val original = collateralItem(
+            loanId,
+            eur("5000.00"),
+            BigDecimal("0.40"),
+            CollateralType.VEHICLE,
+            status = CollateralStatus.PENDING,
+        ).copy(description = "van")
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(listOf(original))
+
+        val result = service.register(loanId, request, "officer-1").await().indefinitely()
+
+        assertThat(result.id).isEqualTo(original.id)
+        verify(exactly = 0) { collateral.save(any()) }
+    }
+
+    @Test
+    fun `a register after the original was decided is a legitimate new registration`() {
+        val loanId = LoanId.random()
+        val request = CollateralRequest(
+            type = CollateralType.VEHICLE,
+            description = "van",
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+        )
+        val decided = collateralItem(
+            loanId,
+            eur("5000.00"),
+            BigDecimal("0.40"),
+            CollateralType.VEHICLE,
+            status = CollateralStatus.APPROVED,
+        ).copy(description = "van")
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(listOf(decided))
+        every { valuation.revalue("VEHICLE", eur("5000.00")) } returns Uni.createFrom().item(eur("5000.00"))
+        val saved = slot<Collateral>()
+        every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
+
+        val result = service.register(loanId, request, "officer-1").await().indefinitely()
+
+        assertThat(result.id).isNotEqualTo(decided.id)
+        verify(exactly = 1) { collateral.save(any()) }
     }
 
     @Test
@@ -1955,6 +2024,23 @@ class LendingServiceTest {
     private fun sourceServiceOf(message: LendingOutboxMessage): String =
         com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get("sourceService").asText()
 
+    private fun fieldOf(message: LendingOutboxMessage, field: String): String? =
+        com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get(field)?.asText()
+
+    /**
+     * The wire identity of one event (#8893): the sink keys `bronze_events` on
+     * `(aggregate_type, aggregate_id)` and falls back to `partyId` when the payload settles neither,
+     * so asserting the pair is asserting that one borrower's loans stay distinct downstream.
+     */
+    private fun assertLoanIdentity(message: LendingOutboxMessage, loanId: java.util.UUID) {
+        assertThat(fieldOf(message, "aggregateType")).isEqualTo("LOAN")
+        assertThat(fieldOf(message, "aggregateId")).isEqualTo(loanId.toString())
+        val party = fieldOf(message, "partyId")
+        if (party != null) {
+            assertThat(fieldOf(message, "aggregateId")).isNotEqualTo(party)
+        }
+    }
+
     @Test
     fun `loan disbursed carries sourceService on the wire`() {
         val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
@@ -1967,11 +2053,14 @@ class LendingServiceTest {
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
         stubBorrowerCreditSucceeds()
 
-        service.disburse(app.id, "dave").await().indefinitely()
+        val loan = service.disburse(app.id, "dave").await().indefinitely()
 
         val disbursed = emitted.single { it.eventType == "loan.disbursed" }
         assertThat(sourceServiceOf(disbursed)).isEqualTo("lending")
         assertThat(disbursed.payload).contains("\"sourceService\":\"lending\"")
+        // The id comes from the returned aggregate, never from the payload under test.
+        assertLoanIdentity(disbursed, loan.id.value)
+        assertThat(fieldOf(disbursed, "partyId")).isEqualTo(app.partyId.toString())
     }
 
     @Test
@@ -1997,6 +2086,7 @@ class LendingServiceTest {
 
         service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
 
+        assertLoanIdentity(emitted.single { it.eventType == "loan.interest_accrued" }, loanId.value)
         assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.interest_accrued" }))
             .isEqualTo("lending")
     }
@@ -2027,8 +2117,9 @@ class LendingServiceTest {
         service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
             .await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.written_off" }))
-            .isEqualTo("lending")
+        val writtenOff = emitted.single { it.eventType == "loan.written_off" }
+        assertThat(sourceServiceOf(writtenOff)).isEqualTo("lending")
+        assertLoanIdentity(writtenOff, loanId.value)
     }
 
     @Test
@@ -2043,8 +2134,9 @@ class LendingServiceTest {
 
         service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.rescheduled" }))
-            .isEqualTo("lending")
+        val rescheduled = emitted.single { it.eventType == "loan.rescheduled" }
+        assertThat(sourceServiceOf(rescheduled)).isEqualTo("lending")
+        assertLoanIdentity(rescheduled, loanId.value)
     }
 
     @Test
@@ -2088,9 +2180,14 @@ class LendingServiceTest {
 
         service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.stage_changed" }))
-            .isEqualTo("lending")
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.provisioned" }))
-            .isEqualTo("lending")
+        val stage = emitted.single { it.eventType == "loan.stage_changed" }
+        val provisioned = emitted.single { it.eventType == "loan.provisioned" }
+        assertThat(sourceServiceOf(stage)).isEqualTo("lending")
+        assertThat(sourceServiceOf(provisioned)).isEqualTo("lending")
+        assertLoanIdentity(stage, loanId.value)
+        assertLoanIdentity(provisioned, loanId.value)
+        // `loan.provisioned` carried no party at all before #8893, so an ECL history in the
+        // warehouse could not be attributed to a borrower.
+        assertThat(fieldOf(provisioned, "partyId")).isEqualTo(loan.partyId.toString())
     }
 }

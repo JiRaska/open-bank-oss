@@ -269,6 +269,35 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
+              # A changed pact builds BOTH sides, exactly as the main-push path above already
+              # does. Without this the PR path attributes files ONLY by `^<module>/`, so a
+              # pact-only PR matched no module, built nothing, and merged green — then broke the
+              # PROVIDER's build on main, where nobody is watching a service they did not touch.
+              # That is #8697: three consumer pacts gained a "no valid M2M identity is presented"
+              # interaction, transaction-service had no such provider state, and main went red
+              # with the causing PR long merged (issue #8984).
+              # Derivation matches the push path (split on the LAST '-openbank-'). A consumer that
+              # is not a Gradle module is skipped rather than failing the scoping: openbank-admin-ui
+              # authors four of the committed pacts and builds in its own workflow. A PROVIDER that
+              # does not resolve to a module is not skippable — it is the side that verifies — so
+              # that falls back to the full fleet, the safe direction this detector always takes.
+              while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                base=$(basename "$f" .json)
+                case "$base" in
+                  *-openbank-*) ;;
+                  *) echo "Pact ${f} does not carry a '<consumer>-openbank-<provider>' name -> full-fleet."
+                     CHANGED="$ALL"; break ;;
+                esac
+                prov="openbank-${base##*-openbank-}"
+                cons="${base%-openbank-*}"
+                if ! grep -qE "(^| )${prov}( |\$)" <<< " $ALL "; then
+                  echo "Pact ${f} names provider ${prov}, which is not a module -> full-fleet."
+                  CHANGED="$ALL"; break
+                fi
+                CHANGED="$CHANGED $prov"
+                if grep -qE "(^| )${cons}( |\$)" <<< " $ALL "; then CHANGED="$CHANGED $cons"; fi
+              done <<< "$(grep -E '^pacts/.*\.json$' <<< "$FILES_CODE" || true)"
               # DST harness dependency edge (ADR-0115). openbank-simulation validates money-path
               # invariants against the ledger/balance/transaction domains, but this detector is
               # per-directory, NOT dependency-aware: a change to one of those services would build
@@ -342,13 +371,14 @@ jobs:
       # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
       # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
       # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
-      # once, and 4 stays comfortably under both the 20-job hosted cap (leaving headroom for
-      # other concurrent CI in the account) and the 12-runner ARC pool.
+      # once. Eight stays below both the 20-job hosted cap (leaving 12 slots for other CI)
+      # and the 12-runner ARC pool (leaving four slots for targeted verification/deploy work).
       #
-      # The number itself is UNCHANGED from before this split (kept conservative rather than
-      # re-tuned on an unmeasured guess) — raising it is a candidate follow-up once real
-      # dispatch data exists for the new hosted-build shape, not asserted here.
-      max-parallel: 4
+      # Measured on successful full-fleet run 34476896912 after the hosted-build split:
+      # 50 build jobs, median 7.8 min, P90 10.4 min, 381 runner-minutes. Four lanes impose
+      # a ~95 min work floor before queueing; eight cut that floor to ~48 min without
+      # saturating either pool. Re-measure before raising it again.
+      max-parallel: 8
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
@@ -404,7 +434,7 @@ jobs:
           echo "modules=${mods}" >> "$GITHUB_OUTPUT"
           echo "changed modules: ${mods:-<none>}"
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin

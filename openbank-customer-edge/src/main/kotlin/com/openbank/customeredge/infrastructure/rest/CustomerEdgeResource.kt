@@ -110,6 +110,14 @@ class CustomerEdgeResource(
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
 
+    // ADR-0284 D4: profile switching. Field-injected for the same LongParameterList reason as the
+    // merge resolver above; every test that constructs this resource by hand sets it explicitly.
+    @Inject
+    lateinit var actingForResolver: ActingForResolver
+
+    @jakarta.ws.rs.core.Context
+    lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
+
     @Inject
     lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
@@ -295,6 +303,36 @@ class CustomerEdgeResource(
             return forbidden("Account does not belong to caller")
         }
         return Response.ok(accountJson).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Who can act on one of the caller's OWN accounts (ADR-0232).
+     *
+     * **Owner-only, deliberately.** [getAccount] lets a delegate read the account itself, but not
+     * this: the list of everyone else who holds access is the grantor's business. A delegate who
+     * could read it would learn about the owner's other delegates and the bank mandates on the
+     * account — none of which their own grant is about.
+     *
+     * The answer unifies BOTH stores the payment guard consults — bank mandates and customer
+     * delegations — because an owner shown only the delegations they issued themselves would be
+     * shown a comforting half-truth about who can take money out.
+     *
+     * Party ids only cross this boundary; no names or contact details, so the response cannot turn
+     * an account id into a person's details.
+     */
+    @GET
+    @Path("/accounts/{accountId}/access")
+    @Authorize(action = "customer.accounts.read", resource = "#accountId")
+    @Blocking
+    fun getAccountAccess(@PathParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        return upstream.get(
+            "$accountServiceUrl/api/v1/accounts/$accountId/authorizations/effective",
+            customer.partyId.toString(),
+        )
     }
 
     // --- Balances ---
@@ -576,23 +614,22 @@ class CustomerEdgeResource(
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header must not be blank" }
         require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
         val customer = customer()
-        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
-            ?: return badRequest("Malformed term-deposit request")
-        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
-            return badRequest("Term-deposit request contains unsupported fields")
+        val parsed = when (val result = parseOpenTermDepositRequest(body)) {
+            is OpenRequestParse.Reject -> return result.response
+            is OpenRequestParse.Ok -> result
         }
-        val productId = request.uuidField("productId")
-            ?: return Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build()
-        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
-            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
-                runCatching { UUID.fromString(value) }.getOrNull()
-            } ?: return badRequest("incentiveReservationId must be a UUID")
-        }
+        val request = parsed.request
+        val productId = parsed.productId
+        val reservationId = parsed.reservationId
         val offer = when (val result = resolvePublicTermDeposit(customer, productId)) {
             is TermDepositResolution.Found -> result.offer
             TermDepositResolution.NotFound -> return termDepositNotFound()
             TermDepositResolution.Unavailable -> return termDepositCatalogueUnavailable()
         }
+        // #9044: the terms record the deposit is opened under — see gateTermsForOpen.
+        val termsGate = gateTermsForOpen(request, offer)
+        if (termsGate is TermsGate.Reject) return termsGate.response
+        val terms = (termsGate as TermsGate.Ok)
         val party = when (val result = activeParty(customer)) {
             is ActivePartyResult.Approved -> result
             is ActivePartyResult.Rejected -> return result.response
@@ -603,6 +640,9 @@ class CustomerEdgeResource(
             .put("accountType", "TERM_DEPOSIT")
             .put("currencyCode", offer.path("currency").asText())
             .put("legalName", party.legalName)
+            .put("termsVersion", terms.version)
+            .put("termsUrl", terms.url)
+            .put("termsEffectiveFrom", terms.effectiveFrom)
         val response = upstream.post(
             "$accountServiceUrl/api/v1/accounts",
             customer.partyId.toString(),
@@ -2229,6 +2269,57 @@ class CustomerEdgeResource(
     }
 
     /**
+     * Point `merchant.logoUrl` at THIS edge instead of at transaction-service's own path.
+     *
+     * The service emits an origin-relative `/api/v1/merchants/<key>/logo?…` on purpose — a logo must
+     * never be a third-party URL, or every statement render would tell that host the customer's IP
+     * address and which merchant they paid. Origin-relative is right and, unchanged, it is also
+     * unreachable here: this edge serves `/customer/v1`, so a mobile client resolving that path
+     * against the edge host would 404. Rewriting the prefix keeps the property (still same-origin,
+     * still no third party) and makes it resolvable, which is why the edge does not simply forward
+     * this one field byte-for-byte as it does the rest of the object.
+     */
+    private fun rewriteMerchantLogoUrl(item: com.fasterxml.jackson.databind.JsonNode) {
+        val merchant = item.path("merchant") as? com.fasterxml.jackson.databind.node.ObjectNode ?: return
+        val logoUrl = merchant.path("logoUrl").asText(null) ?: return
+        if (!logoUrl.startsWith(UPSTREAM_MERCHANT_PREFIX)) return
+        merchant.put("logoUrl", EDGE_MERCHANT_PREFIX + logoUrl.removePrefix(UPSTREAM_MERCHANT_PREFIX))
+    }
+
+    /**
+     * A merchant's logo, proxied from transaction-service.
+     *
+     * Public business data — a trading name's mark — so there is no account to own and no ownership
+     * check to make; the route is authenticated like every other, and that is the whole gate. What
+     * it buys is the thing an `<img src>` to a logo CDN would have cost: the customer's device talks
+     * only to this bank, so no third party learns who they paid from the fact that a logo loaded.
+     *
+     * Bytes and content type pass through unchanged via [UpstreamClient.getRaw]. `v` is the content
+     * hash the service put in the URL; it is not read here, and is carried so a replaced logo is a
+     * different URL rather than a stale cache entry.
+     */
+    @GET
+    @Path("/merchants/{descriptorKey}/logo")
+    @Authorize(action = "customer.transactions.read")
+    @Blocking
+    fun merchantLogo(
+        @PathParam("descriptorKey") descriptorKey: String?,
+        @QueryParam("size") @DefaultValue("64") size: Int,
+    ): Response {
+        // Nullable + explicit check: a non-nullable JAX-RS path parameter would make an absent value
+        // a 500 rather than the 400 it is (fleet rule; the guard in the body would be dead code).
+        val key = descriptorKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return badRequest("Missing path parameter 'descriptorKey'")
+        val customer = customer()
+        return upstream.getRaw(
+            "$transactionServiceUrl/api/v1/merchants/${java.net.URLEncoder.encode(key, Charsets.UTF_8)}" +
+                "/logo?size=$size",
+            customer.partyId.toString(),
+            "image/png",
+        )
+    }
+
+    /**
      * Add `counterpartyIban` to each transaction in a page.
      *
      * transaction-service keys both sides by ACCOUNT ID and carries no IBAN, so a client reading
@@ -2272,6 +2363,7 @@ class CustomerEdgeResource(
                 }
                 if (iban != null) obj.put("counterpartyIban", iban)
             }
+            items.forEach { item -> rewriteMerchantLogoUrl(item) }
             Response.ok(root.toString()).build()
         }.getOrElse { resp }
     }
@@ -5015,7 +5107,29 @@ class CustomerEdgeResource(
         // with the surviving id — otherwise a merged customer sees an empty bank (no accounts,
         // no loans, no KYC case) while their data sits under the survivor. Fail-open: on any
         // upstream trouble the resolver hands back `claimed` unchanged. See PartyMergeResolver.
-        return CustomerIdentity(partyMergeResolver.resolve(claimed))
+        val human = partyMergeResolver.resolve(claimed)
+        // ADR-0284 D4: `X-Acting-For: <entityPartyId>` switches every downstream call to a legal
+        // entity the human holds an ACTIVE mandate for — verified against party-service and
+        // FAIL-CLOSED (403), the opposite of the merge resolver above: an unverified switch would
+        // show someone else's company, an unhonoured merge only shows the customer less.
+        val actingFor = if (this::requestHeaders.isInitialized) {
+            requestHeaders.getHeaderString(
+                ACTING_FOR_HEADER,
+            )
+        } else {
+            null
+        }
+        // `isInitialized`: tests that build this resource by hand set only what they exercise; in
+        // a CDI context both are always injected, so a missing resolver never reaches production.
+        val effective = if (this::actingForResolver.isInitialized) {
+            actingForResolver.resolve(
+                human,
+                actingFor,
+            )
+        } else {
+            human
+        }
+        return CustomerIdentity(effective)
     }
 
     private sealed interface ActivePartyResult {
@@ -5067,6 +5181,88 @@ class CustomerEdgeResource(
     }
 
     /** Maps the rich operator product into only the terms a retail customer needs to decide. */
+    /**
+     * The terms document in force TODAY for this offer (#9044): effectiveFrom <= today and
+     * (no effectiveTo or effectiveTo >= today); the latest effectiveFrom wins when several
+     * qualify. Returns null when the product carries no currently effective document — the
+     * caller must treat that as unopenable, never as "open it without a terms record".
+     */
+    private fun resolveCurrentTerms(offer: JsonNode): JsonNode? {
+        val today = LocalDate.now(clock)
+        val docs = offer.path("termsAndConditions")
+        if (!docs.isArray) return null
+        return docs.filter { doc ->
+            val from = runCatching { LocalDate.parse(doc.path("effectiveFrom").asText()) }.getOrNull()
+                ?: return@filter false
+            val to = doc.path("effectiveTo").takeIf { it.isTextual }
+                ?.let { runCatching { LocalDate.parse(it.asText()) }.getOrNull() }
+            !from.isAfter(today) && (to == null || !to.isBefore(today))
+        }.maxByOrNull { it.path("effectiveFrom").asText() }
+    }
+
+    /** Parses and validates the open-term-deposit request body (#9044 keeps this small). */
+    private fun parseOpenTermDepositRequest(body: String): OpenRequestParse {
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return OpenRequestParse.Reject(badRequest("Malformed term-deposit request"))
+        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
+            return OpenRequestParse.Reject(badRequest("Term-deposit request contains unsupported fields"))
+        }
+        val productId = request.uuidField("productId")
+            ?: return OpenRequestParse.Reject(
+                Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build(),
+            )
+        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
+                runCatching { UUID.fromString(value) }.getOrNull()
+            } ?: return OpenRequestParse.Reject(badRequest("incentiveReservationId must be a UUID"))
+        }
+        return OpenRequestParse.Ok(request, productId, reservationId)
+    }
+
+    private sealed interface OpenRequestParse {
+        data class Ok(val request: JsonNode, val productId: UUID, val reservationId: UUID?) : OpenRequestParse
+        data class Reject(val response: Response) : OpenRequestParse
+    }
+
+    /**
+     * The #9044 terms gate for term-deposit opening. The deposit must open with a RECORD of the
+     * terms it was opened under — they carry the early-withdrawal penalty and the notice period,
+     * and a complaints review asks "which terms govern this deposit" months later, when
+     * reconstruction from openedAt is least defensible. The edge resolves the CURRENTLY EFFECTIVE
+     * terms document server-side (what was published); a product with none is unopenable, and a
+     * client echoing a STALE rendered version is refused with 409, so a terms rollout can never
+     * bind the customer to a document they were not shown (ADR-0269: shown vs published is made
+     * explicit, never papered over).
+     */
+    private fun gateTermsForOpen(request: JsonNode, offer: JsonNode): TermsGate {
+        val terms = resolveCurrentTerms(offer)
+            ?: return TermsGate.Reject(
+                Response.status(Response.Status.CONFLICT)
+                    .entity("{\"error\":\"Product has no currently effective terms document\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        val version = terms.path("version").asText()
+        val shown = request.get("termsVersionShown")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()
+                ?: return TermsGate.Reject(badRequest("termsVersionShown must be a string"))
+        }
+        if (shown != null && shown != version) {
+            return TermsGate.Reject(
+                Response.status(Response.Status.CONFLICT)
+                    .entity("{\"error\":\"Terms version mismatch — re-display the current terms before opening\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        }
+        return TermsGate.Ok(version, terms.path("url").asText(), terms.path("effectiveFrom").asText())
+    }
+
+    private sealed interface TermsGate {
+        data class Ok(val version: String, val url: String, val effectiveFrom: String) : TermsGate
+        data class Reject(val response: Response) : TermsGate
+    }
+
     private fun termDepositOffer(product: JsonNode): ObjectNode? {
         val today = LocalDate.now(clock)
         if (!isDiscoverableTermDeposit(product) || !isCurrentlyValid(product, today)) return null
@@ -5080,10 +5276,43 @@ class CustomerEdgeResource(
             put("currency", product.path("currency").asText())
             product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minimumDeposit", it) }
             product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maximumDeposit", it) }
-            put("annualRate", configuration.path("interestRateAnnual").asDouble())
-            set<JsonNode>("term", configuration)
+            put("annualRate", ratePercent(configuration, "interestRateAnnual") ?: 0.0)
+            set<JsonNode>("term", configWithPercentRates(configuration, "interestRateAnnual"))
             set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
         }
+    }
+
+    /**
+     * The platform stores every rate as a decimal FRACTION (0.058); the customer contract states
+     * them as a PERCENT (5.8), which is what `annualRatePercent` on the interest endpoint has
+     * always done and what the schema's own `example: 5.8` promises. The two conventions met here
+     * and nobody converted, so the app rendered 5.8 % p.a. as "0.1 %" and projected a hundredth of
+     * the interest — while the product's own description string, written by hand, said 5,8 %.
+     *
+     * Converting at this boundary rather than in each client keeps one rule: fractions inside,
+     * percent at the customer edge.
+     */
+    private fun ratePercent(node: JsonNode, field: String): Double? =
+        node.get(field)?.takeIf { it.isNumber }?.decimalValue()
+            ?.multiply(java.math.BigDecimal(RATE_FRACTION_TO_PERCENT))
+            ?.stripTrailingZeros()
+            ?.toDouble()
+
+    /** The catalogue's own config, with every rate inside it restated as a percent. */
+    private fun configWithPercentRates(configuration: JsonNode, vararg rateFields: String): ObjectNode {
+        val out = configuration.deepCopy<ObjectNode>()
+        rateFields.forEach { field -> ratePercent(configuration, field)?.let { out.put(field, it) } }
+        val tiers = configuration.get("interestTiers")
+        if (tiers != null && tiers.isArray) {
+            val converted = objectMapper.createArrayNode()
+            tiers.forEach { tier ->
+                val copy = tier.deepCopy<ObjectNode>()
+                ratePercent(tier, "rateAnnual")?.let { copy.put("rateAnnual", it) }
+                converted.add(copy)
+            }
+            out.set<JsonNode>("interestTiers", converted)
+        }
+        return out
     }
 
     /**
@@ -5114,11 +5343,13 @@ class CustomerEdgeResource(
             product.get("fee")?.takeIf { !it.isNull }?.let { set<JsonNode>("fee", it) }
             // Price, in the catalogue's own shape. Never flattened, never interpolated.
             product.get("termDepositConfig")?.takeIf { it.isObject }?.let { configuration ->
-                put("annualRate", configuration.path("interestRateAnnual").asDouble())
-                set<JsonNode>("term", configuration)
+                put("annualRate", ratePercent(configuration, "interestRateAnnual") ?: 0.0)
+                set<JsonNode>("term", configWithPercentRates(configuration, "interestRateAnnual"))
             }
             product.get("savingsConfig")?.takeIf { it.isObject }?.let { configuration ->
-                set<JsonNode>("savings", configuration)
+                // Tiers carry rates too, and a savings card reads them to state its range — the
+                // same conversion, or the range is a hundredth of the truth.
+                set<JsonNode>("savings", configWithPercentRates(configuration, "baseRateAnnual"))
             }
             set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
         }
@@ -5179,6 +5410,14 @@ class CustomerEdgeResource(
     companion object {
 
         /**
+         * The path transaction-service puts in `merchant.logoUrl`, and the path this edge serves it
+         * on. The rewrite between them is [rewriteMerchantLogoUrl]; both halves are same-origin, so
+         * a logo still reaches no third party.
+         */
+        private const val UPSTREAM_MERCHANT_PREFIX = "/api/v1/merchants/"
+        private const val EDGE_MERCHANT_PREFIX = "/customer/v1/merchants/"
+
+        /**
          * The product types a customer may discover and open from the app.
          *
          * An allow-list, not a deny-list: MORTGAGE, CREDIT_CARD, OVERDRAFT and INVESTMENT exist in
@@ -5215,7 +5454,7 @@ class CustomerEdgeResource(
             "REWARDS_HUB",
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
-        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
+        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId", "termsVersionShown")
         private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(422)
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
@@ -5368,6 +5607,13 @@ class CustomerEdgeResource(
         private const val AUDIT_DETAIL_MAX_CHARS = 300
 
         /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        /**
+         * Rates are fractions inside the platform and percent at the customer edge. The scaling is
+         * done in BigDecimal because 0.058 * 100 is 5.800000000000001 in binary floating point, and
+         * a price with a tail of noise on it is not a price anybody should have to explain.
+         */
+        private const val RATE_FRACTION_TO_PERCENT = 100
+
         private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
@@ -5718,6 +5964,9 @@ class CustomerEdgeResource(
          */
         internal fun resolvePartyIdClaim(partyIdClaim: String?, sub: String?): String? =
             partyIdClaim?.takeIf { it.isNotBlank() } ?: sub?.takeIf { it.isNotBlank() }
+
+        /** ADR-0284 D4: the profile-switch header. Honoured only through [ActingForResolver]. */
+        const val ACTING_FOR_HEADER = "X-Acting-For"
     }
 
     private fun forbidden(message: String): Response = Response.status(403)

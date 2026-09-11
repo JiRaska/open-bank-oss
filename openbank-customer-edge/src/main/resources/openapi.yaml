@@ -3,7 +3,14 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.51.0
+  # 1.53.1 -> 1.54.0 (#9044): additive — optional termsVersionShown on OpenTermDepositRequest
+  # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
+  # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
+  # on POST /term-deposits.
+  # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
+  # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
+  # this takes the next minor; whoever lands second renumbers.
+  version: 1.55.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -23,6 +30,8 @@ servers:
 
 tags:
   - name: Reference
+  - name: Profiles
+  - name: Business
   - name: Accounts
   - name: Term deposits
   - name: Balances
@@ -183,6 +192,11 @@ paths:
           description: Missing idempotency key or malformed product ID
         '404':
           description: Product is not an active public term-deposit offer, or party is absent
+        '409':
+          description: >-
+            Terms version mismatch — the client displayed a terms version that no longer governs
+            (#9044); re-display the current terms and retry. Also returned when the product has
+            no currently effective terms document.
         '422':
           description: KYC not approved
 
@@ -515,6 +529,35 @@ paths:
         '403':
           description: Not the owner
 
+  /accounts/{accountId}/access:
+    get:
+      tags: [Accounts]
+      summary: Who can act on the caller's own account (ADR-0232)
+      description: |
+        Owner-only. A delegate may read the account itself but not this: the list of everyone else
+        who holds access is the grantor's business, and a delegate reading it would learn about the
+        owner's other delegates and the bank mandates on the account.
+
+        Unifies both stores the payment guard consults — bank mandates and customer delegations —
+        so an owner shown only their own delegations is not left with a half-truth about who can
+        take money out. Party ids only; no names or contact details.
+      operationId: getAccountAccess
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessEntry'
+        '403':
+          description: Account does not belong to the caller
+
   /accounts/{accountId}/goal:
     put:
       tags: [Accounts]
@@ -799,6 +842,35 @@ paths:
                 $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
+
+  /merchants/{descriptorKey}/logo:
+    get:
+      tags: [Transactions]
+      summary: A merchant's logo, as a square PNG
+      description: >-
+        Proxied from transaction-service, which stores the bitmap. The bank serves it itself for one
+        reason: a logo loaded from an external host would tell that host the customer's IP address
+        and which merchant they paid, every time a statement renders. Public business data, so there
+        is no account to own and no ownership check — authentication is the gate. Follow the
+        `merchant.logoUrl` this API returns rather than constructing the path; it carries a `v` token
+        so a replaced logo is a new URL and the response may be cached hard.
+      operationId: getMerchantLogo
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: descriptorKey, in: path, required: true, schema: {type: string}}
+        - {name: size, in: query, required: false, schema: {type: integer, enum: [64, 128], default: 64}}
+        - {name: v, in: query, required: false, description: Cache-busting token echoed from logoUrl., schema: {type: string}}
+      responses:
+        '200':
+          description: The logo bitmap
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing descriptor key
+        '404':
+          description: No logo stored for this merchant
 
   /statements/{accountId}:
     get:
@@ -3355,6 +3427,236 @@ paths:
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
 
+  /profiles:
+    get:
+      tags: [Profiles]
+      summary: The profiles the signed-in human can switch to — personal plus one per business mandate (ADR-0284 D4)
+      description: >-
+        Always keyed off the token, never off X-Acting-For, so a client can always find its way back to
+        the personal profile. The personal entry carries `hasProducts` so a business-only customer is
+        offered their first account instead of an empty home. Every other route honours
+        `X-Acting-For: <business partyId>` (fail-closed 403 without an active mandate).
+      operationId: listProfiles
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200':
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string, enum: [PERSONAL, BUSINESS] }
+                        partyId: { type: string, format: uuid }
+                        partyType: { type: string }
+                        displayName: { type: string, nullable: true }
+                        legalName: { type: string, nullable: true }
+                        status: { type: string, nullable: true }
+                        kycStatus: { type: string, nullable: true }
+                        hasProducts: { type: boolean }
+                        registrationNumber: { type: string, nullable: true }
+                        registrationCountry: { type: string, nullable: true }
+                        legalForm: { type: string, nullable: true }
+                        role: { type: string, nullable: true }
+                        authority: { type: string, nullable: true }
+
+  /business/schemes:
+    get:
+      tags: [Business]
+      summary: Business identifier schemes for a country, from its country pack (ADR-0284 D2)
+      operationId: listBusinessSchemes
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          schema: { type: string }
+      responses:
+        '200': {description: Schemes}
+
+  /business/lookup:
+    post:
+      tags: [Business]
+      summary: Look a business identifier up in its public register — the onboarding entry screen, creates nothing
+      operationId: lookupBusiness
+      security:
+        - customerOidc: [profile:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, identifier]
+              properties:
+                scheme: { type: string }
+                identifier: { type: string }
+                declared: { type: object }
+      responses:
+        '200': {description: Register extract}
+        '400': {description: Malformed identifier (format or check digit)}
+        '404': {description: No register record}
+        '503': {description: Register unavailable}
+
+  /business/onboarding:
+    post:
+      tags: [Business]
+      summary: Start a business onboarding case; the initiator is the token's human
+      operationId: startBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, identifier]
+              properties:
+                scheme: { type: string }
+                identifier: { type: string }
+                declared: { type: object }
+      responses:
+        '201': {description: Case}
+        '403': {description: Body names another initiator}
+    get:
+      tags: [Business]
+      summary: Cases the caller initiated or is a signer on
+      operationId: listBusinessOnboarding
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200': {description: Cases}
+
+  /business/onboarding/{id}:
+    get:
+      tags: [Business]
+      summary: One case the caller is involved in
+      operationId: getBusinessOnboarding
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/initiator:
+    post:
+      tags: [Business]
+      summary: The initiator states which listed representative they are
+      operationId: matchBusinessInitiator
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                representativeIndex: { type: integer, nullable: true }
+                claimedName: { type: string }
+                dateOfBirth: { type: string, format: date, nullable: true }
+      responses:
+        '200': {description: Case}
+
+  /business/onboarding/{id}/cosigners:
+    post:
+      tags: [Business]
+      summary: Invite listed representatives to co-sign; returns invitation tokens to the initiator
+      operationId: inviteBusinessCosigners
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                representativeIndexes:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200': {description: Case}
+        '409': {description: Not enough signers for the representation rule}
+
+  /business/onboarding/{id}/sign:
+    post:
+      tags: [Business]
+      summary: Record the caller's completed signature ceremony on the case
+      operationId: signBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signatureRef]
+              properties:
+                signatureRef: { type: string }
+      responses:
+        '200': {description: Case}
+
+  /business/onboarding/{id}/abandon:
+    post:
+      tags: [Business]
+      summary: The initiator abandons the case
+      operationId: abandonBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': {description: Case}
+
+  /business/invitations/{token}/claim:
+    post:
+      tags: [Business]
+      summary: An invited co-signer, now identity-verified as themselves, binds their party to the case
+      operationId: claimBusinessInvitation
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': {description: Case}
+        '404': {description: No open invitation}
+        '409': {description: Already claimed or the person is already a signer}
+
   /delegations/shared-by-me:
     get:
       tags: [Delegation]
@@ -3926,6 +4228,43 @@ components:
             - {$ref: '#/components/schemas/IncentiveReservation'}
           description: Present only when this account opening committed a campaign incentive.
 
+    AccountAccessEntry:
+      type: object
+      description: |
+        One party's effective ability to act on the account, as the payment guard would see it.
+        Built from the same two stores with the same validity filters, so what the owner reads
+        here and what a debit actually gets are the same fact.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means no ceiling of its own — NOT
+            unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
+
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
     # not a bare array).
     AccountList:
@@ -4058,6 +4397,13 @@ components:
             logoUrl:
               type: string
               nullable: true
+              description: >-
+                Path to the logo ON THIS EDGE, e.g.
+                "/customer/v1/merchants/ALZACZ/logo?size=64&v=<hash>". The edge rewrites the prefix
+                transaction-service emits so the path resolves against the host that served this
+                response; it is never an external URL, because a logo fetched from a third party
+                would tell that party who the customer paid. Absent when no logo has been ingested —
+                render what you render today, never a placeholder.
             category:
               type: string
               nullable: true
@@ -4676,6 +5022,14 @@ components:
             Optional opaque reservation returned by /incentives/claims. The edge commits it only
             after account-service returns the authoritative openedAt; deterministic rejection
             releases it, while transient failure leaves it retryable until its TTL.
+        termsVersionShown:
+          type: string
+          description: >-
+            The terms document version the client RENDERED to the customer (#9044). The edge
+            resolves the currently effective version from the catalogue; when the two differ the
+            open is refused with 409, so a terms rollout can never bind the customer to a
+            document they were not shown. The version actually opened under is recorded on the
+            account by account-service.
 
     ClaimCampaignIncentiveRequest:
       type: object
@@ -4757,9 +5111,12 @@ components:
           description: Monthly account fee as the catalogue states it. Sent even when zero.
         annualRate:
           type: number
+          example: 5.8
           description: >-
-            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
-            absence means "not priced here", not 0 %.
+            Term deposits only — one fixed rate for one fixed term, as a PERCENT (5.8 means
+            5.8 % p.a.), which is how every rate crossing this edge is stated. The platform keeps
+            rates as decimal fractions internally; the conversion happens here so no client has to
+            know that. Absent for every other type; absence means "not priced here", not 0 %.
         term:
           type: object
           description: The term deposit's own TermDepositConfig, verbatim.
@@ -4785,6 +5142,7 @@ components:
         currency: {type: string, example: CZK}
         minimumDeposit: {type: number, nullable: true}
         maximumDeposit: {type: number, nullable: true}
+        # Percent, not a fraction: 5.8 means 5.8 % p.a. (see ProductOffer.annualRate).
         annualRate: {type: number, format: double, example: 5.8}
         term:
           type: object

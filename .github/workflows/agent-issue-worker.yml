@@ -45,8 +45,7 @@
 #
 #   It also measures the runner itself, because the whole point of moving here is a set of
 #   capabilities the previous host lacked. On a pull_request touching this file, ONLY the
-#   probe runs: that is how the capability claim gets checked before anyone merges the thing
-#   that depends on it.
+#   validation runs; credential and runner probes require manual dispatch.
 #
 # COST
 #   Zero. Standard GitHub-hosted runners are free for public repositories, and this job never
@@ -72,29 +71,61 @@ on:
         options: [probe, work]
         default: probe
   pull_request:
-    # Self-scoped: a PR editing this file runs the PROBE, so the capability claim in the
-    # header is checked against the real runner before the schedule is ever trusted.
+    # PR validation exercises admission offline; credentials are probed on trusted dispatch.
     paths:
       - .github/workflows/agent-issue-worker.yml
+      - .github/scripts/agent-admission.py
+      - .github/scripts/test-agent-admission.py
+      - .github/scripts/agent-review-claude-cli/**
 
 permissions:
   contents: read
 
 concurrency:
-  # Never two workers at once: two runs would pick the same issue, because the claim (a
-  # pushed `agent/` branch) does not exist until one of them is well underway.
-  group: agent-issue-worker
-  cancel-in-progress: false
+  # Work remains globally serial: two workers would pick the same unclaimed issue. PR
+  # validation is independent per PR and a newer head supersedes its older queued/running
+  # validation; sharing the work lane made unrelated PRs wait behind a 45-minute worker.
+  group: ${{ github.event_name == 'pull_request' && format('agent-issue-worker-pr-{0}', github.event.pull_request.number) || 'agent-issue-worker-work' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  admission:
+    name: Bound agent work in progress
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.admission.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/test-agent-admission.py
+      - id: admission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'probe') }}
+        run: |
+          set -euo pipefail
+          if [ "$PROBE" = true ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+            python3 .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" >> "$GITHUB_OUTPUT"
+          fi
+
   worker:
+    needs: admission
+    if: github.event_name != 'pull_request' && needs.admission.outputs.proceed == 'true'
     name: Pick one issue, open one draft PR
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      contents: write        # push an agent/ branch — never main, enforced by branch rules
-      pull-requests: write   # open a draft PR
-      issues: write          # comment on the issue it worked
+      contents: read
+      pull-requests: read
+      issues: read
     env:
       AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
     steps:
@@ -118,7 +149,7 @@ jobs:
       # what keeps the guard pointed at this work.
       - name: Mint the agent App token
         id: apptoken
-        if: env.AGENT_APP_ID != ''
+        if: env.AGENT_APP_ID != '' && !(github.event_name == 'workflow_dispatch' && inputs.mode == 'probe')
         env:
           AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -126,22 +157,23 @@ jobs:
           app-id: ${{ secrets.AGENT_APP_ID }}
           private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
 
-      # Fall back rather than fail: without the secrets this still works, it just produces PRs
-      # whose checks need a manual "Approve and run". Say so loudly instead of leaving somebody
-      # to rediscover it from a PR that looks stuck for no reason.
+      # Writes require the dedicated App identity so resulting PRs trigger CI.
+      # Probe mode may use the read-only workflow token; work fails closed without the App.
       - name: Resolve the token to use
         id: token
         env:
           APP_TOKEN: ${{ steps.apptoken.outputs.token }}
-          FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+          FALLBACK: ${{ github.token }}
+          PROBE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'probe' }}
         run: |
+          set -euo pipefail
           if [ -n "${APP_TOKEN:-}" ]; then
-            echo "identity: openbank-agent-bot (App token)"
             echo "token=${APP_TOKEN}" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::AGENT_APP_ID/AGENT_APP_PRIVATE_KEY are not set — falling back to GITHUB_TOKEN. Any PR opened by this run will have its checks stuck at 'action_required' until a maintainer approves them by hand."
-            echo "identity: github-actions (GITHUB_TOKEN fallback)"
+          elif [ "$PROBE" = true ]; then
             echo "token=${FALLBACK}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Work requires the dedicated agent App; refusing to create PRs with a fallback identity."
+            exit 1
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -198,12 +230,15 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
             echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set for this job. Re-mint with \`claude setup-token\` and update BOTH copies."
             exit 1
           fi
-          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          npm ci --prefix .github/scripts/agent-review-claude-cli
+          export PATH="$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin:$PATH"
+          echo "$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          claude --version
           probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
                     --max-turns 3 \
                     --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings 2>&1 | tail -3)
@@ -232,8 +267,8 @@ jobs:
       # defect and is fixed by the assertion below.
       #
       # `bypassPermissions` is the right mode for this specific context and not a shortcut:
-      # the container is ephemeral and discarded, the token is a job-scoped GITHUB_TOKEN with
-      # the three narrow permissions declared above, and everything the agent can actually
+      # the container is ephemeral and discarded, writes use the dedicated agent App,
+      # and everything the agent can actually
       # land is still gated by `agent-pr-guard` and by branch protection. The blast radius is
       # bounded by the credential, not by the prompt.
       - name: Work one issue
@@ -298,9 +333,9 @@ jobs:
       # on. Deleting exactly that set can never destroy work — a branch carrying a single
       # commit is left alone and reported instead.
       - name: Release claim branches that carry no work
-        if: always() && steps.mode.outputs.mode == 'work'
+        if: always() && steps.mode.outputs.mode == 'work' && steps.token.outcome == 'success'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -uo pipefail
           git fetch origin main --quiet
@@ -321,7 +356,7 @@ jobs:
           echo "claim gc: ${released} released, ${kept} left for a human"
 
       - name: Summarise
-        if: always() && steps.mode.outputs.mode == 'work'
+        if: always() && steps.mode.outputs.mode == 'work' && steps.token.outcome == 'success'
         run: |
           {
             echo "### Agent issue worker"

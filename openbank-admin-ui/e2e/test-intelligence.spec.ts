@@ -136,6 +136,31 @@ test('never paints an unavailable evidence bundle healthy', async ({ page }) => 
   await expect(assurance).not.toContainText('passed')
 })
 
+test('defers advisory agent code and network work until the panel approaches view', async ({ page }) => {
+  let agentRequests = 0
+  await page.unroute('**/api/test-intelligence/agents')
+  await page.route('**/api/test-intelligence/agents', route => {
+    agentRequests += 1
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ findings: [], available: true }),
+    })
+  })
+
+  await page.goto('/system/tests')
+  await expect(page.getByRole('region', { name: 'Testing assurance map' })).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(agentRequests).toBe(0)
+
+  const agent = page.getByRole('region', { name: 'Advisory test agent' })
+  await agent.scrollIntoViewIfNeeded()
+  // The Playwright server runs React in development Strict Mode, which may remount an effect;
+  // the performance contract is zero eager requests and a request only after intersection.
+  await expect.poll(() => agentRequests).toBeGreaterThan(0)
+  await expect(agent.getByText(/AI AGENT/)).toBeVisible()
+})
+
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/system/tests')

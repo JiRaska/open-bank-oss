@@ -71,6 +71,9 @@ spec:
               kubernetes.io/metadata.name: campaign
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: communication
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
@@ -120,6 +123,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: interest
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyb
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kyc

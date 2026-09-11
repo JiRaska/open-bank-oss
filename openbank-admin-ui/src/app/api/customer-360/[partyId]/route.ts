@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiPermission } from '@/lib/auth/api-permission'
+import type { Customer360Evidence, DomainSummary } from '@/lib/customer360/evidence'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,30 +33,15 @@ const CLICKHOUSE_TIMEOUT_MS = 8_000
 // the format check IS the injection boundary — not a convenience.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export interface DomainSummary {
-  aggregateType: string
-  events: number
-  lastEventType: string
-  lastOccurredAt: string
-}
+const timestampMillis = (value: string): number =>
+  Date.parse(value.replace(' ', 'T') + (value.includes('Z') || /[+-]\d\d:\d\d$/.test(value) ? '' : 'Z'))
 
-export interface Customer360 {
-  available: boolean
-  partyId: string
-  /** occurred_at of the newest event reduced into this view — ADR-0210 D3's staleness signal. */
-  asOf: string | null
-  /** Current state of the party aggregate itself, as last projected. */
-  partyState: Record<string, unknown> | null
-  /** Per-domain event counts and recency. Counts and recency only — never figures (D3). */
-  domains: DomainSummary[]
-  /** Accounts owned by this party, resolved from account events (ADR-0210 D2). Ids only. */
-  accountIds: string[]
-  /** Consents, from consent events. Status + scopes only; consent-service stays authoritative. */
-  consents: { consentId: string; status: string; scopes: string[] }[]
-  error?: string
-}
+export type Customer360 = Customer360Evidence
 
-async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+async function chQuery(sql: string): Promise<unknown[]> {
   const headers: Record<string, string> = { 'Content-Type': 'text/plain' }
   if (CLICKHOUSE_USER) headers['X-ClickHouse-User'] = CLICKHOUSE_USER
   if (CLICKHOUSE_PASSWORD) headers['X-ClickHouse-Key'] = CLICKHOUSE_PASSWORD
@@ -67,8 +53,9 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
     signal: AbortSignal.timeout(CLICKHOUSE_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`ClickHouse ${res.status}`)
-  const body = (await res.json()) as { data?: Record<string, unknown>[] }
-  return body.data ?? []
+  const body = await res.json() as unknown
+  if (!isRecord(body) || !Array.isArray(body.data)) throw new Error('Invalid ClickHouse response')
+  return body.data
 }
 
 /**
@@ -80,32 +67,28 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
  * which is ADR-0210 D2's account→party resolution — owned by the `silver_party_accounts` view, not
  * by this route.
  *
- * ISOLATION IS THE LOAD-BEARING PROPERTY. Both arms filter on this party: the direct arm on
- * JSONExtractString(payload,'partyId'), the indirect arm on aggregate_id IN (that party's account
- * ids). If the indirect arm were ever widened, this route would show another customer's
- * transactions — which is why `customer-360.test.ts` asserts isolation, not just assembly.
+ * ISOLATION IS THE LOAD-BEARING PROPERTY, AND IT IS NO LONGER SPELLED OUT HERE. Both arms — the
+ * direct one on JSONExtractString(payload,'partyId') and the indirect one through the party's
+ * account ids — now live in `silver_party_events` (V12__party_event_profile.sql), which carries the
+ * party key on every row. This route filters that view to one party and nothing else. V5 collapsed
+ * the account→party resolution to one definition and this route's own comment recorded why; the
+ * scoping AROUND that resolution stayed behind in the caller, and this is the same collapse one
+ * level up. `customer-360.test.ts` still asserts isolation, now against a single WHERE.
  */
 function scopedRowsSql(partyId: string): string {
-  // Ownership resolution is NOT restated here. `silver_party_accounts` (V5__party_accounts.sql) is
-  // the ADR-0210 D2 view — "materialises as a ClickHouse view alongside the existing silver views"
-  // — and this route reads it rather than re-deriving it, for the same reason the ADR rejects
-  // querying bronze directly: a resolution with two definitions has two answers, and this one IS
-  // the isolation boundary. It carries the `upper()` fold and the empty-partyId guard, and it reads
-  // bronze rather than silver because an account's latest event is typically BALANCE_UPDATED, which
-  // carries no partyId. The CTE that used to live here shipped the whole of that reasoning inside
-  // one caller (issue #4511).
+  // Neither the ownership resolution NOR the scoping around it is restated here. V5's
+  // `silver_party_accounts` owns the account→party key; `silver_party_events` (V12) owns which rows
+  // belong to a party, applying both arms and de-duplicating a row that satisfies both. The two
+  // arms used to be an OR written out in this string, which made this caller a second definition of
+  // the isolation boundary — the exact hazard V5's header names, one level up (issues #4511, #8792).
   //
-  // What stays here is only the party scoping: every reference to the view is filtered to THIS
-  // party, which is what `customer-360.test.ts` asserts. A reference without that WHERE is the leak.
+  // Measured against the sandbox warehouse before the swap: the view and this route's former OR
+  // agree for all 20 parties, max |delta| 0. Dropping the view's de-duplication guard inflates one
+  // party by one event, so the agreement is a property of the guard and not of thin data.
   return `
     SELECT aggregate_type, aggregate_id, event_type, occurred_at, payload
-    FROM ${DB}.silver_current_state
-    WHERE JSONExtractString(payload, 'partyId') = '${partyId}'
-       OR (upper(aggregate_type) IN ('TRANSACTION', 'ACCOUNT')
-           AND aggregate_id IN (
-             SELECT account_id FROM ${DB}.silver_party_accounts
-             WHERE party_id = '${partyId}'
-           ))
+    FROM ${DB}.silver_party_events
+    WHERE party_id = '${partyId}'
     ORDER BY occurred_at DESC
     LIMIT 5000
   `
@@ -116,10 +99,10 @@ function empty(partyId: string, error?: string): Customer360 {
     available: false,
     partyId,
     asOf: null,
-    partyState: null,
     domains: [],
     accountIds: [],
     consents: [],
+    excludedCount: 0,
     ...(error ? { error } : {}),
   }
 }
@@ -147,52 +130,75 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ partyId: s
     const byDomain = new Map<string, DomainSummary>()
     const accountIds = new Set<string>()
     const consents: Customer360['consents'] = []
-    let partyState: Record<string, unknown> | null = null
     let asOf: string | null = null
+    let excludedCount = 0
 
-    for (const r of rows) {
-      const type = String(r.aggregate_type ?? 'unknown').toLowerCase()
-      const occurredAt = String(r.occurred_at ?? '')
-      const eventType = String(r.event_type ?? '')
+    for (const rawRow of rows) {
+      if (!isRecord(rawRow)) {
+        excludedCount += 1
+        continue
+      }
+      const r = rawRow
+      const type = typeof r.aggregate_type === 'string' ? r.aggregate_type.trim().toLowerCase() : ''
+      const aggregateId = typeof r.aggregate_id === 'string' ? r.aggregate_id.trim() : ''
+      const occurredAt = typeof r.occurred_at === 'string' ? r.occurred_at.trim() : ''
+      const eventType = typeof r.event_type === 'string' ? r.event_type.trim() : ''
+      const parsedAt = timestampMillis(occurredAt)
+      let payload: Record<string, unknown>
+      try {
+        const parsed = JSON.parse(typeof r.payload === 'string' ? r.payload : '') as unknown
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid payload')
+        payload = parsed as Record<string, unknown>
+      } catch {
+        excludedCount += 1
+        continue
+      }
 
-      if (!asOf || occurredAt > asOf) asOf = occurredAt
+      if (!type || !aggregateId || !eventType || !occurredAt || Number.isNaN(parsedAt)) {
+        excludedCount += 1
+        continue
+      }
+
+      let consent: Customer360['consents'][number] | null = null
+      if (type === 'consent') {
+        const status = typeof payload.status === 'string' && payload.status.trim() ? payload.status.trim() : eventType
+        const scopes = Array.isArray(payload.scopes) && payload.scopes.every(scope => typeof scope === 'string' && scope.trim())
+          ? payload.scopes.map(scope => (scope as string).trim())
+          : null
+        if (!scopes) {
+          excludedCount += 1
+          continue
+        }
+        consent = { consentId: aggregateId, status, scopes }
+      }
+
+      if (!asOf || parsedAt > timestampMillis(asOf)) asOf = occurredAt
 
       const d = byDomain.get(type)
       if (!d) {
-        // Rows arrive newest-first, so the first row per domain IS its latest event.
+        // Rows arrive newest-first, so the first valid row per domain is its latest event.
         byDomain.set(type, { aggregateType: type, events: 1, lastEventType: eventType, lastOccurredAt: occurredAt })
       } else {
         d.events += 1
       }
 
-      let payload: Record<string, unknown> = {}
-      try {
-        payload = JSON.parse(String(r.payload ?? '{}')) as Record<string, unknown>
-      } catch {
-        continue // a malformed payload must not take down the whole view
-      }
-
-      if (type === 'account') accountIds.add(String(r.aggregate_id))
-      if (type === 'party' && !partyState) partyState = payload
-      if (type === 'consent') {
-        consents.push({
-          consentId: String(r.aggregate_id),
-          status: String(payload.status ?? eventType),
-          scopes: Array.isArray(payload.scopes) ? payload.scopes.map(String) : [],
-        })
-      }
+      if (type === 'account') accountIds.add(aggregateId)
+      if (consent) consents.push(consent)
     }
 
     return NextResponse.json({
       available: true,
       partyId,
       asOf,
-      partyState,
       domains: [...byDomain.values()].sort((a, b) => b.events - a.events),
       accountIds: [...accountIds],
       consents,
+      excludedCount,
     } satisfies Customer360)
   } catch (e) {
-    return NextResponse.json(empty(partyId, e instanceof Error ? e.message : 'clickhouse unreachable'))
+    // The browser needs availability, never warehouse hosts, statuses or query diagnostics.
+    // Detailed failures stay server-side; this authenticated response remains topology-neutral.
+    console.error('Customer 360 projection query failed', e)
+    return NextResponse.json(empty(partyId, 'clickhouse unavailable'))
   }
 }
