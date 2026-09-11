@@ -75,6 +75,7 @@ jobs:
     outputs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
+      verification-modules: ${{ steps.detect.outputs.verification-modules }}
     steps:
       # harden-runner omitted on the self-hosted sandbox runner — egress is enforced
       # at the infra layer (egress-only SG, isolated VPC, ADR-0027), so the eBPF shim
@@ -338,6 +339,12 @@ jobs:
           # grep -v exits 1 when CHANGED is empty (PR touched no service module);
           # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
+          # The verification job used to checkout the repository and compute this same diff a
+          # second time, even though >90% of PRs change no module build file. Emit the exact
+          # comma-separated module set here so an empty set skips that runner at dispatch time.
+          VERIFY_MODULES=$(grep -E '^openbank-[^/]+/build\.gradle\.kts$' <<< "${FILES:-}" \
+            | cut -d/ -f1 | sort -u | paste -sd, - || true)
+          echo "verification-modules=${VERIFY_MODULES}" >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
             echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -405,34 +412,11 @@ jobs:
   verification-metadata:
     name: verification-metadata
     needs: [changes]
-    if: always()
+    if: needs.changes.result == 'success' && needs.changes.outputs.verification-modules != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Derive changed Gradle modules
-        id: mods
-        run: |
-          set -euo pipefail
-          base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            echo "modules=" >> "$GITHUB_OUTPUT"
-            echo "No usable base sha — skipping."; exit 0
-          fi
-          # Only module-level build files matter; a root or build-logic change is
-          # out of scope here and would fan out to the whole fleet.
-          # `|| true` on the grep is required, not defensive: under `set -o pipefail`
-          # a grep that matches nothing exits 1 and kills the step — which is the
-          # common case here, since most PRs touch no module build file. Measured on
-          # this very PR (#3233), whose own gate went red for exactly this reason.
-          mods="$(git diff --name-only "$base"...HEAD \
-                    | { grep -E '^openbank-[^/]+/build\.gradle\.kts$' || true; } \
-                    | cut -d/ -f1 | sort -u | paste -sd, -)"
-          echo "modules=${mods}" >> "$GITHUB_OUTPUT"
-          echo "changed modules: ${mods:-<none>}"
 
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         if: steps.mods.outputs.modules != ''
@@ -441,7 +425,6 @@ jobs:
           java-version: "25"
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-        if: steps.mods.outputs.modules != ''
         with:
           # READ-ONLY. This job cannot get an exact-key hit from setup-java's own
           # `cache: gradle` — that key hashes `**/*.gradle*`, and this job only runs
@@ -453,10 +436,9 @@ jobs:
           cache-read-only: true
 
       - name: Check verification metadata covers the changed modules
-        if: steps.mods.outputs.modules != ''
         run: |
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules "${{ steps.mods.outputs.modules }}" --enforce
+            --modules "${{ needs.changes.outputs.verification-modules }}" --enforce
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
@@ -484,10 +466,13 @@ jobs:
     steps:
       - name: Verify no service failed
         run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "Changed-service detection did not succeed; build scope is unknown."; exit 1
+          fi
           if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
             echo "One or more service builds failed."; exit 1
           fi
-          if [ "${{ needs.verification-metadata.result }}" = "failure" ]; then
+          if [ "${{ needs.verification-metadata.result }}" = "failure" ] || [ "${{ needs.verification-metadata.result }}" = "cancelled" ]; then
             echo "verification-metadata check failed (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
