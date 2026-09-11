@@ -34,19 +34,20 @@ function collectCoverage(service) {
 
 // ── Pitest ───────────────────────────────────────────────────────────────────
 
-async function collectMutation(service) {
-  const xmlPath = path.join(REPO_ROOT, service, 'build', 'reports', 'pitest', 'mutations.xml')
+export async function collectMutation(service, repoRoot = REPO_ROOT) {
+  const xmlPath = path.join(repoRoot, service, 'build', 'reports', 'pitest', 'mutations.xml')
   if (!fs.existsSync(xmlPath)) return null
 
   const raw = fs.readFileSync(xmlPath, 'utf-8')
   const parsed = await parseStringPromise(raw, { explicitArray: true })
   const mutations = parsed?.mutations?.mutation ?? []
 
-  let killed = 0, survived = 0, noCoverage = 0, total = 0
+  let killed = 0, timedOut = 0, survived = 0, noCoverage = 0, total = 0
   for (const m of mutations) {
     total++
     const status = m.$.status
     if (status === 'KILLED') killed++
+    else if (status === 'TIMED_OUT') timedOut++
     else if (status === 'SURVIVED') survived++
     else if (status === 'NO_COVERAGE') noCoverage++
   }
@@ -56,11 +57,16 @@ async function collectMutation(service) {
     targetPackage: `com.openbank.${service.replace('openbank-', '').replace(/-service$/, '').replace(/-/g, '.')}.domain`,
     totalMutants: total,
     killed,
+    timedOut,
     survived,
     noCoverage,
-    score: total > 0 ? Math.round((killed / total) * 100) : null,
+    score: total > 0 ? Math.floor(((killed + timedOut) * 100 + Math.floor(total / 2)) / total) : null,
     reportedAt: fs.statSync(xmlPath).mtime.toISOString(),
   }
+}
+
+export async function collectMutations(services = MONEY_PATH_SERVICES, repoRoot = REPO_ROOT) {
+  return (await Promise.all(services.map(service => collectMutation(service, repoRoot)))).filter(Boolean)
 }
 
 // ── Pact contracts ────────────────────────────────────────────────────────────
@@ -279,7 +285,7 @@ async function main() {
     testResults = JSON.parse(fs.readFileSync(path.resolve('test-results.json'), 'utf-8'))
   } catch { /* not available */ }
 
-  const mutations = (await Promise.all(MONEY_PATH_SERVICES.map(collectMutation))).filter(Boolean)
+  const mutations = await collectMutations()
   const contracts = await enrichWithVerification(collectContracts())
   const serviceScores = buildServiceScores(testResults, mutations, contracts)
 

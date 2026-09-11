@@ -15,5 +15,8 @@ describe('party detail refresh contract', () => {
     expect(source).toContain("aria-label={t('Obnovit detail subjektu', 'Refresh party detail')}")
     expect(source).toContain("svcUrl('party-service'")
     expect(source).toContain("svcUrl('kyc-service'")
+    expect(source).toContain('activeLoad.current?.abort()')
+    expect(source).toContain('if (controller.signal.aborted) return')
+    expect(source).toContain('activeLoad.current = null')
   })
 })

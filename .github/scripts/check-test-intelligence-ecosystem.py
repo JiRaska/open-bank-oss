@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -259,6 +260,285 @@ def performance_projection_errors(deploy: str) -> list[str]:
     if unknown_barrier.search(deploy) is None:
         errors.append("unknown perf-gate scope can fall through to older green evidence")
 
+    return errors
+
+
+def javascript_function(source: str, name: str) -> str:
+    """Return one named function through the next declaration, without matching comments."""
+    declarations = list(re.finditer(
+        r"(?m)^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
+        source,
+    ))
+    for index, declaration in enumerate(declarations):
+        if declaration.group(1) == name:
+            end = declarations[index + 1].start() if index + 1 < len(declarations) else len(source)
+            return source[declaration.start():end]
+    return ""
+
+
+def shell_code(source: str) -> str:
+    """Drop shell comments so prose cannot satisfy an executable mutation invariant."""
+    return "\n".join(
+        re.sub(r"\s+#.*$", "", line)
+        for line in source.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def shell_variable_write_count(source: str, variable: str) -> int:
+    """Count ordinary and arithmetic writes to one shell variable."""
+    return len(re.findall(
+        rf"(?<![A-Za-z0-9_])(?:\+\+\s*|--\s*)?{re.escape(variable)}\s*"
+        r"(?:\+\+|--|(?:<<|>>|[+\-*/%&^|])?=(?!=)|:=)",
+        source,
+    ))
+
+
+def producer_mutation_semantics_errors(producer: str) -> list[str]:
+    """Prove the Python producer carries both detected statuses into its score."""
+    try:
+        tree = ast.parse(producer)
+    except SyntaxError as exc:
+        return [f"run-envelope collector cannot be parsed: {exc}"]
+    function = next(
+        (node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "specialized_evidence"),
+        None,
+    )
+    if function is None:
+        return ["run-envelope collector has no specialized-evidence implementation"]
+
+    assignments = {
+        target.id: node.value
+        for node in ast.walk(function) if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+
+    detected = assignments.get("detected")
+    status_sets = [
+        {constant.value for constant in ast.walk(comparison.comparators[0])
+         if isinstance(constant, ast.Constant) and isinstance(constant.value, str)}
+        for comparison in ast.walk(detected) if isinstance(comparison, ast.Compare)
+        and any(isinstance(operator, ast.In) for operator in comparison.ops)
+        and comparison.comparators
+    ] if detected is not None else []
+    if not any({"KILLED", "TIMED_OUT"}.issubset(statuses) for statuses in status_sets):
+        return ["run-envelope mutation producer does not count killed and timed-out mutants as detected"]
+
+    score = assignments.get("score")
+    score_names = {node.id for node in ast.walk(score) if isinstance(node, ast.Name)} if score else set()
+    if not {"detected", "mutations"}.issubset(score_names):
+        return ["run-envelope mutation producer disconnects detected mutants from its score"]
+    return []
+
+
+def mutation_projection_errors(
+    deploy: str,
+    pitest: str,
+    producer: str,
+    collector: str,
+    quality_collector: str,
+) -> list[str]:
+    """Keep fixed Pitest lanes attached to their report owner.
+
+    Matrix artifact names already carry the released component. A fixed lane may use a
+    scope name instead, so derive its owner from the literal mutation-report path and
+    require both the deployment compatibility mapping and collector denominator parser.
+    """
+    errors: list[str] = []
+    try:
+        workflow = yaml.load(pitest, Loader=CapabilityLoader)
+    except yaml.YAMLError as exc:
+        return [f"pitest workflow cannot be inspected for fixed mutation lanes: {exc}"]
+
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    if not isinstance(jobs, dict):
+        return ["pitest workflow has no inspectable jobs mapping"]
+
+    fixed_lanes: list[tuple[str, str]] = []
+    report_pattern = re.compile(
+        r"--mutation-report\s+[\"']?(openbank-[a-z0-9-]+)/build/reports/pitest/mutations\.xml[\"']?"
+    )
+    out_pattern = re.compile(r"--out\s+(?:[\"']([^\"']+)[\"']|([^\s\\]+))")
+    for job in jobs.values():
+        if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+            continue
+        owners: set[str] = set()
+        artifacts: set[tuple[str, str]] = set()
+        for step in job["steps"]:
+            if not isinstance(step, dict):
+                continue
+            run = step.get("run")
+            if isinstance(run, str):
+                executable = shell_code(run)
+                run_owners = set(report_pattern.findall(executable))
+                owners.update(run_owners)
+                outputs = {next(value for value in match.groups() if value is not None)
+                           for match in out_pattern.finditer(executable)}
+                for owner in run_owners:
+                    expected = f"{owner}/build/reports/pitest/test-intelligence-run.json"
+                    if outputs != {expected}:
+                        errors.append(f"mutation envelope for {owner} is not retained beside its XML report")
+            config = step.get("with")
+            artifact = config.get("name") if isinstance(config, dict) else None
+            upload_path = config.get("path") if isinstance(config, dict) else None
+            upload = str(step.get("uses", "")).startswith("actions/upload-artifact@")
+            if upload and isinstance(artifact, str) and artifact.startswith("pitest-") and "${{" not in artifact:
+                artifacts.add((artifact, upload_path if isinstance(upload_path, str) else ""))
+        if owners:
+            if len(owners) != 1 or len(artifacts) != 1:
+                errors.append("a fixed Pitest lane does not have one literal report owner and artifact")
+                continue
+            owner = next(iter(owners))
+            artifact, upload_path = next(iter(artifacts))
+            if upload_path.rstrip("/") != f"{owner}/build/reports/pitest":
+                errors.append(f"mutation artifact {artifact} does not upload its report-owner directory")
+            fixed_lanes.append((artifact, owner))
+
+        if any(isinstance(step, dict) and "--mutation-report" in str(step.get("run", ""))
+               for step in job["steps"]):
+            scoring = [str(step.get("run")) for step in job["steps"] if isinstance(step, dict)
+                       and re.search(r"(?m)^\s*SCORE\s*=", str(step.get("run", "")))]
+            valid_scoring = bool(scoring)
+            for script in scoring:
+                code = shell_code(script)
+                detected_variables = []
+                for line in code.splitlines():
+                    match = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*\$\((.*status=.*)\)\s*$", line)
+                    if match and re.search(
+                        r"\(\s*(?:KILLED\s*\|\s*TIMED_OUT|TIMED_OUT\s*\|\s*KILLED)\s*\)",
+                        match.group(2),
+                    ):
+                        detected_variables.append(match.group(1))
+                score_lines = [line for line in code.splitlines()
+                               if re.match(r"\s*SCORE\s*=\s*\$\(\(", line)]
+                score_line = score_lines[0] if len(score_lines) == 1 else ""
+                # A canonical line left above a later assignment is dead evidence. Count
+                # every ordinary/arithmetic write in the executable shell, not only lines
+                # whose right-hand side happens to look like our expected expression.
+                score_is_detected_half_up = len(detected_variables) == 1 and any(
+                    re.fullmatch(
+                        rf"\s*SCORE\s*=\s*\$\(\(\s*\(\s*{re.escape(variable)}\s*\*\s*100\s*"
+                        r"\+\s*TOTAL\s*/\s*2\s*\)\s*/\s*TOTAL\s*\)\)\s*;?\s*",
+                        score_line,
+                    )
+                    and shell_variable_write_count(code, variable) == 1
+                    and shell_variable_write_count(code, "SCORE") == 1
+                    for variable in detected_variables
+                )
+                valid_scoring = valid_scoring and score_is_detected_half_up
+            if not valid_scoring:
+                errors.append("Pitest workflow scoring does not carry killed and timed-out mutants into SCORE")
+
+    if ("pitest-authz", "openbank-libs-runtime") not in fixed_lanes:
+        errors.append("enforced pitest-authz lane does not publish the openbank-libs-runtime mutation report")
+
+    pitest_stage = deploy.partition("Stage pitest mutation results")[2].partition(
+        "Stage performance evidence"
+    )[0]
+    pitest_stage = "\n".join(
+        line for line in pitest_stage.splitlines() if not line.lstrip().startswith("#")
+    )
+    artifact_selector = "if a['name'].startswith('pitest-') and not a['expired']]"
+    if artifact_selector not in pitest_stage:
+        errors.append("mutation staging does not select every retained non-expired Pitest artifact")
+    fallback = pitest_stage.find('*) svc="${art_name#pitest-}" ;;')
+    destination = pitest_stage.find('dest="${svc}/build/reports/pitest"')
+    for artifact, owner in fixed_lanes:
+        if artifact == f"pitest-{owner}":
+            continue
+        mapping = re.compile(
+            rf"(?m)^\s*{re.escape(artifact)}\)\s+svc=[\"']{re.escape(owner)}[\"']\s*;;\s*$"
+        ).search(pitest_stage)
+        case_end = pitest_stage.find("esac", fallback)
+        overwritten = case_end >= 0 and re.search(
+            r"(?m)^\s*svc=", pitest_stage[case_end + len("esac"):destination]
+        )
+        if mapping is None or not (mapping.start() < fallback < case_end < destination) or overwritten:
+            errors.append(f"mutation artifact {artifact} is not staged under report owner {owner}")
+
+    mutation_components = collector.partition("function mutationComponents()")[2].partition(
+        "function platformCapabilities()"
+    )[0]
+    fixed_capture = re.search(
+        r"(?s)const\s+([A-Za-z_$][\w$]*)\s*=\s*\[\.\.\.workflow\.matchAll\(\s*"
+        r"/--mutation-report\\s\+\[\"'\]\?\(openbank-\[a-z0-9-\]\+\)\\/"
+        r"build\\/reports\\/pitest\\/mutations\\\.xml\[\"'\]\?/g\s*,?\s*\)"
+        r"\]\.map\(match\s*=>\s*match\[1\]\)",
+        mutation_components,
+    )
+    fixed_union = fixed_capture and re.search(
+        rf"return\s+new Set\(\[\.\.\.matrixComponents,\s*\.\.\.{re.escape(fixed_capture.group(1))}\]\)",
+        mutation_components,
+    )
+    if not fixed_union:
+        errors.append("admin projection omits fixed Pitest report owners from its required-control denominator")
+
+    projection_flow = (
+        "const governedMutationComponents = mutationComponents()",
+        "const internalMutationComponents = [...governedMutationComponents]",
+        ".filter(component => !names.includes(component) && !tooling.includes(component))",
+        "for (const component of internalMutationComponents)",
+        "component, released: false",
+        "const mutationEvidence = await mutations([...names, ...internalMutationComponents])",
+    )
+    cursor = 0
+    for needle in projection_flow:
+        found = collector.find(needle, cursor)
+        if found < 0:
+            errors.append("admin projection does not collect fixed Pitest report owners as internal components")
+            break
+        cursor = found + len(needle)
+
+    required_controls = collector.partition("function requiredControls(")[2].partition(
+        "function performance()"
+    )[0]
+    if ("for (const component of components)" not in required_controls
+            or "if (mutationParticipants.has(component.component))" not in required_controls
+            or "components.filter(item => item.released)" in required_controls):
+        errors.append("fixed Pitest report owners cannot enter the required-control output")
+
+    errors.extend(producer_mutation_semantics_errors(producer))
+
+    mutation_reader = re.sub(
+        r"/\*.*?\*/|^\s*//.*$",
+        "",
+        javascript_function(collector, "mutations"),
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    timed_out_declarations = re.findall(r"\b(?:const|let)\s+timedOut\s*=", mutation_reader)
+    timed_out_binding = re.search(
+        r"(?m)^\s*(?:const|let)\s+timedOut\s*=\s*status\s*\(\s*['\"]TIMED_OUT['\"]\s*\)\s*;?\s*$",
+        mutation_reader,
+    )
+    detected_score = r"pitestMutationScore\s*\(\s*killed\s*\+\s*timedOut\s*,\s*items\.length\s*\)"
+    state_start = re.search(r"\b(?:const|let)\s+specializedState\s*=", mutation_reader)
+    legacy_state = mutation_reader[state_start.end():].partition("result.push")[0] if state_start else ""
+    projected_score = re.search(rf"\bscore\s*:\s*{detected_score}", mutation_reader)
+    if (len(timed_out_declarations) != 1 or timed_out_binding is None or state_start is None
+            or timed_out_binding.start() > state_start.start()
+            or re.search(detected_score, legacy_state) is None or projected_score is None):
+        errors.append("admin mutation projection does not carry timed-out mutants into state and score")
+
+    quality_reader = re.sub(
+        r"/\*.*?\*/|^\s*//.*$",
+        "",
+        javascript_function(quality_collector, "collectMutation"),
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    mutation_loop = re.search(r"for\s*\([^)]*\bof\s+mutations\s*\)\s*\{(.*?)\n\s*\}", quality_reader, re.DOTALL)
+    loop = mutation_loop.group(1) if mutation_loop else ""
+    quality_return = quality_reader.partition("return {")[2]
+    quality_counts_timeout = re.search(
+        r"else\s+if\s*\(\s*status\s*===\s*['\"]TIMED_OUT['\"]\s*\)\s*timedOut\+\+",
+        loop,
+    )
+    quality_score = re.search(
+        r"\bscore\s*:\s*[^,]*\(\s*killed\s*\+\s*timedOut\s*\)[^,]*,",
+        quality_return,
+        re.DOTALL,
+    )
+    if quality_counts_timeout is None or quality_score is None:
+        errors.append("quality-report mutation scoring disagrees with PIT detected-mutant semantics")
     return errors
 
 
@@ -529,6 +809,11 @@ def check(root: Path) -> list[str]:
         errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
+    pitest_workflow = text(root / ".github/workflows/pitest.yml")
+    quality_collector = text(root / "openbank-admin-ui/scripts/collect-quality-report.mjs")
+    errors.extend(mutation_projection_errors(
+        deploy, pitest_workflow, run_collector, collector, quality_collector
+    ))
     performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
         "Collect production-readiness scorecard"
     )[0]
@@ -634,7 +919,7 @@ def check(root: Path) -> list[str]:
     for needle in ("unknownEvidence", "unresolvedEvidence", "['unknown', 'not-run', 'blocked']"):
         if needle not in collector:
             errors.append(f"collector can aggregate unresolved evidence as green: {needle}")
-    for needle in ("freshnessAwareState", "freshnessAwareState(item.status, item.verifiedAt)", "specialized.state, performanceRun?.run?.observedAt", "specialized.state, mutationRun?.run?.observedAt", "freshnessAwareState(evidence.state, envelope.run.observedAt)"):
+    for needle in ("freshnessAwareState", "freshnessAwareState(item.status, item.verifiedAt)", "specialized.state, performanceRun?.run?.observedAt", "specializedState, mutationRun?.run?.observedAt", "freshnessAwareState(evidence.state, envelope.run.observedAt)"):
         if needle not in collector:
             errors.append(f"retained successful evidence can outlive the fleet freshness budget: {needle}")
     synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")
@@ -858,6 +1143,177 @@ python3 "${SELECTOR}" baseline
         }
         for label, candidate in broken_performance_projections.items():
             if not performance_projection_errors(candidate):
+                print(f"self-test failed: {label} was accepted")
+                return 1
+        valid_mutation_deploy = """
+Stage pitest mutation results
+if a['name'].startswith('pitest-') and not a['expired']]
+case "${art_name}" in
+  pitest-authz) svc="openbank-libs-runtime" ;;
+  *) svc="${art_name#pitest-}" ;;
+esac
+dest="${svc}/build/reports/pitest"
+Stage performance evidence
+"""
+        valid_fixed_pitest = """
+jobs:
+  pitest-authz:
+    steps:
+      - run: |
+          python collector.py \\
+            --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \\
+            --out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json
+      - run: |
+          XML=openbank-libs-runtime/build/reports/pitest/mutations.xml
+          TOTAL=$(grep -o '<mutation ' "$XML" | wc -l)
+          DETECTED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l)
+          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
+      - uses: actions/upload-artifact@sha
+        with:
+          name: pitest-authz
+          path: openbank-libs-runtime/build/reports/pitest/
+"""
+        valid_mutation_producer = '''
+def pitest_mutation_score(detected, total):
+    return (detected * 100 + total // 2) // total if total else None
+
+def specialized_evidence(mutation_report, mutation_threshold):
+    mutations = []
+    detected = sum(1 for item in mutations if item.attrib.get("status") in {"KILLED", "TIMED_OUT"})
+    score = pitest_mutation_score(detected, len(mutations))
+    return score
+'''
+        valid_mutation_collector = r"""
+function pitestMutationScore(detected, total) {
+  return total ? Math.floor((detected * 100 + Math.floor(total / 2)) / total) : null
+}
+async function mutations(components) {
+  const items = []
+  const status = name => items.filter(item => item.$?.status === name).length
+  const killed = status('KILLED')
+  const timedOut = status('TIMED_OUT')
+  const legacyThreshold = 63
+  const specializedState = pitestMutationScore(killed + timedOut, items.length) < legacyThreshold ? 'failed' : 'passed'
+  const result = []
+  result.push({ timedOut, score: pitestMutationScore(killed + timedOut, items.length) })
+  return result
+}
+function mutationComponents() {
+  const matrixComponents = []
+  const fixedComponents = [...workflow.matchAll(
+    /--mutation-report\s+["']?(openbank-[a-z0-9-]+)\/build\/reports\/pitest\/mutations\.xml["']?/g,
+  )].map(match => match[1])
+  return new Set([...matrixComponents, ...fixedComponents])
+}
+function platformCapabilities() {
+}
+function requiredControls(components) {
+  const mutationParticipants = mutationComponents()
+  for (const component of components) {
+    if (component.released) {
+    }
+    if (mutationParticipants.has(component.component)) {
+    }
+  }
+}
+function performance() {
+}
+async function main() {
+  const names = releasedComponents()
+  const governedMutationComponents = mutationComponents()
+  const tooling = []
+  const internalMutationComponents = [...governedMutationComponents]
+    .filter(component => !names.includes(component) && !tooling.includes(component))
+  const components = []
+  for (const component of internalMutationComponents) {
+    components.push({ component, released: false })
+  }
+  const mutationEvidence = await mutations([...names, ...internalMutationComponents])
+  return mutationEvidence
+}
+"""
+        valid_quality_collector = """
+export async function collectMutation(service) {
+  const mutations = []
+  let killed = 0, timedOut = 0, total = 0
+  for (const mutation of mutations) {
+    total++
+    const status = mutation.$.status
+    if (status === 'KILLED') killed++
+    else if (status === 'TIMED_OUT') timedOut++
+  }
+  return {
+    service,
+    killed,
+    timedOut,
+    score: total > 0 ? Math.floor(((killed + timedOut) * 100 + Math.floor(total / 2)) / total) : null,
+  }
+}
+function collectContracts() {}
+"""
+        valid_mutation_inputs = (
+            valid_mutation_deploy, valid_fixed_pitest, valid_mutation_producer,
+            valid_mutation_collector, valid_quality_collector,
+        )
+        if mutation_projection_errors(*valid_mutation_inputs):
+            print("self-test failed: valid fixed Pitest mutation projection was rejected")
+            return 1
+        broken_mutation_projections = {
+            "fixed mutation artifact loses its report owner": (0, lambda value: value.replace(
+                'pitest-authz) svc="openbank-libs-runtime" ;;\n', "")),
+            "fixed mutation artifact is excluded from staging": (0, lambda value: value.replace(
+                "if a['name'].startswith('pitest-')",
+                "if a['name'] != 'pitest-authz' and a['name'].startswith('pitest-')")),
+            "fixed mutation upload leaves its report owner": (1, lambda value: value.replace(
+                "path: openbank-libs-runtime/build/reports/pitest/", "path: authz/build/reports/pitest/")),
+            "fixed mutation owner is overwritten after mapping": (0, lambda value: value.replace(
+                "esac\ndest=", 'esac\nsvc="openbank-authz"\ndest=')),
+            "fixed mutation sidecar leaves its report owner": (1, lambda value: value.replace(
+                "--out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json",
+                "--out /tmp/test-intelligence-run.json")),
+            "Pitest workflow counts killed mutants only": (1, lambda value: value.replace(
+                "(KILLED|TIMED_OUT)", "KILLED")),
+            "Pitest workflow floors instead of rounding half up": (1, lambda value: value.replace(
+                " + TOTAL / 2", "")),
+            "Pitest workflow disconnects detected mutants from the score": (1, lambda value: value.replace(
+                "DETECTED * 100", "DETECTED * 0")),
+            "Pitest workflow overwrites detected count before scoring": (1, lambda value: value.replace(
+                "          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))",
+                "          DETECTED=0\n          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))")),
+            "Pitest workflow overwrites score after correct arithmetic": (1, lambda value: value.replace(
+                "          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))",
+                "          SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))\n"
+                '          SCORE=$(expr "${DETECTED}" \\* 100 / "${TOTAL}")')),
+            "run-envelope producer counts killed mutants only": (2, lambda value: value.replace(
+                '{"KILLED", "TIMED_OUT"}', '{"KILLED"}')),
+            "admin mutation collector counts killed mutants only": (3, lambda value: value.replace(
+                "const timedOut = status('TIMED_OUT')", "const timedOut = 0")),
+            "quality score ignores timeout while a dead expression names it": (4, lambda value:
+                value.replace("((killed + timedOut) * 100", "(killed * 100")
+                + "\nconst unusedDetected = killed + timedOut\n"),
+            "fixed mutation capture is not projected": (3, lambda value: value.replace(
+                ")].map(match => match[1])", ")]")),
+            "fixed mutation lane leaves the denominator": (3, lambda value: value.replace(
+                "return new Set([...matrixComponents, ...fixedComponents])", "return new Set(matrixComponents)")),
+            "enforced fixed lane disappears": (1, lambda value: value.replace(
+                "--mutation-report", "--ignored-report")),
+            "fixed mutation report owner is not collected": (3, lambda value: value.replace(
+                "const internalMutationComponents = [...governedMutationComponents]",
+                "const internalMutationComponents = []")),
+            "internal mutation component is presented as released": (3, lambda value: value.replace(
+                "component, released: false", "component, released: true")),
+            "fixed mutation report is not parsed": (3, lambda value: value.replace(
+                "mutations([...names, ...internalMutationComponents])", "mutations(names)")),
+            "fixed mutation control stays behind the released filter": (3, lambda value: value.replace(
+                "for (const component of components)",
+                "for (const component of components.filter(item => item.released))")),
+            "quality report ignores timed-out mutants": (4, lambda value: value.replace(
+                "else if (status === 'TIMED_OUT') timedOut++", "")),
+        }
+        for label, (input_index, break_input) in broken_mutation_projections.items():
+            candidate = list(valid_mutation_inputs)
+            candidate[input_index] = break_input(candidate[input_index])
+            if not mutation_projection_errors(*candidate):
                 print(f"self-test failed: {label} was accepted")
                 return 1
     selector_error = performance_selector_self_test_error(

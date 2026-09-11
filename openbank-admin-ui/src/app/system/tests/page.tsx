@@ -12,7 +12,7 @@ import { useLanguage, type Language } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-triage'
 import type {
-  ComponentTestPosture, EvidenceKind, EvidenceState, TestCaseHistory, TestIntelligenceReport,
+  ComponentTestPosture, EvidenceKind, EvidenceState, RequiredTestControl, TestCaseHistory, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
@@ -23,6 +23,19 @@ import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Ton
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
 const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
+
+function requiredControlTab(kind: RequiredTestControl['kind']): Tab {
+  switch (kind) {
+    case 'contract': return 'contracts'
+    case 'mutation': return 'mutation'
+    case 'performance': return 'performance'
+    case 'synthetic': return 'synthetic'
+    case 'coverage': return 'coverage'
+    case 'runtime': return 'runtime'
+    case 'visual': return 'posture'
+    default: return 'execution'
+  }
+}
 
 function evidenceTone(state: EvidenceState): Tone {
   switch (state) {
@@ -73,10 +86,16 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
     'not-run',
   )
-  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
-    : report.totals.failingEvidence > 0 ? 'failed'
+  const componentCiState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
+  const requiredControlGaps = (report.requiredControls ?? []).filter(control => control.state !== 'passed')
+  const requiredControlState = aggregateEvidenceState([
+    ...requiredControlGaps.map(control => control.state),
+    ...((report.totals.requiredControlGaps ?? 0) > requiredControlGaps.length ? ['unknown' as const] : []),
+  ], 'passed')
+  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
+    : aggregateEvidenceState([componentCiState, requiredControlState])
   const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
     { tab: 'posture', title: t('CI důkazy', 'CI evidence'), eyebrow: t('deterministické gate', 'deterministic gates'), state: ciState, detail: t(`${report.totals.componentsWithExecutionEvidence}/${report.totals.components} komponent s důkazem běhu`, `${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with run evidence`) },
     { tab: 'runtime', title: t('Testcontainers runtime', 'Testcontainers runtime'), eyebrow: t('skutečná topologie', 'actual topology'), state: runtimeState, detail: t(`${runtimeRows.length} deklarovaných testovacích runtime`, `${runtimeRows.length} declared test runtimes`) },
@@ -103,6 +122,19 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
  */
 function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
+  const requiredControlGaps = (report.requiredControls ?? []).filter(control => control.state !== 'passed')
+  const unprojectedRequiredControlGaps = Math.max(0, (report.totals.requiredControlGaps ?? 0) - requiredControlGaps.length)
+  const queuedRequiredControlGaps = requiredControlGaps.filter(control => {
+    if (control.kind === 'synthetic') {
+      return !report.syntheticJourneys.some(journey => `synthetic:${journey.id}` === control.id
+        && (journey.status === 'planned' || journey.state !== 'passed'))
+    }
+    if (control.kind === 'performance') {
+      return !report.performance.some(row => row.component === control.component
+        && (row.state !== 'passed' || Boolean(row.plan?.blocker)))
+    }
+    return true
+  })
   // A component that has never emitted a particular test layer is not a green result.
   // Do not infer that every component *must* own every layer: this is a visibility and
   // prioritisation signal, while governed journey coverage remains the obligation source.
@@ -127,6 +159,19 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
   })
   const gaps: Array<{ id: string; tab: Tab; title: string; detail: string; state: EvidenceState }> = [
     ...layerVisibility,
+    ...queuedRequiredControlGaps.map(control => ({
+      id: `required-control-${control.id}`, tab: requiredControlTab(control.kind), state: control.state,
+      title: t(`Povinná kontrola: ${control.id}`, `Required control: ${control.id}`),
+      detail: control.blocker ?? control.reason,
+    })),
+    ...(unprojectedRequiredControlGaps > 0 ? [{
+      id: 'required-controls-unprojected', tab: 'posture' as const, state: 'unknown' as const,
+      title: t('Povinné kontroly', 'Required controls'),
+      detail: t(
+        `${unprojectedRequiredControlGaps} mezer povinných kontrol nemá v tomto snapshotu detailní řádek.`,
+        `${unprojectedRequiredControlGaps} required-control gaps have no detailed row in this snapshot.`,
+      ),
+    }] : []),
     ...report.performance.filter(row => row.state !== 'passed' || row.plan?.blocker).map(row => ({
       id: `performance-${row.id}`, tab: 'performance' as const, state: row.state,
       title: t(`Výkon: ${row.id}`, `Performance: ${row.id}`),
@@ -147,8 +192,8 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
     }] : []),
   ]
   if (gaps.length === 0) return null
-  return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, #d97706 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, #d97706 7%, var(--surface-1)), var(--surface-1))' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: '#d97706', fontWeight: 750 }}>{gaps.length}</span></div>
+  return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, var(--warning-border) 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, var(--warning-bg) 70%, var(--surface-1)), var(--surface-1))' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: 'var(--warning-text)', fontWeight: 750 }}>{gaps.length}</span></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
   </section>
 }
@@ -190,7 +235,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
-                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: 'var(--danger-text)', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
                 {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
@@ -204,7 +249,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
           <thead><tr><th style={thStyle}>Control</th><th style={thStyle}>State</th><th style={thStyle}>Reason</th><th style={thStyle}>Observed</th></tr></thead>
           <tbody>{(report.requiredControls ?? []).map(control => <tr key={control.id}>
             <td style={{ ...tdStyle, fontWeight: 650 }}>{control.id}</td><td style={tdStyle}><StateBadge state={control.state} /></td>
-            <td style={{ ...tdStyle, minWidth: 320 }}>{control.reason}{control.blocker && <div style={{ color: '#7c3aed', fontSize: 10, marginTop: 3 }}>{control.blocker}</div>}</td>
+            <td style={{ ...tdStyle, minWidth: 320 }}>{control.reason}{control.blocker && <div style={{ color: 'var(--accent-text)', fontSize: 10, marginTop: 3 }}>{control.blocker}</div>}</td>
             <td style={tdStyle}>{control.observedAt ? formatTimestamp(control.observedAt, language) : '—'}</td>
           </tr>)}</tbody>
         </table></div>
@@ -216,7 +261,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
           <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
           <tbody>{(report.platformCapabilities ?? []).length ? (report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
             <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
-            <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
+            <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? 'var(--success-text)' : 'var(--accent-text)', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
             <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
             <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
           </tr>) : <tr><td colSpan={4} style={{ ...tdStyle, color: 'var(--text-secondary)' }}><StateBadge state="unknown" /> {t('Registr schopností není v tomto snapshotu dostupný; přesný důvod je ve varování snapshotu.', 'The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')}</td></tr>}</tbody>
@@ -270,10 +315,10 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
       <Stat label={t('Aktuálně selhává', 'Currently failing')} value={failing.length} tone={failing.length ? 'danger' : 'success'} />
       <Stat label={t('Čas neúspěšných běhů', 'Failed runtime')} value={`${Math.round(wasted / 1000)} s`} tone={wasted ? 'warning' : undefined} />
     </div>
-    <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
+    <div style={{ padding: 12, border: '1px solid color-mix(in srgb, var(--success-border) 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
       {t('Test je označen jako flaky po neúspěšném Playwright pokusu následovaném úspěšným retry ve stejném běhu nebo po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky after a failed Playwright attempt followed by a passing retry in the same run, or after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
     </div>
-    {impact && <div aria-label={t('Stav mapování test impactu', 'Test impact mapping state')} style={{ padding: 12, border: '1px solid color-mix(in srgb, #64748b 42%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12, background: 'var(--surface-2)' }}>
+    {impact && <div aria-label={t('Stav mapování test impactu', 'Test impact mapping state')} style={{ padding: 12, border: '1px solid color-mix(in srgb, var(--text-tertiary) 42%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12, background: 'var(--surface-2)' }}>
       <strong>{t('Test impact selection: shadow only', 'Test impact selection: shadow only')}</strong><span style={{ marginLeft: 8 }}><StateBadge state="unknown" /></span><div style={{ marginTop: 5 }}>{impact.detail}</div><div style={{ marginTop: 5, color: 'var(--text-tertiary)' }}>{t('Cesta k testu není mapa závislostí do produkce. AI ji nesmí domýšlet ani vybírat povinné gate.', 'A test source path is not a production dependency map. AI must not infer it or select a required gate.')}</div>
     </div>}
     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -295,7 +340,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
       ].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
       <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
         <td style={tdStyle}><TestCaseStateBadge state={item.state} /></td>
-        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: '#d97706', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
+        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: 'var(--warning-text)', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10, maxWidth: 260, overflowWrap: 'anywhere' }}>{item.testDefinitionPath ?? t('nenahlášeno', 'not reported')}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
@@ -310,17 +355,17 @@ function History({ report }: { report: TestIntelligenceReport }) {
   const max = Math.max(1, ...report.history.map(point => point.components))
   return <div style={{ display: 'grid', gap: 18 }}><div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
     <div style={{ marginBottom: 16 }}><strong>{t('Historie fleet evidence', 'Fleet evidence history')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Neměnné deployment snapshoty uchované jako CI artefakty. Sloupce nikdy neodvozují chybějící běhy.', 'Immutable deployment snapshots retained as CI artifacts. Bars never infer missing runs.')}</div></div>
-    {report.history.length < 2 && <div style={{ color: '#d97706', fontSize: 12, marginBottom: 12 }}><TriangleAlert size={13} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} />{t('První snapshot je dostupný; trend se zobrazí po dalším nasazení admin UI.', 'The first snapshot is present; a trend appears after the next admin deployment.')}</div>}
+    {report.history.length < 2 && <div style={{ color: 'var(--warning-text)', fontSize: 12, marginBottom: 12 }}><TriangleAlert size={13} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} />{t('První snapshot je dostupný; trend se zobrazí po dalším nasazení admin UI.', 'The first snapshot is present; a trend appears after the next admin deployment.')}</div>}
     <div style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 190, overflowX: 'auto', paddingTop: 12 }}>
       {report.history.map(point => <div key={point.collectedAt} title={`${formatTimestamp(point.collectedAt, language)} · ${point.componentsWithExecutionEvidence}/${point.components} evidenced · ${point.failingEvidence} failing · ${point.unresolvedEvidence ?? point.unknownEvidence ?? 0} unresolved`} style={{ minWidth: 38, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'end', gap: 3, height: 170 }}>
-        <div style={{ height: `${Math.max(2, point.failingEvidence / max * 150)}px`, background: '#dc2626', borderRadius: '4px 4px 0 0' }} />
-        <div style={{ height: `${Math.max(2, (point.unresolvedEvidence ?? point.unknownEvidence ?? 0) / max * 150)}px`, background: '#64748b' }} />
-        <div style={{ height: `${Math.max(2, point.missingEvidence / max * 150)}px`, background: '#d97706' }} />
-        <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: '#16a34a', borderRadius: '0 0 4px 4px' }} />
+        <div style={{ height: `${Math.max(2, point.failingEvidence / max * 150)}px`, background: 'var(--danger-text)', borderRadius: '4px 4px 0 0' }} />
+        <div style={{ height: `${Math.max(2, (point.unresolvedEvidence ?? point.unknownEvidence ?? 0) / max * 150)}px`, background: 'var(--text-tertiary)' }} />
+        <div style={{ height: `${Math.max(2, point.missingEvidence / max * 150)}px`, background: 'var(--warning-text)' }} />
+        <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: 'var(--success-text)', borderRadius: '0 0 4px 4px' }} />
         <span style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'center' }}>{formatTimestamp(point.collectedAt, language, { month: 'short', day: 'numeric' })}</span>
       </div>)}
     </div>
-    <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: '#16a34a' }}>● evidenced</span><span style={{ color: '#64748b' }}>● unresolved</span><span style={{ color: '#d97706' }}>● missing</span><span style={{ color: '#dc2626' }}>● failing</span></div>
+    <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: 'var(--success-text)' }}>● evidenced</span><span style={{ color: 'var(--text-tertiary)' }}>● unresolved</span><span style={{ color: 'var(--warning-text)' }}>● missing</span><span style={{ color: 'var(--danger-text)' }}>● failing</span></div>
   </div><div style={{ border: '1px solid var(--border)', borderRadius: 10, overflowX: 'auto' }}>
     <div style={{ padding: '16px 18px 8px' }}><strong>{t('Neměnné pokusy služeb', 'Immutable service attempts')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Nejnovější verzované CI obálky; opakované běhy zůstávají samostatnými pokusy.', 'Latest versioned CI envelopes; reruns remain separate attempts.')}</div></div>
     <table style={tableStyle}><thead><tr><th style={thStyle}>Component</th><th style={thStyle}>Run / attempt</th><th style={thStyle}>Commit</th><th style={thStyle}>{t('Stavy evidence', 'Evidence states')}</th><th style={thStyle}>Runtime</th><th style={thStyle}>Observed</th></tr></thead>
@@ -352,7 +397,7 @@ function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
       // that a container leaked; presenting it as failed would overclaim beyond the retained evidence.
       const state: EvidenceState = started.length === 0 || impossibleStops || unmatchedStarts > 0 ? 'unknown' : 'passed'
       const latest = row.testInfrastructure.observed.at(-1)?.observedAt
-      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || t('žádná', 'none')}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{scopes.length > 0 && <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`${scopes.length} neprůhledných scopeů resource manageru · ${incompleteScopes.length} s neúplným lifecycle záznamem`, `${scopes.length} opaque resource-manager scopes · ${incompleteScopes.length} with incomplete lifecycle records`)}</div>}{unmatchedStarts > 0 && <div role="status" style={{ color: '#a16207', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? formatTimestamp(latest, language) : t('tento běh nevydal', 'not emitted by this run')}</td></tr>
+      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || t('žádná', 'none')}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{scopes.length > 0 && <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`${scopes.length} neprůhledných scopeů resource manageru · ${incompleteScopes.length} s neúplným lifecycle záznamem`, `${scopes.length} opaque resource-manager scopes · ${incompleteScopes.length} with incomplete lifecycle records`)}</div>}{unmatchedStarts > 0 && <div role="status" style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? formatTimestamp(latest, language) : t('tento běh nevydal', 'not emitted by this run')}</td></tr>
     })}</tbody>
   </table></div>
 }
@@ -377,11 +422,11 @@ function Contracts({ report }: { report: TestIntelligenceReport }) {
     ? t('V uchované historii není přibalen žádný contract suite verdict.', 'No contract-suite verdict is bundled in retained run history.')
     : t(`${contractSuites.filter(state => state === 'passed').length}/${contractSuites.length} uchovaných CI contract suite verdiktů prošlo.`, `${contractSuites.filter(state => state === 'passed').length}/${contractSuites.length} retained CI contract-suite verdicts passed.`)
   return <div style={{ display: 'grid', gap: 12 }}>
-    <div style={{ padding: 13, border: '1px solid color-mix(in srgb, #64748b 36%, var(--border))', borderRadius: 10, background: 'var(--surface-2)', color: 'var(--text-secondary)', fontSize: 12 }}>
+    <div style={{ padding: 13, border: '1px solid color-mix(in srgb, var(--text-tertiary) 36%, var(--border))', borderRadius: 10, background: 'var(--surface-2)', color: 'var(--text-secondary)', fontSize: 12 }}>
       <strong style={{ color: 'var(--text-primary)' }}>{t('Dva nezaměnitelné druhy důkazu.', 'Two non-interchangeable evidence types.')}</strong>{' '}
       {t('Tabulka níže ukazuje per-Pact provider-verification verdikt z Pact Brokeru. Historie běhů ukazuje CI contract suite verdikt. Jeden není náhradou druhého a neznámý broker verdikt se nikdy nevydává za zelený.', 'The table below shows the per-Pact provider-verification verdict from the Pact Broker. Run history shows the CI contract-suite verdict. Neither substitutes for the other, and an unavailable broker verdict is never presented as green.')}
       <div style={{ marginTop: 7 }}>{suiteSummary}</div>
-      {unknown.length > 0 && <div style={{ marginTop: 7, color: '#64748b' }}>{t(`${unknown.length} Pactů má neznámý broker verdikt v tomto snapshotu; otevři detail řádku pro přesný důvod.`, `${unknown.length} Pacts have an unavailable broker verdict in this snapshot; open a row detail for the precise reason.`)}</div>}
+      {unknown.length > 0 && <div style={{ marginTop: 7, color: 'var(--text-tertiary)' }}>{t(`${unknown.length} Pactů má neznámý broker verdikt v tomto snapshotu; otevři detail řádku pro přesný důvod.`, `${unknown.length} Pacts have an unavailable broker verdict in this snapshot; open a row detail for the precise reason.`)}</div>}
     </div>
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
       <thead><tr><th style={thStyle}>Consumer</th><th style={thStyle}>Provider</th><th style={thStyle}>{t('Broker verdict', 'Broker verdict')}</th><th style={thStyle}>Interactions</th><th style={thStyle}>Pact</th><th style={thStyle}>Verified</th><th style={thStyle}>{t('Evidence basis', 'Evidence basis')}</th></tr></thead>
@@ -394,7 +439,7 @@ function Mutations({ report }: { report: TestIntelligenceReport }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>{report.mutations.map(row => <div key={row.component} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface-1)' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{row.component}</strong><StateBadge state={row.state} /></div>
     <div style={{ fontSize: 28, fontWeight: 750, margin: '12px 0' }}>{row.score ?? '—'}%</div>
-    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.killed} killed · {row.survived} survived · {row.noCoverage} no coverage</div>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.killed} killed · {row.timedOut ?? 0} timed out · {row.survived} survived · {row.noCoverage} no coverage</div>
     {row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 7 }}>run {row.run.id} · {row.run.commit.slice(0, 8)}</div>}
   </div>)}</div>
 }
@@ -435,7 +480,7 @@ function Performance({ report }: { report: TestIntelligenceReport }) {
     {report.performance.map(row => {
       const trend = performanceHistory.filter(point => point.id === row.id)
       return <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-        <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.plan && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}><span style={{ padding: '3px 7px', borderRadius: 999, background: 'var(--surface-2)' }}>{row.plan.executionMode}</span><span>{row.plan.targetSchedule ? `${t('Cílový plán', 'Target schedule')}: ${row.plan.targetSchedule}` : t('Bez automatického plánu', 'No automated schedule')}</span>{row.plan.baselineReport && <span>{t('Zdokumentovaný baseline', 'Documented baseline')}: {row.plan.baselineReport}</span>}</div>}{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}<PerformanceTrend points={trend} t={t} language={language} />{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}{row.plan?.safetyBoundary && <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 5 }}><strong>{t('Bezpečnostní hranice', 'Safety boundary')}:</strong> {row.plan.safetyBoundary}</div>}{row.plan?.blocker && <div style={{ color: '#7c3aed', fontSize: 11, marginTop: 5 }}><strong>Blocker:</strong> {row.plan.blocker}</div>}</div><StateBadge state={row.state} />
+        <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.plan && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}><span style={{ padding: '3px 7px', borderRadius: 999, background: 'var(--surface-2)' }}>{row.plan.executionMode}</span><span>{row.plan.targetSchedule ? `${t('Cílový plán', 'Target schedule')}: ${row.plan.targetSchedule}` : t('Bez automatického plánu', 'No automated schedule')}</span>{row.plan.baselineReport && <span>{t('Zdokumentovaný baseline', 'Documented baseline')}: {row.plan.baselineReport}</span>}</div>}{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}<PerformanceTrend points={trend} t={t} language={language} />{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}{row.plan?.safetyBoundary && <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 5 }}><strong>{t('Bezpečnostní hranice', 'Safety boundary')}:</strong> {row.plan.safetyBoundary}</div>}{row.plan?.blocker && <div style={{ color: 'var(--accent-text)', fontSize: 11, marginTop: 5 }}><strong>Blocker:</strong> {row.plan.blocker}</div>}</div><StateBadge state={row.state} />
       </div>
     })}
   </div>
@@ -445,14 +490,14 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
   const { t, language } = useLanguage()
   const coverage = report.journeyCoverage
   return <div style={{ display: 'grid', gap: 12 }}>
-    {coverage && <section aria-label={t('Pokrytí money-path syntetickými cestami', 'Money-path synthetic journey coverage')} style={{ padding: 18, borderRadius: 12, border: '1px solid color-mix(in srgb, #7c3aed 35%, var(--border))', background: 'linear-gradient(135deg, color-mix(in srgb, #7c3aed 8%, var(--surface-1)), var(--surface-1))' }}>
+    {coverage && <section aria-label={t('Pokrytí money-path syntetickými cestami', 'Money-path synthetic journey coverage')} style={{ padding: 18, borderRadius: 12, border: '1px solid color-mix(in srgb, var(--accent-border) 35%, var(--border))', background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-bg) 80%, var(--surface-1)), var(--surface-1))' }}>
       <strong>{t('Skutečné customer-journey pokrytí', 'Actual customer-journey coverage')}</strong>
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}><span><strong>{coverage.activelyCovered}/{coverage.moneyPathTotal}</strong> {t('money-path služeb aktivně sledováno', 'money-path services actively covered')}</span><span><strong>{coverage.explicitlyUnwatched}</strong> {t('explicitně evidováno jako nesledované', 'explicitly accounted as unwatched')}</span></div>
       <p style={{ margin: '9px 0 0', color: 'var(--text-secondary)', fontSize: 12 }}>{t('Plánovaná cesta se do pokrytí nepočítá. Čitatel se zvýší až po nasazení aktivního scénáře, který službu výslovně pokrývá.', 'A planned journey does not count as coverage. The numerator advances only after an active scenario explicitly covers the service.')}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 11 }}>{coverage.services.map(service => {
         const stateLabel = service.state === 'covered' ? t('Sledováno', 'Covered') : t('Nesledováno', 'Unwatched')
         const detail = service.reason ?? service.journeys.join(', ')
-        return <span key={service.component} title={detail} aria-label={`${service.component}: ${stateLabel}${detail ? `. ${detail}` : ''}`} style={{ padding: '4px 7px', borderRadius: 999, fontSize: 10, border: '1px solid var(--border)', color: service.state === 'covered' ? '#16a34a' : '#d97706', background: 'var(--surface-2)' }}>{service.component.replace(/^openbank-/, '').replace(/-service$/, '')} · <strong>{stateLabel}</strong></span>
+        return <span key={service.component} title={detail} aria-label={`${service.component}: ${stateLabel}${detail ? `. ${detail}` : ''}`} style={{ padding: '4px 7px', borderRadius: 999, fontSize: 10, border: '1px solid var(--border)', color: service.state === 'covered' ? 'var(--success-text)' : 'var(--warning-text)', background: 'var(--surface-2)' }}>{service.component.replace(/^openbank-/, '').replace(/-service$/, '')} · <strong>{stateLabel}</strong></span>
       })}</div>
     </section>}
     {report.syntheticJourneys.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
@@ -473,7 +518,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       <div style={{ color: 'var(--text-secondary)', lineHeight: 1.35 }}>{t(`Prometheus · nejhorší publikovaná hodnota v posledních ${Math.round(row.live.performance.windowSeconds / 60)} minutách. Nedostupná metrika není zelený výsledek a nemění Kubernetes verdikt cesty.`, `Prometheus · worst published value over the last ${Math.round(row.live.performance.windowSeconds / 60)} minutes. An unavailable metric is not a green result and does not change the journey's Kubernetes verdict.`)}</div>
     </div>}
     {row.live?.recentRuns.length ? <div aria-label={t(`Poslední běhy ${row.title}`, `Recent runs for ${row.title}`)} style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 9 }}>{row.live.recentRuns.map(run => <span key={run.id} title={run.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 7px', border: '1px solid var(--border)', borderRadius: 999, background: 'var(--surface-2)', fontSize: 10 }}><StateBadge state={run.state} /><span>{formatTimestamp(run.observedAt, language, { dateStyle: 'short', timeStyle: 'short' })}</span></span>)}</div> : null}
-    {row.runtimeNote && <p style={{ fontSize: 12, color: '#b45309', margin: '10px 0 0' }}><strong>{t('Známý runtime předpoklad', 'Known runtime prerequisite')}:</strong> {row.runtimeNote}</p>}
+    {row.runtimeNote && <p style={{ fontSize: 12, color: 'var(--warning-text)', margin: '10px 0 0' }}><strong>{t('Známý runtime předpoklad', 'Known runtime prerequisite')}:</strong> {row.runtimeNote}</p>}
     {row.ci && <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '10px 0 0' }}><strong>{t('CI důkaz', 'CI evidence')}:</strong> <StateBadge state={row.ci.state} /> · {row.ci.detail} · <a href={row.ci.run.url} target="_blank" rel="noreferrer">run {row.ci.run.id}</a></p>}
     {row.ci?.variants && <div aria-label={t(`Browserová matice ${row.title}`, `Browser matrix for ${row.title}`)} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, marginTop: 9 }}>
       {row.ci.variants.map(variant => <div key={variant.browser} aria-label={t(`Evidence browseru ${variant.browser}`, `${variant.browser} browser evidence`)} style={{ padding: 10, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', fontSize: 11 }}>
@@ -483,7 +528,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       </div>)}
     </div>}
     {row.falsifies && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '10px 0 0' }}><strong>Falsification:</strong> {row.falsifies}</p>}
-    {row.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {row.blocker}</p>}
+    {row.blocker && <p style={{ fontSize: 12, color: 'var(--accent-text)', margin: '10px 0 0' }}><strong>Blocker:</strong> {row.blocker}</p>}
   </div>)}</div>
 }
 
@@ -492,9 +537,9 @@ function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
   return <div style={{ display: 'grid', gap: 12 }}>{(report.clientExperiences ?? []).map(client => <div key={client.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={aggregateEvidenceState(client.evidence.map(item => item.state), 'not-run')} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}{item.diagnostics?.map(diagnostic => <div key={diagnostic.name} style={{ marginTop: 7 }}><a href={diagnostic.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{t('Otevřít diagnostiku běhu', 'Open run diagnostics')}</a><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`Chráněný GitHub artefakt · ${diagnostic.retentionDays} dní · může obsahovat citlivá browser data`, `GitHub-authenticated artifact · ${diagnostic.retentionDays} days · may contain sensitive browser data`)}</div></div>)}</div>)}</div>
-    {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
+    {client.evidence.length === 0 && <p style={{ fontSize: 12, color: 'var(--warning-text)', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
     <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled {client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'} · {client.rum.errorSpansLast7d ?? 'unknown'} error span-counter increments</div>}{client.rum.audit && <div style={{ marginTop: 10, padding: 8, border: '1px solid var(--border)', borderRadius: 7 }}><strong>{t('Audit RUM atributů', 'RUM attribute audit')}</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.audit.state} /></span><div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.audit.detail}</div><div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{t('Poslední úspěšné naplánované spuštění:', 'Last scheduled success:')} {client.rum.audit.lastSuccessfulAt ? formatTimestamp(client.rum.audit.lastSuccessfulAt, language, { dateStyle: 'short', timeStyle: 'short' }) : t('žádné', 'none')}</div></div>}{client.rum.backendCorrelations && <div style={{ marginTop: 8, padding: 9, borderLeft: '2px solid var(--accent)', color: 'var(--text-secondary)', fontSize: 11 }}><strong>{client.surface === 'mobile' ? t('Mobil → backend', 'Mobile → backend') : t('Browser → backend', 'Browser → backend')}</strong><span style={{ marginLeft: 7 }}>{client.rum.backendCorrelations.correlatedTraces}/{client.rum.backendCorrelations.inspectedTraces} {t('prohlédnutých traceů sdílí kontext s backendem', 'inspected traces share context with a backend service')}</span>{client.rum.backendCorrelations.backendServices.length ? <div style={{ marginTop: 4, color: 'var(--text-tertiary)' }}>{t('Pozorované služby', 'Observed services')}: {client.rum.backendCorrelations.backendServices.join(', ')}</div> : null}<div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}>{client.rum.backendCorrelations.truncated ? t('Omezený vzorek; nejde o odhad celého provozu.', 'Bounded sample; not an estimate of all traffic.') : t('Vzorek aktuálně dostupných klientských traceů; nejde o testový verdikt.', 'Sample of currently available client traces; not a test verdict.')}</div></div>}{client.rum.platforms?.length ? <div aria-label={t('Důkazy RUM platforem', 'RUM platform evidence')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8, marginTop: 10 }}>{client.rum.platforms.map(platform => <div key={platform.platform} style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 7 }}><strong>{platform.platform}</strong><div style={{ display: 'flex', gap: 10, marginTop: 5 }}><span>{t('exportér', 'exporter')} <StateBadge state={platform.capability} /></span><span>{t('runtime', 'runtime')} <StateBadge state={platform.runtime} /></span></div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 5 }}>{platform.detail}</div></div>)}</div> : null}</div>
-    {client.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
+    {client.blocker && <p style={{ fontSize: 12, color: 'var(--accent-text)', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
   </div>)}</div>
 }
 
@@ -502,12 +547,12 @@ function AiAssurance({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
   const assurance = report.aiEvalAssurance
   if (!assurance) return <div style={{ padding: 18, border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text-secondary)' }}>{t('AI eval evidence není v tomto snapshotu dostupná.', 'AI eval evidence is unavailable in this snapshot.')}</div>
-  return <section aria-label={t('AI eval assurance', 'AI eval assurance')} style={{ border: '1px solid color-mix(in srgb, #7c3aed 35%, var(--border))', borderRadius: 12, padding: 18, background: 'linear-gradient(135deg, color-mix(in srgb, #7c3aed 8%, var(--surface-1)), var(--surface-1))' }}>
+  return <section aria-label={t('AI eval assurance', 'AI eval assurance')} style={{ border: '1px solid color-mix(in srgb, var(--accent-border) 35%, var(--border))', borderRadius: 12, padding: 18, background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-bg) 80%, var(--surface-1)), var(--surface-1))' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{t('AI eval assurance', 'AI eval assurance')}</strong><p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '7px 0 0' }}>{t('Versionované offline replaye. Nejde o runtime zdraví agenta ani o výsledek customer testu.', 'Versioned offline replays. This is neither agent runtime health nor a customer-test verdict.')}</p></div><StateBadge state={assurance.state} /></div>
     <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginTop: 14, fontSize: 13 }}><span><strong>{assurance.recordedCharters.length}/{assurance.registeredCharters.length}</strong> {t('charterů s nahraným baseline', 'charters with recorded baselines')}</span><span><strong>{assurance.suiteCharters.length}</strong> {t('versionovaných suites', 'versioned suites')}</span><span><strong>{Math.round(assurance.defaultMinPassRate * 100)}%</strong> {t('minimální pass rate', 'minimum pass rate')}</span></div>
     <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '12px 0 0' }}>{assurance.detail}</p>
-    {assurance.missingSuiteCharters.length > 0 && <div style={{ marginTop: 12, color: '#7c3aed', fontSize: 12 }}><strong>{t('Chybějící eval suite:', 'Missing eval suites:')}</strong> {assurance.missingSuiteCharters.join(', ')}</div>}
-    {assurance.missingRecordingCharters.length > 0 && <div style={{ marginTop: 8, color: '#d97706', fontSize: 12 }}><strong>{t('Suite bez recording:', 'Suites without recordings:')}</strong> {assurance.missingRecordingCharters.join(', ')}</div>}
+    {assurance.missingSuiteCharters.length > 0 && <div style={{ marginTop: 12, color: 'var(--accent-text)', fontSize: 12 }}><strong>{t('Chybějící eval suite:', 'Missing eval suites:')}</strong> {assurance.missingSuiteCharters.join(', ')}</div>}
+    {assurance.missingRecordingCharters.length > 0 && <div style={{ marginTop: 8, color: 'var(--warning-text)', fontSize: 12 }}><strong>{t('Suite bez recording:', 'Suites without recordings:')}</strong> {assurance.missingRecordingCharters.join(', ')}</div>}
   </section>
 }
 
@@ -558,7 +603,7 @@ export default function TestIntelligencePage() {
     <TestIntelligenceFlow report={report} />
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
-    {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid #d97706', borderRadius: 8, padding: 12, color: '#d97706', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
+    {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid var(--warning-border)', borderRadius: 8, padding: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
     <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
             aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
     {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <>

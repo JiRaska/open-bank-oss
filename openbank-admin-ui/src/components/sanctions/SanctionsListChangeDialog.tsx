@@ -3,8 +3,8 @@
 'use client'
 
 import { useRef } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle } from 'lucide-react'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export interface SanctionsList {
@@ -30,39 +30,44 @@ export function SanctionsListChangeDialog({ list, enabled, busy, error, onCancel
   onConfirm: () => void
 }) {
   const { t, language } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `sanctions-list-${list.id}-change-title`
-  const impactId = `sanctions-list-${list.id}-change-impact`
-  const governanceId = `sanctions-list-${list.id}-change-governance`
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const failedUnauthorized = error === 'unauthorized'
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={`${impactId} ${governanceId}`}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
-  ><div className="card" style={{ width: 'min(580px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+      <Dialog.Content
+        role="alertdialog"
+        aria-modal="true"
+        aria-busy={busy}
+        onOpenAutoFocus={event => {
+          event.preventDefault()
+          cancelRef.current?.focus()
+        }}
+        onCloseAutoFocus={event => {
+          // The page restores focus only after any status reconciliation has committed and the
+          // stable list control exists again. Radix must not race that deliberate hand-off.
+          event.preventDefault()
+        }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onInteractOutside={event => event.preventDefault()}
+        className="card"
+        style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 40px)', maxWidth: 580, maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+      >
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
       <AlertTriangle aria-hidden="true" size={19} style={{ color: enabled ? 'var(--success)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
       <div>
-        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>
+        <Dialog.Title style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>
           {enabled
             ? t(`Obnovit automatické aktualizace pro „${list.displayName}“?`, `Resume automatic updates for “${list.displayName}”?`)
             : t(`Pozastavit automatické aktualizace pro „${list.displayName}“?`, `Pause automatic updates for “${list.displayName}”?`)}
-        </h2>
-        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+        </Dialog.Title>
+        <Dialog.Description style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
           {enabled
             ? t('Plánované stahování a funkce „stáhnout vše“ se obnoví. Seznam bude znovu dostupný pro výběr v nových manuálních kontrolách z této konzole; do aktuálního rozsahu ho ale nepřidáme bez vašeho výběru.', 'Scheduled and refresh-all downloads resume. The list becomes available for selection in new manual checks from this console, but it is not added to the current scope without your choice.')
             : t('Budoucí plánovaná stahování a spuštění „stáhnout vše“ tento seznam přeskočí; již probíhající stahování může doběhnout. Tato konzole odebere seznam z nových manuálních kontrol. Importované záznamy a dosavadní kontroly zůstanou uložené. API kontroly mimo tuto konzoli toto nastavení nevyloučí.', 'Future scheduled and refresh-all runs will skip this list; a download already in progress may finish. This console will remove the list from new manual checks. Imported entries and existing checks stay stored. API screenings outside this console are not excluded by this setting.')}
-        </p>
+        </Dialog.Description>
       </div>
     </div>
 
@@ -81,7 +86,7 @@ export function SanctionsListChangeDialog({ list, enabled, busy, error, onCancel
       </div>
     </div>
 
-    <p id={governanceId} style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12, lineHeight: 1.5 }}>
+    <p style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12, lineHeight: 1.5 }}>
       {t('Služba provede změnu ihned po potvrzení; požadavek nevstupuje do čtyřokého schvalování a současné API neukládá důvod změny.', 'The service applies this change immediately after confirmation; it does not enter the four-eyes approval queue, and the current API does not store a change reason.')}
     </p>
 
@@ -92,7 +97,7 @@ export function SanctionsListChangeDialog({ list, enabled, busy, error, onCancel
     </p>}
 
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-      <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>
+      <button ref={cancelRef} type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
         {error
           ? t('Zavřít a obnovit stav', 'Close and refresh status')
           : enabled
@@ -107,5 +112,7 @@ export function SanctionsListChangeDialog({ list, enabled, busy, error, onCancel
             : t('Pozastavit automatické aktualizace', 'Pause automatic updates')}
       </button>
     </div>
-  </div></div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
