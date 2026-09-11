@@ -14,8 +14,9 @@
 #
 #   The instinct that catches these is "what else touched this file today", and it is
 #   currently a manual habit — a `git diff origin/main origin/<branch> -- <file>` somebody
-#   has to think of running. This gate makes it automatic and free: no model, no clone, one
-#   REST call per open PR.
+#   has to think of running. This gate makes it automatic and free: no model and no clone.
+#   The open-PR/file inventory is one paginated GraphQL snapshot rather than one REST call
+#   per PR; blob identities for actual overlaps are fetched in bounded GraphQL batches.
 #
 # WHAT IT IS NOT
 #   It is not a conflict detector. Git already reports textual conflicts, and the failures
@@ -52,7 +53,7 @@
 #   (repo lore: never let a gate's SCOPE be hand-kept; a hand-kept list of FACTS is fine.)
 #
 # FALSIFIABILITY
-#   --self-test runs the classifier over synthetic PR-file fixtures with no network at all:
+#   --self-test runs the classifier and GraphQL paginator over synthetic fixtures with no network:
 #   a disjoint pair that must stay clean, a divergent overlap that must be reported, an
 #   identical-sha overlap that must be reported as already-agreeing rather than as a
 #   divergence, and a serialized-path overlap that must be escalated. It also asserts that
@@ -141,26 +142,85 @@ def _gh(args):
         raise RuntimeError(f"gh {' '.join(args)} returned non-JSON: {e}") from e
 
 
-def fetch_open_prs():
-    """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
-    prs = _gh(["pr", "list", "--state", "open", "--limit", "200", "--json", "number,title"])
-    out = []
+def _graphql(query, variables):
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is not None:
+            args.extend(["-F", f"{key}={value}"])
+    return _gh(args)
+
+
+PR_QUERY = """
+query($owner:String!,$name:String!,$after:String) {
+  repository(owner:$owner,name:$name) {
+    pullRequests(first:100,states:OPEN,after:$after,orderBy:{field:CREATED_AT,direction:ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id number title headRefOid
+        files(first:100) { pageInfo { hasNextPage endCursor } nodes { path } }
+      }
+    }
+  }
+}
+"""
+
+FILES_QUERY = """
+query($id:ID!,$after:String) {
+  node(id:$id) {
+    ... on PullRequest {
+      files(first:100,after:$after) { pageInfo { hasNextPage endCursor } nodes { path } }
+    }
+  }
+}
+"""
+
+
+def _fill_overlap_oids(prs, graphql):
+    """Fetch blob oids only for paths that can affect the overlap verdict."""
+    owners = {}
     for pr in prs:
-        n = pr["number"]
-        # --slurp is required with --paginate: without it gh concatenates one JSON array per
-        # page, which is not a JSON document. It yields [[page], [page], ...], hence the flatten.
-        pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
-        files = [f for page in pages for f in page]
-        out.append(
-            {
-                "number": n,
-                "title": pr.get("title", ""),
-                # `sha` is the blob at THIS PR's head — the discriminator that separates
-                # "already agrees" from "genuinely diverges". `status` is carried so a file
-                # deleted by one PR and edited by another is still visible as an overlap.
-                "files": {f["filename"]: f.get("sha", "") for f in files},
-            }
-        )
+        for path in pr["files"]:
+            owners.setdefault(path, []).append(pr)
+    targets = [(pr, path) for path, path_prs in owners.items() if len(path_prs) > 1
+               for pr in path_prs]
+    for offset in range(0, len(targets), 50):
+        batch = targets[offset:offset + 50]
+        declarations = ["$owner:String!", "$name:String!"]
+        fields = []
+        variables = {"owner": REPO.split("/", 1)[0], "name": REPO.split("/", 1)[1]}
+        for index, (pr, path) in enumerate(batch):
+            key = f"expr{index}"
+            declarations.append(f"${key}:String!")
+            fields.append(f'f{index}:object(expression:${key}) {{ ... on Blob {{ oid }} }}')
+            variables[key] = f'{pr["headRefOid"]}:{path}'
+        query = (f'query({",".join(declarations)}) {{ repository(owner:$owner,name:$name) '
+                 f'{{ {" ".join(fields)} }} }}')
+        repository = graphql(query, variables)["data"]["repository"]
+        for index, (pr, path) in enumerate(batch):
+            obj = repository.get(f"f{index}")
+            pr["files"][path] = obj.get("oid", "") if isinstance(obj, dict) else ""
+
+
+def fetch_open_prs(graphql=_graphql):
+    """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
+    owner, name = REPO.split("/", 1)
+    out, after = [], None
+    while True:
+        connection = graphql(PR_QUERY, {"owner": owner, "name": name, "after": after})["data"]["repository"]["pullRequests"]
+        for node in connection["nodes"]:
+            files = node["files"]
+            paths = [item["path"] for item in files["nodes"]]
+            file_after = files["pageInfo"]["endCursor"]
+            while files["pageInfo"]["hasNextPage"]:
+                files = graphql(FILES_QUERY, {"id": node["id"], "after": file_after})["data"]["node"]["files"]
+                paths.extend(item["path"] for item in files["nodes"])
+                file_after = files["pageInfo"]["endCursor"]
+            out.append({"number": node["number"], "title": node.get("title", ""),
+                        "headRefOid": node["headRefOid"], "files": dict.fromkeys(paths, "")})
+        if not connection["pageInfo"]["hasNextPage"]:
+            break
+        after = connection["pageInfo"]["endCursor"]
+    _fill_overlap_oids(out, graphql)
     return out
 
 
@@ -349,12 +409,45 @@ def self_test():
     except RuntimeError:
         pass
 
+    # 9. Exercise both GraphQL pagination axes and the selective blob lookup. This is the
+    #    API-cost control: two PR pages plus one >100-file continuation and ONE oid batch,
+    #    rather than a REST files call for every open PR.
+    calls = []
+
+    def fake_graphql(query, variables):
+        calls.append((query, dict(variables)))
+        if "pullRequests" in query:
+            first = variables.get("after") is None
+            number = 10 if first else 11
+            return {"data": {"repository": {"pullRequests": {
+                "pageInfo": {"hasNextPage": first, "endCursor": "next" if first else None},
+                "nodes": [{"id": f"PR{number}", "number": number, "title": str(number),
+                           "headRefOid": f"head{number}", "files": {
+                               "pageInfo": {"hasNextPage": first, "endCursor": "files-next"},
+                               "nodes": [{"path": "shared.txt"}]}}],
+            }}}}
+        if "... on PullRequest" in query:
+            return {"data": {"node": {"files": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [{"path": "only-first.txt"}],
+            }}}}
+        if "object(expression" in query:
+            return {"data": {"repository": {"f0": {"oid": "same"}, "f1": {"oid": "same"}}}}
+        raise AssertionError("unexpected GraphQL query")
+
+    fetched = fetch_open_prs(fake_graphql)
+    check("GraphQL PR pagination lost a PR", [p["number"] for p in fetched] == [10, 11])
+    check("GraphQL file pagination lost a path", "only-first.txt" in fetched[0]["files"])
+    check("overlap blob identities were not populated", all(p["files"]["shared.txt"] == "same" for p in fetched))
+    check("non-overlapping paths caused blob reads", fetched[0]["files"]["only-first.txt"] == "")
+    check("GraphQL snapshot used an unexpected call count", len(calls) == 4)
+
     if failures:
         for f in failures:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(failures)} case(s))\n")
         return 1
-    print("self-test ok: overlap classifier is falsifiable (8 cases)")
+    print("self-test ok: overlap classifier and paginated GraphQL snapshot are falsifiable (9 cases)")
     return 0
 
 
