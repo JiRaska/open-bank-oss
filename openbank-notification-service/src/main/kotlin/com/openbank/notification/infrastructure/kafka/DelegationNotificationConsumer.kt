@@ -56,13 +56,25 @@ import java.util.UUID
  * is "acceptable for notifications (no money path)". A DLQ'd/retried delegation event can therefore
  * produce a duplicate notification on redelivery, same as every other channel into this service.
  *
- * **Failure handling**: a malformed/unparseable record is a poison pill — logged and swallowed so
- * it can never wedge the partition (mirrors [PartyErasureConsumer]). No `dead-letter-queue`
- * `failure-strategy` is configured, matching this service's other two channels
- * (`notification-events-in`, `party-events-in`): [NotificationConsumer.consume] already recovers
- * every failure internally (JSON parse, closed-schema rejection, and `dispatch`'s own
- * `.onFailure().recoverWithUni`) and always completes its `Uni`, so there is nothing left here that
- * would reach a failure-strategy.
+ * **Failure handling**, two kinds, and only the first is handled here. A malformed/unparseable
+ * record is a poison pill — logged and swallowed so it can never wedge the partition (mirrors
+ * [PartyErasureConsumer]). A *processing* failure is not: [consume] returns the `Uni` it gets from
+ * [NotificationConsumer.consume], and that `Uni` FAILS. Its `.onFailure().invoke` only logs, by
+ * deliberate design — retrying from the top would persist a second row and re-send, so the single
+ * attempt is rethrown and the connector's `failure-strategy` decides.
+ *
+ * Which makes the configuration load-bearing, and this KDoc used to describe it backwards: it said
+ * no `failure-strategy` was configured, "matching this service's other two channels", and that
+ * `NotificationConsumer.consume` "always completes its `Uni`". Both were false — #5745 had already
+ * given `notification-events-in` and `party-events-in` a DLQ and turned that recovery into a
+ * rethrow. The connector default is `fail`, which STOPS the channel, so any transient dispatch
+ * failure would have silently ended every delegation notification until a pod restart. #8346 wires
+ * the DLQ (`openbank.dlq.notification.delegation-events-in`, nested form in `application.yaml` per
+ * issue #686, with its `KafkaTopic` CR and a KafkaUser `Write` grant, since a DLQ send that is
+ * denied wedges on the very failure it was added to park).
+ *
+ * Stated as the mechanism rather than the value on purpose: this class controls that the record is
+ * nacked, and `application.yaml` is what answers what the connector then does with it.
  */
 @ApplicationScoped
 class DelegationNotificationConsumer @Inject constructor(
