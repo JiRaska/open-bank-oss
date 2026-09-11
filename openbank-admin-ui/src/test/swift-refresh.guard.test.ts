@@ -11,6 +11,6 @@ describe('SWIFT detail refresh contract', () => {
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Obnovit SWIFT zprávu', 'Refresh SWIFT message')}")
     expect(source).toContain('<RefreshCw size={13} aria-hidden="true"')
-    expect(source).toContain('onClick={load}')
+    expect(source).toContain('onClick={() => void load(false)}')
   })
 })

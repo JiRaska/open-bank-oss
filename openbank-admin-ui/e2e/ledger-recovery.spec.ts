@@ -10,6 +10,7 @@ const journalPage = {
     valueDate: '2026-08-31',
     description: 'Customer transfer settlement',
     status: 'POSTED',
+    synthetic: false,
     createdAt: '2026-08-31T12:00:00Z',
     lines: [
       { id: 'line-debit', glAccountId: 'gl-debit-12345678', side: 'DEBIT', amount: 1250, currencyCode: 'EUR', baseAmount: 1250, baseCurrencyCode: 'EUR', sequence: 1 },

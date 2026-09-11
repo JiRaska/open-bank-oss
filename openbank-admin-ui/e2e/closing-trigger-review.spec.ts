@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const previous = {
-  id: 'close-run-2026-07',
+  id: 'd2b7e9a0-0000-4000-8000-000000000001',
   trigger: 'SCHEDULED',
   status: 'COMPLETED',
   periodFrom: '2026-07-01',
@@ -19,7 +19,7 @@ const previous = {
 }
 const accepted = {
   ...previous,
-  id: 'close-run-2026-08',
+  id: 'd2b7e9a0-0000-4000-8000-000000000002',
   trigger: 'MANUAL',
   status: 'RUNNING',
   periodFrom: '2026-08-01',
@@ -64,7 +64,7 @@ test('reviews the latest close evidence and retains a failed catch-up trigger fo
   await back.click()
   await expect(trigger).toBeFocused()
   await trigger.click()
-  await expect(dialog).toContainText('close-run-2026-07 · COMPLETED · SCHEDULED')
+  await expect(dialog).toContainText(`${previous.id} · COMPLETED · SCHEDULED`)
   await expect(dialog).toContainText(/1st of month · 02:30|1\. den v měsíci · 02:30/)
   await expect(dialog).toContainText(/Acceptance only confirms the start|Přijetí pouze potvrzuje zahájení/)
 

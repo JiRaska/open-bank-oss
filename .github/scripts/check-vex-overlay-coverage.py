@@ -82,6 +82,11 @@ NO_OVERLAY_YET: dict[str, str] = {
     "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
                 "of the JVM dependency evidence used for the other three reaches it and there is "
                 "no npm triage material in the repository to write a disposition from.",
+    "communication-service": "#9148 - new service (ADR-0285 phase 2), no VEX overlay written yet. "
+                              "Its dependency set is the ordinary reactive Quarkus stack shared with "
+                              "services that already have overlays, but writing dispositions from "
+                              "that assumption rather than the resolved runtimeClasspath artifacts "
+                              "is exactly the fabrication this gate's own header refuses.",
 }
 
 

@@ -13,6 +13,7 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import { Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { validateAccountBalance, validateAccountDetail } from '@/lib/accounts/detailContract'
 import type { Account, AccountBalance } from '@/types'
 
 const STATUS_PILL: Record<string, string> = {
@@ -34,25 +35,38 @@ export default function AccountDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing]     = useState(false)
   const actionInFlight = useRef(false)
+  const loadSequence = useRef(0)
   const [actionIntent, setActionIntent] = useState<'freeze' | 'unfreeze' | 'close' | null>(null)
   const [actionReason, setActionReason] = useState('')
 
   async function load() {
+    const sequence = ++loadSequence.current
     setLoading(true); setError(null)
     try {
       const [acc, bal] = await Promise.allSettled([
         accountApi.get(id),
         accountApi.getBalance(id),
       ])
-      if (acc.status === 'fulfilled') setAccount(acc.value)
-      else throw new Error(acc.reason?.message ?? 'Failed to load account')
-      if (bal.status === 'fulfilled') setBalance(bal.value)
+      if (sequence !== loadSequence.current) return
+      if (acc.status !== 'fulfilled') throw new Error(acc.reason?.message ?? 'Failed to load account')
+      const verifiedAccount = validateAccountDetail(acc.value, id)
+      if (!verifiedAccount) {
+        throw new Error(t('Služba vrátila neověřitelná data účtu.', 'The service returned unverifiable account data.'))
+      }
+      setAccount(verifiedAccount)
+      setBalance(bal.status === 'fulfilled' ? validateAccountBalance(bal.value, verifiedAccount) : null)
     } catch (e: unknown) {
+      if (sequence !== loadSequence.current) return
       setError(e instanceof Error ? e.message : 'Failed to load account')
-    } finally { setLoading(false) }
+    } finally {
+      if (sequence === loadSequence.current) setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [id])
+  useEffect(() => {
+    void load()
+    return () => { loadSequence.current += 1 }
+  }, [id])
 
   function requestAction(action: 'freeze' | 'unfreeze' | 'close') {
     setActionIntent(action)

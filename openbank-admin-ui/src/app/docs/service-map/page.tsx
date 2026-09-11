@@ -3,63 +3,68 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen, Play, Pause, KeyRound, ShieldCheck, Boxes, Cloud, Send, Server } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
-import { svcUrl } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
-import { edgeGeometry, mixHex, pathId, type Pt, type Half } from '@/components/topology/geometry'
+import { edgeGeometry, pathId, type Pt, type Half } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBand } from '@/components/topology/layout'
+import {
+  parseMapGovernance, parseMapHealth, parseServiceMapGraph,
+  type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
+  type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
+} from '@/lib/governance/service-map-evidence'
 
 // Service definitions with positions for the map
 const SERVICES = [
   // Core Banking
-  { id: 'account',     name: 'Account Service',      port: 8100, group: 'core',    x: 125, y: 100,  color: '#2563eb', desc: 'Account lifecycle management, IBAN assignment' },
-  { id: 'ledger',      name: 'Ledger Service',       port: 8101, group: 'core',    x: 250, y: 100,  color: '#2563eb', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
-  { id: 'transaction', name: 'Transaction Service',  port: 8102, group: 'core',    x: 375, y: 100,  color: '#2563eb', desc: 'Transaction processing, partitioned by booking_date' },
-  { id: 'catalog',     name: 'Product Catalog',      port: 8104, group: 'core',    x: 500, y: 100,  color: '#2563eb', desc: 'Banking products, pricing, limits' },
-  { id: 'balance',     name: 'Balance Service',      port: 8103, group: 'core',    x: 125, y: 220,  color: '#2563eb', desc: 'Real-time balance tracking, holds management' },
-  { id: 'interest',    name: 'Interest Service',     port: 8125, group: 'core',    x: 250, y: 220,  color: '#2563eb', desc: 'Interest calculation and accrual' },
-  { id: 'fx',          name: 'FX Service',           port: 8119, group: 'core',    x: 375, y: 220,  color: '#2563eb', desc: 'Foreign exchange rates and conversion' },
+  { id: 'account',     name: 'Account Service',      port: 8100, group: 'core',    x: 125, y: 100,  color: 'var(--map-core)', desc: 'Account lifecycle management, IBAN assignment' },
+  { id: 'ledger',      name: 'Ledger Service',       port: 8101, group: 'core',    x: 250, y: 100,  color: 'var(--map-core)', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
+  { id: 'transaction', name: 'Transaction Service',  port: 8102, group: 'core',    x: 375, y: 100,  color: 'var(--map-core)', desc: 'Transaction processing, partitioned by booking_date' },
+  { id: 'catalog',     name: 'Product Catalog',      port: 8104, group: 'core',    x: 500, y: 100,  color: 'var(--map-core)', desc: 'Banking products, pricing, limits' },
+  { id: 'balance',     name: 'Balance Service',      port: 8103, group: 'core',    x: 125, y: 220,  color: 'var(--map-core)', desc: 'Real-time balance tracking, holds management' },
+  { id: 'interest',    name: 'Interest Service',     port: 8125, group: 'core',    x: 250, y: 220,  color: 'var(--map-core)', desc: 'Interest calculation and accrual' },
+  { id: 'fx',          name: 'FX Service',           port: 8119, group: 'core',    x: 375, y: 220,  color: 'var(--map-core)', desc: 'Foreign exchange rates and conversion' },
   // Identity
-  { id: 'pid',         name: 'PID Service',          port: 8105, group: 'identity', x: 650, y: 100,  color: '#059669', desc: 'Party identity documents, external IDs' },
-  { id: 'party',       name: 'Party Service',        port: 8111, group: 'identity', x: 750, y: 100,  color: '#059669', desc: 'Customer/company master data, PEP/sanctions flags' },
+  { id: 'pid',         name: 'PID Service',          port: 8105, group: 'identity', x: 650, y: 100,  color: 'var(--map-identity)', desc: 'Party identity documents, external IDs' },
+  { id: 'party',       name: 'Party Service',        port: 8111, group: 'identity', x: 750, y: 100,  color: 'var(--map-identity)', desc: 'Customer/company master data, PEP/sanctions flags' },
   // Platform
-  { id: 'agent',       name: 'Agent Service',        port: 8109, group: 'platform', x: 900, y: 100,  color: '#6b7280', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
-  { id: 'notification',name: 'Notification Service', port: 8112, group: 'platform', x: 1000,y: 100,  color: '#6b7280', desc: 'Email/SMS/Push notifications, template engine' },
-  { id: 'security-scanner',name: 'Security Scanner', port: 8120, group: 'platform', x: 1100,y: 100,  color: '#6b7280', desc: 'Continuous vulnerability scanning' },
+  { id: 'agent',       name: 'Agent Service',        port: 8109, group: 'platform', x: 900, y: 100,  color: 'var(--map-platform)', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
+  { id: 'notification',name: 'Notification Service', port: 8112, group: 'platform', x: 1000,y: 100,  color: 'var(--map-platform)', desc: 'Email/SMS/Push notifications, template engine' },
+  { id: 'security-scanner',name: 'Security Scanner', port: 8120, group: 'platform', x: 1100,y: 100,  color: 'var(--map-platform)', desc: 'Continuous vulnerability scanning' },
   // Cards
-  { id: 'card-issuance',name: 'Card Issuance',       port: 8118, group: 'cards',    x: 650, y: 260,  color: '#db2777', desc: 'Card issuance and lifecycle management' },
-  { id: 'dispute',     name: 'Dispute Service',      port: 8135, group: 'cards',    x: 750, y: 260,  color: '#db2777', desc: 'Card disputes and chargebacks' },
+  { id: 'card-issuance',name: 'Card Issuance',       port: 8118, group: 'cards',    x: 650, y: 260,  color: 'var(--map-cards)', desc: 'Card issuance and lifecycle management' },
+  { id: 'dispute',     name: 'Dispute Service',      port: 8135, group: 'cards',    x: 750, y: 260,  color: 'var(--map-cards)', desc: 'Card disputes and chargebacks' },
   // Compliance
-  { id: 'audit',       name: 'Audit Service',        port: 8113, group: 'compliance', x: 920, y: 260,  color: '#dc2626', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
-  { id: 'kyc',         name: 'KYC Service',          port: 8114, group: 'compliance', x: 1080,y: 260,  color: '#dc2626', desc: 'KYC/CDD/EDD case management, document verification' },
-  { id: 'aml',         name: 'AML Service',          port: 8117, group: 'compliance', x: 920, y: 380,  color: '#dc2626', desc: 'AML screening, SAR filing' },
-  { id: 'sanctions',   name: 'Sanctions Service',    port: 8123, group: 'compliance', x: 1080,y: 380,  color: '#dc2626', desc: 'Real-time sanctions list screening' },
-  { id: 'fraud',       name: 'Fraud Service',        port: 8115, group: 'compliance', x: 920, y: 500,  color: '#dc2626', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
+  { id: 'audit',       name: 'Audit Service',        port: 8113, group: 'compliance', x: 920, y: 260,  color: 'var(--map-compliance)', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
+  { id: 'kyc',         name: 'KYC Service',          port: 8114, group: 'compliance', x: 1080,y: 260,  color: 'var(--map-compliance)', desc: 'KYC/CDD/EDD case management, document verification' },
+  { id: 'aml',         name: 'AML Service',          port: 8117, group: 'compliance', x: 920, y: 380,  color: 'var(--map-compliance)', desc: 'AML screening, SAR filing' },
+  { id: 'sanctions',   name: 'Sanctions Service',    port: 8123, group: 'compliance', x: 1080,y: 380,  color: 'var(--map-compliance)', desc: 'Real-time sanctions list screening' },
+  { id: 'fraud',       name: 'Fraud Service',        port: 8115, group: 'compliance', x: 920, y: 500,  color: 'var(--map-compliance)', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
   // Payments
-  { id: 'sepa',        name: 'SEPA Payment',         port: 8115, group: 'payment', x: 125, y: 380,  color: '#7c3aed', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
-  { id: 'sepa-instant',name: 'SEPA Instant',         port: 8127, group: 'payment', x: 250, y: 380,  color: '#7c3aed', desc: 'Real-time EUR payment processing' },
-  { id: 'domestic',    name: 'Domestic Payment',     port: 8116, group: 'payment', x: 375, y: 380,  color: '#7c3aed', desc: 'Czech domestic payments' },
-  { id: 'standing-order',name:'Standing Order',      port: 8121, group: 'payment', x: 500, y: 380,  color: '#7c3aed', desc: 'Recurring payments and scheduled transfers' },
-  { id: 'swift',       name: 'SWIFT Service',        port: 8122, group: 'payment', x: 125, y: 500,  color: '#7c3aed', desc: 'SWIFT MT/MX messaging' },
-  { id: 'clearing',    name: 'Clearing Service',     port: 8124, group: 'payment', x: 250, y: 500,  color: '#7c3aed', desc: 'Interbank clearing and settlement' },
+  { id: 'sepa',        name: 'SEPA Payment',         port: 8115, group: 'payment', x: 125, y: 380,  color: 'var(--map-payment)', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
+  { id: 'sepa-instant',name: 'SEPA Instant',         port: 8127, group: 'payment', x: 250, y: 380,  color: 'var(--map-payment)', desc: 'Real-time EUR payment processing' },
+  { id: 'domestic',    name: 'Domestic Payment',     port: 8116, group: 'payment', x: 375, y: 380,  color: 'var(--map-payment)', desc: 'Czech domestic payments' },
+  { id: 'standing-order',name:'Standing Order',      port: 8121, group: 'payment', x: 500, y: 380,  color: 'var(--map-payment)', desc: 'Recurring payments and scheduled transfers' },
+  { id: 'swift',       name: 'SWIFT Service',        port: 8122, group: 'payment', x: 125, y: 500,  color: 'var(--map-payment)', desc: 'SWIFT MT/MX messaging' },
+  { id: 'clearing',    name: 'Clearing Service',     port: 8124, group: 'payment', x: 250, y: 500,  color: 'var(--map-payment)', desc: 'Interbank clearing and settlement' },
   // PSD2
-  { id: 'consent',     name: 'Consent Service',      port: 8106, group: 'psd2',   x: 125, y: 660,  color: '#d97706', desc: 'PSD2 consent management' },
-  { id: 'sca',         name: 'SCA Service',          port: 8110, group: 'psd2',   x: 250, y: 660,  color: '#d97706', desc: 'Strong Customer Authentication' },
-  { id: 'psd2',        name: 'PSD2 Service',         port: 8107, group: 'psd2',   x: 375, y: 660,  color: '#d97706', desc: 'PSD2 API gateway' },
-  { id: 'tpp',         name: 'TPP Registry',         port: 8108, group: 'psd2',   x: 500, y: 660,  color: '#d97706', desc: 'Third Party Provider registry' },
+  { id: 'consent',     name: 'Consent Service',      port: 8106, group: 'psd2',   x: 125, y: 660,  color: 'var(--map-psd2)', desc: 'PSD2 consent management' },
+  { id: 'sca',         name: 'SCA Service',          port: 8110, group: 'psd2',   x: 250, y: 660,  color: 'var(--map-psd2)', desc: 'Strong Customer Authentication' },
+  { id: 'psd2',        name: 'PSD2 Service',         port: 8107, group: 'psd2',   x: 375, y: 660,  color: 'var(--map-psd2)', desc: 'PSD2 API gateway' },
+  { id: 'tpp',         name: 'TPP Registry',         port: 8108, group: 'psd2',   x: 500, y: 660,  color: 'var(--map-psd2)', desc: 'Third Party Provider registry' },
   // Extended / reporting — were silently missing from the map before ADR-0071.
-  { id: 'lending',     name: 'Lending Service',      port: 8128, group: 'core',    x: 500, y: 220,  color: '#2563eb', desc: 'Loan products and origination' },
-  { id: 'statement',   name: 'Statement Service',    port: 8136, group: 'core',    x: 625, y: 220,  color: '#2563eb', desc: 'Account statement generation (EoM)' },
-  { id: 'onboarding',  name: 'Onboarding Service',   port: 8130, group: 'identity', x: 750, y: 220,  color: '#059669', desc: 'Customer onboarding journey (ADR-0069)' },
-  { id: 'anacredit',   name: 'AnaCredit Service',    port: 8137, group: 'compliance', x: 1080, y: 500, color: '#dc2626', desc: 'AnaCredit regulatory reporting (ECB)' },
-  { id: 'sdd',         name: 'SEPA Direct Debit',    port: 8129, group: 'payment', x: 375, y: 500,  color: '#7c3aed', desc: 'SEPA Direct Debit mandates and collections' },
+  { id: 'lending',     name: 'Lending Service',      port: 8128, group: 'core',    x: 500, y: 220,  color: 'var(--map-core)', desc: 'Loan products and origination' },
+  { id: 'statement',   name: 'Statement Service',    port: 8136, group: 'core',    x: 625, y: 220,  color: 'var(--map-core)', desc: 'Account statement generation (EoM)' },
+  { id: 'onboarding',  name: 'Onboarding Service',   port: 8130, group: 'identity', x: 750, y: 220,  color: 'var(--map-identity)', desc: 'Customer onboarding journey (ADR-0069)' },
+  { id: 'anacredit',   name: 'AnaCredit Service',    port: 8137, group: 'compliance', x: 1080, y: 500, color: 'var(--map-compliance)', desc: 'AnaCredit regulatory reporting (ECB)' },
+  { id: 'sdd',         name: 'SEPA Direct Debit',    port: 8129, group: 'payment', x: 375, y: 500,  color: 'var(--map-payment)', desc: 'SEPA Direct Debit mandates and collections' },
 ]
 
 // Service dependencies (edges)
@@ -105,15 +110,33 @@ const SERVICE_NAME_TO_ID = Object.fromEntries(Object.entries(SERVICE_ID_TO_NAME)
 const CATALOG_PRESENT = Object.values(SERVICE_ID_TO_NAME)
 
 const GROUP_LABELS: Record<string, { label: string; color: string }> = {
-  core:       { label: 'Core Banking',    color: '#2563eb' },
-  payment:    { label: 'Payments',        color: '#7c3aed' },
-  compliance: { label: 'Compliance',      color: '#dc2626' },
-  identity:   { label: 'Identity',        color: '#059669' },
-  psd2:       { label: 'PSD2 / Open Banking', color: '#d97706' },
-  platform:   { label: 'Platform',        color: '#6b7280' },
-  cards:      { label: 'Cards',           color: '#db2777' },
+  core:       { label: 'Core Banking',    color: 'var(--map-core)' },
+  payment:    { label: 'Payments',        color: 'var(--map-payment)' },
+  compliance: { label: 'Compliance',      color: 'var(--map-compliance)' },
+  identity:   { label: 'Identity',        color: 'var(--map-identity)' },
+  psd2:       { label: 'PSD2 / Open Banking', color: 'var(--map-psd2)' },
+  platform:   { label: 'Platform',        color: 'var(--map-platform)' },
+  cards:      { label: 'Cards',           color: 'var(--map-cards)' },
 }
 type HealthStatus = 'UP' | 'DOWN' | 'UNKNOWN'
+type EvidenceState = 'loading' | 'ok' | 'unreachable' | 'not_deployed' | 'scaled_to_zero' | 'unauthorized' | 'error'
+type EvidenceResult<T> = { ok: true; value: T } | { ok: false; state: EvidenceState }
+
+const evidenceFailure = (failure: BffFailure): EvidenceState => {
+  if (failure === 'not_deployed' || failure === 'scaled_to_zero' || failure === 'unauthorized' || failure === 'unreachable') return failure
+  return 'error'
+}
+
+async function fetchEvidence<T>(url: string, parse: (value: unknown) => T | null): Promise<EvidenceResult<T>> {
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) return { ok: false, state: evidenceFailure(await classifyBffFailure(response)) }
+    const parsed = parse(await response.json())
+    return parsed === null ? { ok: false, state: 'error' } : { ok: true, value: parsed }
+  } catch {
+    return { ok: false, state: 'unreachable' }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Auto-layout — a clean, deterministic grid per group so nodes never overlap
@@ -165,7 +188,7 @@ const LAYOUT: { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; he
       const w = colWidth[c]
       const h = PAD_TOP + rows * CELL_H + PAD_BOT
       const meta = GROUP_LABELS[g]
-      groups.push({ key: g, label: meta?.label ?? g, color: meta?.color ?? '#64748b', x: colX[c], y, w, h })
+      groups.push({ key: g, label: meta?.label ?? g, color: meta?.color ?? 'var(--map-infrastructure)', x: colX[c], y, w, h })
       const gridW = cols * CELL_W
       const startX = colX[c] + (w - gridW) / 2 + CELL_W / 2
       list.forEach((s, i) => {
@@ -216,10 +239,12 @@ const STUD_W = 10
 const STUD_H = 6
 const BRICK_H = 21
 
-const lightFace = (c: string) => mixHex(c, '#ffffff', 0.72)
-const studTop = (c: string) => mixHex(c, '#ffffff', 0.84)
-const studHi = (c: string) => mixHex(c, '#ffffff', 0.45)
-const shadeFace = (c: string) => mixHex(c, '#000000', 0.12)
+const tint = (color: string, amount: number) => `color-mix(in srgb, ${color} ${amount}%, var(--surface))`
+const fade = (color: string, amount: number) => `color-mix(in srgb, ${color} ${amount}%, transparent)`
+const lightFace = (color: string) => tint(color, 28)
+const studTop = (color: string) => tint(color, 16)
+const studHi = (color: string) => tint(color, 55)
+const shadeFace = (color: string) => `color-mix(in srgb, ${color} 88%, var(--text-primary))`
 
 // Number of studs (brick length) from the service's connection degree.
 function brickStuds(degree: number): number {
@@ -247,7 +272,7 @@ function LegoBrick({ cx, cy, color, degree, selected }: { cx: number; cy: number
       <g key={c}>
         <path d={`M ${x0} ${y} L ${x0} ${y - STUD_H + 2.5} Q ${x0} ${y - STUD_H} ${x0 + 2.5} ${y - STUD_H} L ${x0 + STUD_W - 2.5} ${y - STUD_H} Q ${x0 + STUD_W} ${y - STUD_H} ${x0 + STUD_W} ${y - STUD_H + 2.5} L ${x0 + STUD_W} ${y} Z`}
           fill={studFill} stroke={color} strokeWidth={1} />
-        <line x1={x0 + 2} y1={y - STUD_H + 2} x2={x0 + STUD_W - 2} y2={y - STUD_H + 2} stroke="#fff" strokeWidth={1.2} opacity={0.6} />
+        <line x1={x0 + 2} y1={y - STUD_H + 2} x2={x0 + STUD_W - 2} y2={y - STUD_H + 2} stroke="var(--surface)" strokeWidth={1.2} opacity={0.6} />
       </g>,
     )
   }
@@ -255,8 +280,8 @@ function LegoBrick({ cx, cy, color, degree, selected }: { cx: number; cy: number
     <g filter="url(#node-shadow)">
       {studs}
       <rect x={x} y={y} width={w} height={h} rx={3} fill={face} stroke={color} strokeWidth={1.4} />
-      <rect x={x + 2} y={y + 2} width={w - 4} height={h * 0.32} rx={2} fill="#ffffff" opacity={0.22} />
-      <rect x={x + 2} y={y + h - h * 0.3} width={w - 4} height={h * 0.28} rx={2} fill={selected ? '#000000' : shadeFace(color)} opacity={selected ? 0.12 : 0.18} />
+      <rect x={x + 2} y={y + 2} width={w - 4} height={h * 0.32} rx={2} fill="var(--surface)" opacity={0.22} />
+      <rect x={x + 2} y={y + h - h * 0.3} width={w - 4} height={h * 0.28} rx={2} fill={selected ? 'var(--text-primary)' : shadeFace(color)} opacity={selected ? 0.12 : 0.18} />
     </g>
   )
 }
@@ -267,33 +292,29 @@ function LegoBrick({ cx, cy, color, degree, selected }: { cx: number; cy: number
 // application.yaml, never hand-authored. Presentation-only metadata (colour,
 // icon, bilingual copy) lives here; the topology itself is code-derived.
 // ---------------------------------------------------------------------------
-type InfraNodeT = { id: string; kind: 'infra'; tech: string; label: string }
-type ExternalNodeT = { id: string; kind: 'external'; vendor: string; label: string }
-type InfraEdgeT = { from: string; to: string; type: 'db' | 'broker' | 'auth' | 'authz' }
-type ExternalEdgeT = { from: string; to: string; type: 'push' | 'webhook' | 'registry' | 'api' | 'llm'; enabled: boolean }
 type TierMeta = { color: string; Icon: typeof Database; labelCs: string; labelEn: string; descCs: string; descEn: string }
 
 const INFRA_META: Record<string, TierMeta> = {
-  'infra:postgres': { color: '#0ea5e9', Icon: Database, labelCs: 'PostgreSQL', labelEn: 'PostgreSQL', descCs: 'Perzistentní stav služeb (účty, ledger, transakce). Podvojné úložiště, reactive Vert.x klient.', descEn: 'Per-service persistent state (accounts, ledger, transactions). Reactive Vert.x client.' },
-  'infra:kafka': { color: '#6366f1', Icon: Boxes, labelCs: 'Apache Kafka', labelEn: 'Apache Kafka', descCs: 'Asynchronní páteř událostí — produkce/konzumace topiců, outbox dispatch mezi službami.', descEn: 'Async event backbone — topic produce/consume, cross-service outbox dispatch.' },
-  'infra:keycloak': { color: '#0891b2', Icon: KeyRound, labelCs: 'Keycloak (OIDC)', labelEn: 'Keycloak (OIDC)', descCs: 'Vydavatel identit a tokenů (OIDC). Ověřuje operátory i M2M client-credentials tok.', descEn: 'Identity & token issuer (OIDC). Authenticates operators and M2M client-credentials flows.' },
-  'infra:opa': { color: '#16a34a', Icon: ShieldCheck, labelCs: 'OPA (autorizace)', labelEn: 'OPA (authz)', descCs: 'Rozhodovací bod autorizace (ADR-0034). Sidecar vyhodnocuje rest.rego politiky per požadavek.', descEn: 'Authorization decision point (ADR-0034). Sidecar evaluates rest.rego per request.' },
+  'infra:postgres': { color: 'var(--map-external)', Icon: Database, labelCs: 'PostgreSQL', labelEn: 'PostgreSQL', descCs: 'Perzistentní stav služeb (účty, ledger, transakce). Podvojné úložiště, reactive Vert.x klient.', descEn: 'Per-service persistent state (accounts, ledger, transactions). Reactive Vert.x client.' },
+  'infra:kafka': { color: 'var(--accent)', Icon: Boxes, labelCs: 'Apache Kafka', labelEn: 'Apache Kafka', descCs: 'Asynchronní páteř událostí — produkce/konzumace topiců, outbox dispatch mezi službami.', descEn: 'Async event backbone — topic produce/consume, cross-service outbox dispatch.' },
+  'infra:keycloak': { color: 'var(--map-edge-auth)', Icon: KeyRound, labelCs: 'Keycloak (OIDC)', labelEn: 'Keycloak (OIDC)', descCs: 'Vydavatel identit a tokenů (OIDC). Ověřuje operátory i M2M client-credentials tok.', descEn: 'Identity & token issuer (OIDC). Authenticates operators and M2M client-credentials flows.' },
+  'infra:opa': { color: 'var(--success)', Icon: ShieldCheck, labelCs: 'OPA (autorizace)', labelEn: 'OPA (authz)', descCs: 'Rozhodovací bod autorizace (ADR-0034). Sidecar vyhodnocuje rest.rego politiky per požadavek.', descEn: 'Authorization decision point (ADR-0034). Sidecar evaluates rest.rego per request.' },
 }
 const EXT_META: Record<string, TierMeta> = {
-  'ext:apple-apns': { color: '#0f172a', Icon: Send, labelCs: 'Apple APNs', labelEn: 'Apple APNs', descCs: 'Push notifikace na iOS zařízení (adapter v notification-service).', descEn: 'Push notifications to iOS devices (notification-service adapter).' },
-  'ext:firebase-fcm': { color: '#f59e0b', Icon: Send, labelCs: 'Firebase FCM', labelEn: 'Firebase FCM', descCs: 'Push notifikace přes Google FCM.', descEn: 'Push notifications via Google FCM.' },
-  'ext:slack': { color: '#7c3aed', Icon: Send, labelCs: 'Slack webhook', labelEn: 'Slack webhook', descCs: 'Odchozí oversight signály (ADR-0059).', descEn: 'Outbound oversight signals (ADR-0059).' },
-  'ext:cnb': { color: '#dc2626', Icon: Cloud, labelCs: 'ČNB', labelEn: 'Czech National Bank', descCs: 'Veřejné feedy ČNB — seznam bank (JERR) a devizové kurzy.', descEn: 'CNB public feeds — bank registry (JERR) and FX rates.' },
-  'ext:github': { color: '#0f172a', Icon: Cloud, labelCs: 'GitHub API', labelEn: 'GitHub API', descCs: 'Rozhraní pro platformní/agentní služby (release, governance).', descEn: 'Interface for platform/agent services (release, governance).' },
-  'ext:llm-gateway': { color: '#0d9488', Icon: Cloud, labelCs: 'LLM brána', labelEn: 'LLM gateway', descCs: 'Externí LLM poskytovatelé (DeepInfra, Groq, NVIDIA) pro AI agenty.', descEn: 'External LLM providers (DeepInfra, Groq, NVIDIA) for AI agents.' },
-  'ext:s3': { color: '#f97316', Icon: Cloud, labelCs: 'AWS S3', labelEn: 'AWS S3', descCs: 'Objektové úložiště (export analytiky, artefakty).', descEn: 'Object store (analytics export, artifacts).' },
+  'ext:apple-apns': { color: 'var(--text-primary)', Icon: Send, labelCs: 'Apple APNs', labelEn: 'Apple APNs', descCs: 'Push notifikace na iOS zařízení (adapter v notification-service).', descEn: 'Push notifications to iOS devices (notification-service adapter).' },
+  'ext:firebase-fcm': { color: 'var(--warning)', Icon: Send, labelCs: 'Firebase FCM', labelEn: 'Firebase FCM', descCs: 'Push notifikace přes Google FCM.', descEn: 'Push notifications via Google FCM.' },
+  'ext:slack': { color: 'var(--map-payment)', Icon: Send, labelCs: 'Slack webhook', labelEn: 'Slack webhook', descCs: 'Odchozí oversight signály (ADR-0059).', descEn: 'Outbound oversight signals (ADR-0059).' },
+  'ext:cnb': { color: 'var(--map-compliance)', Icon: Cloud, labelCs: 'ČNB', labelEn: 'Czech National Bank', descCs: 'Veřejné feedy ČNB — seznam bank (JERR) a devizové kurzy.', descEn: 'CNB public feeds — bank registry (JERR) and FX rates.' },
+  'ext:github': { color: 'var(--text-primary)', Icon: Cloud, labelCs: 'GitHub API', labelEn: 'GitHub API', descCs: 'Rozhraní pro platformní/agentní služby (release, governance).', descEn: 'Interface for platform/agent services (release, governance).' },
+  'ext:llm-gateway': { color: 'var(--map-edge-llm)', Icon: Cloud, labelCs: 'LLM brána', labelEn: 'LLM gateway', descCs: 'Externí LLM poskytovatelé (DeepInfra, Groq, NVIDIA) pro AI agenty.', descEn: 'External LLM providers (DeepInfra, Groq, NVIDIA) for AI agents.' },
+  'ext:s3': { color: 'var(--map-edge-push)', Icon: Cloud, labelCs: 'AWS S3', labelEn: 'AWS S3', descCs: 'Objektové úložiště (export analytiky, artefakty).', descEn: 'Object store (analytics export, artifacts).' },
 }
 const tierMeta = (id: string): TierMeta | undefined => INFRA_META[id] ?? EXT_META[id]
 
 // Edge-type palette + bilingual label for the legend / detail panel.
 const EDGE_TYPE_COLOR: Record<string, string> = {
-  db: '#38bdf8', broker: '#818cf8', auth: '#22d3ee', authz: '#4ade80',
-  push: '#fb923c', webhook: '#a78bfa', registry: '#f87171', api: '#94a3b8', llm: '#2dd4bf',
+  db: 'var(--map-edge-db)', broker: 'var(--map-edge-async-active)', auth: 'var(--map-edge-auth)', authz: 'var(--map-edge-authz)',
+  push: 'var(--map-edge-push)', webhook: 'var(--map-payment)', registry: 'var(--map-edge-registry)', api: 'var(--map-edge-sync)', llm: 'var(--map-edge-llm)',
 }
 const edgeTypeLabel = (type: string, t: (cs: string, en: string) => string): string => ({
   db: t('perzistence', 'persistence'), broker: t('události', 'events'), auth: t('identita', 'auth'),
@@ -332,7 +353,7 @@ function TierChip({ pos, color, label, active, dim, faded, onClick, onEnter, onL
         fill={active ? color : 'var(--surface)'} stroke={color} strokeWidth={active ? 1.8 : 1.3}
         strokeDasharray={faded ? '4,3' : undefined} opacity={faded ? 0.75 : 1} filter="url(#node-shadow)" />
       <circle cx={x + 15} cy={cy} r={4} fill={color} opacity={faded ? 0.5 : 1} />
-      <text x={x + 27} y={cy + 4} fontSize="11" fontWeight="600" fill={active ? '#fff' : 'var(--text-primary)'}>{label}</text>
+      <text x={x + 27} y={cy + 4} fontSize="11" fontWeight="600" fill={active ? 'var(--text-inverse)' : 'var(--text-primary)'}>{label}</text>
     </g>
   )
 }
@@ -354,73 +375,98 @@ export default function ServiceMapPage() {
   const [graphEdges, setGraphEdges] = useState<{ from: string; to: string; via: string; type: 'rest' | 'kafka' }[]>([])
   // Per-service degree (upstream + downstream) from the graph → drives brick size.
   const [degrees, setDegrees] = useState<Record<string, number>>({})
-  const [isChecking, setIsChecking] = useState(false)
+  const [isChecking, setIsChecking] = useState(true)
   // Data-flow tiers (infra substrate + external 3rd parties), from the same graph fetch.
   const [infraNodes, setInfraNodes] = useState<InfraNodeT[]>([])
   const [externalNodes, setExternalNodes] = useState<ExternalNodeT[]>([])
   const [infraEdges, setInfraEdges] = useState<InfraEdgeT[]>([])
   const [externalEdges, setExternalEdges] = useState<ExternalEdgeT[]>([])
+  const [evidence, setEvidence] = useState<Record<'health' | 'governance' | 'topology', EvidenceState>>({
+    health: 'loading', governance: 'loading', topology: 'loading',
+  })
+  const [verified, setVerified] = useState<Record<'health' | 'governance' | 'topology', boolean>>({
+    health: false, governance: false, topology: false,
+  })
   // Animation + tier visibility controls. Infra has ~130 edges → hidden by default
   // (revealed per-service on hover, or globally via its toggle); external is sparse → shown.
   const [flow, setFlow] = useFlowAnimation()
   const [showInfra, setShowInfra] = useState(false)
   const [showExternal, setShowExternal] = useState(true)
+  const requestGeneration = useRef(0)
 
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
+    const generation = ++requestGeneration.current
     setIsChecking(true)
-    try {
-      const [res, govRes, graphRes] = await Promise.all([
-        fetch('/api/services/health'),
-        fetch('/api/services/governance'),
-        fetch('/api/catalog/graph'),
-      ])
+    setEvidence(current => ({
+      health: current.health === 'ok' ? 'ok' : 'loading',
+      governance: current.governance === 'ok' ? 'ok' : 'loading',
+      topology: current.topology === 'ok' ? 'ok' : 'loading',
+    }))
+    const [healthResult, governanceResult, graphResult] = await Promise.all([
+      fetchEvidence('/api/services/health', parseMapHealth),
+      fetchEvidence('/api/services/governance', parseMapGovernance),
+      fetchEvidence('/api/catalog/graph', parseServiceMapGraph),
+    ])
+    if (generation !== requestGeneration.current) return
 
-      if (res.ok) {
-        const data = await res.json() as { services: { port: number; status: string }[] }
-        const newStatuses: Record<string, HealthStatus> = {}
-        for (const svc of SERVICES) {
-          const entry = data.services.find(s => s.port === svc.port)
-          if (!entry) { newStatuses[svc.id] = 'UNKNOWN'; continue }
-          newStatuses[svc.id] = entry.status === 'UP' ? 'UP' : entry.status === 'DOWN' ? 'DOWN' : 'UNKNOWN'
-        }
-        setHealthStatuses(newStatuses)
-      }
-
-      if (govRes.ok) {
-        const govData = await govRes.json() as { byService?: Record<string, GovernanceManifestEntry> }
-        setGovernanceData(govData.byService ?? {})
-      }
-
-      if (graphRes.ok) {
-        const graph = await graphRes.json() as {
-          edges?: { from: string; to: string; via: string; type: 'rest' | 'kafka' }[]
-          nodes?: { name: string; dependsOn?: number; dependedOnBy?: number }[]
-          infraNodes?: InfraNodeT[]
-          externalNodes?: ExternalNodeT[]
-          infraEdges?: InfraEdgeT[]
-          externalEdges?: ExternalEdgeT[]
-        }
-        setGraphEdges(Array.isArray(graph.edges) ? graph.edges : [])
-        const deg: Record<string, number> = {}
-        for (const n of graph.nodes ?? []) {
-          const id = SERVICE_NAME_TO_ID[n.name.replace(/^openbank-/, '')]
-          if (id) deg[id] = (n.dependsOn ?? 0) + (n.dependedOnBy ?? 0)
-        }
-        setDegrees(deg)
-        setInfraNodes(Array.isArray(graph.infraNodes) ? graph.infraNodes : [])
-        setExternalNodes(Array.isArray(graph.externalNodes) ? graph.externalNodes : [])
-        setInfraEdges(Array.isArray(graph.infraEdges) ? graph.infraEdges : [])
-        setExternalEdges(Array.isArray(graph.externalEdges) ? graph.externalEdges : [])
-      }
-    } catch {
-    } finally {
+    if ([healthResult, governanceResult, graphResult].some(result => !result.ok && result.state === 'unauthorized')) {
+      requestGeneration.current += 1
+      setHealthStatuses({})
+      setGovernanceData({})
+      setGraphEdges([])
+      setDegrees({})
+      setInfraNodes([])
+      setExternalNodes([])
+      setInfraEdges([])
+      setExternalEdges([])
+      setSelected(null)
+      setVerified({ health: false, governance: false, topology: false })
+      setEvidence({ health: 'unauthorized', governance: 'unauthorized', topology: 'unauthorized' })
       setIsChecking(false)
+      return
     }
-  }
+
+    const nextEvidence: Record<'health' | 'governance' | 'topology', EvidenceState> = {
+      health: healthResult.ok ? 'ok' : healthResult.state,
+      governance: governanceResult.ok ? (governanceResult.value.available ? 'ok' : 'not_deployed') : governanceResult.state,
+      topology: graphResult.ok ? (graphResult.value.available ? 'ok' : 'not_deployed') : graphResult.state,
+    }
+    if (healthResult.ok) {
+      const newStatuses: Record<string, HealthStatus> = {}
+      for (const svc of SERVICES) {
+        const entry = healthResult.value.find(service => service.port === svc.port)
+        newStatuses[svc.id] = entry?.status ?? 'UNKNOWN'
+      }
+      setHealthStatuses(newStatuses)
+    }
+    if (governanceResult.ok && governanceResult.value.available) setGovernanceData(governanceResult.value.byService)
+    if (graphResult.ok && graphResult.value.available) {
+      const graph = graphResult.value.graph
+      const deg: Record<string, number> = {}
+      for (const node of graph.nodes) {
+        const id = SERVICE_NAME_TO_ID[node.name.replace(/^openbank-/, '')]
+        if (id) deg[id] = (node.dependsOn ?? 0) + (node.dependedOnBy ?? 0)
+      }
+      setGraphEdges(graph.edges)
+      setDegrees(deg)
+      setInfraNodes(graph.infraNodes)
+      setExternalNodes(graph.externalNodes)
+      setInfraEdges(graph.infraEdges)
+      setExternalEdges(graph.externalEdges)
+    }
+    setVerified(current => ({
+      health: current.health || healthResult.ok,
+      governance: current.governance || (governanceResult.ok && governanceResult.value.available),
+      topology: current.topology || (graphResult.ok && graphResult.value.available),
+    }))
+    setEvidence(nextEvidence)
+    setIsChecking(false)
+  }, [])
 
   useEffect(() => {
-    checkHealth()
-  }, [])
+    void Promise.resolve().then(checkHealth)
+    return () => { requestGeneration.current += 1 }
+  }, [checkHealth])
 
   const selectedSvc = SERVICES.find(s => s.id === selected)
   const selectedTier: InfraNodeT | ExternalNodeT | undefined = [...infraNodes, ...externalNodes].find(n => n.id === selected)
@@ -556,6 +602,22 @@ export default function ServiceMapPage() {
     sdd: 'SEPA Direct Debit mandáty a inkasa',
   }
 
+  const evidenceLabels = {
+    health: t('Provozní stav', 'Runtime health'),
+    governance: t('Governance', 'Governance'),
+    topology: t('Vazby a integrace', 'Dependencies & integrations'),
+  }
+  const evidenceCopy = (key: keyof typeof evidence, state: EvidenceState) => {
+    if (state === 'loading') return t('Načítám', 'Loading')
+    if (state === 'ok') return t('Ověřeno', 'Verified')
+    const stale = verified[key] ? t(' · poslední ověřená data', ' · last verified data') : ''
+    if (state === 'unauthorized') return t('Relace vypršela', 'Session expired')
+    if (state === 'scaled_to_zero') return t('Zdroj je uspán', 'Source scaled to zero') + stale
+    if (state === 'not_deployed') return t('Snapshot není nasazen', 'Snapshot not deployed') + stale
+    if (state === 'error') return t('Neplatná evidence', 'Invalid evidence') + stale
+    return t('Zdroj neodpovídá', 'Source unavailable') + stale
+  }
+
   return (
     <div>
       <DocsPageHeader
@@ -571,6 +633,22 @@ export default function ServiceMapPage() {
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
 
+      <section className="card" aria-label={t('Stav zdrojů mapy', 'Map evidence status')} style={{ padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+        {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {
+          const state = evidence[key]
+          const tone = state === 'ok' ? 'var(--success)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning)'
+          return (
+            <div key={key} data-testid={`map-evidence-${key}`} role={state === 'ok' || state === 'loading' ? undefined : 'status'} aria-live={state === 'ok' || state === 'loading' ? undefined : 'polite'} style={{ minWidth: 0, padding: '8px 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>{evidenceLabels[key]}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: tone, fontSize: 11 }}>
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
+                <span>{evidenceCopy(key, state)}</span>
+              </div>
+            </div>
+          )
+        })}
+      </section>
+
       {/* Filter tabs and Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
         <div role="group" aria-label={t('Filtrování skupin služeb', 'Service group filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -581,7 +659,7 @@ export default function ServiceMapPage() {
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
                 background: filter === key ? 'var(--accent)' : 'var(--surface)',
-                color: filter === key ? '#fff' : 'var(--text-secondary)',
+                color: filter === key ? 'var(--text-inverse)' : 'var(--text-secondary)',
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>{label}</button>
           ))}
@@ -600,7 +678,7 @@ export default function ServiceMapPage() {
                 borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                 border: `1px solid ${c.on ? 'var(--accent)' : 'var(--border)'}`,
                 background: c.on ? 'var(--accent)' : 'var(--surface)',
-                color: c.on ? '#fff' : 'var(--text-secondary)',
+                color: c.on ? 'var(--text-inverse)' : 'var(--text-secondary)',
               }}>
               {c.icon}{c.label}
             </button>
@@ -623,10 +701,10 @@ export default function ServiceMapPage() {
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
           <svg viewBox={`0 0 ${LAYOUT.width} ${svgHeight}`} style={{ width: '100%', height: 'auto', display: 'block', background: 'var(--surface)' }}>
             <defs>
-              <ArrowMarker id="arrow-sync" color="#94a3b8" />
-              <ArrowMarker id="arrow-sync-hi" color="#475569" />
-              <ArrowMarker id="arrow-async" color="#c4b5fd" />
-              <ArrowMarker id="arrow-async-hi" color="#8b5cf6" />
+              <ArrowMarker id="arrow-sync" color="var(--map-edge-sync)" />
+              <ArrowMarker id="arrow-sync-hi" color="var(--map-edge-sync-active)" />
+              <ArrowMarker id="arrow-async" color="var(--map-edge-async)" />
+              <ArrowMarker id="arrow-async-hi" color="var(--map-edge-async-active)" />
               <NodeShadow id="node-shadow" />
             </defs>
 
@@ -634,7 +712,7 @@ export default function ServiceMapPage() {
             {LAYOUT.groups.map(g => (
               <g key={g.key}>
                 <rect x={g.x} y={g.y} width={g.w} height={g.h} rx="16"
-                  fill={`${g.color}0a`} stroke={`${g.color}33`} strokeWidth="1" />
+                  fill={fade(g.color, 4)} stroke={fade(g.color, 20)} strokeWidth="1" />
                 <text x={g.x + 18} y={g.y + 26} fontSize="11" fill={g.color} fontWeight="700" letterSpacing="0.08em">
                   {groupLabel(g.key).toUpperCase()}
                 </text>
@@ -653,12 +731,12 @@ export default function ServiceMapPage() {
                   {/* Tier bands (infra + external) — full-width backgrounds below the grid */}
                   {bandBoxes.map(band => {
                     const meta = band.key === 'infra'
-                      ? { color: '#64748b', label: t('Infrastruktura', 'Infrastructure') }
-                      : { color: '#0ea5e9', label: t('Externí / 3. strany', 'External / 3rd parties') }
+                      ? { color: 'var(--map-infrastructure)', label: t('Infrastruktura', 'Infrastructure') }
+                      : { color: 'var(--map-external)', label: t('Externí / 3. strany', 'External / 3rd parties') }
                     return (
                       <g key={band.key}>
                         <rect x={band.x} y={band.y} width={band.w} height={band.h} rx="16"
-                          fill={`${meta.color}0a`} stroke={`${meta.color}33`} strokeWidth="1" strokeDasharray="4,4" />
+                          fill={fade(meta.color, 4)} stroke={fade(meta.color, 20)} strokeWidth="1" strokeDasharray="4,4" />
                         <text x={band.x + 18} y={band.y + 20} fontSize="11" fill={meta.color} fontWeight="700" letterSpacing="0.08em">
                           {meta.label.toUpperCase()}
                         </text>
@@ -675,7 +753,7 @@ export default function ServiceMapPage() {
                     const aHalf = { hw: brickSize(degrees[e.fromId] ?? 0).w / 2, hh: hhAll }
                     const bHalf = { hw: b.w / 2, hh: CHIP_H / 2 }
                     const { d } = edgeGeometry(a, b, aHalf, bHalf)
-                    const color = EDGE_TYPE_COLOR[e.type] ?? '#94a3b8'
+                    const color = EDGE_TYPE_COLOR[e.type] ?? 'var(--map-edge-sync)'
                     const dashed = e.type === 'broker' || e.type === 'push' || e.type === 'webhook'
                     const off = e.kind === 'external' && e.enabled === false
                     const touches = !!activeNode && (e.fromId === activeNode || e.to === activeNode)
@@ -683,7 +761,7 @@ export default function ServiceMapPage() {
                     const pid = pathId('fx', e.fromId, e.to, 10000 + i)
                     return (
                       <g key={`t${i}`} opacity={off ? 0.3 : dim ? 0.12 : touches ? 1 : 0.55} style={{ transition: 'opacity 0.15s' }}>
-                        <path id={pid} d={d} fill="none" stroke={off ? '#94a3b8' : color}
+                        <path id={pid} d={d} fill="none" stroke={off ? 'var(--map-edge-sync)' : color}
                           strokeWidth={touches ? 2 : 1.3}
                           strokeDasharray={off ? '2,4' : dashed ? '5,4' : undefined} />
                         {flow && !off && <FlowParticle pathId={pid} color={color} dur={2.6 + (i % 4) * 0.3} begin={(i % 6) * 0.2} r={2.3} />}
@@ -702,8 +780,8 @@ export default function ServiceMapPage() {
                     const aHalf = { hw: brickSize(degrees[e.from] ?? 0).w / 2, hh: hhAll }
                     const bHalf = { hw: brickSize(degrees[e.to] ?? 0).w / 2, hh: hhAll }
                     const { d, lx, ly } = edgeGeometry(a, b, aHalf, bHalf)
-                    const baseColor = isAsync ? '#c4b5fd' : '#cbd5e1'
-                    const hiColor = isAsync ? '#8b5cf6' : '#64748b'
+                    const baseColor = isAsync ? 'var(--map-edge-async)' : 'var(--border-strong)'
+                    const hiColor = isAsync ? 'var(--map-edge-async-active)' : 'var(--map-infrastructure)'
                     const pid = pathId('fx', e.from, e.to, i)
                     return (
                       <g key={i} opacity={dim ? 0.08 : touches ? 1 : 0.5} style={{ transition: 'opacity 0.15s' }}>
@@ -719,7 +797,7 @@ export default function ServiceMapPage() {
                           return (
                             <g>
                               <rect x={lx - lbl.length * 3.1 - 5} y={ly - 9} width={lbl.length * 6.2 + 10} height="15"
-                                rx="7.5" fill="var(--surface)" stroke={`${hiColor}55`} strokeWidth="0.75" opacity="0.97" />
+                                rx="7.5" fill="var(--surface)" stroke={fade(hiColor, 33)} strokeWidth="0.75" opacity="0.97" />
                               <text x={lx} y={ly + 2} fontSize="9" fill={hiColor} textAnchor="middle" fontWeight="600">{lbl}</text>
                             </g>
                           )
@@ -754,11 +832,11 @@ export default function ServiceMapPage() {
                         {health && (
                           <g transform={`translate(${p.cx + bw / 2 - 1}, ${p.cy - (bh + STUD_H) / 2 + 2})`}>
                             <circle cx="0" cy="0" r="7"
-                              fill={health === 'UP' ? '#10b981' : health === 'DOWN' ? '#ef4444' : '#94a3b8'}
+                              fill={health === 'UP' ? 'var(--success)' : health === 'DOWN' ? 'var(--danger)' : 'var(--map-edge-sync)'}
                               stroke="var(--surface)" strokeWidth="1.5" />
-                            {health === 'UP' && <path d="M-3,0 L-1,2 L3,-2.5" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
-                            {health === 'DOWN' && <path d="M-2,-2 L2,2 M-2,2 L2,-2" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />}
-                            {health === 'UNKNOWN' && <text x="0" y="2.5" fontSize="8" fill="#fff" textAnchor="middle" fontWeight="bold">?</text>}
+                            {health === 'UP' && <path d="M-3,0 L-1,2 L3,-2.5" fill="none" stroke="var(--text-inverse)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
+                            {health === 'DOWN' && <path d="M-2,-2 L2,2 M-2,2 L2,-2" fill="none" stroke="var(--text-inverse)" strokeWidth="1.5" strokeLinecap="round" />}
+                            {health === 'UNKNOWN' && <text x="0" y="2.5" fontSize="8" fill="var(--text-inverse)" textAnchor="middle" fontWeight="bold">?</text>}
                           </g>
                         )}
                       </g>
@@ -770,7 +848,7 @@ export default function ServiceMapPage() {
                     const p = tierPos[n.id]
                     if (!p) return null
                     const meta = tierMeta(n.id)
-                    const color = meta?.color ?? '#64748b'
+                    const color = meta?.color ?? 'var(--map-infrastructure)'
                     const isSel = selected === n.id
                     const rel = !!activeNode && (activeNode === n.id
                       || tierEdges.some(e => e.to === n.id && (e.fromId === activeNode || e.to === activeNode)))
@@ -794,23 +872,23 @@ export default function ServiceMapPage() {
           {/* Legend */}
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#94a3b8" strokeWidth="1.5" markerEnd="url(#arrow-sync)" /></svg>
+              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="var(--map-edge-sync)" strokeWidth="1.5" markerEnd="url(#arrow-sync)" /></svg>
               {t('Synchronní volání', 'Synchronous call')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#c4b5fd" strokeWidth="1.5" strokeDasharray="5,3" /></svg>
+              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="var(--map-edge-async)" strokeWidth="1.5" strokeDasharray="5,3" /></svg>
               {t('Async (události Kafka)', 'Async (Kafka events)')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="#64748b" strokeWidth="1.3" /></svg>
+              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="var(--map-infrastructure)" strokeWidth="1.3" /></svg>
               {t('Infrastruktura (DB · Kafka · OIDC · OPA)', 'Infrastructure (DB · Kafka · OIDC · OPA)')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="#0ea5e9" strokeWidth="1.3" /></svg>
+              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="var(--map-external)" strokeWidth="1.3" /></svg>
               {t('Externí 3. strany (push · API)', 'External 3rd parties (push · API)')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#94a3b8" strokeWidth="1.3" strokeDasharray="2,4" /></svg>
+              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="var(--map-edge-sync)" strokeWidth="1.3" strokeDasharray="2,4" /></svg>
               {t('Zapojená, ale vypnutá integrace', 'Wired but disabled integration')}
             </div>
           </div>
@@ -832,8 +910,8 @@ export default function ServiceMapPage() {
                   borderRadius: '12px',
                   fontSize: '11px',
                   fontWeight: 600,
-                  background: healthStatuses[selectedSvc.id] === 'UP' ? '#d1fae5' : healthStatuses[selectedSvc.id] === 'DOWN' ? '#fee2e2' : '#f3f4f6',
-                  color: healthStatuses[selectedSvc.id] === 'UP' ? '#059669' : healthStatuses[selectedSvc.id] === 'DOWN' ? '#dc2626' : '#4b5563'
+                  background: healthStatuses[selectedSvc.id] === 'UP' ? 'var(--success-bg)' : healthStatuses[selectedSvc.id] === 'DOWN' ? 'var(--danger-bg)' : 'var(--surface-3)',
+                  color: healthStatuses[selectedSvc.id] === 'UP' ? 'var(--map-identity)' : healthStatuses[selectedSvc.id] === 'DOWN' ? 'var(--map-compliance)' : 'var(--text-secondary)'
                 }}>
                   {healthStatuses[selectedSvc.id] === 'UP' && <CheckCircle2 size={12} />}
                   {healthStatuses[selectedSvc.id] === 'DOWN' && <XCircle size={12} />}
@@ -980,13 +1058,13 @@ export default function ServiceMapPage() {
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                             {govEntry.lineage?.interfaces?.apis?.map((api, i) => (
-                              <span key={`api-${i}`} style={{ fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '2px 6px', borderRadius: '4px', border: '1px solid #bfdbfe' }}>{t('API', 'API')}: {api}</span>
+                              <span key={`api-${i}`} style={{ fontSize: '10px', background: 'var(--info-bg)', color: 'var(--info-text)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--info-border)' }}>{t('API', 'API')}: {api}</span>
                             ))}
                             {govEntry.lineage?.interfaces?.topics?.map((topic, i) => (
-                              <span key={`topic-${i}`} style={{ fontSize: '10px', background: '#f3e8ff', color: '#6b21a8', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e9d5ff' }}>{t('Téma', 'Topic')}: {topic}</span>
+                              <span key={`topic-${i}`} style={{ fontSize: '10px', background: 'var(--accent-bg)', color: 'var(--accent-text)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--accent-border)' }}>{t('Téma', 'Topic')}: {topic}</span>
                             ))}
                             {govEntry.lineage?.interfaces?.datastores?.map((ds, i) => (
-                              <span key={`ds-${i}`} style={{ fontSize: '10px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', border: '1px solid #bbf7d0' }}>{t('DB', 'DB')}: {ds}</span>
+                              <span key={`ds-${i}`} style={{ fontSize: '10px', background: 'var(--success-bg)', color: 'var(--success-text)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--success-border)' }}>{t('DB', 'DB')}: {ds}</span>
                             ))}
                           </div>
                         </div>
@@ -1029,18 +1107,18 @@ export default function ServiceMapPage() {
         {/* Detail panel — infra/external tier node */}
         {selectedTier && !selectedSvc && (() => {
           const meta = tierMeta(selectedTier.id)
-          const color = meta?.color ?? '#64748b'
+          const color = meta?.color ?? 'var(--map-infrastructure)'
           const isExt = selectedTier.kind === 'external'
           const anyEnabled = tierConsumers.some(c => c.enabled)
           const Icon = meta?.Icon ?? Server
           return (
             <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `${color}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: fade(color, 10), display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
                   <Icon size={16} />
                 </div>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{chipLabel(selectedTier.id, selectedTier.label)}</div>
-                <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `${color}1a`, color }}>
+                <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: fade(color, 10), color }}>
                   {isExt ? t('3. strana', '3rd party') : t('Infra', 'Infra')}
                 </div>
               </div>
