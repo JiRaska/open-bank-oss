@@ -3,10 +3,16 @@
 openapi: 3.1.0
 info:
   title: SEPA Payment Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
-  # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
-  # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.7.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.7 -> 1.8): CORRECTION
+  # (#5962) — the published status vocabularies never matched SepaPaymentStatus. RECALLED has
+  # never existed in the code and PENDING was removed before this spec was written, while
+  # RECEIVED/VALIDATED/RETURNED/CANCELLED — all reachable and all returned — went unpublished.
+  # oasdiff reads the removals as breaking; they are not, because no server behaviour changes:
+  # RECALLED/PENDING could never be produced or accepted, so no conformant client can regress.
+  # Minor, not major, per the correction class.
+  # Minor bump (1.6 -> 1.7): additive only — GET /approvals (the checker's queue, issue #5679)
+  # plus two additive fields on ApprovalResponse (makerId, createdAt). No breaking change.
+  version: 1.8.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -63,7 +69,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, PROCESSING, COMPLETED, REJECTED, RECALLED]
+            enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         - name: debtorAccountId
           in: query
           schema:
@@ -362,7 +368,10 @@ components:
       properties:
         targetStatus:
           type: string
-          enum: [PROCESSING, COMPLETED, REJECTED, RECALLED]
+          # A DELIBERATE SUBSET of SepaPaymentStatus: every value `canTransitionTo` can reach.
+          # RECEIVED is the entry state only — no transition targets it — so it is absent here
+          # while being present on the read filter above.
+          enum: [VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         reason:
           type: string
 
