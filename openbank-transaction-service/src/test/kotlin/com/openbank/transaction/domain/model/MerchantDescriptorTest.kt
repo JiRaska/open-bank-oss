@@ -85,4 +85,49 @@ class MerchantDescriptorTest {
         val twice = MerchantDescriptor.normalise(once)
         assertThat(twice).isEqualTo(once)
     }
+
+    /**
+     * The town is stripped to reach the key AND kept as its own answer. Both matter: without the
+     * strip, `BILLA PRAHA 4` and `BILLA BRNO` are different merchants; without the town, they are
+     * the same merchant in the same place, and a Brno purchase renders in Prague.
+     */
+    @Test
+    fun `parse keeps the town it strips from the key`() {
+        val parsed = MerchantDescriptor.parse("BILLA PRAHA 4")
+
+        assertThat(parsed?.key).isEqualTo("BILLA")
+        assertThat(parsed?.cityToken).isEqualTo("PRAHA")
+    }
+
+    @Test
+    fun `the town token is folded, so an accented spelling keys the same row`() {
+        assertThat(MerchantDescriptor.parse("BILLA PLZEŇ")?.cityToken).isEqualTo("PLZEN")
+    }
+
+    /** No town means nothing to narrow to — not an unknown town, and not the empty string. */
+    @Test
+    fun `a descriptor with no town yields a null town`() {
+        assertThat(MerchantDescriptor.parse("ALZA.CZ A.S.")?.cityToken).isNull()
+        assertThat(MerchantDescriptor.parse("NETFLIX.COM")?.cityToken).isNull()
+    }
+
+    /**
+     * The district is dropped with the town and never returned on its own. `PRAHA 4` is a
+     * subdivision this parser cannot resolve to coordinates, and returning it would invent a
+     * precision the data does not have.
+     */
+    @Test
+    fun `a district is dropped rather than reported as a town`() {
+        assertThat(MerchantDescriptor.parse("BILLA PRAHA 4")?.cityToken).isEqualTo("PRAHA")
+        assertThat(MerchantDescriptor.parse("PENNY 24")?.cityToken).isNull()
+    }
+
+    /** The outermost town wins, so a trading name containing a town name cannot displace it. */
+    @Test
+    fun `a town inside the trading name is not mistaken for the location`() {
+        val parsed = MerchantDescriptor.parse("PRAHA COFFEE BRNO")
+
+        assertThat(parsed?.key).isEqualTo("PRAHACOFFEE")
+        assertThat(parsed?.cityToken).isEqualTo("BRNO")
+    }
 }

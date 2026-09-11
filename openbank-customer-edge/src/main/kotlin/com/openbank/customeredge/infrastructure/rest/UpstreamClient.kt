@@ -96,12 +96,26 @@ class UpstreamClient {
         return URI.create(url)
     }
 
+    /**
+     * Builds an upstream URI while keeping the trusted service authority structurally separate
+     * from a caller-derived path. A path can never replace the host, user-info, query or fragment.
+     */
+    private inline fun structuredUri(baseUrl: String, path: String): URI {
+        require(SAFE_UPSTREAM_BASE_URL.matches(baseUrl)) { "refusing upstream call to disallowed host" }
+        require(path.startsWith('/') && !path.startsWith("//")) { "upstream path must be absolute and hostless" }
+        require('?' !in path && '#' !in path) { "upstream path must not contain a query or fragment" }
+        val base = URI.create(baseUrl)
+        return URI(base.scheme, null, base.host, base.port, path, null, null)
+    }
+
     companion object {
         const val PARTY_HEADER = "X-Customer-Party-Id"
         const val IDEMPOTENCY_REPLAY_HEADER = "X-Idempotency-Replayed"
         private const val TOKEN_REFRESH_BUFFER_SECONDS = 60L
         private val SAFE_UPSTREAM_URL =
             Regex("^https?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.svc|127\\.0\\.0\\.1|localhost)(?::\\d+)?(?:/.*)?$")
+        private val SAFE_UPSTREAM_BASE_URL =
+            Regex("^https?://(?:[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.svc|127\\.0\\.0\\.1|localhost)(?::\\d+)?/?$")
         private val JSON = com.fasterxml.jackson.databind.ObjectMapper()
     }
 
@@ -374,9 +388,9 @@ class UpstreamClient {
     // Idempotency-aware POST: forwards the caller's Idempotency-Key (required by some upstreams,
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.
-    fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
+    private fun post(uri: URI, partyId: String, body: String, idempotencyKey: String?): Response {
         val request = HttpRequest.newBuilder()
-            .uri(validatedUri(url))
+            .uri(uri)
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Content-Type", "application/json")
@@ -385,9 +399,29 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        jsonResponse(r)
+        return jsonResponse(r)
+    }
+
+    fun post(url: String, partyId: String, body: String, idempotencyKey: String? = null): Response = try {
+        post(validatedUri(url), partyId, body, idempotencyKey)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** POST to a fixed service authority with a separately constructed caller-derived path. */
+    fun postToService(
+        baseUrl: String,
+        path: String,
+        partyId: String,
+        body: String,
+        idempotencyKey: String? = null,
+    ): Response = try {
+        post(structuredUri(baseUrl, path), partyId, body, idempotencyKey)
+    } catch (e: Exception) {
+        // Do not log path: it may contain an opaque invitation or recovery token.
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
