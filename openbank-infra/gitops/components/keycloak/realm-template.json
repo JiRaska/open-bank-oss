@@ -86,6 +86,14 @@
         "description": "Lending officer: opens and services loan applications, cannot take the credit decision (four-eyes with ROLE_CREDIT_RISK). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
       },
       {
+        "name": "ROLE_COMMS_EDITOR",
+        "description": "Communication Studio maker: drafts and submits style/playbook versions (ADR-0285 D6). Cannot publish (four-eyes with ROLE_COMMS_APPROVER)."
+      },
+      {
+        "name": "ROLE_COMMS_APPROVER",
+        "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
