@@ -17,6 +17,7 @@
  */
 export { PageHeader } from './PageHeader'
 export { Drawer } from './Drawer'
+export { LoadingState } from './LoadingState'
 export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
 export { Tabs, type TabItem } from './Tabs'
