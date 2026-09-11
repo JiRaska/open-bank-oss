@@ -134,3 +134,12 @@ not change any existing request's outcome until explicitly flipped.
   settled batch stays a manual reversing journal (documented limit, ADR-0281). No DB schema change
   in clearing-service; ledger gains V26 seed accounts (additive). Rollback: revert the commit —
   unsettled batches post nothing; already-committed outbox rows drain or dead-letter harmlessly.
+- **2026-09-09** — Submit idempotency (ADR-0298, burn-down #8351): `POST /api/v1/clearing/submit`
+  dedups on the payment natural key — a retry replays the existing item check-first, and V9's
+  `uq_clearing_items_payment` unique index backstops the true-concurrency race (the loser
+  re-reads the winner). The closed threat is a double-settlement reachable from one transport
+  retry: previously a retried submit stacked a second PENDING row that the clearing cycle swept
+  into a batch. No new caller, route, role or endpoint shape; the response for a retry is the
+  original item, so nothing downstream can distinguish replay from first submit. Rollback:
+  revert the commit and `DROP INDEX IF EXISTS uq_clearing_items_payment` — pre-duplicate data
+  must be cleaned before V9 (detection query in the migration).

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-"""Prevent action tag drift and preserve bounded, read-only agent PR validation."""
+"""Prevent action tag drift and ratchet GitHub workflow write capabilities."""
 import re
 import sys
 from pathlib import Path
@@ -9,8 +9,35 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+WRITE_BASELINE = ROOT / '.github/gates/workflow-write-permissions-baseline.txt'
 # The SLSA builder verifies its identity using a version tag (see release-please.yml).
 SLSA = 'slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0'
+
+
+def write_grants(name, doc):
+    """Return stable workflow|owner|permission coordinates for every write grant."""
+    grants = set()
+    owners = [('top', doc), *[(f'job:{key}', job) for key, job in doc.get('jobs', {}).items()]]
+    for owner, value in owners:
+        permissions = value.get('permissions')
+        if permissions == 'write-all':
+            grants.add(f'{name}|{owner}|write-all')
+        elif isinstance(permissions, dict):
+            grants.update(
+                f'{name}|{owner}|{permission}'
+                for permission, access in permissions.items()
+                if access == 'write'
+            )
+    return grants
+
+
+def grant_drift(actual, expected):
+    errors = []
+    for grant in sorted(actual - expected):
+        errors.append(f'unexpected workflow write grant: {grant}')
+    for grant in sorted(expected - actual):
+        errors.append(f'stale workflow write baseline entry: {grant}')
+    return errors
 
 
 def findings(name, doc):
@@ -47,6 +74,20 @@ def findings(name, doc):
         if name == 'agent-issue-worker.yml':
             if worker.get('needs') != 'admission' or "needs.admission.outputs.proceed == 'true'" not in worker.get('if', ''):
                 errors.append('issue worker must depend on successful queue admission')
+    if name == 'services-ci.yml':
+        changes = jobs.get('changes', {})
+        verification = jobs.get('verification-metadata', {})
+        aggregate = jobs.get('all-green', {})
+        output = changes.get('outputs', {}).get('verification-modules', '')
+        if 'steps.detect.outputs.verification-modules' not in output:
+            errors.append('changes must export the module verification plan from its detector')
+        verification_if = verification.get('if', '')
+        if ("needs.changes.result == 'success'" not in verification_if
+                or "needs.changes.outputs.verification-modules != ''" not in verification_if):
+            errors.append('verification metadata must allocate a runner only for a successful non-empty plan')
+        aggregate_run = '\n'.join(step.get('run', '') for step in aggregate.get('steps', []))
+        if ('needs.changes.result' not in aggregate_run or 'scope is unknown' not in aggregate_run):
+            errors.append('all-green must fail closed when changed-service detection has no verdict')
     return errors
 
 
@@ -67,12 +108,53 @@ def steward_scope_findings(prompt, rules, workflow):
 
 
 def main():
+    if '--self-test' in sys.argv:
+        fixture = {
+            'permissions': {'contents': 'read', 'issues': 'write'},
+            'jobs': {
+                'safe': {'permissions': {'contents': 'read'}},
+                'oidc': {'permissions': {'id-token': 'write'}},
+                'all': {'permissions': 'write-all'},
+            },
+        }
+        expected = {
+            'fixture.yml|top|issues',
+            'fixture.yml|job:oidc|id-token',
+            'fixture.yml|job:all|write-all',
+        }
+        actual = write_grants('fixture.yml', fixture)
+        if actual != expected:
+            print(f'::error::write-permission self-test failed: {sorted(actual)}')
+            return 1
+        if grant_drift(actual | {'new.yml|top|contents'}, expected) != [
+            'unexpected workflow write grant: new.yml|top|contents'
+        ]:
+            print('::error::write-permission self-test did not reject a new grant')
+            return 1
+        if grant_drift(actual - {'fixture.yml|top|issues'}, expected) != [
+            'stale workflow write baseline entry: fixture.yml|top|issues'
+        ]:
+            print('::error::write-permission self-test did not reject stale debt')
+            return 1
+        print('self-test ok: write grants are owner-scoped; new and stale grants both fail')
+        return 0
+
     paths = sorted((ROOT / '.github/workflows').glob('*.yml')) + sorted((ROOT / '.github/workflows').glob('*.yaml'))
     print(f'SUBJECTS={len(paths)}')
     errors = []
     for path in paths:
         doc = yaml.safe_load(path.read_text())
         errors.extend(f'{path.name}: {error}' for error in findings(path.name, doc))
+    actual_grants = set().union(*(write_grants(path.name, yaml.safe_load(path.read_text())) for path in paths))
+    if not WRITE_BASELINE.is_file():
+        errors.append(f'{WRITE_BASELINE.relative_to(ROOT)}: write-permission baseline is missing')
+    else:
+        expected_grants = {
+            line.strip() for line in WRITE_BASELINE.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith('#')
+        }
+        errors.extend(grant_drift(actual_grants, expected_grants))
+
     steward_path = ROOT / '.github/workflows/agent-pr-steward.yml'
     steward = yaml.safe_load(steward_path.read_text())
     rules = yaml.safe_load((ROOT / 'openbank-libs/governance/rules.yaml').read_text())
