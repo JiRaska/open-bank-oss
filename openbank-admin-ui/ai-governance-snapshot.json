@@ -221,7 +221,7 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "8326ffc1f5a537aa",
+      "sha256": "6372285504647940",
       "counts": {
         "external": 2,
         "not-applicable": 2,
@@ -267,7 +267,9 @@
           "catalog-review.v1"
         ],
         "customer-copilot": [
-          "system.v1"
+          "system.v1",
+          "core.v1",
+          "style.v1"
         ],
         "devops-agent": [
           "diagnosis.v1",

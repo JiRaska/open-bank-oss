@@ -13,6 +13,12 @@ import { PageHeader, StatusBadge } from '@/components/ui'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { PAYMENT_INSIGHTS } from '@/components/insights/catalog'
 import { Can } from '@/components/auth/AuthGuard'
+import {
+  parseTransactionSearchResult,
+  TRANSACTION_STATUSES,
+  TRANSACTION_TYPES,
+  type TransactionSearchResult,
+} from '@/lib/transactions/transactionSearchContract'
 
 const TYPE_COLOR: Record<string, string> = {
   DEBIT:      'var(--danger)',
@@ -24,40 +30,19 @@ const TYPE_COLOR: Record<string, string> = {
   ADJUSTMENT: 'var(--text-tertiary)',
 }
 
-interface TxResult {
-  id: string
-  referenceNumber: string
-  type: string
-  sourceAccountId?: string
-  targetAccountId?: string
-  amount: number
-  currencyCode: string
-  status: string
-  description?: string
-  valueDate: string
-  bookingDate: string
-  initiatedAt: string
-  completedAt?: string
-}
-
-interface SearchResult {
-  data: TxResult[]
-  count: number
-  limit: number
-  offset: number
-}
-
-const CHANNELS = ['API', 'BRANCH', 'ATM', 'MOBILE', 'INTERNET', 'BATCH']
-const STATUSES = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REVERSED']
-const TYPES    = ['DEBIT', 'CREDIT', 'TRANSFER', 'FEE', 'INTEREST', 'REVERSAL', 'ADJUSTMENT']
 const PAGE_SIZE = 50
+const REQUEST_SIZE = PAGE_SIZE + 1
+
+interface TransactionResultPage extends TransactionSearchResult {
+  hasNextPage: boolean
+}
 
 export default function TransactionsPage() {
   const { t, language } = useLanguage()
   const [showFilters, setShowFilters] = useState(false)
   const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<BffFailure | null>(null)
-  const [result, setResult] = useState<SearchResult | null>(null)
+  const [result, setResult] = useState<TransactionResultPage | null>(null)
   const [resultQueryKey, setResultQueryKey] = useState<string | null>(null)
   const searchGeneration = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
@@ -75,10 +60,9 @@ export default function TransactionsPage() {
   const [dateTo, setDateTo]               = useState('')
   const [amountMin, setAmountMin]         = useState('')
   const [amountMax, setAmountMax]         = useState('')
-  const [channel, setChannel]             = useState('')
 
-  const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].some(Boolean)
-  const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].join('\u0000')
+  const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].some(Boolean)
+  const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].join('\u0000')
   const queryChanged = result !== null && resultQueryKey !== queryKey
 
   useEffect(() => () => {
@@ -104,7 +88,12 @@ export default function TransactionsPage() {
     const controller = new AbortController()
     activeRequest.current = controller
     const requestedQueryKey = queryKey
+    const canRetainSnapshot = result !== null && resultQueryKey === requestedQueryKey
     setLoading(true); setFailure(null)
+    if (!canRetainSnapshot) {
+      setResult(null)
+      setResultQueryKey(null)
+    }
     try {
       const params = new URLSearchParams()
       if (accountId)     params.set('accountId', accountId)
@@ -119,13 +108,13 @@ export default function TransactionsPage() {
       if (dateTo)        params.set('dateTo', dateTo)
       if (amountMin)     params.set('amountMin', amountMin)
       if (amountMax)     params.set('amountMax', amountMax)
-      if (channel)       params.set('channel', channel)
-      params.set('limit', String(PAGE_SIZE))
+      // One-row lookahead removes the false "Next" affordance when a page has exactly 50 rows.
+      params.set('limit', String(REQUEST_SIZE))
       params.set('offset', String(offset))
 
       const res = await fetch(
         svcUrl('transaction-service', '/api/v1/transactions/search', Object.fromEntries(params)),
-        { cache: 'no-store', signal: controller.signal },
+        { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) },
       )
       if (generation !== searchGeneration.current) return
       if (!res.ok) {
@@ -134,12 +123,35 @@ export default function TransactionsPage() {
         // sandbox), not that the search itself failed. Distinguish the cases so
         // the operator sees a meaningful state instead of a raw "HTTP 404".
         const nextFailure = await classifyBffFailure(res)
-        if (generation === searchGeneration.current) setFailure(nextFailure)
+        if (generation === searchGeneration.current) {
+          if (res.status === 401 || res.status === 403) {
+            setResult(null)
+            setResultQueryKey(null)
+          }
+          setFailure(res.status === 401 || res.status === 403 ? 'unauthorized' : nextFailure)
+        }
         return
       }
-      const nextResult = await res.json() as SearchResult
+      const raw = await res.json() as unknown
       if (generation !== searchGeneration.current) return
-      setResult(nextResult)
+      let nextResult: TransactionSearchResult
+      try {
+        nextResult = parseTransactionSearchResult(raw)
+      } catch {
+        setFailure('error')
+        return
+      }
+      if (nextResult.limit !== REQUEST_SIZE || nextResult.offset !== offset) {
+        setFailure('error')
+        return
+      }
+      setResult({
+        ...nextResult,
+        data: nextResult.data.slice(0, PAGE_SIZE),
+        count: Math.min(nextResult.count, PAGE_SIZE),
+        limit: PAGE_SIZE,
+        hasNextPage: nextResult.data.length > PAGE_SIZE,
+      })
       setResultQueryKey(requestedQueryKey)
     } catch {
       // Network-level failure (BFF unreachable from the browser).
@@ -154,7 +166,7 @@ export default function TransactionsPage() {
     invalidatePendingSearch()
     setIban(''); setBban(''); setReferenceNumber(''); setEndToEndId('')
     setCounterparty(''); setStatus(''); setType(''); setDateFrom('')
-    setDateTo(''); setAmountMin(''); setAmountMax(''); setChannel('')
+    setDateTo(''); setAmountMin(''); setAmountMax('')
   }
 
   return (
@@ -201,7 +213,7 @@ export default function TransactionsPage() {
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
             <Filter size={13} />
-            {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax,channel].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
+            {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
             {loading ? <RefreshCw size={13} aria-hidden="true" className="animate-spin" /> : <Search size={13} aria-hidden="true" />}
@@ -229,21 +241,14 @@ export default function TransactionsPage() {
                 <label htmlFor="transaction-status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
                 <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => updateSearchField(setStatus, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  {TRANSACTION_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-type" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
                 <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => updateSearchField(setType, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="transaction-channel" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Kanál', 'Channel')}</label>
-                <select id="transaction-channel" className="input" style={{ width: '100%' }} value={channel} onChange={e => updateSearchField(setChannel, e.target.value)}>
-                  <option value="">{t('Vše', 'All')}</option>
-                  {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {TRANSACTION_TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
                 </select>
               </div>
               <div>
@@ -308,12 +313,12 @@ export default function TransactionsPage() {
                     <tr key={tx.id}>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>{tx.referenceNumber}</td>
                       <td><span style={{ fontSize: '11px', fontWeight: 600, color: TYPE_COLOR[tx.type] || 'var(--text-secondary)' }}>{tx.type}</span></td>
-                      <td style={{ fontWeight: 600, color: tx.type === 'DEBIT' ? 'var(--danger)' : 'var(--success)' }}>
-                        {tx.type === 'DEBIT' ? '-' : '+'}{Number(tx.amount).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
+                      <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                        {tx.amount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
                       </td>
                       <td><StatusBadge status={tx.status} /></td>
-                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId?.slice(0, 8)}…</td>
-                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId?.slice(0, 8)}…</td>
+                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId ? `${tx.sourceAccountId.slice(0, 8)}…` : '—'}</td>
+                      <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId ? `${tx.targetAccountId.slice(0, 8)}…` : '—'}</td>
                       <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>{tx.description || '—'}</td>
                       <td style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{tx.bookingDate}</td>
                     </tr>
@@ -335,7 +340,7 @@ export default function TransactionsPage() {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 aria-label={t('Další stránka transakcí', 'Next transaction page')}
-                disabled={loading || queryChanged || result.data.length !== PAGE_SIZE}
+                disabled={loading || queryChanged || !result.hasNextPage}
                 onClick={() => search(result.offset + PAGE_SIZE)}
               >
                 {t('Další', 'Next')}
