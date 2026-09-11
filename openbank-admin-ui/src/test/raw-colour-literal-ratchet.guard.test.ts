@@ -28,9 +28,11 @@ function rawColourCount(): number {
 
 describe('admin UI semantic colour migration', () => {
   it('does not add raw hexadecimal colours outside the token stylesheet', () => {
-    // Re-baselined after migrations reduced the scanner result from 1,782 to 1,684.
-    // Keeping the old ceiling left 98 free regression slots in a shrink-only ratchet.
+    // Baseline captured after migrating approval identity badges to shared semantic tones.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(1684)
+    // Must match MAX_RAW_COLOUR_LITERALS in check-raw-colour-literal-ratchet.py — measured at 729
+    // on the merged tree, not a negotiated headroom. A ceiling above the real count is slack a
+    // regression can land in with CI green; at 1599 there were 870 literals of it.
+    expect(rawColourCount()).toBeLessThanOrEqual(729)
   })
 })

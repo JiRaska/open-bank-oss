@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const STATUS = {
@@ -46,3 +47,26 @@ test('filters the live infrastructure map and keeps a DOWN state semantically ex
   await refresh.click()
   await expect(refresh).toHaveAttribute('aria-busy', 'false')
 })
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`keeps the semantic topology legible and accessible in ${theme} mode`, async ({ page }) => {
+    await page.goto('/infrastructure/topology')
+    await page.locator('html').evaluate((element, selectedTheme) => {
+      element.classList.toggle('dark', selectedTheme === 'dark')
+    }, theme)
+
+    const topology = page.locator('main').getByRole('button', { name: 'ArgoCD' })
+    await expect(topology).toBeVisible()
+    await topology.click()
+
+    const details = page.getByRole('region', { name: 'Infrastructure component details' })
+    await expect(details).toBeVisible()
+    await expect(details.getByText('Platform / control plane')).toBeVisible()
+
+    const scan = await new AxeBuilder({ page })
+      .include('main')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations).toEqual([])
+  })
+}

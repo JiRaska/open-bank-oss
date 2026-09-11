@@ -41,10 +41,11 @@ SOURCE_EXTENSIONS = {".tsx", ".css"}
 
 # Lowering this is always safe; raising it needs an intentional token decision, same rule as the
 # Vitest test's own comment. Keep this number equal to that test's ceiling.
-# Re-baselined from the exact scanner output on main after the design-system
-# migrations had already paid down 98 literals. A shrink-only ratchet must not
-# retain that slack: otherwise a new raw colour can regress while CI stays green.
-MAX_RAW_COLOUR_LITERALS = 1684
+# Measured on the merged tree, not negotiated: the scanner reports DEBT=729 over SUBJECTS=297
+# today, so the ceiling IS 729. A shrink-only ratchet whose ceiling sits above the real count is
+# not a ratchet — at 1599 it carried 870 literals of slack, which is room for a regression to
+# land with CI green. Lower this whenever the debt drops; never raise it.
+MAX_RAW_COLOUR_LITERALS = 729
 
 
 def source_files(root: pathlib.Path):

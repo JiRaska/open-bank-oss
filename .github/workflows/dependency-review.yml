@@ -28,12 +28,12 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 35 leaves real headroom, and the
-    # last step's own retry loop below (issue #5066) borrows from that headroom rather than
-    # adding its own minutes: worst case measured so far is ~9 min, well inside the ~11 min
-    # of slack 35 already carries over the 24 min baseline.
+    # slow queue away from a spurious red on an honest PR. 50 also contains the bounded
+    # installation-quota recovery below plus the final basis retry: a 15.5 min API wait,
+    # a measured 24 min snapshot/indexing path and ~5 min basis retry fit without turning
+    # a transient GitHub 403 into a timeout.
     # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -74,6 +74,8 @@ jobs:
           fi
 
       - name: Dependency Review
+        id: review
+        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
@@ -126,7 +128,49 @@ jobs:
           # dependency-submission.yml, do not allowlist it. One naming a real *Classpath is a
           # genuine finding: bump the pin.
 
-      # The gate above PROCEEDS on an invalid basis instead of failing (issue #2833, item 4).
+      # GitHub's dependency-diff endpoint intermittently answers 403 when the
+      # installation API quota is exhausted. dependency-review-action maps every
+      # 403 to the misleading permanent "not supported" error (upstream #555),
+      # even for this public repository with a working dependency graph. A plain
+      # workflow rerun later succeeds, but leaves every PR blocked in the meantime.
+      #
+      # Retry only after the first complete review attempt failed, and wait on the
+      # same compare endpoint that backs the action. A real vulnerability also
+      # reaches the retry, then fails the second full review identically. API errors
+      # remain red after the bounded wait; no result is converted to a pass.
+      - name: Wait for dependency-diff API after a failed review
+        if: ${{ steps.review.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          delays=(0 30 60 120 240 480)
+          for delay in "${delays[@]}"; do
+            if [ "$delay" -gt 0 ]; then sleep "$delay"; fi
+            if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}" \
+              >/tmp/dependency-diff.json 2>/tmp/dependency-diff.error; then
+              echo "Dependency-diff API is readable; repeating the full policy review."
+              exit 0
+            fi
+            echo "Dependency-diff API unavailable; retrying after bounded backoff."
+          done
+          cat /tmp/dependency-diff.error >&2
+          exit 1
+
+      - name: Dependency Review retry
+        if: ${{ steps.review.outcome == 'failure' }}
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
+          retry-on-snapshot-warnings: ${{ steps.deps.outputs.changed == 'true' }}
+          retry-on-snapshot-warnings-timeout: 1800
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+
+      # A successful review attempt above can still PROCEED on an invalid basis instead of
+      # failing (issue #2833, item 4).
       #
       # dependency-review compares two SUBMITTED graphs. When one side has no snapshot it
       # logs a warning, exhausts retry-on-snapshot-warnings, prints
@@ -171,10 +215,9 @@ jobs:
       #
       # This is defense in depth, not a proof the Checks API can never itself lag — kept as a
       # short bounded retry (5 attempts, linear backoff, ~5 min worst case) so a much smaller
-      # residual delay still resolves before this step gives up. That budget is small next to
-      # the ~11 min of headroom timeout-minutes already carries (see the job header), and it
-      # is far below the double-digit-minute lag that made the OLD endpoint unusable — if the
-      # Checks API turns out to share that failure mode, the fix is a workflow_run trigger on
+      # residual delay still resolves before this step gives up. It fits inside the 50-minute
+      # job budget together with the measured snapshot and quota-recovery paths. If the Checks
+      # API turns out to share that failure mode, the fix is a workflow_run trigger on
       # dependency-submission.yml completing (auto-retry-cancelled.yml already listens to that
       # workflow's completion event, so the pattern is proven in this repo) rather than a
       # longer poll here.
