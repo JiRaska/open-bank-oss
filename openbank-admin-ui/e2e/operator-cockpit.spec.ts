@@ -31,7 +31,8 @@ test('KYC resolves a customer name before loading that customer’s cases', asyn
     // collection route, which always answers an array.
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       id: 'case-anna-1', partyId: PARTY_ID, status: 'OPEN', reviewedBy: 'reviewer@openbank.test',
-      updatedAt: '2026-08-22T08:00:00Z', checks: [{ checkType: 'IDENTITY', status: 'APPROVED' }],
+      riskLevel: 'LOW', createdAt: '2026-08-22T07:00:00Z', updatedAt: '2026-08-22T08:00:00Z',
+      checks: [{ id: 'check-identity', checkType: 'IDENTITY', status: 'PASSED' }],
     }) })
   })
 
