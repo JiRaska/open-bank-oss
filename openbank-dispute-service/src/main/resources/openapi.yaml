@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
     regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
@@ -370,22 +370,36 @@ components:
   schemas:
     OpenDisputeRequest:
       type: object
-      required: [accountId, transactionId, reason, claimAmount]
+      required: [accountId, transactionId]
       properties:
-        accountId:
-          type: string
-          format: uuid
         transactionId:
           type: string
           format: uuid
-        reason:
+        accountId:
           type: string
-          enum: [UNAUTHORIZED, DUPLICATE, WRONG_AMOUNT, NOT_RECEIVED, QUALITY]
-        claimAmount:
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        disputeType:
+          type: string
+          enum: [UNAUTHORIZED, DUPLICATE, GOODS_NOT_RECEIVED, NOT_AS_DESCRIBED, CREDIT_NOT_PROCESSED, TECHNICAL_ERROR, OTHER]
+        amount:
           type: number
+        currency:
+          type: string
         description:
           type: string
 
+        merchantName:
+          type: string
+          nullable: true
+        merchantId:
+          type: string
+          nullable: true
+        transactionDate:
+          type: string
+          format: date
     UpdateDisputeRequest:
       type: object
       properties:
@@ -393,9 +407,12 @@ components:
           type: string
         resolution:
           type: string
-        notes:
+        chargebackAmount:
+          type: number
+          nullable: true
+        resolvedBy:
           type: string
-
+          nullable: true
     DisputeEvidence:
       type: object
       description: >-
