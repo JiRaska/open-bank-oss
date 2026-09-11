@@ -35,14 +35,14 @@ interface Topology {
 }
 
 const STATUS: Record<Status, { cs: string; en: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live: { cs: 'Live', en: 'Live', color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { cs: 'Částečně', en: 'Partial', color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { cs: 'Plánováno', en: 'Planned', color: '#64748b', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
+  live: { cs: 'Live', en: 'Live', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { cs: 'Částečně', en: 'Partial', color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  planned: { cs: 'Plánováno', en: 'Planned', color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 const ICONS: Record<string, React.ElementType> = {
   bank: Building2, lock: Lock, network: Network, cpu: Cpu, globe: Globe, shield: Shield, key: Key, box: Box, server: Server,
 }
-const K8S_BLUE = '#326CE5'
+const K8S_BLUE = 'var(--map-core)'
 
 function StatusPill({ s, lang }: { s: Status; lang: string }) {
   const m = STATUS[s]
@@ -58,7 +58,7 @@ function AdrRefs({ adr }: { adr: string[] }) {
   return (
     <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
       {adr.map(a => (
-        <a key={a} href={`/docs/adr#${a}`} style={{ fontSize: 10, fontFamily: 'var(--font-mono, monospace)', color: K8S_BLUE, background: 'rgba(50,108,229,0.08)', border: '1px solid rgba(50,108,229,0.25)', padding: '1px 6px', borderRadius: 4, textDecoration: 'none' }}>
+        <a key={a} href={`/docs/adr#${a}`} style={{ fontSize: 10, fontFamily: 'var(--font-mono, monospace)', color: 'var(--info-text)', background: 'var(--info-bg)', border: '1px solid var(--info-border)', padding: '1px 6px', borderRadius: 4, textDecoration: 'none' }}>
           ADR-{a}
         </a>
       ))}
@@ -97,12 +97,12 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.3fr)', gap: 20, alignItems: 'start' }}>
       {/* the box */}
-      <div style={{ position: 'relative', background: 'linear-gradient(160deg,#1e293b,#0f172a)', borderRadius: 14, padding: 14, border: '2px solid #334155', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+      <div style={{ position: 'relative', background: 'var(--sidebar-bg)', borderRadius: 14, padding: 14, border: '2px solid var(--sidebar-border)', boxShadow: 'var(--shadow-xl)' }}>
         {/* corner rivets */}
         {[[8, 8], [8, 'r'], ['b', 8], ['b', 'r']].map((p, i) => (
-          <span key={i} style={{ position: 'absolute', top: p[0] === 'b' ? undefined : 8, bottom: p[0] === 'b' ? 8 : undefined, left: p[1] === 'r' ? undefined : 8, right: p[1] === 'r' ? 8 : undefined, width: 7, height: 7, borderRadius: '50%', background: '#475569' }} />
+          <span key={i} style={{ position: 'absolute', top: p[0] === 'b' ? undefined : 8, bottom: p[0] === 'b' ? 8 : undefined, left: p[1] === 'r' ? undefined : 8, right: p[1] === 'r' ? 8 : undefined, width: 7, height: 7, borderRadius: '50%', background: 'var(--sidebar-text)' }} />
         ))}
-        <div style={{ textAlign: 'center', color: '#cbd5e1', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, letterSpacing: '0.15em', marginBottom: 8 }}>
+        <div style={{ textAlign: 'center', color: 'var(--sidebar-active-text)', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, letterSpacing: '0.15em', marginBottom: 8 }}>
           OPENBANK · {anatomy.runtimeBase}
         </div>
         <div style={{ display: 'grid', gap: 4 }}>
@@ -114,21 +114,21 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
               <button key={st.id} onClick={() => setOpen(st.id)} type="button"
                 aria-expanded={on} aria-controls={on ? `cluster-anatomy-panel-${st.id}` : undefined} style={{
                 textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 7, cursor: 'pointer',
-                background: on ? 'rgba(50,108,229,0.18)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${on ? K8S_BLUE : 'rgba(255,255,255,0.06)'}`,
+                background: on ? `color-mix(in srgb, ${K8S_BLUE} 20%, var(--sidebar-bg))` : 'var(--sidebar-hover-bg)',
+                border: `1px solid ${on ? K8S_BLUE : 'var(--sidebar-border)'}`,
                 opacity: discarded ? 0.5 : 1,
                 borderStyle: discarded ? 'dashed' : 'solid',
               }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#e2e8f0', flex: 1 }}>{st.label}</span>
-                {st.id === 'sign' && <BadgeCheck aria-hidden="true" size={14} style={{ color: '#34d399' }} />}
-                <ChevronRight aria-hidden="true" size={13} style={{ color: '#64748b', transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--sidebar-active-text)', flex: 1 }}>{st.label}</span>
+                {st.id === 'sign' && <BadgeCheck aria-hidden="true" size={14} style={{ color: 'var(--map-identity)' }} />}
+                <ChevronRight aria-hidden="true" size={13} style={{ color: 'var(--sidebar-text-muted)', transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
               </button>
             )
           })}
         </div>
         {anatomy.multiStage && (
-          <div style={{ marginTop: 8, fontSize: 10, color: '#64748b', textAlign: 'center', fontStyle: 'italic' }}>
+          <div style={{ marginTop: 8, fontSize: 10, color: 'var(--sidebar-text-muted)', textAlign: 'center', fontStyle: 'italic' }}>
             {lang === 'cs' ? `Build stage (${anatomy.buildBase}) se zahodí — distribuuje se jen runtime.` : `Build stage discarded — only the runtime ships.`}
           </div>
         )}
@@ -167,7 +167,10 @@ export default function ClusterDossierPage() {
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)
     } catch { setTopo(null) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   const nsByGroup = useMemo(() => {
     const map: Record<string, Namespace[]> = {}
@@ -199,10 +202,10 @@ export default function ClusterDossierPage() {
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
-          { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: '#059669' },
-          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: '#d97706' },
-          { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('nic v gitu', 'none in git'), tone: '#059669' },
-          { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('image-verify (Audit)', 'image-verify (Audit)'), tone: '#d97706' },
+          { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: 'var(--success-text)' },
+          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: 'var(--warning-text)' },
+          { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('nic v gitu', 'none in git'), tone: 'var(--success-text)' },
+          { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('image-verify (Audit)', 'image-verify (Audit)'), tone: 'var(--warning-text)' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -228,7 +231,7 @@ export default function ClusterDossierPage() {
           return (
             <div key={g.id}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ width: 26, height: 26, borderRadius: 7, background: `${g.color}1a`, border: `1px solid ${g.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ width: 26, height: 26, borderRadius: 7, background: `color-mix(in srgb, ${g.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${g.color} 35%, var(--border))`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <GI size={14} style={{ color: g.color }} />
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{language === 'cs' ? g.label : g.labelEn}</span>
@@ -243,7 +246,7 @@ export default function ClusterDossierPage() {
                     <button key={nsItem.name} onClick={() => setOpenNs(on ? null : nsItem.name)} type="button"
                       aria-expanded={on} aria-controls={on ? panelId : undefined} style={{
                       textAlign: 'left', cursor: 'pointer', padding: '10px 12px', borderRadius: 9,
-                      background: on ? `${g.color}10` : 'var(--surface)', border: `1px solid ${on ? g.color : 'var(--border)'}`,
+                      background: on ? `color-mix(in srgb, ${g.color} 8%, var(--surface))` : 'var(--surface)', border: `1px solid ${on ? g.color : 'var(--border)'}`,
                       transition: 'all .12s',
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -253,7 +256,7 @@ export default function ClusterDossierPage() {
                       {on && (
                         <div id={panelId} role="region" aria-label={nsItem.name} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                           {nsItem.role}
-                          <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                          <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-secondary)' }}>
                             {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy nasazeny, fleet-wide aktivace probíhá (#854)', 'NetworkPolicies deployed, fleet-wide activation in progress (#854)') : t('zatím bez NetworkPolicy', 'no NetworkPolicy yet')}
                           </div>
                         </div>
