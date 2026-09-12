@@ -45,6 +45,4 @@
 # unattested: cosign says the image is not in the registry, which is a different bug with a
 # different fix. Remove this line with that gitops PR; the ratchet fails on a stale entry, so
 # it cannot outlive the first real build.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-26f33679
 
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-000000000
