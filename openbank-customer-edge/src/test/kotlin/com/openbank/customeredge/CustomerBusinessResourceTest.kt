@@ -24,6 +24,9 @@ class CustomerBusinessResourceTest {
     private val stranger = UUID.randomUUID()
     private val kyb = "http://kyb-service.kyb.svc:8157"
 
+    /** One past the edge's own URL bound. kyb-service imposes no maximum name length at all. */
+    private val maxTermPlusOne = CustomerBusinessResource.MAX_TERM + 1
+
     private fun resource(upstream: UpstreamClient): CustomerBusinessResource {
         val merge = mockk<PartyMergeResolver> { every { resolve(any()) } answers { firstArg() } }
         return CustomerBusinessResource(upstream, merge).apply {
@@ -120,5 +123,75 @@ class CustomerBusinessResourceTest {
         every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
         resource(upstream).mine()
         assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/cases?partyId=$caller")
+    }
+
+    @Test
+    fun `search forwards the trimmed terms and the caller's own party, and encodes them`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        every { upstream.get(capture(url), capture(party)) } returns Response.ok().build()
+
+        val response = resource(upstream).search("CZ", "  Příklad & syn  ", " Ústí nad Labem ", 10)
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(party.captured).isEqualTo(caller.toString())
+        assertThat(url.captured).startsWith("$kyb/api/v1/kyb/registry/search?")
+        // Encoded, not interpolated: an ampersand in a company name would otherwise append a
+        // parameter of the caller's choosing to the upstream query.
+        assertThat(url.captured).contains("name=P%C5%99%C3%ADklad+%26+syn")
+        // A diacritic AND spaces, deliberately: "Praha" encodes to itself, so asserting it would
+        // pass against raw interpolation — and `city` is the one parameter with no shape regex.
+        assertThat(url.captured).contains("city=%C3%9Ast%C3%AD+nad+Labem")
+        assertThat(url.captured).contains("limit=10")
+    }
+
+    @Test
+    fun `search drops a blank town rather than sending an empty filter`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok().build()
+
+        resource(upstream).search("CZ", "Kofola", "   ", null)
+
+        assertThat(url.captured).doesNotContain("city=")
+        assertThat(url.captured).doesNotContain("limit=")
+    }
+
+    @Test
+    fun `search rejects a malformed request WITHOUT an upstream round trip`() {
+        val upstream = mockk<UpstreamClient>()
+
+        // An absent parameter is a 400 from requireNotNull, never the 500 a non-null JAX-RS
+        // parameter would give (root CLAUDE.md, gate `nonnull-jaxrs-param-ratchet`).
+        listOf<() -> Unit>(
+            { resource(upstream).search(null, "Kofola", null, null) },
+            { resource(upstream).search("CZ", null, null, null) },
+            { resource(upstream).search("CZE", "Kofola", null, null) },
+            { resource(upstream).search("CZ", "ab", null, null) },
+            { resource(upstream).search("CZ", "Kofola", null, 0) },
+            { resource(upstream).search("CZ", "Kofola", null, 500) },
+            { resource(upstream).search("CZ", "x".repeat(maxTermPlusOne), null, null) },
+            { resource(upstream).search("CZ", "Kofola", "x".repeat(maxTermPlusOne), null) },
+        ).forEach { call ->
+            assertThatThrownBy { call() }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+
+        io.mockk.verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `a long company name is searchable — the cap is a URL bound, not a claim about the register`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok().build()
+
+        // kyb-service requires only that the name is not blank, so a cap here is a bound this edge
+        // imposes on its own URL. An earlier version set it at 100, which silently made long-named
+        // entities unsearchable — Czech cooperative and association names run past that routinely.
+        val long = "Zemědělské družstvo " + "Horní Dolní ".repeat(10)
+        resource(upstream).search("CZ", long, null, null)
+
+        assertThat(url.captured).contains("name=Zem%C4%9Bd%C4%9Blsk%C3%A9")
     }
 }
