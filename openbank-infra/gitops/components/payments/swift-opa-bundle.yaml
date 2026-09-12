@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "557d52fd29b447c5"
+    openbank.tech/policy-checksum: "bf10137551d616f6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -934,6 +934,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:
