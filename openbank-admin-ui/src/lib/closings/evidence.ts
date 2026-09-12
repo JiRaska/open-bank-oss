@@ -57,7 +57,7 @@ const MAX_ROWS = 1_000
 const isText = (value: unknown, maxLength = 5_000): value is string =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= maxLength
 const isUuid = (value: unknown): value is string => isText(value)
-  && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 const isCurrency = (value: unknown): value is string => isText(value) && /^[A-Z]{3}$/.test(value)
 const isDate = (value: unknown): value is string => isText(value) && ISO_DATE.test(value)
   && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
