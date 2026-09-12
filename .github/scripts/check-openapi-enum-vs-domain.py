@@ -107,8 +107,6 @@ BASELINE: dict[str, str] = {
     "openbank-campaign-service:BANNER,PUSH":
         "#5962 — attribution response `channel`: NOT drift. A deliberate subset of Channel; the "
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
-    "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
-        "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
     # NOT drift — a DELIBERATE SUBSET (#5962). Delegation lifecycle approvals persist ONLY
     # PROPOSED/REJECTED/EXECUTED: decide is atomic (DelegationLifecycleApprovalService
     # PERSISTED_STATES), so the shared ProposalState's transient APPROVED would claim a decision
@@ -183,7 +181,15 @@ BASELINE: dict[str, str] = {
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
-SPEC_ENUM_BLOCK = re.compile(r"enum:[ \t]*\n((?:[ \t]*-[ \t]*\S+[ \t]*\n)+)")
+# A block enum runs until a line that is neither an item nor a COMMENT. The comment clause is
+# load-bearing: without it the run ends at the first `#` inside the block, the parser reports
+# only the values above it, and the gate invents drift that does not exist — openbank-campaign
+# SendOutcome declares all ten values with three explanatory comments between them, and was
+# read as five and baselined as real drift (#5962). It is also a false-NEGATIVE generator:
+# a genuinely undeclared value sitting below a comment is simply not seen.
+SPEC_ENUM_BLOCK = re.compile(
+    r"enum:[ \t]*\n((?:[ \t]*(?:-[ \t]*\S+|#[^\n]*)[ \t]*\n)+)"
+)
 KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
@@ -426,6 +432,24 @@ def self_test() -> int:
         failures += 1
     else:
         print("  ok    a block-style spec enum")
+
+    # A COMMENT INSIDE THE BLOCK must not end it. This is the case that was wrong in production:
+    # the campaign spec declares ten SendOutcome values with explanatory comments between them,
+    # the parser stopped at the first `#`, saw five, and the gate reported drift that did not
+    # exist — which was then baselined as real (#5962). The truncation cuts both ways: a value
+    # genuinely missing from the spec, sitting below a comment, would not be seen at all.
+    commented = spec_enums(
+        "        enum:\n"
+        "          - OPEN\n"
+        "          # why the next one exists\n"
+        "          - CLOSED\n"
+        "          - PENDING\n"
+    )
+    if commented != {frozenset({"OPEN", "CLOSED", "PENDING"})}:
+        print(f"  FAIL  a block enum interrupted by a comment: {commented}")
+        failures += 1
+    else:
+        print("  ok    a block enum interrupted by a comment")
 
     print("self-test: " + ("FAILED" if failures else "passed"))
     return 1 if failures else 0
