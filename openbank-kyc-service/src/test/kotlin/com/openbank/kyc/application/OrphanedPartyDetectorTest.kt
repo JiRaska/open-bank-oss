@@ -12,6 +12,7 @@ import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -56,6 +57,20 @@ class OrphanedPartyDetectorTest {
 
     private fun casesExistFor(vararg ids: UUID) {
         coEvery { repository.findPartyIdsWithAnyCase(any()) } returns ids.toSet()
+    }
+
+    /**
+     * Default: no cutoff available, so nothing is excluded as pre-consumer. That is the
+     * conservative direction the detector must take for an empty store, and it keeps every case
+     * below about the rule it was written for rather than about #9726's eligibility split.
+     */
+    @BeforeEach
+    fun noEligibilityCutoffByDefault() {
+        coEvery { repository.earliestCaseCreatedAt() } returns null
+    }
+
+    private fun oldestCaseAt(at: Instant) {
+        coEvery { repository.earliestCaseCreatedAt() } returns at
     }
 
     @Test
@@ -167,6 +182,73 @@ class OrphanedPartyDetectorTest {
                     "is looking at nothing' — both report zero orphans",
             )
             .isZero()
+    }
+
+    @Test
+    fun `a party created before the oldest case is pre-consumer, not stranded`(): Unit = runBlocking {
+        // The sandbox's six 2026-06-07 parties (#9726): PartyEventConsumer did not exist yet, so no
+        // case was opened for them and none ever could have been. Counting them as stranded put a
+        // permanent floor under the gauge and made `> 0` unsatisfiable.
+        val preConsumer = party(ageMinutes = 10_000)
+        val stranded = party(ageMinutes = 1_000)
+        directoryHolds(preConsumer, stranded)
+        casesExistFor()
+        oldestCaseAt(now.minus(Duration.ofMinutes(5_000)))
+
+        val report = detector().detect()
+
+        assertThat(report.orphanedPartyIds).containsExactly(stranded.id)
+        assertThat(report.preConsumerPartyIds).containsExactly(preConsumer.id)
+        assertThat(report.oldestOrphanCreatedAt)
+            .describedAs("the age gauge must age the ACTIONABLE orphan, not the excluded one")
+            .isEqualTo(stranded.createdAt)
+    }
+
+    @Test
+    fun `with no case in the store NOTHING is excluded`(): Unit = runBlocking {
+        // A wiped or brand-new kyc-db has no cutoff to derive. Excluding on a null cutoff would let
+        // an empty store report a clean register — the report-clean failure #5698 is about.
+        val ancient = party(ageMinutes = 100_000)
+        directoryHolds(ancient)
+        casesExistFor()
+        coEvery { repository.earliestCaseCreatedAt() } returns null
+
+        val report = detector().detect()
+
+        assertThat(report.orphanedPartyIds).containsExactly(ancient.id)
+        assertThat(report.preConsumerPartyIds).isEmpty()
+    }
+
+    @Test
+    fun `a party created at the same instant as the oldest case is NOT excluded`(): Unit = runBlocking {
+        // The boundary is strict: the cutoff is the first moment the auto-open path is known to
+        // have worked, so a party created AT that instant was eligible and its missing case is real.
+        val at = now.minus(Duration.ofMinutes(5_000))
+        val boundary = PartySummary(id = UUID.randomUUID(), status = "PENDING_KYC", createdAt = at)
+        directoryHolds(boundary)
+        casesExistFor()
+        oldestCaseAt(at)
+
+        val report = detector().detect()
+
+        assertThat(report.orphanedPartyIds).containsExactly(boundary.id)
+        assertThat(report.preConsumerPartyIds).isEmpty()
+    }
+
+    @Test
+    fun `the cutoff excludes only parties with no case, never parties that have one`(): Unit = runBlocking {
+        // The split runs AFTER the case lookup, so a pre-consumer party that does have a case is
+        // not an orphan at all and must appear in neither list.
+        val oldButHandled = party(ageMinutes = 10_000)
+        directoryHolds(oldButHandled)
+        casesExistFor(oldButHandled.id)
+        oldestCaseAt(now.minus(Duration.ofMinutes(5_000)))
+
+        val report = detector().detect()
+
+        assertThat(report.orphanedPartyIds).isEmpty()
+        assertThat(report.preConsumerPartyIds).isEmpty()
+        assertThat(report.firstCaseCreatedAt).isNotNull()
     }
 
     private companion object {

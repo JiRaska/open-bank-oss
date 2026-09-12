@@ -175,6 +175,15 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         return found
     }
 
+    // Scalar MIN rather than `find("order by createdAt asc").firstResult()`: the ordered-row form
+    // hydrates a whole KycCaseEntity and parses its checksJson to then read one column off it, on
+    // every tick of a monitoring job. The aggregate is an index-only read of one value.
+    override suspend fun earliestCaseCreatedAt(): Instant? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(EARLIEST_CASE_CREATED_AT_HQL, Instant::class.java).singleResultOrNull
+        }
+    }.awaitSuspending()
+
     override suspend fun listAll(page: Int, size: Int): List<KycCase> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending().map { it.toDomain(objectMapper) }
 
@@ -282,6 +291,11 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
          * count of one statement (`KycRepositoryBatchingTest`).
          */
         internal fun idBatches(partyIds: Collection<UUID>): List<List<UUID>> = partyIds.toList().chunked(ID_BATCH_SIZE)
+
+        // MIN over an empty table is a single NULL row, not an empty result — `singleResultOrNull`
+        // is therefore about the VALUE being null, and the query always returns exactly one row.
+        private const val EARLIEST_CASE_CREATED_AT_HQL =
+            "SELECT MIN(c.createdAt) FROM KycCaseEntity c"
 
         private const val PARTY_IDS_WITH_CASE_HQL =
             "SELECT c.partyId FROM KycCaseEntity c WHERE c.partyId IN :ids"

@@ -61,6 +61,24 @@ interface KycCaseRepository {
      */
     suspend fun findPartyIdsWithAnyCase(partyIds: Collection<UUID>): Set<UUID>
 
+    /**
+     * Creation time of the OLDEST KYC case in the store, or null when no case has ever existed.
+     *
+     * This is the reconciliation's eligibility cutoff, derived rather than declared (issue #9726).
+     * `PartyEventConsumer` — the thing that opens a case when a party is created — was added on
+     * 2026-06-26; every party created before it existed has no case and never could have had one,
+     * so counting those as stranded customers puts a permanent floor under
+     * `openbank_kyc_orphaned_parties` and makes the alert structurally unable to clear. The date
+     * itself must not be hardcoded: the first case this store holds IS the first moment the
+     * auto-open path demonstrably worked, and it moves with the environment instead of with a
+     * comment someone has to remember to update.
+     *
+     * Returning null must NOT be read as "everything is ineligible" — an empty or wiped kyc-db
+     * would then silence the control completely, which is the reporting-clean failure the whole
+     * of #5698 is about. The caller treats null as "no cutoff available, report every orphan".
+     */
+    suspend fun earliestCaseCreatedAt(): Instant?
+
     suspend fun listAll(page: Int, size: Int): List<KycCase>
 
     /** Filter by [status]. Used by the onboarding cockpit funnel view (ADR-0068). */
