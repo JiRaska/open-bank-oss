@@ -618,6 +618,17 @@ permanent legacy tombstone; a revisionless activate/reinstate is ignored. This d
 temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
 Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.
 
+## Approval-policy projection
+
+Activation and reinstatement events now carry the grant's exact `approvalPolicy` and
+`requiredApprovals` into `account_delegation_projection`. Legacy events with neither field become
+`SOLO`; they never acquire a multi-party promise retrospectively. Unknown future policy strings
+are retained for forward compatibility but must remain unsupported by the operation-snapshot
+resolver. This slice does not count approvals and therefore does not remove delegation-service's
+fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. Rollout is
+consumer-first (account-service migration and consumer before delegation-service producer);
+rollback removes the producer fields first and may retain the additive projection columns.
+
 - **2026-09-06** — **Owner-only transparency view over both authorization stores** (ADR-0232,
   `GET /api/v1/accounts/{accountId}/authorizations/effective`). Read-only projection of the same
   two stores (`account_authorizations`, delegation grants) and the same active/validity filters the
