@@ -104,6 +104,21 @@ kover {
 // fleet-standard block, so nothing service-specific remains here.
 
 tasks.withType<Test> {
+    // The forked test JVM, not the Gradle daemon (issue #5043). `org.gradle.jvmargs=-Xmx3g` in
+    // gradle.properties and `GRADLE_OPTS` in `_service-ci.yml` both size the DAEMON; a Test task
+    // forks its own JVM and takes Gradle's default heap unless told otherwise, so this module ran
+    // the fleet's heaviest IT suite on that default while nine siblings (account, balance,
+    // delegation, fx, ledger, lending, notification, sepa-payment, product-catalog) set a value.
+    //
+    // Measured 2026-09-12 on #5043's branch, which adds one profiled @QuarkusTest to this module:
+    //   default heap -> `OutOfMemoryError: Java heap space`, task FAILED after 232 tests
+    //   2g           -> 256 tests, 0 failures
+    // `main` itself fits in the default, which is why nothing has flagged this: the module sits on
+    // the edge, and the next IT is what goes over it. An exhausted fork does not fail as an OOM at
+    // the assertion — on CI the same branch failed with all four of that IT's tests timing out at a
+    // uniform ~30s `SocketTimeoutException`, i.e. a starved fork looks like the SUBJECT hanging.
+    maxHeapSize = "2g"
+
     // Fail fast, not fail wide (issue #5940). This module boots a real Kafka producer against a
     // Redpanda Testcontainer, and Quarkus tears that container down whenever the set of
     // @QuarkusTestResource classes changes between test classes. A producer left over from the
