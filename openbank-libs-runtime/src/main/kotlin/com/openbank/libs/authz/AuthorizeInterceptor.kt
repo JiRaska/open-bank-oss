@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.security.SecurityTelemetry
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.Priority
 import jakarta.enterprise.inject.Instance
@@ -136,6 +137,18 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var metrics: Instance<DomainMetrics>
 
+    // Instance<> for the same reason as `metrics` directly above: SecurityTelemetry ships in
+    // this same JAR and no-ops without a MeterRegistry, but a hard @Inject would tie every
+    // service's ArC validation to it.
+    //
+    // This is the ONLY production call site of SecurityTelemetry.recordAuthorizationDecision.
+    // Between #8554 (which added the primitive) and this change there was none at all, so
+    // `openbank.security.authz.decisions` was never registered in any registry and
+    // AuthzDenyRatioElevated — written against that exact constant in #8583 — could not fire.
+    // Measured on the sandbox 2026-09-07: the series did not exist on any of the 293 targets.
+    @Inject
+    lateinit var securityTelemetry: Instance<SecurityTelemetry>
+
     // Instance<> for the same reason as `pdp`/`securityContext` above: most services
     // never wire an ApprovalStore, so a hard @Inject would break their build.
     @Inject
@@ -192,7 +205,7 @@ class AuthorizeInterceptor {
         if (!decision.allow) {
             // The rollout signal: outcome=deny + enforced=false is the "would DENY" population that
             // a service's advisory window has to show empty before AUTHZ_ENFORCE can flip.
-            record(annotation.action, "deny", query.principal.type)
+            record(annotation.action, "deny", query.principal.type, decision.reason ?: "unspecified")
             if (!enforce) {
                 log.warnf(
                     "advisory: would DENY action=%s resource=%s principal=%s reason=%s — proceeding (enforce=false)",
@@ -212,7 +225,7 @@ class AuthorizeInterceptor {
             )
             throw ForbiddenException(decision.reason ?: "policy denied")
         }
-        record(annotation.action, "allow", query.principal.type)
+        record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
         return requireFourEyesOrProceed(ctx, annotation, query, decision)
     }
 
@@ -249,8 +262,31 @@ class AuthorizeInterceptor {
     private val meters: DomainMetrics?
         get() = if (metrics.isResolvable) metrics.get() else null
 
-    private fun record(action: String, outcome: String, principalType: String) =
+    /**
+     * Writes both authorization signals for one verdict. [DomainMetrics.authzDecision] is the
+     * ADR-0034 D5 rollout signal, scoped by `action` — "can this service graduate to enforce?".
+     * [SecurityTelemetry.AUTHZ_DECISIONS] is the ADR-0279 WS2 security signal, scoped by
+     * `reason` and also stamped on the trace — "is somebody being refused, and why?".
+     *
+     * [securityReason] is non-null on a real ALLOW or a real DENY only — the caller passes it as
+     * `null` for `pdp_unconfigured` (see [onMissingPdp]), and it is deliberately excluded there:
+     * a missing PolicyDecisionPoint is a wiring fault, not a verdict, and folding it into DENY
+     * would make any misconfigured service read as a 100% deny ratio — an alert that says "under
+     * enumeration attack" about a deployment mistake. Two such services were live on the sandbox
+     * when this was written (product-catalog's `catalog.read` / `catalog.list`), so this is a
+     * case that exists, not a hypothetical.
+     */
+    private fun record(action: String, outcome: String, principalType: String, securityReason: String? = null) {
         meters?.authzDecision(action, outcome, enforce, principalType)
+        if (securityReason != null && securityTelemetry.isResolvable) {
+            val decision = if (outcome == "deny") {
+                SecurityTelemetry.AuthzDecision.DENY
+            } else {
+                SecurityTelemetry.AuthzDecision.ALLOW
+            }
+            securityTelemetry.get().recordAuthorizationDecision(decision, securityReason, enforce)
+        }
+    }
 
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second

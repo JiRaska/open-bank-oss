@@ -17,5 +17,25 @@ class CustomerDelegationPreviewOpenApiTest {
         assertThat(contract).contains("before the app starts SCA")
         assertThat(normalized).contains("creates no grant, emits no event and never consumes SCA")
         assertThat(normalized).contains("a successful preview is not an authorization decision")
+        assertThat(contract).contains("EXPOSURE_UNSUPPORTED")
+        assertThat(contract).contains("historical metadata is audit-only")
+    }
+
+    @Test
+    fun `customer preview rejects a caller who is not the grantor with 403`() {
+        assertThat(normalized).contains(
+            "'403': {description: grantorPartyId does not match the authenticated customer}",
+        )
+    }
+
+    @Test
+    fun `customer contract exposes portfolio management without caller supplied ownership`() {
+        assertThat(contract).contains("/delegations/portfolios:")
+        assertThat(contract).contains("Create a named account portfolio for the active profile")
+        assertThat(normalized).contains("ownerPartyId is derived from the authenticated profile")
+        assertThat(normalized).contains("not payment or co-signing authority")
+        assertThat(normalized).contains("name: Idempotency-Key in: header required: true")
+        assertThat(normalized).contains("'403': {description: Caller attempted to provide ownerPartyId")
+        assertThat(normalized).contains("'404': {description: Portfolio does not exist or is not owned")
     }
 }

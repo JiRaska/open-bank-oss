@@ -8,6 +8,10 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.RepresentationDecision
 import java.time.LocalDate
 import java.util.UUID
 
@@ -44,9 +48,58 @@ data class ClaimInvitationCommand(val token: String, val partyId: UUID)
 
 data class SignCommand(val caseId: UUID, val signerPartyId: UUID, val signatureRef: String)
 
-data class ResolveReviewCommand(val caseId: UUID, val requiredSignatures: Int, val operator: String)
+data class ResolveReviewCommand(
+    val caseId: UUID,
+    val requiredSignatures: Int,
+    val operator: String,
+    val requiredSignerRoles: List<String> = emptyList(),
+)
+
+/**
+ * An operator confirms how one entity is represented (#9711). Keyed by identifier, and bound to the
+ * exact register text that was on screen — [ruleTextHash] is supplied by the caller so a rule that
+ * changed between rendering the form and submitting it is rejected rather than silently confirmed.
+ */
+data class AttestRepresentationCommand(
+    val scheme: IdentifierScheme,
+    val identifier: String,
+    val ruleTextHash: String,
+    val confirmedSigners: Int,
+    val confirmedRoles: List<String>,
+    val operator: String,
+    val note: String? = null,
+)
+
+interface RepresentationAttestationUseCase {
+    /** What the store says about this entity's CURRENT register text, for rendering the review form. */
+    suspend fun decisionFor(scheme: IdentifierScheme, identifier: String): RepresentationDecision?
+
+    suspend fun attest(cmd: AttestRepresentationCommand): RepresentationAttestation
+
+    suspend fun history(scheme: IdentifierScheme, identifier: String): List<RepresentationAttestation>
+}
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
+
+/**
+ * Find a company by name instead of by identifier (issue #9707). [country] selects the register
+ * through the country pack; the scheme follows from it.
+ */
+data class SearchRegistryCommand(
+    val country: String,
+    val name: String,
+    val city: String? = null,
+    val limit: Int = RegistrySearchQuery.DEFAULT_LIMIT,
+)
+
+interface RegistrySearchUseCase {
+    /**
+     * Null when the register for [SearchRegistryCommand.country] cannot search — distinct from an
+     * empty result, so the caller can hide the search box rather than show one that never finds
+     * anything.
+     */
+    suspend fun search(cmd: SearchRegistryCommand): RegistrySearchResult?
+}
 
 interface RegistryLookupUseCase {
     /**

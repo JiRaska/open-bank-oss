@@ -78,7 +78,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -113,12 +112,22 @@ class Unreadable(RuntimeError):
     """
 
 
-# A rate limit is not a broken call: the subject was never read, exactly as in the
-# missing-admin-scope case. `gh` reports it on stderr; the primary limit says "API rate limit
-# exceeded", the secondary one "secondary rate limit" / "exceeded a secondary rate limit".
-# Matched on the message rather than the status, because `gh api` exits 1 for every HTTP error
-# and does not surface the code separately here.
-_RATE_LIMITED = re.compile(r"rate limit exceeded|exceeded a secondary rate limit", re.IGNORECASE)
+# The vocabulary is NOT defined here. `gh-transient-patterns.txt` next to this file is the one
+# shared list, read by `gh-retry.sh` and `check-ruleset-context-parity.py` as well. Its header
+# carries the measurement that produced it: three hand-written classifiers of this exact question
+# agreed on 23 of 31 real `gh` messages and disagreed on 8, each missing five the others caught.
+# A private regex here would have been the fourth — and this one's first draft was, missing
+# `Too Many Requests (HTTP 429)`, `abuse detection mechanism`, and a bare `HTTP 503`.
+# The vocabulary and its reader both live in gatelib now. This file used to carry its own loader
+# — the fourth copy of the judgement, removed by #9695 in favour of the shared FILE, which still
+# left the shared file with three private READERS. One more gate needing it (#9697's main-red
+# watch) made that the fifth. `gatelib.is_gh_transient` is the reader; add patterns to
+# gh-transient-patterns.txt with a [cases] entry, never in Python.
+
+
+def _is_transient(message: str) -> bool:
+    """True when a `gh` failure is about REACHABILITY, not about the bypass actors."""
+    return gatelib.is_gh_transient(message)
 
 
 def gh_api(path: str) -> list | dict:
@@ -139,7 +148,7 @@ def gh_api(path: str) -> list | dict:
         raise RuntimeError(f"could not run `gh api {path}`: {exc}") from exc
     if p.returncode != 0:
         stderr = p.stderr.strip()
-        if _RATE_LIMITED.search(stderr):
+        if _is_transient(stderr):
             raise Unreadable(
                 f"gh api {path} was RATE LIMITED (rc={p.returncode}): {stderr}. The subject was "
                 f"never read, so this run says nothing about bypass actors either way — it is "
@@ -314,11 +323,18 @@ def self_test() -> int:
         # matching stderr, so a message that is NOT a rate limit must stay a RuntimeError. Without
         # this, widening the pattern to `.*` would pass every case above.
         _real_gh_api = _real
+        # The last three transient cases are exactly what a PRIVATE regex misses — the first
+        # draft of this gate had one and classified all three as final, which is a PR turned red
+        # for a reason its diff cannot cause. They come from the shared vocabulary's own corpus.
         for msg, want_unreadable in (
             ("API rate limit exceeded for installation", True),
             ("You have exceeded a secondary rate limit", True),
+            ("gh: Too Many Requests (HTTP 429)", True),
+            ("You have triggered an abuse detection mechanism. Please wait and try again.", True),
+            ("HTTP 503", True),
             ("Bad credentials", False),
             ("Not Found", False),
+            ("Resource not accessible by integration", False),
         ):
             class _FakeProc:
                 returncode = 1
@@ -366,7 +382,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: ruleset-bypass-actors is falsifiable (17 cases, both directions, exit codes and the rate-limit classifier included)")
+    print("self-test ok: ruleset-bypass-actors is falsifiable (21 cases, both directions, exit codes and the shared transient vocabulary included)")
     return 0
 
 

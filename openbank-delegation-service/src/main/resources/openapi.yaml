@@ -5,14 +5,81 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.12.0
+  # 1.12.0 -> 1.13.0 was taken on main by an unrelated PR while this branch also wrote 1.13.0.
+  # Both sides produced the SAME text, so git merged them cleanly and the collision left no
+  # conflict to resolve — the trap CLAUDE.md records for this axis. 1.14.0 is additive
+  # (POST/GET /api/v1/delegation-portfolios), read off live origin/main (1.13.0) and confirmed
+  # unused with `git log -S 'version: 1.14.0'` on this file.
+  version: 1.14.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
 paths:
+  /api/v1/delegation-portfolios:
+    post:
+      tags: [Delegation portfolios]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        A durable account scope owned by the active profile. It is not a grant and never authorizes
+        payment or co-signing by itself; for a business profile customer-edge resolves the current
+        mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationPortfolioRequest' }
+      responses:
+        '201':
+          description: Portfolio created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '400': { description: Missing idempotency key, name, or account scope }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+        '422': { description: An account is not owned by the active profile }
+        '503':
+          description: Authoritative account ownership cannot currently be established; safe to retry
+          headers:
+            Retry-After: { schema: { type: integer } }
+  /api/v1/delegation-portfolios/owner/{ownerPartyId}:
+    get:
+      tags: [Delegation portfolios]
+      summary: List portfolios of the active profile
+      parameters:
+        - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Portfolios ordered by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationPortfolioResponse' } }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+  /api/v1/delegation-portfolios/{id}:
+    get:
+      tags: [Delegation portfolios]
+      summary: Read a portfolio of the active profile
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '403': { description: Authenticated active profile does not own the portfolio }
+        '404': { description: Portfolio not found }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -89,6 +156,9 @@ paths:
               monthlyLimit (ADR-0249 D5). Unlimited access to someone else's account is not
               something this platform grants by omission.
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
+            * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
+              for audit, but cannot authorize a raw object download until transformed-artifact delivery
+              can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
@@ -116,7 +186,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
-        '400': { description: Unsupported or inconsistent constraints }
+        '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or resource ownership could not be established }
   /api/v1/delegations/{id}:
@@ -218,6 +288,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '400': { description: SCA invalid or expired, or EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '403': { description: The authenticated party is not the grantee }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
@@ -284,6 +355,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/DelegationId'
       responses:
+        '400': { description: EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '200':
           description: Grant reinstated
           content:
@@ -496,6 +568,31 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    DelegationPortfolioRequest:
+      type: object
+      required: [ownerPartyId, name, accountIds]
+      properties:
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    DelegationPortfolioResponse:
+      type: object
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]
@@ -585,7 +682,12 @@ components:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
             As dailyLimit, over the Europe/Prague calendar month.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
         note: { type: string }
@@ -614,7 +716,12 @@ components:
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
         dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
         monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
@@ -721,7 +828,12 @@ components:
           deprecated: true
           description: >-
             See dailyLimit. Not enforced; do not render it as a limit.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Historical audit metadata only. New non-null values are refused with 400
+            EXPOSURE_UNSUPPORTED and never authorize access.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         status:
