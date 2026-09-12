@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
 function statusStyle(s: ControlStatus): { color: string; bg: string } {
   switch (s) {
     case 'enforced': return { color: 'var(--success-text)', bg: 'var(--success-bg)' }
-    case 'partial':  return { color: 'var(--info, #2563eb)', bg: 'var(--info-bg, #dbeafe)' }
+    case 'partial':  return { color: 'var(--info-text)', bg: 'var(--info-bg)' }
     case 'audit':    return { color: 'var(--warning-text)', bg: 'var(--warning-bg)' }
     default:         return { color: 'var(--text-tertiary)', bg: 'var(--surface-2)' }
   }
@@ -159,7 +159,7 @@ export default async function ControlTowerPage() {
                     {c.frameworks.map(f => (
                       <span key={f} title={fwName(f)} style={{
                         fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px',
-                        background: 'var(--accent-bg)', color: 'var(--accent)',
+                        background: 'var(--accent-bg)', color: 'var(--accent-text)',
                       }}>
                         {f}
                       </span>
