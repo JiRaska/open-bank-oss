@@ -57,23 +57,14 @@ spec:
     - extract:
         key: case-coordinator
 ---
-# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-1"
-  name: kafka-cluster-ca-truststore
-  namespace: platform
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: kafka-messaging-certs
-  target:
-    name: kafka-cluster-ca-truststore
-    creationPolicy: Owner
-    deletionPolicy: Retain
-  dataFrom:
-    - extract:
-        key: openbank-cluster-cluster-ca-cert
+# The cluster CA truststore Secret lives in namespace `platform` and is declared ONCE,
+# by the `agent` component (agent/kafka-agent-mtls.yaml, #696). It is not repeated here.
+#
+# It used to be: this file carried a byte-identical copy (#4236), so ExternalSecret
+# platform/kafka-cluster-ca-truststore was in the desired state of TWO Applications.
+# ArgoCD tracked it for `agent` and answered `SharedResourceWarning` on
+# `case-coordinator`, which therefore reported OutOfSync permanently — a real drift
+# signal spent on a copy that was never going to differ. Both Applications sync into
+# `platform`, so whichever ran last would have won silently had they ever diverged.
+#
+# case-coordinator-service consumes the Secret by name; it does not need to declare it.
