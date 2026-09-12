@@ -209,6 +209,7 @@ class PartyService : PartyUseCase {
         listOf(agent, principal).firstOrNull { it.status in MANDATE_INELIGIBLE }?.let {
             throw PartyMandateRejectedException("party ${it.id} is ${it.status} and cannot take part in a mandate")
         }
+        validateMandateThreshold(cmd.authority, cmd.requiredSignatures)
         val now = Instant.now(clock)
         val existing = mandateRepo.findActive(principal.id, agent.id, cmd.role.name)
         val mandate = (
@@ -219,6 +220,7 @@ class PartyService : PartyUseCase {
                 agentPartyId = agent.id,
                 role = cmd.role,
                 authority = cmd.authority,
+                requiredSignatures = cmd.requiredSignatures,
                 source = cmd.source,
                 status = MandateStatus.ACTIVE,
                 evidenceRef = cmd.evidenceRef,
@@ -229,6 +231,7 @@ class PartyService : PartyUseCase {
             )
             ).copy(
             authority = cmd.authority,
+            requiredSignatures = cmd.requiredSignatures,
             source = cmd.source,
             evidenceRef = cmd.evidenceRef ?: existing?.evidenceRef,
             validTo = cmd.validTo,
@@ -236,6 +239,18 @@ class PartyService : PartyUseCase {
         )
         val event = PartyEvents.mandateGranted(mandate, now, PartyActor.system("party-api"))
         return if (existing == null) mandateRepo.save(mandate, event) else mandateRepo.update(mandate, event)
+    }
+
+    private fun validateMandateThreshold(authority: MandateAuthority, requiredSignatures: Int) {
+        val valid = when (authority) {
+            MandateAuthority.SOLE -> requiredSignatures == 1
+            MandateAuthority.JOINT -> requiredSignatures >= 2
+        }
+        if (!valid) {
+            throw PartyMandateRejectedException(
+                "$authority authority is inconsistent with requiredSignatures=$requiredSignatures",
+            )
+        }
     }
 
     override suspend fun revokeMandate(cmd: RevokeMandateCommand): PartyMandate {

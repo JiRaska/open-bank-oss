@@ -263,6 +263,11 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         val entity = requireNotNull(case.entityPartyId) { "a SIGNED case must carry its entity party" }
         val sole = case.extract?.isSoleTrader == true
         val joint = (case.requiredSignatures ?: 1) > 1
+        val requiredSignatures = requireNotNull(
+            case.requiredSignatures,
+        ) {
+            "a SIGNED case must carry its signature quorum"
+        }
         case.signers.filter { it.status == SignerStatus.SIGNED && it.partyId != null }.forEach { signer ->
             parties.grantMandate(
                 MandateRequest(
@@ -270,6 +275,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                     agentPartyId = signer.partyId!!,
                     role = if (sole) "OWNER" else "LEGAL_REPRESENTATIVE",
                     authority = if (joint) "JOINT" else "SOLE",
+                    requiredSignatures = requiredSignatures,
                     source = if (signer.representativeIndex != null) "REGISTRY" else "POWER_OF_ATTORNEY",
                     evidenceRef = "kyb-case:${case.id}:signature:${signer.signatureRef}",
                 ),
