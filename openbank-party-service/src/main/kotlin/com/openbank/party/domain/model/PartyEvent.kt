@@ -170,6 +170,7 @@ object PartyEvents {
                 "agentPartyId" to mandate.agentPartyId,
                 "role" to mandate.role,
                 "authority" to mandate.authority,
+                "requiredSignatures" to mandate.requiredSignatures,
                 "source" to mandate.source,
                 "status" to mandate.status,
                 "validFrom" to mandate.validFrom,
