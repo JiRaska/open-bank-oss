@@ -459,7 +459,8 @@
       "realmRoles": [
         "ROLE_COMPLIANCE",
         "ROLE_VIEWER",
-        "ROLE_COMMS_EDITOR"
+        "ROLE_COMMS_EDITOR",
+        "ROLE_DPO"
       ]
     },
     {
