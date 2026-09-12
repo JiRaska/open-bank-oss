@@ -715,15 +715,21 @@ _probe_selftest() {
   # bash DOES word-split, so this cannot reproduce the zsh behaviour that caused the incident.
   # What it pins is the property the caller needs either way: one line PER ITEM, whatever shell
   # the script is read by.
+  # shellcheck disable=SC2034  # read INDIRECTLY, by name, inside probe_each — which is the whole
+  # point of the helper: the caller passes a variable NAME, not its value. shellcheck cannot see
+  # through that, and passing the value instead would reintroduce the very word-splitting this
+  # probe exists to prevent.
   PROBE_TEST_LIST="alpha beta gamma"
   local each_n
   each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
   _check "probe_each yields one line per item (got $each_n, want 3)" \
     "$([ "$each_n" = "3" ] && echo 1 || echo 0)"
+  # shellcheck disable=SC2034  # indirect read — see above
   PROBE_TEST_LIST="   solo   "
   each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
   _check "probe_each collapses padding to one item (got $each_n, want 1)" \
     "$([ "$each_n" = "1" ] && echo 1 || echo 0)"
+  # shellcheck disable=SC2034  # indirect read — see above
   PROBE_TEST_LIST=""
   each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
   _check "probe_each yields nothing for an empty list (got $each_n, want 0)" \
