@@ -47,9 +47,6 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: delegation
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: documents
         - namespaceSelector:
             matchLabels:
