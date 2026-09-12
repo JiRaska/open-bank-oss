@@ -7,11 +7,16 @@ info:
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios.
   #
-  # 1.14.0 -> 1.17.0 (#9237, this branch): additive — the external-disclosure verify-otp and
-  # content routes. NOT 1.15.0 (held by the open #9215) and NOT 1.16.0 (held by the open
-  # #9481 and #9484). This branch previously wrote 1.13.0, which main took while it sat open —
-  # the silent form of this collision, since both sides produced identical text.
-  version: 1.17.0
+  # 1.14.0 -> 1.18.0 (#9522): additive — organization grant authority. Now on main.
+  #
+  # 1.18.0 -> 1.20.0 (#9237, this branch): additive — the external-disclosure verify-otp and
+  # content routes. This number has moved TWICE while the branch sat open, in both directions the
+  # gate can see: it first wrote 1.13.0, which main then took (identical text on both sides, so no
+  # conflict), and 1.17.0 was then OVERTAKEN when #9522 landed 1.18.0 — `api-contract gate` reads
+  # that as `1.18.0 -> 1.17.0`, a bump going backwards. 1.19.0 is held by the open #9417, so
+  # 1.20.0 is the first free number. Re-read it off live origin/main WITH the open PRs after any
+  # rebase; neither direction of this collision produces a merge conflict (ADR-0048).
+  version: 1.20.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -574,6 +579,18 @@ components:
       name: approvalId
       in: path
       required: true
+      schema: { type: string, format: uuid }
+    # Referenced by both /external-disclosures/{id} routes and never defined until now, which is
+    # why `api-contract gate` could not classify the spec at all: oasdiff fails strict resolution
+    # on a dangling $ref rather than reporting a diff, so the whole service's version verdict was
+    # unavailable — not "no change", unavailable.
+    ExternalDisclosureId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        The sealed external-disclosure link id. Invalid, expired, revoked, locked and unknown ids
+        are all answered 404 by design, so this value never distinguishes them to the caller.
       schema: { type: string, format: uuid }
     CustomerPartyId:
       name: X-Customer-Party-Id
