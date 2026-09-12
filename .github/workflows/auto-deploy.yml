@@ -503,6 +503,10 @@ jobs:
       # the push keys off this, never off the changed set (#9714).
       pushed_services: ${{ steps.push.outputs.pushed }}
       failed_services: ${{ steps.push.outputs.failed }}
+      # What survived BOTH the push and the CVE gate. `deployable` is the set the gitops PR
+      # and can-i-deploy must use; `pushed` is only "the image exists in the registry".
+      deployable_services: ${{ steps.scan.outputs.deployable }}
+      cve_blocked_services: ${{ steps.scan.outputs.cve_blocked }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -774,12 +778,14 @@ jobs:
           df -h /
 
       - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
+        id: scan
         timeout-minutes: 15
         run: |
           set -euo pipefail
           SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
+          DEPLOYABLE=(); BLOCKED=()
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # Mirror push_one's skip: no fast-jar → nothing was pushed.
@@ -800,11 +806,34 @@ jobs:
                  --ignore-unfixed --quiet --exit-code 1 "${image}" \
                  2>&1 | sed "s/^/[${svc}] /"; then
               echo "[${svc}] fixable CRITICAL CVEs (or scan error) — blocking deploy"
-              FAILED=1
+              BLOCKED+=("$svc"); FAILED=1
+            else
+              DEPLOYABLE+=("$svc")
             fi
           done
 
-          [ "$FAILED" -eq 0 ] || { echo "Image scan gate failed"; exit 1; }
+          # Same shape as the push step, one stage later (#9715, #9714). A CVE in ONE service
+          # must block THAT service's deploy — which is the gate working — and must not skip
+          # `Gitops PR` and `Deploy signal` for every other service in the run. Measured
+          # 2026-09-11: openbank-kyb-service had fixable CRITICALs, so this line exited 1 and
+          # a run in which every other image had been built, pushed and scanned cleanly
+          # deployed nothing at all.
+          #
+          # The blocked service simply does not reach `collect`, so no gitops manifest is
+          # repinned to its new tag and it keeps running the image it was already running.
+          # That is the correct outcome for a vulnerable image: not deployed, not silently
+          # deployed anyway, and not a reason to freeze the fleet.
+          printf '%s\n' ${DEPLOYABLE[@]+"${DEPLOYABLE[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/deployable.json"
+          printf '%s\n' ${BLOCKED[@]+"${BLOCKED[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/cve-blocked.json"
+          {
+            echo "deployable=$(cat "$RUNNER_TEMP/deployable.json")"
+            echo "cve_blocked=$(cat "$RUNNER_TEMP/cve-blocked.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> deployable after the CVE gate: $(cat "$RUNNER_TEMP/deployable.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::fixable CRITICAL CVEs blocked $(cat "$RUNNER_TEMP/cve-blocked.json") — the run fails in push-failures; the rest of the fleet deploys"
 
       # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to each pushed
       # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
@@ -827,7 +856,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -uo pipefail
-          SERVICES='${{ steps.push.outputs.pushed }}'
+          SERVICES='${{ steps.scan.outputs.deployable }}'
           TAG="${{ steps.build.outputs.tag }}"
           # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
           # post-attest proof all live in the shared helper, which every build-push-*.sh
@@ -906,7 +935,10 @@ jobs:
         id: collect
         run: |
           set -euo pipefail
-          SERVICES='${{ steps.push.outputs.pushed }}'
+          # The CVE-gate survivors, NOT everything that pushed: this map is what repins the
+          # gitops manifests, so a service blocked by a fixable CRITICAL must not appear in it
+          # — otherwise the vulnerable tag deploys anyway and the gate was decorative (#9714).
+          SERVICES='${{ steps.scan.outputs.deployable }}'
           TAG="${{ steps.build.outputs.tag }}"
 
           # Emit { "openbank-account-service": "sandbox-abc1234", … }
@@ -998,7 +1030,7 @@ jobs:
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
           # a group name silently stops the job being created (#3082/#3084); an env var has no
           # such ceiling.
-          SERVICES: ${{ needs.build-push.outputs.pushed_services }}
+          SERVICES: ${{ needs.build-push.outputs.deployable_services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
@@ -1053,7 +1085,7 @@ jobs:
       github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled' &&
-      needs.build-push.outputs.pushed_services != '[]'
+      needs.build-push.outputs.deployable_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
       contents: write
@@ -1211,7 +1243,7 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.pushed_services }}
+            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
 
             Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
             triggering commit). ArgoCD syncs automatically after merge.
@@ -1382,7 +1414,13 @@ jobs:
   push-failures:
     name: Push failures
     needs: [build-push, gitops-pr, deploy-signal]
-    if: ${{ always() && needs.build-push.outputs.failed_services != '' && needs.build-push.outputs.failed_services != '[]' }}
+    if: >-
+      ${{ always() && (
+        (needs.build-push.outputs.failed_services != '' &&
+         needs.build-push.outputs.failed_services != '[]') ||
+        (needs.build-push.outputs.cve_blocked_services != '' &&
+         needs.build-push.outputs.cve_blocked_services != '[]')
+      ) }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -1390,13 +1428,17 @@ jobs:
         env:
           FAILED_SERVICES: ${{ needs.build-push.outputs.failed_services }}
           PUSHED_SERVICES: ${{ needs.build-push.outputs.pushed_services }}
+          CVE_BLOCKED: ${{ needs.build-push.outputs.cve_blocked_services }}
+          DEPLOYABLE: ${{ needs.build-push.outputs.deployable_services }}
         run: |
           set -uo pipefail
           {
-            echo "## Docker push failed"
+            echo "## Some services did not deploy"
             echo
-            echo "Failed: \`${FAILED_SERVICES}\`"
-            echo "Pushed and deployed normally: \`${PUSHED_SERVICES}\`"
+            echo "Push failed: \`${FAILED_SERVICES:-[]}\`"
+            echo "Blocked by fixable CRITICAL CVEs: \`${CVE_BLOCKED:-[]}\`"
+            echo "Pushed: \`${PUSHED_SERVICES:-[]}\`"
+            echo "Deployed: \`${DEPLOYABLE:-[]}\`"
             echo
             echo "These services are running whatever image they ran before this commit."
             echo "A missing ECR repository is the recurring cause — the repository set is"
@@ -1405,5 +1447,5 @@ jobs:
             echo "workflow_dispatch only, so a new service's pin is not a repository until"
             echo "someone runs that apply."
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "::error::docker push failed for ${FAILED_SERVICES} — those services did not deploy"
+          echo "::error::these services did not deploy — push: ${FAILED_SERVICES:-[]}, CVE-blocked: ${CVE_BLOCKED:-[]}"
           exit 1
