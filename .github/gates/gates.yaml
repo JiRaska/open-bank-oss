@@ -137,7 +137,7 @@ gates:
     budget_seconds: 20
     min_subjects: 2  # 3 declared observed 2026-09-05; 2 lets one service be demoted, a wipe cannot pass
     review_after: "2027-03-05"
-    rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returns 0 for every finding by design (advisory until finops_tiers.enforced flips). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure. The floored count is the DECLARED side alone, not the 26-service union: 23 of that union are money_path_services, already floored at 20 by journey-money-path-accountability, so a union floor would stay green through the `declared: {}` wipe this gate exists to catch."
+    rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returned 0 for every finding (advisory until finops_tiers.enforced flips; #9678 has since made CONFIG errors block, but the DRIFT half this gate is named for is still advisory and still returns 0). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure. The floored count is the DECLARED side alone, not the 26-service union: 23 of that union are money_path_services, already floored at 20 by journey-money-path-accountability, so a union floor would stay green through the `declared: {}` wipe this gate exists to catch."
     selftest: python3 openbank-infra/scripts/check-finops-tiers.py --self-test
     selftest_expect: pass
     run: |
@@ -1512,6 +1512,30 @@ gates:
     budget_seconds: 90   # builds 17 git trees
     run: |
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
+
+  # A provider's two verification twins must serve the SAME @State handlers, and the folder twin's
+  # KDoc has asserted exactly that in prose ("a deliberate duplicate of the broker twin's body:
+  # same @State handlers") while three of them drifted. The folder twin is the one a PR runs, so the
+  # drift is invisible at PR time; the broker twin runs on main-push and is the only one whose
+  # results reach the broker, so its MissingStateChangeMethod lands as success=false in the broker
+  # and can-i-deploy blocks the consumers as REGRESSIONs — vop, interest, sdd and swift, four
+  # money-path services, stuck five days with main green throughout (#9752).
+  # Asymmetric on purpose: folder-only is fatal (that is the blocked-deploy shape), broker-only is a
+  # warning (verified after the merge, weaker but harmless). Scope is derived from the annotations.
+  - id: pact-twin-state-parity
+    name: "provider twins serve the same @State set (issue #9752, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 8   # 10 twin pairs today; a collapse means the annotation scan broke, not that the fleet did
+    selftest_inputs:
+      - ".github/scripts/check-pact-twin-state-parity.py"
+    rationale: "The claim that the two twins are duplicates lived only in their own KDoc; when it stopped being true nothing went red, and the cost landed on the deploy path days later as a contract REGRESSION no reconcile tick can clear."
+    review_after: "2027-03-15"
+    selftest: |
+      python3 .github/scripts/check-pact-twin-state-parity.py --selftest
+    run: |
+      python3 .github/scripts/check-pact-twin-state-parity.py
 
   # The only exception to publishing a provider verification for the exact checked-out ref.
   # This tests the proof's negative paths too: a runtime/build/resources/root/libs change, a

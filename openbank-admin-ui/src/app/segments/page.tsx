@@ -13,6 +13,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
+import { parseAudiencePreview, type AudiencePreview } from '@/lib/audiences/previewContract'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -27,18 +28,13 @@ interface Segment {
   approvedBy?: string | null
 }
 
-interface Preview {
-  size?: number
-  asOf?: string
-  state: string
-}
-
 export default function SegmentsPage() {
   const { t, language } = useLanguage()
   const [items, setItems] = useState<Segment[]>([])
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
-  const [previews, setPreviews] = useState<Record<string, Preview | 'loading'>>({})
+  const [previews, setPreviews] = useState<Record<string, AudiencePreview | 'loading'>>({})
+  const previewRequests = useRef<Record<string, number>>({})
   const [lifecycleAction, setLifecycleAction] = useState<{ key: string; action: 'submit' | 'approve' } | null>(null)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [approvalIntent, setApprovalIntent] = useState<Segment | null>(null)
@@ -121,11 +117,19 @@ export default function SegmentsPage() {
   // layer, so loading the page must not fire one per row.
   const loadPreview = (s: Segment) => {
     const k = key(s)
+    const requestId = (previewRequests.current[k] ?? 0) + 1
+    previewRequests.current[k] = requestId
     setPreviews(p => ({ ...p, [k]: 'loading' }))
     fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/preview`)
-      .then(r => r.json())
-      .then((d: Preview) => setPreviews(p => ({ ...p, [k]: d })))
-      .catch(() => setPreviews(p => ({ ...p, [k]: { state: 'unreachable' } })))
+      .then(async r => r.ok
+        ? parseAudiencePreview(await r.json() as unknown, s.name, s.version)
+        : { state: 'unreachable' } as const)
+      .then(d => {
+        if (previewRequests.current[k] === requestId) setPreviews(p => ({ ...p, [k]: d }))
+      })
+      .catch(() => {
+        if (previewRequests.current[k] === requestId) setPreviews(p => ({ ...p, [k]: { state: 'unreachable' } }))
+      })
   }
 
   const formatAsOf = (iso: string) =>
@@ -169,24 +173,30 @@ export default function SegmentsPage() {
       // Never render a failed preview as 0 — "nobody matches" is a business answer a marketer
       // would act on, and a 403 or a timeout is not that answer.
       return (
-        <span className="text-xs text-amber-600">
+        <span className="inline-flex items-center gap-2 text-xs text-amber-600">
           {p.state === 'unauthorized'
             ? t('Bez oprávnění', 'Not permitted')
             : p.state === 'unknown_segment'
               ? t('Neznámý segment', 'Unknown segment')
               : t('Nedostupné', 'Unavailable')}
+          <button
+            type="button"
+            className="font-semibold underline underline-offset-2"
+            onClick={() => loadPreview(s)}
+            aria-label={t(`Znovu spočítat dosah ${audienceName(s)}`, `Retry reach for ${audienceName(s)}`)}
+          >
+            {t('Zkusit znovu', 'Retry')}
+          </button>
         </span>
       )
     }
     return (
       <span className="text-sm" data-audience-size={key(s)}>
-        <strong className="text-lg tracking-tight">{p.size?.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
+        <strong className="text-lg tracking-tight">{p.size.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
         <span className="text-muted-foreground">{t('lidí nyní odpovídá', 'people match now')}</span>
-        {p.asOf && (
-          // The cohort moves as the silver layer moves; a number without its timestamp is a claim
-          // with no time attached, which is what ADR-0201 D1's "provably a different version" rules out.
-          <span className="ml-2 text-xs text-muted-foreground">{t('k', 'as of')} {formatAsOf(p.asOf)}</span>
-        )}
+        {/* The cohort moves as the silver layer moves; a number without its timestamp is a claim
+            with no time attached, which is what ADR-0201 D1's versioning rules out. */}
+        <span className="ml-2 text-xs text-muted-foreground">{t('k', 'as of')} {formatAsOf(p.asOf)}</span>
       </span>
     )
   }

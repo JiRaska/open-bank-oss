@@ -17,5 +17,14 @@ class CustomerDelegationPreviewOpenApiTest {
         assertThat(contract).contains("before the app starts SCA")
         assertThat(normalized).contains("creates no grant, emits no event and never consumes SCA")
         assertThat(normalized).contains("a successful preview is not an authorization decision")
+        assertThat(contract).contains("EXPOSURE_UNSUPPORTED")
+        assertThat(contract).contains("historical metadata is audit-only")
+    }
+
+    @Test
+    fun `customer preview rejects a caller who is not the grantor with 403`() {
+        assertThat(normalized).contains(
+            "'403': {description: grantorPartyId does not match the authenticated customer}",
+        )
     }
 }

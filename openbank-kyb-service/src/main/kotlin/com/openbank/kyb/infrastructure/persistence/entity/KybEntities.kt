@@ -39,6 +39,9 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "entity_party_active", nullable = false)
     var entityPartyActive: Boolean = false
 
+    @Column(name = "required_signer_roles", nullable = false, columnDefinition = "TEXT")
+    lateinit var requiredSignerRoles: String
+
     @Column(name = "required_signatures")
     var requiredSignatures: Int? = null
 
@@ -80,6 +83,53 @@ class RegistryExtractEntity : PanacheEntity() {
 
     @Column(name = "fetched_at", nullable = false)
     lateinit var fetchedAt: Instant
+}
+
+/**
+ * One human confirmation of a representation rule (#9711). Superseded rows are KEPT — the history
+ * of who confirmed what, and when the rule changed, is the audit trail this control is for.
+ */
+@Entity
+@Table(name = "kyb_representation_attestations")
+class RepresentationAttestationEntity : PanacheEntity() {
+    @Column(name = "attestation_id", nullable = false, unique = true)
+    lateinit var attestationId: UUID
+
+    @Column(name = "identifier_scheme", nullable = false)
+    lateinit var identifierScheme: String
+
+    @Column(name = "identifier_value", nullable = false)
+    lateinit var identifierValue: String
+
+    @Column(name = "rule_text_hash", nullable = false)
+    lateinit var ruleTextHash: String
+
+    @Column(name = "rule_text", columnDefinition = "TEXT")
+    var ruleText: String? = null
+
+    @Column(name = "parsed_mode", nullable = false)
+    lateinit var parsedMode: String
+
+    @Column(name = "parsed_signers")
+    var parsedSigners: Int? = null
+
+    @Column(name = "confirmed_signers", nullable = false)
+    var confirmedSigners: Int = 0
+
+    @Column(name = "confirmed_roles", nullable = false, columnDefinition = "TEXT")
+    lateinit var confirmedRoles: String
+
+    @Column(name = "attested_by", nullable = false)
+    lateinit var attestedBy: String
+
+    @Column(name = "attested_at", nullable = false)
+    lateinit var attestedAt: Instant
+
+    @Column(name = "superseded_at")
+    var supersededAt: Instant? = null
+
+    @Column(name = "note", columnDefinition = "TEXT")
+    var note: String? = null
 }
 
 @Entity

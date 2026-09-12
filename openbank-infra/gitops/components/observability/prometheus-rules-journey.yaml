@@ -52,11 +52,26 @@ spec:
         # `max_over_time` because kube-state-metrics drops the series when the Job object is
         # garbage-collected (failedJobsHistoryLimit: 1), and an alert that vanishes with its
         # evidence is one nobody can triage.
+        #
+        # The 30m window does NOT bound the age of the failure, and that was the defect:
+        # `kube_job_status_failed` is a GAUGE that keeps reporting 1 for as long as the Job object
+        # exists, and these Jobs are retained for `ttlSecondsAfterFinished: 172800` (48h). So
+        # `max_over_time(...[30m])` re-reads the same retained 1 on every evaluation and the alert
+        # outlives its own window by two days. Measured 2026-09-11: five instances firing, of which
+        # one (`journey-public-edge-29817560`) was a 25h-old one-off whose every subsequent run had
+        # passed. The recency guard reads the Job's own start time instead of the window, so the
+        # evidence still survives GC while a failure that is two days stale stops paging.
         - alert: JourneyRunFailed
           expr: |
             max by (namespace, job_name) (
               max_over_time(kube_job_status_failed{namespace="observability", job_name=~"journey-.*"}[30m])
             ) > 0
+              and on (namespace, job_name)
+            (
+              time() - max by (namespace, job_name) (
+                kube_job_status_start_time{namespace="observability", job_name=~"journey-.*"}
+              ) < 3600
+            )
           for: 1m
           labels:
             severity: warning
