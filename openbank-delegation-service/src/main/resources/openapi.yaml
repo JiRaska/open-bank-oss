@@ -5,49 +5,82 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.13.0
+  # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios.
+  #
+  # 1.14.0 -> 1.17.0 (#9237, this branch): additive — the external-disclosure verify-otp and
+  # content routes. NOT 1.15.0 (held by the open #9215) and NOT 1.16.0 (held by the open
+  # #9481 and #9484). This branch previously wrote 1.13.0, which main took while it sat open —
+  # the silent form of this collision, since both sides produced identical text.
+  version: 1.17.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
-  - name: External disclosures
 paths:
-  /api/v1/external-disclosures/{id}/verify-otp:
+  /api/v1/delegation-portfolios:
     post:
-      tags: [External disclosures]
-      summary: Verify an external disclosure one-time passcode
-      description: Available only through the public customer edge. Invalid, expired, revoked, locked and unknown links all return 404.
+      tags: [Delegation portfolios]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        A durable account scope owned by the active profile. It is not a grant and never authorizes
+        payment or co-signing by itself; for a business profile customer-edge resolves the current
+        mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
       parameters:
-        - $ref: '#/components/parameters/ExternalDisclosureId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+            schema: { $ref: '#/components/schemas/DelegationPortfolioRequest' }
       responses:
-        '204': { description: OTP accepted }
-        '404': { description: External disclosure unavailable }
-  /api/v1/external-disclosures/{id}/content:
-    post:
-      tags: [External disclosures]
-      summary: Release one sealed external disclosure PDF
-      description: Available only through the public customer edge after OTP verification. The response is a recipient-watermarked, sealed PDF derivative, never the original document.
+        '201':
+          description: Portfolio created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '400': { description: Missing idempotency key, name, or account scope }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+        '422': { description: An account is not owned by the active profile }
+        '503':
+          description: Authoritative account ownership cannot currently be established; safe to retry
+          headers:
+            Retry-After: { schema: { type: integer } }
+  /api/v1/delegation-portfolios/owner/{ownerPartyId}:
+    get:
+      tags: [Delegation portfolios]
+      summary: List portfolios of the active profile
       parameters:
-        - $ref: '#/components/parameters/ExternalDisclosureId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+        - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
-          description: Sealed disclosure PDF
+          description: Portfolios ordered by name
           content:
-            application/pdf:
-              schema: { type: string, format: binary }
-        '404': { description: External disclosure unavailable }
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationPortfolioResponse' } }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+  /api/v1/delegation-portfolios/{id}:
+    get:
+      tags: [Delegation portfolios]
+      summary: Read a portfolio of the active profile
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '403': { description: Authenticated active profile does not own the portfolio }
+        '404': { description: Portfolio not found }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -501,6 +534,40 @@ paths:
           description: >-
             The reservation was confirmed. Releasing settled money would re-open a ceiling the
             delegate has already spent through.
+  /api/v1/external-disclosures/{id}/content:
+    post:
+      tags: [External disclosures]
+      summary: Release one sealed external disclosure PDF
+      description: Available only through the public customer edge after OTP verification. The response is a recipient-watermarked, sealed PDF derivative, never the original document.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+      responses:
+        '200':
+          description: Sealed disclosure PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: External disclosure unavailable }
+  /api/v1/external-disclosures/{id}/verify-otp:
+    post:
+      tags: [External disclosures]
+      summary: Verify an external disclosure one-time passcode
+      description: Available only through the public customer edge. Invalid, expired, revoked, locked and unknown links all return 404.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+      responses:
+        '204': { description: OTP accepted }
+        '404': { description: External disclosure unavailable }
 components:
   parameters:
     ApprovalId:
@@ -525,11 +592,6 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
-    ExternalDisclosureId:
-      name: id
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
     PartyId:
       name: partyId
       in: path
@@ -541,21 +603,31 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
-    ExternalDisclosureOtpRequest:
+    DelegationPortfolioRequest:
       type: object
-      additionalProperties: false
-      required: [linkSecret, otp, idempotencyKey]
+      required: [ownerPartyId, name, accountIds]
       properties:
-        linkSecret: { type: string, minLength: 1, maxLength: 128 }
-        otp: { type: string, pattern: '^[0-9]{6}$' }
-        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
-    ExternalDisclosureLinkRequest:
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    DelegationPortfolioResponse:
       type: object
-      additionalProperties: false
-      required: [linkSecret, idempotencyKey]
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
       properties:
-        linkSecret: { type: string, minLength: 1, maxLength: 128 }
-        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]
@@ -875,3 +947,18 @@ components:
         detail: { type: string }
         code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }
+    ExternalDisclosureLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+    ExternalDisclosureOtpRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, otp, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
