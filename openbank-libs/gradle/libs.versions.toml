@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.4.20"
+kotlin = "2.4.10"
 quarkus = "3.38.0"
 quarkus-plugin = "3.38.0"
 coroutines = "1.8.1"
