@@ -9,6 +9,7 @@ import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
@@ -33,6 +34,7 @@ class PartyEventConsumerTest {
     private val accountRepository: AccountRepository = mockk()
     private val welcomeBonusPort: WelcomeBonusPort = mockk(relaxed = true)
     private val notificationRequestPort: NotificationRequestPort = mockk(relaxed = true)
+    private val partyMandateRepository: PartyMandateProjectionRepository = mockk(relaxed = true)
     private val objectMapper = ObjectMapper()
 
     private fun consumer(bonusEnabled: Boolean) = PartyEventConsumer(
@@ -48,6 +50,7 @@ class PartyEventConsumerTest {
         welcomeBonusAmount = BigDecimal("100000.00"),
         welcomeBonusCurrency = "CZK",
         notificationRequestPort = notificationRequestPort,
+        partyMandateRepository = partyMandateRepository,
     )
 
     private fun pendingAccount(id: UUID, type: AccountType = AccountType.CURRENT): Account = mockk {
@@ -66,6 +69,51 @@ class PartyEventConsumerTest {
     private fun activeEvent(partyId: UUID) =
         """{"eventType":"PARTY_UPDATED","partyId":"$partyId","partyType":"INDIVIDUAL",""" +
             """"status":"ACTIVE","legalName":"Jan Novák","email":"jan@example.cz","occurredAt":"2026-06-11T08:05:00Z"}"""
+
+    private fun mandateEvent(
+        type: String,
+        principal: UUID,
+        mandate: UUID,
+        agent: UUID,
+        authority: String,
+        quorum: Int,
+    ) = """{"eventType":"$type","partyId":"$principal",""" +
+        """"mandateId":"$mandate","agentPartyId":"$agent","authority":"$authority",""" +
+        """"requiredSignatures":$quorum,"status":"ACTIVE"}"""
+
+    @Test
+    fun `mandate grant projects exact authority and quorum`(): Unit = runBlocking {
+        val principal = UUID.randomUUID()
+        val mandate = UUID.randomUUID()
+        val agent = UUID.randomUUID()
+
+        consumer(false).consume(mandateEvent("PARTY_MANDATE_GRANTED", principal, mandate, agent, "JOINT", 2))
+
+        coVerify {
+            partyMandateRepository.upsert(
+                match {
+                    it.id == mandate &&
+                        it.principalPartyId == principal &&
+                        it.agentPartyId == agent &&
+                        it.authority == "JOINT" &&
+                        it.requiredSignatures == 2 &&
+                        it.active
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `mandate revoke disables the projected authority`(): Unit = runBlocking {
+        val principal = UUID.randomUUID()
+        val mandate = UUID.randomUUID()
+
+        consumer(false).consume(
+            """{"eventType":"PARTY_MANDATE_REVOKED","partyId":"$principal","mandateId":"$mandate"}""",
+        )
+
+        coVerify { partyMandateRepository.revoke(mandate) }
+    }
 
     @Test
     fun `PARTY_CREATED for an individual opens PENDING_ACTIVATION current and savings accounts`(): Unit = runBlocking {
