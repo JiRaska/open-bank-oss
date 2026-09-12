@@ -10,6 +10,16 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
+ * The producer's own claim of who emitted the event.
+ *
+ * audit-service resolves attribution strongest-claim-first, and where no producer claim exists it
+ * DERIVES one from the topic name. That derivation is a guess written into `audit_entries`, which
+ * is append-only at the database with `source_service` chain-hashed into `record_hash` — so a row
+ * attributed by derivation can never be corrected afterwards (#5256/#6035).
+ */
+private const val SOURCE_SERVICE = "wealth-service"
+
+/**
  * One data class per event type, and that is not verbosity.
  *
  * The ADR-0006 contract-agreement gate pairs each AsyncAPI message with the data class whose
@@ -35,6 +45,7 @@ data class HoldingDeclared(
     val valuationSource: ValuationSource,
     val ownershipShare: BigDecimal,
     val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
 ) {
     companion object {
         const val EVENT_TYPE = "wealth.holding.declared.v1"
@@ -50,6 +61,7 @@ data class HoldingRevalued(
     val valuedAt: LocalDate,
     val valuationSource: ValuationSource,
     val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
 ) {
     companion object {
         const val EVENT_TYPE = "wealth.holding.revalued.v1"
@@ -61,6 +73,7 @@ data class HoldingWithdrawn(
     val ownerPartyId: UUID,
     val holdingType: HoldingType,
     val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
 ) {
     companion object {
         const val EVENT_TYPE = "wealth.holding.withdrawn.v1"

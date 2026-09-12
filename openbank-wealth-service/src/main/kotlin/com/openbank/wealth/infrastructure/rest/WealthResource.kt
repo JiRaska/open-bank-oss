@@ -76,7 +76,9 @@ class WealthResource {
                 valuation = request.valuation.toDomain(),
                 ownershipShare = request.ownershipShare,
                 externalReference = request.externalReference,
-                documentIds = request.documentIds,
+                documentIds = request.documentIds.mapIndexed { index, documentId ->
+                    requireNotNull(documentId) { "documentIds[$index] must not be null" }
+                },
             ),
         )
         return Response.status(Response.Status.CREATED).entity(HoldingResponse.from(holding)).build()

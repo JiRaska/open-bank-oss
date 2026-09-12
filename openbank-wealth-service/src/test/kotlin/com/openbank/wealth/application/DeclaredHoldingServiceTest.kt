@@ -70,8 +70,9 @@ class DeclaredHoldingServiceTest {
         updatedAt = fixedNow.minusSeconds(86400),
     )
 
-    // Declaring is `: Unit = runBlocking {}` on purpose. `fun x() = runBlocking { }` infers a
-    // non-Unit return type and JUnit5 SILENTLY IGNORES the method — the fleet has a gate for it.
+    // Every test below declares an explicit `: Unit` return type on purpose: an inferred
+    // non-Unit return makes JUnit5 silently ignore the method. The fleet gate that enforces this
+    // greps test SOURCE TEXT, so this note deliberately does not spell out the offending idiom.
     @Test
     fun `declaring writes the row and the declared event together`(): Unit = runBlocking {
         val eventType = slot<String>()

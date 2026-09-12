@@ -114,6 +114,7 @@ components:
         - valuationSource
         - ownershipShare
         - occurredAt
+        - sourceService
       properties:
         holdingId: { type: string, format: uuid }
         ownerPartyId: { type: string, format: uuid }
@@ -127,6 +128,10 @@ components:
         valuationSource: { $ref: '#/components/schemas/ValuationSource' }
         ownershipShare: { type: number }
         occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.
 
     HoldingRevalued:
       type: object
@@ -140,6 +145,7 @@ components:
         - valuedAt
         - valuationSource
         - occurredAt
+        - sourceService
       properties:
         holdingId: { type: string, format: uuid }
         ownerPartyId: { type: string, format: uuid }
@@ -149,13 +155,21 @@ components:
         valuedAt: { type: string, format: date }
         valuationSource: { $ref: '#/components/schemas/ValuationSource' }
         occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.
 
     HoldingWithdrawn:
       type: object
       description: "Constructor properties of `HoldingWithdrawn` in `WealthEventPayloads.kt`."
-      required: [holdingId, ownerPartyId, holdingType, occurredAt]
+      required: [holdingId, ownerPartyId, holdingType, occurredAt, sourceService]
       properties:
         holdingId: { type: string, format: uuid }
         ownerPartyId: { type: string, format: uuid }
         holdingType: { $ref: '#/components/schemas/HoldingType' }
         occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.

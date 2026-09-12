@@ -27,7 +27,13 @@ data class DeclareHoldingRequest(
     val valuation: ValuationDto,
     val ownershipShare: BigDecimal = BigDecimal.ONE,
     val externalReference: String? = null,
-    val documentIds: List<UUID> = emptyList(),
+    /**
+     * The ELEMENT type is nullable, and that is not sloppiness. A JSON array carrying a null
+     * deserialises fine into a non-nullable Kotlin element type and then NPEs at the first
+     * dereference — a 500 where a 400 belongs (#7867). Declared nullable, the null survives to a
+     * guard that can name the offending index.
+     */
+    val documentIds: List<UUID?> = emptyList(),
 )
 
 data class RevalueHoldingRequest(val valuation: ValuationDto)

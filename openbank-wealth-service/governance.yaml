@@ -9,11 +9,10 @@ dataLineageRole: producer
 dataClassification: confidential
 retentionPolicy: 10 years
 evidenceExported: false
-lineage:
-  downstream:
-    - serviceName: customer-edge
-      relationType: api
-      description: net-worth composition reads declared holdings as one labelled branch (ADR-0301 D2)
+# No `lineage:` block yet, deliberately. The customer-edge net-worth composition that will read
+# this service is ADR-0301 D2 and is not built (issue #9772), so declaring the edge now would be a
+# lineage claim with no backing code — exactly what the lineage-vs-code audit exists to catch
+# (#889). It is added in the change that adds the caller.
 databaseLineage:
   ownedDatabases:
     - openbank_wealth
