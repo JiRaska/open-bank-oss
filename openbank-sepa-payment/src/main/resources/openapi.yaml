@@ -11,14 +11,15 @@ info:
   # behaviour changes, so it takes the correction class: minor, not major.
   # 1.6 -> 1.7: additive only — GET /approvals (the checker's queue, issue #5679) plus two
   # additive fields on ApprovalResponse (makerId, createdAt).
-  # 1.9.0 (#8833): the request schemas the resources actually accept.
-  # 1.9.0 -> 1.10.0 (#9395): ADR-0300 returns idempotency.
-  # Four PRs have queued on this one spec. This branch still carried 1.7.1, a number main passed
-  # two releases ago; #8833 is OPEN and holds 1.9.0, so these are SEQUENCED — #8833 lands first.
-  # If #8833 is closed rather than merged, drop this to 1.9.0. Read off live origin/main (1.8.0)
-  # and confirmed free; a taken version is textually identical to a free one, so the git merge
-  # could not have caught it.
-  version: 1.10.0
+  # 1.9 -> 1.10 (#9395): ADR-0300 returns idempotency.
+  #
+  # 1.11.0 (#8833, this branch): the request schemas the resources actually accept.
+  # This branch held 1.9.0 on the assumption that it would land before #9395. It did not: #9395
+  # merged at 1.10.0 and is on live main, so 1.9.0 is now BEHIND the published contract and
+  # 1.11.0 is the next free number. Read off live origin/main in the same turn as this edit —
+  # a taken version is textually identical to a free one, so no merge could have caught it, and
+  # the four-PR queue on this one spec is exactly the shape that keeps producing the collision.
+  version: 1.11.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -348,11 +349,22 @@ components:
 
     CreateSepaPaymentRequest:
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, endToEndId]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (CreateSepaPaymentRequest in SepaPaymentDtos.kt). Before #8828 this schema published
+      # currencyCode and requestedExecutionDate, neither of which exists on that DTO, and
+      # omitted type, debtorIban and debtorName, all three non-nullable — so a client
+      # generated from this document could not create a SEPA payment at all.
+      required: [type, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, currency]
       properties:
+        type:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
@@ -361,17 +373,13 @@ components:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           example: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
           type: string
-        requestedExecutionDate:
+        endToEndId:
           type: string
-          format: date
-
     TransitionStatusRequest:
       type: object
       required: [targetStatus]
