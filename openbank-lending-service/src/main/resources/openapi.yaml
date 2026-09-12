@@ -3,7 +3,12 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.22.0
+  # 1.22.0 -> 1.23.0: additive — GET /api/v1/lending/risk/portfolio/summary and the
+  # CreditPortfolioSummary schema. Classified additive by the contract gate's own oasdiff run, so
+  # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
+  # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
+  # one and nothing in a merge can tell them apart.
+  version: 1.23.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
