@@ -15,6 +15,8 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
@@ -100,6 +102,9 @@ class PartyPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var partyRepository: PartyRepository
+
+    @Inject
+    lateinit var partyUseCase: PartyUseCase
 
     @Inject
     lateinit var vertx: Vertx
@@ -398,11 +403,52 @@ class PartyPactFolderProviderVerificationTest {
         )
     }
 
+    @State("an active human mandate exists for an active company")
+    fun activeHumanMandateExistsForActiveCompany() {
+        partyExistsWithLegalAndTradingName()
+        runOnVertxContext {
+            if (partyRepository.findById(DELEGATION_ACTOR_ID) == null) {
+                partyRepository.save(
+                    Party(
+                        id = DELEGATION_ACTOR_ID,
+                        partyType = PartyType.INDIVIDUAL,
+                        status = PartyStatus.ACTIVE,
+                        legalName = "Pact Delegation Actor",
+                        tradingName = null,
+                        dateOfBirth = null,
+                        nationality = null,
+                        taxId = null,
+                        registrationNumber = null,
+                        email = "pact-delegation-actor@example.com",
+                        phone = null,
+                        address = null,
+                        kycStatus = KycStatus.APPROVED,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                        amlStatus = AmlStatus.NOT_SCREENED,
+                    ),
+                )
+            }
+            partyUseCase.grantMandate(
+                GrantMandateCommand(
+                    principalPartyId = VOP_NAME_PARTY_ID,
+                    agentPartyId = DELEGATION_ACTOR_ID,
+                    role = MandateRole.LEGAL_REPRESENTATIVE,
+                    authority = MandateAuthority.SOLE,
+                    requiredSignatures = 1,
+                    source = MandateSource.REGISTRY,
+                    evidenceRef = "synthetic-pact-fixture",
+                ),
+            )
+        }
+    }
+
     companion object {
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+        private val DELEGATION_ACTOR_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3")
         private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
         private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
     }
