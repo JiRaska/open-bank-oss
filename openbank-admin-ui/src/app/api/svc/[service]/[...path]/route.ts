@@ -62,6 +62,9 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   // here regardless, same as every other entry; a scaled-to-zero backend surfaces as a normal
   // upstream connection failure, not a special case this map needs to know about.
   'communication-service':  { container: 'openbank-communication-service',  port: 8158 },
+  // ADR-0284: legal-entity onboarding. The operator console reads the manual-review queue and
+  // writes the per-IČO representation attestation (#9711) through this same operator-token path.
+  'kyb-service':            { container: 'openbank-kyb-service',            port: 8157 },
 }
 
 // In-cluster, the upstream address must be the real Service DNS
