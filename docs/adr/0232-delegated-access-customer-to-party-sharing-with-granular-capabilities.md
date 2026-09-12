@@ -186,6 +186,12 @@ weekly cap), "Společný cíl" (shared vault, N_OF_M withdrawal), "Senior
 trusted contact" (read-only + fraud alerts, structurally incapable of
 transacting).
 
+The product-service projection must receive `approvalPolicy` and `requiredApprovals` on every
+authority-opening event before any non-SOLO policy can be offered. Missing fields from legacy
+events resolve only to `SOLO`; unknown future policy values may be retained but never interpreted
+as executable authority. This projection is input to, not a substitute for, the immutable
+per-operation approval-requirement snapshot described by ADR-0284 D3.
+
 ## Alternatives considered
 
 - **Extend consent-service with a `CUSTOMER` grantee type** — rejected:
