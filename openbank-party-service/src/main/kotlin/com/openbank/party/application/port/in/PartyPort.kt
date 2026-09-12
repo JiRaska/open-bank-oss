@@ -131,6 +131,7 @@ data class GrantMandateCommand(
     val agentPartyId: UUID,
     val role: MandateRole,
     val authority: MandateAuthority,
+    val requiredSignatures: Int,
     val source: MandateSource,
     val evidenceRef: String?,
     val validTo: java.time.Instant? = null,

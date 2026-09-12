@@ -764,8 +764,17 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   regressions.
 
 ### ADR registry
+- **A stale derived ADR file reddens EVERY open PR, and each one reads as its own failure.**
+  `check-adr-registry.sh` is enforced, so when `CURRENT.md` drifted on `main` (2026-09-11: ADR-0300
+  absent from its tag listings, ADR-0285 still `planned`, the standing count 279 vs 280) the
+  `gates (registry-kotlin-data)` shard was red on every open PR — and `Validate manifests` was red
+  too, with the single message *"One or more gate shards failed"*, i.e. one cause reported twice.
+  It was found only because a test-only PR touching no ADR failed that gate. **When a gate fails on
+  a PR whose diff cannot plausibly reach it, run that gate against bare `origin/main` first** — one
+  worktree and one command, and it distinguishes "my branch is broken" from "main is broken" before
+  any branch is touched (#9711 innocent, fixed by #9720).
 - **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
-  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  failing check restores the four derived files (`README.md`, `DIGEST.md`, `CURRENT.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
   then disagrees with what you committed, failing the gate on content you never wrote (#3983).
   **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
@@ -892,14 +901,16 @@ repo is the single source of truth.
   - **Reading them: start at `docs/adr/DIGEST.md`, not at the ADRs.** It is the whole
     decision history as one line per ADR (~16k tokens vs ~400k for the fleet). Read it,
     then open only the ADRs it points you at. Grepping the fleet finds whichever ADR
-    matched a keyword, not the one that decided the thing.
+    matched a keyword, not the one that decided the thing. `docs/adr/CURRENT.md` is the
+    same lines with superseded/rejected ADRs dropped and the rest grouped by domain tag —
+    read it for what the rules ARE, the digest for how they got that way.
   - **Writing one: `docs/adr/new.sh "Title"`.** Never hand-copy an existing ADR — the
     header is a validated YAML front-matter block (`docs/adr/SCHEMA.md`), with closed
     enums and a closed tag vocabulary (`docs/adr/tags.txt`), and `new.sh` also allocates
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
-    `README.md`, `DIGEST.md` and `index.json` are DERIVED — never hand-edit them.
+    `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in
   `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching
