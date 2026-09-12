@@ -21,6 +21,22 @@ Deliberately NOT checked: the checkboxes' truthfulness (CI cannot know whether t
 author really ran a secrets sweep — the control is the pause, not the proof) and
 non-money-path PRs (the pause is priced; spend it where a mistake moves money).
 
+RELEASE-DERIVED FILES ARE NOT MONEY-PATH CODE (#9230). A release-please PR touches
+`CHANGELOG.md`, `version.txt` and `.release-please-manifest.json` under every service
+that released, and nothing else — no Kotlin, no config, no migration, no spec. Counted
+as money-path files those tripped this gate on a PR with no code in it at all, and the
+remedy the error names is unanswerable: there is no secrets sweep to run and no
+suppression to justify over a generated changelog, and the PR is authored by a bot that
+cannot tick a box. Measured on #9230: 42 "money-path files" across 21 services, 88 files
+in the diff, and ZERO of them outside the four derived names below — the release train
+sat blocked from 2026-09-08.
+
+This is the `gate whose remedy cannot be performed` shape, so the fix is the SCOPE, not
+the severity: strip the derived names before deciding whether the PR is money-path. A
+release PR that also carried real code still trips the gate, because the strip is
+per-file and the code file survives it. That case is the self-test's must-FAIL control —
+without it this exclusion would be indistinguishable from switching the gate off.
+
 Usage:  check-security-checklist.py --body-file <file> [--base origin/main]
         check-security-checklist.py --self-test
 """
@@ -37,6 +53,23 @@ RULES = Path("openbank-libs/governance/rules.yaml")
 SECTION = re.compile(r"^##\s+Security checklist\s*$", re.M | re.I)
 NEXT_HEADING = re.compile(r"^##\s+", re.M)
 BOX = re.compile(r"^\s*-\s*\[(?P<mark>[ xX])\]\s*(?P<text>.*)$", re.M)
+
+# Files release-please writes, and the only files a release-only PR contains. Matched on the
+# BASENAME, because each lives under its own service directory (and the manifest at the root).
+# Deliberately a closed list of four exact names, not a glob: `*.md` would swallow a threat model
+# and `*.json` an OPA bundle, and both of those are exactly the money-path evidence this gate must
+# keep seeing.
+RELEASE_DERIVED = frozenset({
+    "CHANGELOG.md",
+    "version.txt",
+    ".release-please-manifest.json",
+})
+
+
+def is_release_derived(path: str) -> bool:
+    """True for a file release-please generates, which carries no code and no attack surface."""
+    return path.rsplit("/", 1)[-1] in RELEASE_DERIVED
+
 
 
 def money_path_dirs(root: Path) -> list[str]:
@@ -83,10 +116,21 @@ def unticked(body: str) -> tuple[str, list[str]] | None:
 def run(root: Path, body: str, base: str, enforce: bool) -> int:
     dirs = money_path_dirs(root)
     files = changed_files(base)
-    touched = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
+    in_money_path = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
+    touched = [f for f in in_money_path if not is_release_derived(f)]
+    derived = len(in_money_path) - len(touched)
     if not touched:
-        print(f"security-checklist: PR touches no money-path directory ({len(files)} files) — not applicable")
+        if derived:
+            # Say it out loud. A gate that narrows its own scope silently is how a control becomes
+            # a no-op nobody notices, so the release-only case reports what it skipped and why.
+            print(f"security-checklist: {derived} money-path file(s) are release-derived "
+                  f"(CHANGELOG.md / version.txt / .release-please-manifest.json) and carry no code; "
+                  f"no other money-path file in this PR — not applicable")
+        else:
+            print(f"security-checklist: PR touches no money-path directory ({len(files)} files) — not applicable")
         return 0
+    if derived:
+        print(f"security-checklist: ignoring {derived} release-derived money-path file(s)")
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
@@ -125,6 +169,65 @@ def self_test() -> int:
     r3 = unticked(other)
     if r3 is None or r3[1]:
         print("self-test FAIL: box in the next section leaked into the check"); bad += 1
+    # ── the release-derived exclusion, both directions (#9230) ───────────────────────────────
+    #
+    # The must-FAIL half is the load-bearing one: an exclusion that also let a real money-path
+    # source file through would be indistinguishable from switching the gate off, and every case
+    # above would still pass. So drive the real `run()` over a throwaway git repo — the parser,
+    # the diff and the decision, not a mock of them.
+    import subprocess as _sp
+    import tempfile as _tf
+
+    money = money_path_dirs(Path("."))
+    if not money:
+        print("self-test FAIL: no money-path service to build a fixture from"); bad += 1
+        money = ["openbank-ledger-service"]
+    svc = sorted(money)[0]
+
+    def fixture(paths: list[str], body: str) -> int:
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "openbank-libs" / "governance").mkdir(parents=True)
+            (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                "money_path_services:\n  - " + svc + "\n", encoding="utf-8")
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": __import__("os").environ.get("PATH", "")}
+            def git(*a):
+                _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
+            git("init", "-q", "-b", "base")
+            git("add", "-A"); git("commit", "-q", "-m", "base")
+            for rel in paths:
+                f = root / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("x\n", encoding="utf-8")
+            git("checkout", "-q", "-b", "head")
+            git("add", "-A"); git("commit", "-q", "-m", "head")
+            cwd = __import__("os").getcwd()
+            try:
+                __import__("os").chdir(root)
+                return run(root, body, "base", enforce=True)
+            finally:
+                __import__("os").chdir(cwd)
+
+    no_checklist = "## Summary\nrelease\n"
+    release_only = [f"{svc}/CHANGELOG.md", f"{svc}/version.txt", ".release-please-manifest.json"]
+
+    rc = fixture(release_only, no_checklist)
+    if rc != 0:
+        print("self-test FAIL: a release-only PR (CHANGELOG/version.txt/manifest) still trips the gate")
+        bad += 1
+
+    rc = fixture(release_only + [f"{svc}/src/main/kotlin/Money.kt"], no_checklist)
+    if rc == 0:
+        print("self-test FAIL: a release PR that ALSO changes money-path source passed — the "
+              "exclusion is swallowing real code, which is the gate switched off")
+        bad += 1
+
+    # A name that merely resembles a derived one must not be excluded: the strip is exact-basename.
+    rc = fixture([f"{svc}/docs/CHANGELOG.md.bak", f"{svc}/src/main/kotlin/Money.kt"], no_checklist)
+    if rc == 0:
+        print("self-test FAIL: a near-miss filename was treated as release-derived"); bad += 1
+
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
