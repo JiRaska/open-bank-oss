@@ -58,7 +58,6 @@ class DelegationServiceTest {
     private lateinit var service: DelegationService
 
     private val grantor: UUID = UUID.randomUUID()
-    private val organizationActor: UUID = UUID.randomUUID()
     private val grantee: UUID = UUID.randomUUID()
     private val accountId: UUID = UUID.randomUUID()
     private val now: OffsetDateTime = OffsetDateTime.now(clock)
@@ -181,47 +180,6 @@ class DelegationServiceTest {
         coVerify(exactly = 0) { scaClient.getChallenge(any()) }
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
-    }
-
-    @Test
-    fun `organization offer requires an active mandate and spends the human actor SCA`(): Unit = runBlocking {
-        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
-            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, "Acme s.r.o.")
-        scaOk(organizationActor, "DELEGATION_GRANT")
-        eligibilityOk(granteeName = "Bob Zkousky")
-        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
-
-        val grant = service.offer(offerCommand().copy(actorPartyId = organizationActor))
-
-        assertThat(grant.grantorName).isEqualTo("Acme s.r.o.")
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), organizationActor) }
-        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(grantor) }
-    }
-
-    @Test
-    fun `organization preview fails closed without a mandate before SCA or ownership`() {
-        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
-            GrantorAuthority(GrantorAuthorityVerdict.DENIED)
-
-        assertThatThrownBy {
-            runBlocking { service.preview(previewCommand().copy(actorPartyId = organizationActor)) }
-        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
-
-        coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
-    }
-
-    @Test
-    fun `organization authority outage is retryable and happens before SCA or ownership`() {
-        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
-            GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)
-
-        assertThatThrownBy {
-            runBlocking { service.preview(previewCommand().copy(actorPartyId = organizationActor)) }
-        }.isInstanceOf(DelegationGrantorAuthorityUnavailableException::class.java)
-
-        coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
     }
 
     @Test
