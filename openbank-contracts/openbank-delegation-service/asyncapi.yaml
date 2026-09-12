@@ -382,6 +382,18 @@ components:
           uniqueItems: true
           items:
             $ref: '#/components/schemas/capability'
+    approvalRequirement:
+      type: object
+      required: [approvalPolicy, requiredApprovals]
+      properties:
+        approvalPolicy:
+          type: string
+          enum: [SOLO, N_OF_M]
+          description: Policy that the consuming product must preserve exactly.
+        requiredApprovals:
+          type: integer
+          minimum: 1
+          description: Number of distinct approvals required by the policy.
 
     # The enforceable window and the ceiling. Present on the events that make a grant enforceable
     # — Offered, Activated, Reinstated — and on no other, because nothing else changes them.
@@ -526,6 +538,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/approvalRequirement'
           - $ref: '#/components/schemas/enforcement'
 
     DelegationActivated:
@@ -543,6 +556,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/approvalRequirement'
           - $ref: '#/components/schemas/enforcement'
 
     DelegationDeclined:
@@ -613,6 +627,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/approvalRequirement'
           - $ref: '#/components/schemas/enforcement'
 
     DelegationRenounced:
