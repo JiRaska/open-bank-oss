@@ -1,3 +1,14 @@
+/**
+ * The evidence window this page asks audit-service for.
+ *
+ * audit-service clamps the query parameter itself — `AuditResource.getAuditTrail` answers
+ * `repo.findByAggregateId(aggregateId, limit.coerceIn(1, 500))` — so 500 is the largest trail a
+ * single request can return, and asking for more silently yields the same 500 rows. The UI must
+ * therefore disclose this bound rather than imply a complete trail: a response holding exactly
+ * this many entries is a FULL window, which means older events may exist and are not shown.
+ */
+export const AUDIT_EVIDENCE_WINDOW = 500
+
 export type AuditEvidence = {
   id: string
   aggregateId: string
