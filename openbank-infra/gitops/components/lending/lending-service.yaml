@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "480fe4bdcb9c2cda"
+        openbank.tech/policy-checksum: "7f5499f2f8a5dfd2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: lending-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-1cff9564
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-8db73dbb
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
