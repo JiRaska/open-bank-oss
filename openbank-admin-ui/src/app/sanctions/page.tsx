@@ -294,13 +294,11 @@ export default function SanctionsPage() {
       setLists(nextLists)
       // Reconciliation may reveal that an ambiguous PUT actually disabled a list. Remove only
       // types that are no longer enabled; never add back a list the operator deliberately omitted.
-      setSelectedListTypes(current => {
-        if (!listScopeInitialisedRef.current) {
-          listScopeInitialisedRef.current = true
-          return nextLists.filter(list => list.enabled).map(list => list.listType)
-        }
-        return retainEnabledSelectedListTypes(current, nextLists)
-      })
+      const firstLoad = !listScopeInitialisedRef.current
+      listScopeInitialisedRef.current = true
+      setSelectedListTypes(current => (firstLoad
+        ? nextLists.filter(list => list.enabled).map(list => list.listType)
+        : retainEnabledSelectedListTypes(current, nextLists)))
     } catch (error) {
       setListsError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
     }
