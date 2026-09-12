@@ -40,9 +40,33 @@ on:
     # the `CodeQL` SARIF upload across the open PRs with
     # `API rate limit exceeded for installation`.
     #
-    # `labeled` stays: a label is how a human re-opens the question for a PR this job already
-    # declined, and it fires rarely enough not to be part of the cost.
-    types: [opened, reopened, labeled]
+    # NOT `labeled` either, and the reason it was kept did not survive measurement. The comment
+    # here used to read "a label is how a human re-opens the question for a PR this job already
+    # declined, and it fires rarely enough not to be part of the cost." Both halves were wrong.
+    #
+    # Measured 2026-09-12 over 600 completed `pull_request` runs (07:25:42Z..10:10:22Z, 2.74 h):
+    # this workflow ran 38 times on 20 branches, 34 skipped and the other 4 cancelled — zero
+    # useful executions, and not one of those branches was a Dependabot branch. Eight branches
+    # fired it more than once; the worst fired FIVE times.
+    #
+    # Those repeats are not rare human labelling. `openbank-gitops-bot` applies the PR's labels
+    # when it opens a deploy PR, and applies each one twice:
+    #
+    #     08:15:10  labeled  chore   by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  gitops  by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  chore   by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  gitops  by openbank-gitops-bot[bot]
+    #
+    # One `opened` plus four `labeled` is exactly the five runs measured — so `labeled` costs four
+    # queued runs per bot deploy PR and buys nothing. Dependabot's own labels (`dependencies`,
+    # plus the ecosystem) are applied at creation too, so `labeled` there is redundant with
+    # `opened` rather than additional to it.
+    #
+    # What the removal costs: re-labelling a PR this job declined no longer re-asks it. `reopened`
+    # still does, and a maintainer can re-run the workflow. That is a smaller affordance than four
+    # wasted runs per deploy PR, and unlike the claim it replaces it is not asserted — nothing in
+    # the window shows `labeled` ever doing work.
+    types: [opened, reopened]
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the auto-merge job below declares its own override for the write access it needs.
