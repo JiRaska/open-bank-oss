@@ -25,6 +25,7 @@ import java.util.UUID
  *
  * - PARTY_CREATED → open a PENDING_ACTIVATION account (P1 contract)
  * - PARTY_UPDATED / KYC_STATUS_CHANGED → reconcile account status via `status` field (P2 extension)
+ * - PARTY_MANDATE_GRANTED / PARTY_MANDATE_REVOKED → open and close representative authority
  *
  * party-service verifies all three via `PartyEventPactProviderVerificationTest`
  * (`@PactBroker` — CI-only, publishes/consumes results against the broker; skips locally
@@ -124,5 +125,61 @@ class PartyCreatedMessagePactConsumerTest {
         assertThat(node.path("eventType").asText()).isEqualTo("KYC_STATUS_CHANGED")
         assertThat(UUID.fromString(node.path("partyId").asText())).isNotNull()
         assertThat(node.path("status").asText()).isNotBlank()
+    }
+
+    @Pact(consumer = "openbank-account-service", provider = "openbank-party-service")
+    fun partyMandateGrantedPact(builder: MessagePactBuilder): MessagePact = builder
+        .given("a sole party mandate has been granted")
+        .expectsToReceive("a PARTY_MANDATE_GRANTED event")
+        .withContent(
+            newJsonBody { o ->
+                o.stringValue("eventType", "PARTY_MANDATE_GRANTED")
+                o.uuid("partyId")
+                o.uuid("mandateId")
+                o.uuid("agentPartyId")
+                o.stringValue("authority", "SOLE")
+                o.integerType("requiredSignatures", 1)
+                o.stringValue("status", "ACTIVE")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "partyMandateGrantedPact")
+    fun `the mandate grant carries every field the authority projection needs`(messages: List<Message>) {
+        val node = ObjectMapper().readTree(messages.first().contentsAsBytes())
+
+        assertThat(node.path("eventType").asText()).isEqualTo("PARTY_MANDATE_GRANTED")
+        assertThat(UUID.fromString(node.path("partyId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("mandateId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("agentPartyId").asText())).isNotNull()
+        assertThat(node.path("authority").asText()).isEqualTo("SOLE")
+        assertThat(node.path("requiredSignatures").asInt()).isEqualTo(1)
+        assertThat(node.path("status").asText()).isEqualTo("ACTIVE")
+    }
+
+    @Pact(consumer = "openbank-account-service", provider = "openbank-party-service")
+    fun partyMandateRevokedPact(builder: MessagePactBuilder): MessagePact = builder
+        .given("a party mandate has been revoked")
+        .expectsToReceive("a PARTY_MANDATE_REVOKED event")
+        .withContent(
+            newJsonBody { o ->
+                o.stringValue("eventType", "PARTY_MANDATE_REVOKED")
+                o.uuid("partyId")
+                o.uuid("mandateId")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "partyMandateRevokedPact")
+    fun `the mandate revocation carries the key that closes representative authority`(messages: List<Message>) {
+        val node = ObjectMapper().readTree(messages.first().contentsAsBytes())
+
+        // This negative authorization fact is the asynchronous equivalent of a 403 boundary:
+        // after it is consumed, the representative must not retain authority.
+        assertThat(node.path("eventType").asText()).isEqualTo("PARTY_MANDATE_REVOKED")
+        assertThat(UUID.fromString(node.path("partyId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("mandateId").asText())).isNotNull()
     }
 }
