@@ -19,7 +19,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "8ebcd1d6472d238d"
+        openbank.tech/policy-checksum: "a21008b0c1d79683"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication
@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: communication-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-000000000
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-ba40ec5c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
