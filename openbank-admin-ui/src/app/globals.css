@@ -32,9 +32,18 @@
   /* ── Text ── */
   --text-primary:         #0f172a;
   --text-secondary:       #475569;
-  /* Used for labels, metadata and empty-state guidance across the operator console. #64748b
-     keeps a clear hierarchy while meeting AA on both white (4.76:1) and surface-2 (4.55:1). */
-  --text-tertiary:        #64748b;
+  /* Used for labels, metadata and empty-state guidance across the operator console.
+     #64748b was chosen against white (4.76:1) and surface-2 (4.55:1) — the two LIGHTEST
+     backgrounds in the palette, and the only two it was ever measured on. It fails AA on
+     five others (#9749):
+         surface-4  3.86:1    surface-3  4.34:1    accent-bg 4.26:1
+         danger-bg  4.35:1    info-bg    4.37:1
+     #586779 is the lightest value that clears 4.5:1 on EVERY light-theme background,
+     worst case surface-4 at 4.69:1, and it stays lighter than --text-secondary so the
+     three-step hierarchy is unchanged. Dark theme has its own value below and is
+     unaffected. Any future change here must be measured against the DARKEST surface,
+     not the brightest. */
+  --text-tertiary:        #586779;
   --text-muted:           var(--text-tertiary);
 
   /* ── Shorthand semantic aliases ── */

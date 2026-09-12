@@ -26,8 +26,7 @@ import { ConfirmTransitionDialog } from '@/components/cards/ConfirmTransitionDia
 import { CardOperationFeedback } from '@/components/cards/CardOperationFeedback'
 import { IssueCardDialog } from '@/components/cards/IssueCardDialog'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { StatCard } from '@/components/ui/StatCard'
+import { LoadMoreControl, PageHeader, StatCard } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 
 // Admin-UI rule #2: page the render. `GET /api/v1/cards` is an unpaginated
@@ -288,16 +287,16 @@ export default function CardsPage() {
                   })}
                 </tbody>
               </table>
-              <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
-                  {t(`Zobrazeno ${page.length} z ${filtered.length}`, `Showing ${page.length} of ${filtered.length}`)}
-                </span>
-                {page.length < filtered.length && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisible(v => v + PAGE_SIZE)} aria-label={t('Načíst další karty', 'Load more cards')}>
-                    {t('Načíst další', 'Load more')}
-                  </button>
-                )}
-              </div>
+              <LoadMoreControl
+                loaded={page.length}
+                total={filtered.length}
+                progressLabel={t(`Zobrazeno ${page.length} z ${filtered.length} karet`, `Showing ${page.length} of ${filtered.length} cards`)}
+                buttonLabel={t(`Načíst dalších ${Math.min(PAGE_SIZE, filtered.length - page.length)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - page.length)} more`)}
+                buttonAriaLabel={t('Načíst další karty', 'Load more cards')}
+                controls="cards-results"
+                onLoadMore={() => setVisible(v => v + PAGE_SIZE)}
+                announceProgress={false}
+              />
             </>
           )}
           </section>
