@@ -6,9 +6,9 @@ package com.openbank.wealth.application.port.out
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
-import io.smallrye.mutiny.Uni
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingType
+import io.smallrye.mutiny.Uni
 import java.util.UUID
 
 /** Raised when a command names a holding that does not exist. Mapped to 404. */

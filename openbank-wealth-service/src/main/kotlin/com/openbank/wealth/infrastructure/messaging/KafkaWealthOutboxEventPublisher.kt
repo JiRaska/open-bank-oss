@@ -16,9 +16,8 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 
 @ApplicationScoped
-class KafkaWealthOutboxEventPublisher(
-    @Channel("wealth-events-out") private val emitter: MutinyEmitter<String>,
-) : OutboxEventPublisher {
+class KafkaWealthOutboxEventPublisher(@Channel("wealth-events-out") private val emitter: MutinyEmitter<String>) :
+    OutboxEventPublisher {
 
     /**
      * The whole [OutboxEntry] decides the record, not just its payload: the partition key is the

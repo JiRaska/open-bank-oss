@@ -27,7 +27,8 @@ class DeclaredHoldingRepositoryImpl(
     private val outbox: WealthOutboxRepository,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
-) : DeclaredHoldingRepository, PanacheRepository<DeclaredHoldingEntity> {
+) : DeclaredHoldingRepository,
+    PanacheRepository<DeclaredHoldingEntity> {
 
     /**
      * Row + outbox entry in ONE transaction — the event is evidence of the state, so they commit

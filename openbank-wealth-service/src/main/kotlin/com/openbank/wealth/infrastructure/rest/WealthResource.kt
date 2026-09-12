@@ -108,8 +108,7 @@ class WealthResource {
     @Path("/{id}")
     @Operation(summary = "Withdraw a holding; refused while pledged as lending collateral")
     @Authorize(action = "wealth.holding.withdraw", resource = "#id")
-    suspend fun withdraw(@PathParam("id") id: UUID): HoldingResponse =
-        HoldingResponse.from(holdings.withdraw(id))
+    suspend fun withdraw(@PathParam("id") id: UUID): HoldingResponse = HoldingResponse.from(holdings.withdraw(id))
 }
 
 private fun ValuationDto.toDomain() = Valuation(

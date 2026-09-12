@@ -104,6 +104,5 @@ class DeclaredHoldingService(
 
     override suspend fun findById(holdingId: UUID): DeclaredHolding? = repository.findById(holdingId)
 
-    override suspend fun listForParty(ownerPartyId: UUID): List<DeclaredHolding> =
-        repository.listForParty(ownerPartyId)
+    override suspend fun listForParty(ownerPartyId: UUID): List<DeclaredHolding> = repository.listForParty(ownerPartyId)
 }
