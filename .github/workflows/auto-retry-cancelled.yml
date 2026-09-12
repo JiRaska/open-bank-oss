@@ -187,14 +187,46 @@ jobs:
       - name: Fetch the decision script (sparse, default branch)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
-          # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
-          # is a hand-kept list of what the script needs — the failure mode CLAUDE.md warns
-          # about for any gate whose scope is maintained separately from its subject.
+          # ALL THREE files: spot-kill-retry.sh `source`s gh-retry.sh, which READS
+          # gh-transient-patterns.txt. The comment here used to say "BOTH files" and warn, in so
+          # many words, that a sparse checkout is a hand-kept list of what the script needs —
+          # "the failure mode CLAUDE.md warns about for any gate whose scope is maintained
+          # separately from its subject". It then missed the third file, and the job failed
+          # exactly as predicted (#7976):
+          #
+          #   gh_retry: cannot read the transient-pattern vocabulary at
+          #   '.github/scripts/gh-transient-patterns.txt'. Refusing to classify
+          #
+          # Refusing was right — with no patterns loaded, every failure would classify as final.
+          # The step below asserts the list is complete, so the next missing dependency fails at
+          # checkout time with a name, instead of inside a control that then declines to act.
           sparse-checkout: |
             .github/scripts/spot-kill-retry.sh
             .github/scripts/gh-retry.sh
+            .github/scripts/gh-transient-patterns.txt
           sparse-checkout-cone-mode: false
+
+      - name: Assert the sparse checkout is complete
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in .github/scripts/spot-kill-retry.sh \
+                   .github/scripts/gh-retry.sh \
+                   .github/scripts/gh-transient-patterns.txt; do
+            [ -r "$f" ] || { echo "::error::sparse checkout is missing $f"; missing=1; }
+          done
+          # Not just present — non-empty in both sections, because an empty vocabulary makes
+          # gh-retry.sh refuse to classify just as surely as a missing file does.
+          for section in rate_limit transient; do
+            n=$(awk -v s="[$section]" '
+              $0==s {inside=1; next}
+              /^\[/ {inside=0}
+              inside && $0 !~ /^#/ && NF {c++}
+              END {print c+0}' .github/scripts/gh-transient-patterns.txt)
+            [ "$n" -gt 0 ] || { echo "::error::gh-transient-patterns.txt has an empty [$section] section"; missing=1; }
+            echo "[$section] patterns: $n"
+          done
+          [ "$missing" -eq 0 ]
           persist-credentials: false
 
       - name: Re-run only if the runner was reclaimed
