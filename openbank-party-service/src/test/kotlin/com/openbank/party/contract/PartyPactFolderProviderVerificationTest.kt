@@ -163,6 +163,41 @@ class PartyPactFolderProviderVerificationTest {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
+    @State("no party exists for the KYB mandate principal")
+    fun noPartyForKybMandatePrincipal() {
+        // The pact uses a dedicated principal id no positive state inserts.
+    }
+
+    @State("an active company and natural person exist for a joint KYB mandate")
+    fun partiesExistForJointKybMandate() = runOnVertxContext {
+        seedMandateParty(KYB_MANDATE_PRINCIPAL_ID, PartyType.COMPANY, "Pact Joint Company a.s.")
+        seedMandateParty(KYB_MANDATE_AGENT_ID, PartyType.INDIVIDUAL, "Pact Joint Signatory")
+    }
+
+    private suspend fun seedMandateParty(id: UUID, type: PartyType, name: String) {
+        if (partyRepository.findById(id) != null) return
+        partyRepository.save(
+            Party(
+                id = id,
+                partyType = type,
+                status = PartyStatus.ACTIVE,
+                legalName = name,
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "$id@pact.openbank.invalid",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.CLEARED,
+            ),
+        )
+    }
+
     @State("a party has been created")
     fun partyHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
@@ -315,5 +350,7 @@ class PartyPactFolderProviderVerificationTest {
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+        private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
+        private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
     }
 }
