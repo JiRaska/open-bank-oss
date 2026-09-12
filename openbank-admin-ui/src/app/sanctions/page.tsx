@@ -1004,7 +1004,14 @@ export default function SanctionsPage() {
                                 {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
                                 {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                              {/*
+                                --text-tertiary on the CHECKED row's --accent-bg is 4.25:1 at 10px,
+                                and WCAG AA wants 4.5:1. It was unreachable while the scope failed
+                                to seed and nothing was ever checked; fixing the seeding made the
+                                checked background real and the violation with it. --text-secondary
+                                on the same background clears AA.
+                              */}
+                              <div style={{ fontSize: '10px', color: checked ? 'var(--text-secondary)' : 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
                                 {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString(numberLocale)} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
                               </div>
                             </div>
