@@ -458,7 +458,8 @@
       ],
       "realmRoles": [
         "ROLE_COMPLIANCE",
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_COMMS_EDITOR"
       ]
     },
     {
@@ -477,7 +478,8 @@
       ],
       "realmRoles": [
         "ROLE_COMPLIANCE",
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_COMMS_APPROVER"
       ]
     },
     {
