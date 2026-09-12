@@ -67,6 +67,7 @@ import {
   Waypoints,
   Workflow,
   Zap,
+  Building2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -105,6 +106,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
   { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
+  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
 ]
 

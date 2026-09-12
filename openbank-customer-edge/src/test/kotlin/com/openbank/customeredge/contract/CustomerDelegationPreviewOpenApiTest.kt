@@ -27,4 +27,15 @@ class CustomerDelegationPreviewOpenApiTest {
             "'403': {description: grantorPartyId does not match the authenticated customer}",
         )
     }
+
+    @Test
+    fun `customer contract exposes portfolio management without caller supplied ownership`() {
+        assertThat(contract).contains("/delegations/portfolios:")
+        assertThat(contract).contains("Create a named account portfolio for the active profile")
+        assertThat(normalized).contains("ownerPartyId is derived from the authenticated profile")
+        assertThat(normalized).contains("not payment or co-signing authority")
+        assertThat(normalized).contains("name: Idempotency-Key in: header required: true")
+        assertThat(normalized).contains("'403': {description: Caller attempted to provide ownerPartyId")
+        assertThat(normalized).contains("'404': {description: Portfolio does not exist or is not owned")
+    }
 }

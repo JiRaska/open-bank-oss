@@ -12,7 +12,14 @@ info:
   # this took the next minor.
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
-  version: 1.57.0
+  #
+  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
+  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
+  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
+  # (1.57.0) in the same turn as this edit and confirmed free with
+  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
+  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
+  version: 1.58.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3768,6 +3775,74 @@ paths:
                     sourceService: {type: string}
                     occurredAt: {type: string, format: date-time}
 
+  /delegations/portfolios:
+    get:
+      tags: [Delegation]
+      summary: List named account portfolios for the active profile
+      description: >-
+        The active profile is derived from the customer token, or from a verified business mandate
+        selected with X-Acting-For. A portfolio is a reusable account scope for a later delegation
+        journey; it is not payment or co-signing authority.
+      operationId: listDelegationPortfolios
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Portfolios owned by the active profile
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/DelegationPortfolio'}}
+        '403': {description: Selected business profile is not an active mandate of the customer}
+    post:
+      tags: [Delegation]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        ownerPartyId is derived from the authenticated profile and is therefore deliberately absent
+        from the request. Supplying it is refused. This creates no delegation grant and no payment
+        or co-signing authority.
+      operationId: createDelegationPortfolio
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateDelegationPortfolio'}
+      responses:
+        '201':
+          description: Portfolio created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationPortfolio'}
+        '400': {description: Missing idempotency key, name, or account scope}
+        '403': {description: Caller attempted to provide ownerPartyId, or selected profile is not an active mandate}
+        '422': {description: An account is not owned by the active profile}
+        '503': {description: Authoritative account ownership cannot currently be established; safe to retry}
+
+  /delegations/portfolios/{id}:
+    get:
+      tags: [Delegation]
+      summary: Read one portfolio owned by the active profile
+      description: A guessed or other profile's identifier returns 404 and reveals no existence oracle.
+      operationId: getDelegationPortfolio
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationPortfolio'}
+        '403': {description: Selected business profile is not an active mandate}
+        '404': {description: Portfolio does not exist or is not owned by the active profile}
+
   /delegations/{id}:
     get:
       tags: [Delegation]
@@ -3853,6 +3928,32 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    CreateDelegationPortfolio:
+      type: object
+      required: [name, accountIds]
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: {type: string, format: uuid}
+    DelegationPortfolio:
+      type: object
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        ownerPartyId: {type: string, format: uuid, description: Derived active profile, never a caller supplied create field}
+        name: {type: string}
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
