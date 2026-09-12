@@ -14,33 +14,19 @@
 # fix and PR #963 — re-bumped to the first post-#963 build). Confirmed live before removal:
 # `cosign verify-attestation --key <the policy's public key> --type cyclonedx
 # <the new pinned digest>` succeeds against openbank-ci-runner's actual current image.
+# The 2026-09-12 entries (sbom-attestation + slsa-provenance) added by #9803 are REMOVED:
+# their cause is gone. #9793 made runner-image.yml attest SLSA provenance through the shared
+# cosign-attest.sh, run 34693338577 produced sha256:9f227805... carrying all three
+# predicates, and #9815 pinned it.
 #
-# ── TEMPORARY, 2026-09-12 (#9793) — REMOVE once the rebuilt runner image is pinned ──────
-# This is the July incident again, one predicate over. #8847 (2026-09-05 18:57) added
-# verify-openbank-image-slsa-provenance scoped to `openbank-*`, which matches
-# openbank-ci-runner, and runner-image.yml never attested SLSA at all — it hand-rolled
-# cosign instead of sourcing cosign-attest.sh, so it only ever produced a CycloneDX SBOM.
-# Kyverno then reports `unverified image` on verify-openbank-image-sbom-attestation
-# (Enforce) as well, while logging the missing SLSA predicate as the only error — so the
-# blocking policy is not the failing one. Measured 2026-09-12: the CycloneDX attestation
-# on the pinned digest verifies fine on its own
-# (`cosign verify-attestation --key <policy PEM> --type cyclonedx` passes), and the control
-# image openbank-ledger-service carries cyclonedx AND slsaprovenance while
-# openbank-ci-runner carried cyclonedx only.
+# Confirmed before removal in ns/default, where this exception does NOT apply, so the answer
+# is about the IMAGE and not about the exception. Eight probes each, because admission is
+# nondeterministic for an unverifiable image (#9805 item 4) and one ADMITTED proves nothing:
+#   NEW sha256:9f227805...  ADMITTED 8/8   <- passes all three policies on its own merits
+#   OLD sha256:45c0408d...  ADMITTED 4/8   <- still not passing; the 4 are the fail-open
 #
-# Same deadlock as July: runner-image.yml has `runs-on: openbank-deploy`, so the only
-# workflow that can produce a fixed image needs a runner the policy denies. 865 denials
-# in 24 h; the pools ran at all only because these policies set failurePolicy: Ignore, so
-# a webhook timeout admitted the occasional Pod.
-#
-# REMOVAL CRITERIA — all three, then delete both entries below in one PR:
-#   1. #9793 merged (runner-image.yml calls cosign_sign_and_attest; no continue-on-error).
-#   2. runner-image.yml re-run, and its "Verify signature + both attestations actually
-#      landed" step green for the NEW digest — that step now checks all three predicates.
-#   3. The new digest pinned in arc-runners.tf and platform-tofu.yml applied, confirmed by
-#      a server-side dry-run Pod create in arc-runners being ADMITTED for the new digest
-#      while the OLD digest is still denied in the same session (control).
-# July's equivalent removal was #1053. Do not let this one outlive its cause.
+# July's equivalent removal was #1053. Same dance, one predicate over; #9805 is the
+# follow-up meant to prevent a third round.
 apiVersion: kyverno.io/v2
 kind: PolicyException
 metadata:
@@ -49,25 +35,13 @@ metadata:
 spec:
   match:
     any:
-      - resources:
-          kinds:
-            - Pod
-          namespaces:
-            - arc-runners
+    - resources:
+        kinds:
+        - Pod
+        namespaces:
+        - arc-runners
   exceptions:
-    - policyName: verify-openbank-image-signatures
-      ruleNames:
-        - verify-cosign-signature
-        - autogen-verify-cosign-signature
-    # TEMPORARY (see the 2026-09-12 block above) — remove with the digest bump.
-    - policyName: verify-openbank-image-sbom-attestation
-      ruleNames:
-        - verify-cyclonedx-sbom-attestation
-        - autogen-verify-cyclonedx-sbom-attestation
-    # TEMPORARY (see the 2026-09-12 block above) — remove with the digest bump.
-    # Audit-only, but its failure is what makes the Enforce policy above report
-    # `unverified image`, so excepting only the Enforce one would not admit the Pod.
-    - policyName: verify-openbank-image-slsa-provenance
-      ruleNames:
-        - verify-slsa-provenance
-        - autogen-verify-slsa-provenance
+  - policyName: verify-openbank-image-signatures
+    ruleNames:
+    - verify-cosign-signature
+    - autogen-verify-cosign-signature
