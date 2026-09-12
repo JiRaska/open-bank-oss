@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "70cc5843d416b819"
+    openbank.tech/policy-checksum: "f15e5533c348ad5f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1617,6 +1617,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

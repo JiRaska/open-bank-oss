@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "6cb72e4d68e6f4b2"
+    openbank.tech/policy-checksum: "d6ba5c872d300876"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1746,6 +1746,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
