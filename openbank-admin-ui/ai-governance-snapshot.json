@@ -377,6 +377,13 @@
           "buildFile": "openbank-control-liveness-sentinel/build.gradle.kts"
         },
         {
+          "module": "openbank-copilot-service",
+          "charters": [
+            "customer-copilot"
+          ],
+          "buildFile": "openbank-copilot-service/build.gradle.kts"
+        },
+        {
           "module": "openbank-devops-agent",
           "charters": [
             "devops-agent"
@@ -419,12 +426,13 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 10,
+      "serviceCount": 11,
       "registeredChartersLoadedFromRegistry": [
         "authz-policy-auditor",
         "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",
+        "customer-copilot",
         "devops-agent",
         "docs-truth-agent",
         "finops-agent",
@@ -433,9 +441,7 @@
         "release-steward",
         "ui-assistant"
       ],
-      "registeredChartersStillInline": [
-        "customer-copilot"
-      ]
+      "registeredChartersStillInline": []
     },
     "governanceDefaults": {
       "enforcement": "block",
