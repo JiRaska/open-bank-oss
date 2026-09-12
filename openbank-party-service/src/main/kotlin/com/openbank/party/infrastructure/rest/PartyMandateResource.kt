@@ -52,12 +52,21 @@ class PartyMandateResource {
     @Operation(summary = "Grant (or refresh) a representation mandate: agent may act for the entity party {id}")
     suspend fun grant(@PathParam("id") id: UUID, req: GrantMandateRequest?): Response {
         requireNotNull(req) { "request body is required" }
+        val authority = (req.authority ?: "SOLE").toEnum<MandateAuthority>("authority")
+        val requiredSignatures = req.requiredSignatures ?: when (authority) {
+            MandateAuthority.SOLE -> 1
+            MandateAuthority.JOINT ->
+                throw IllegalArgumentException(
+                    "requiredSignatures is required for JOINT authority",
+                )
+        }
         val mandate = partyUseCase.grantMandate(
             GrantMandateCommand(
                 principalPartyId = id,
                 agentPartyId = requireNotNull(req.agentPartyId) { "agentPartyId is required" },
                 role = req.role.toEnum<MandateRole>("role"),
-                authority = (req.authority ?: "SOLE").toEnum<MandateAuthority>("authority"),
+                authority = authority,
+                requiredSignatures = requiredSignatures,
                 source = (req.source ?: "MANUAL").toEnum<MandateSource>("source"),
                 evidenceRef = req.evidenceRef,
                 validTo = req.validTo,
@@ -128,6 +137,7 @@ data class GrantMandateRequest(
     val agentPartyId: UUID?,
     val role: String?,
     val authority: String? = null,
+    val requiredSignatures: Int? = null,
     val source: String? = null,
     val evidenceRef: String? = null,
     val validTo: Instant? = null,
@@ -141,6 +151,7 @@ fun PartyMandate.toResponse() = mapOf(
     "agentPartyId" to agentPartyId,
     "role" to role,
     "authority" to authority,
+    "requiredSignatures" to requiredSignatures,
     "source" to source,
     "status" to status,
     "evidenceRef" to evidenceRef,

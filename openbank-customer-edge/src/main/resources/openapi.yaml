@@ -11,7 +11,8 @@ info:
   # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
   # this took the next minor.
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
-  version: 1.56.0
+  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
+  version: 1.57.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3486,6 +3487,42 @@ paths:
           schema: { type: string }
       responses:
         '200': {description: Schemes}
+
+  /business/search:
+    get:
+      tags: [Business]
+      summary: Find a company by NAME and town — the entry screen for a founder who does not know their IČO
+      description: |
+        Read-only over a public register; creates nothing. A hit carries the identifier, which still
+        goes through `/business/lookup` and the ordinary extract confirmation before any case is
+        bound — picking the wrong identically-named company is otherwise silent.
+
+        `tooManyMatches` is a third outcome next to hits and no-hits, and it is the common one for a
+        short term: the register refuses a query above its match cap and the customer is told to add
+        a town or more of the name. It is not an outage and is answered 200.
+      operationId: searchBusiness
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 2 }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 100 }
+        - name: city
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': {description: Pickable rows, possibly empty, or a tooManyMatches marker}
+        '400': {description: Missing or malformed parameter}
+        '404': {description: The country's register cannot be searched by name}
+        '503': {description: Register unavailable}
 
   /business/lookup:
     post:
