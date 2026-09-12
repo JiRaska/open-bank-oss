@@ -296,7 +296,7 @@ done
 # is deterministic, so a clean tree => no diff.
 if [[ -x "$ADR_DIR/gen-index.sh" || -f "$ADR_DIR/gen-index.sh" ]]; then
   bash "$ADR_DIR/gen-index.sh" >/dev/null
-  for derived in README.md DIGEST.md index.json; do
+  for derived in README.md DIGEST.md CURRENT.md index.json; do
     if ! git diff --quiet -- "$ADR_DIR/$derived" 2>/dev/null; then
       err "docs/adr/$derived is stale — run 'bash $ADR_DIR/gen-index.sh' and commit the result."
       echo "----- $derived drift (committed vs regenerated) -----" >&2

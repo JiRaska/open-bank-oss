@@ -13,6 +13,7 @@ import {
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
+  BarChart3,
   Bell,
   Bluetooth,
   BookOpen,
@@ -41,6 +42,7 @@ import {
   Map,
   Megaphone,
   MessageSquareWarning,
+  MessagesSquare,
   Network,
   Package,
   PiggyBank,
@@ -112,7 +114,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view' },
   { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view' },
   { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view' },
-  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },
+  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view' },
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view' },
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
@@ -136,11 +138,17 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
+  // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
+  { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]
 
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
+  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Filed under Ops beside
+  // Notifications (what we send) rather than under the agent cockpit: the audience is the
+  // contact centre and back-office, not agent operators.
+  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]

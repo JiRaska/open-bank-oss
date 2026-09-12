@@ -35,7 +35,13 @@ ADR-0029):
    from the OpenAPI diff (`oasdiff`), never forced equal to the release version.
 4. **DB change ⇒ Flyway migration + rollback note. Event change ⇒ schema versioned backward-compatibly.**
    **Config change ⇒ no duplicate YAML keys** in `application.yaml` — SmallRye/SnakeYAML keep only the
-   *last* of a repeated mapping key and silently drop the rest (CI enforces this).
+   *last* of a repeated mapping key and silently drop the rest (CI enforces this). The same trap
+   reaches `.github/gates/gates.yaml` and every YAML a gate parses with `yaml.safe_load`, and there
+   it is worse: **a guard that READS a document cannot be the thing that notices the document is
+   malformed.** Two PRs added `budget_seconds` to the same five gates within an hour on 2026-09-05;
+   `gate-observability-declarations` read the duplicate, saw a budget, called it declared and passed,
+   while `yamllint` reddened `main` for the whole queue. `check-duplicate-yaml-keys.sh` now covers
+   that path too.
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
@@ -58,6 +64,11 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+
+Autonomous work is WIP-limited across every prefix in
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
+opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
+reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
 
 ## Build
 
@@ -754,7 +765,7 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
 
 ### ADR registry
 - **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
-  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  failing check restores the four derived files (`README.md`, `DIGEST.md`, `CURRENT.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
   then disagrees with what you committed, failing the gate on content you never wrote (#3983).
   **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
@@ -881,14 +892,16 @@ repo is the single source of truth.
   - **Reading them: start at `docs/adr/DIGEST.md`, not at the ADRs.** It is the whole
     decision history as one line per ADR (~16k tokens vs ~400k for the fleet). Read it,
     then open only the ADRs it points you at. Grepping the fleet finds whichever ADR
-    matched a keyword, not the one that decided the thing.
+    matched a keyword, not the one that decided the thing. `docs/adr/CURRENT.md` is the
+    same lines with superseded/rejected ADRs dropped and the rest grouped by domain tag —
+    read it for what the rules ARE, the digest for how they got that way.
   - **Writing one: `docs/adr/new.sh "Title"`.** Never hand-copy an existing ADR — the
     header is a validated YAML front-matter block (`docs/adr/SCHEMA.md`), with closed
     enums and a closed tag vocabulary (`docs/adr/tags.txt`), and `new.sh` also allocates
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
-    `README.md`, `DIGEST.md` and `index.json` are DERIVED — never hand-edit them.
+    `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in
   `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching

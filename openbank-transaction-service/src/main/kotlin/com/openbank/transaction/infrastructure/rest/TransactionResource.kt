@@ -20,7 +20,9 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
+import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
 import jakarta.annotation.security.RolesAllowed
@@ -59,6 +61,7 @@ class TransactionResource(
     private val transactionUseCase: TransactionUseCase,
     private val transactionRepository: PanacheTransactionRepository,
     private val merchantCatalog: MerchantCatalogRepository,
+    private val merchantLocations: MerchantLocationRepository,
 ) {
 
     @GET
@@ -78,7 +81,11 @@ class TransactionResource(
         // display-only: `description` is passed through untouched, because disputes and SPAYD are
         // built from the raw acquirer descriptor and must not inherit a prettified name.
         val merchants = merchantCatalog.findByDescriptors(page.data.map { it.description })
-        return Response.ok(page.toResponse(merchants)).build()
+        // A second bounded read, for the same reason as the first: a chain's coordinates depend on
+        // WHICH town the descriptor named, and the catalogue row cannot know that. Keyed by the pair,
+        // one query per page.
+        val locations = merchantLocations.findByKeys(locationKeys(page.data.map { it.description }))
+        return Response.ok(page.toResponse(merchants, locations)).build()
     }
 
     @GET
@@ -111,8 +118,8 @@ class TransactionResource(
                 referenceNumber = referenceNumber,
                 endToEndId = endToEndId,
                 counterpartyName = counterparty,
-                status = status?.let { runCatching { TransactionStatus.valueOf(it) }.getOrNull() },
-                type = type?.let { runCatching { TransactionType.valueOf(it) }.getOrNull() },
+                status = parseEnumParam<TransactionStatus>("status", status),
+                type = parseEnumParam<TransactionType>("type", type),
                 dateFrom = dateFrom?.let { LocalDate.parse(it) },
                 dateTo = dateTo?.let { LocalDate.parse(it) },
                 amountMin = amountMin,
@@ -166,8 +173,8 @@ class TransactionResource(
             initiatedByPartyId = request.initiatedByPartyId,
             scaChallengeId = request.scaChallengeId,
             scaExemption = request.scaExemption,
-            rail = request.rail?.let { runCatching { PaymentRail.valueOf(it) }.getOrNull() },
-            instructionType = request.instructionType?.let { runCatching { InstructionType.valueOf(it) }.getOrNull() },
+            rail = parseEnumParam<PaymentRail>("rail", request.rail),
+            instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))
@@ -349,6 +356,13 @@ data class TransactionResponse(
  * and a head-office pin on a "where you spent" map would be fiction. [source] is always `ENRICHED`
  * here; the field exists so a client never has to infer whether a name is the bank's or the
  * acquirer's.
+ *
+ * [logoUrl] is ORIGIN-RELATIVE and always points back at whichever host served this response. That
+ * is the whole design: the catalogue also records where a logo was obtained from, and putting THAT
+ * URL here instead would make every statement render fire a request at a third-party CDN carrying
+ * the customer's IP address and the merchant they paid — a spending profile leaving the bank
+ * through an `<img>` tag. The bytes are ingested once and served from this bank's own origin, so
+ * the field is a path and never an external link.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class MerchantResponse(
@@ -359,22 +373,80 @@ data class MerchantResponse(
     val source: String = "ENRICHED",
 )
 
-data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
+/**
+ * Where the merchant is — and how much that answer is worth.
+ *
+ * [precision] is `EXACT` only where the coordinates are about the place the money was spent: a
+ * single-site merchant, or a location resolved from the device that took the payment. For a chain
+ * it is `CITY`, because a brand has no single location and the seeded coordinates were a pin in
+ * Prague that put every Billa purchase in the country at one address. A client may caption the town
+ * for `CITY`; it must not drop a pin claiming a street.
+ */
+data class MerchantGeoResponse(
+    val lat: Double,
+    val lon: Double,
+    val city: String?,
+    val country: String?,
+    val precision: String,
+)
 
-private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
+/**
+ * How much of the content hash goes in the logo URL. A 64-bit prefix: the token only has to
+ * distinguish one merchant's successive logos from each other, and a full hash makes every
+ * statement row longer for nothing.
+ */
+private const val LOGO_VERSION_CHARS = 16
+
+/**
+ * @param location the merchant's row for the town THIS transaction's descriptor named, when there is
+ *   one. It wins over the catalogue's own coordinates, which for a chain are a representative pin
+ *   for the whole brand and cannot be about a particular purchase.
+ */
+private fun MerchantCatalogEntity.toResponse(location: MerchantLocationEntity? = null) = MerchantResponse(
     cleanName = cleanName,
-    logoUrl = logoUrl,
+    // Null when no logo has been ingested — absence stays absence, and a client renders whatever
+    // it renders today. The hash makes the URL change whenever the bytes do, which is what lets
+    // the logo route answer with a year-long immutable cache and still correct a wrong logo the
+    // moment it is replaced.
+    logoUrl = logoEtag?.let { "/api/v1/merchants/$descriptorKey/logo?size=64&v=${it.take(LOGO_VERSION_CHARS)}" },
     category = category,
     // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
     // half-populated row can never become a pin at latitude 0.
-    geo = if (lat != null && lon != null) {
-        MerchantGeoResponse(lat = lat!!, lon = lon!!, city = city, country = country)
-    } else {
-        null
+    geo = when {
+        location != null -> MerchantGeoResponse(
+            lat = location.lat,
+            lon = location.lon,
+            city = location.city,
+            country = location.country,
+            precision = location.geoPrecision,
+        )
+        lat != null && lon != null -> MerchantGeoResponse(
+            lat = lat!!,
+            lon = lon!!,
+            city = city,
+            country = country,
+            precision = geoPrecision,
+        )
+        else -> null
     },
 )
 
-private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) = TransactionResponse(
+/**
+ * The (merchant, town) pairs a page of descriptions can resolve to a location.
+ *
+ * Only descriptors that named a town produce a pair: with no town there is nothing to narrow to,
+ * and asking for `<merchant>|` would either miss or — worse — match a row someone had keyed on the
+ * empty string.
+ */
+private fun locationKeys(descriptions: List<String?>): Set<Pair<String, String>> =
+    descriptions.mapNotNull { MerchantDescriptor.parse(it) }
+        .mapNotNull { parsed -> parsed.cityToken?.let { parsed.key to it } }
+        .toSet()
+
+private fun Transaction.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
+) = TransactionResponse(
     id = id,
     referenceNumber = referenceNumber,
     type = type.name,
@@ -391,8 +463,32 @@ private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity>
     rail = rail?.name,
     instructionType = instructionType?.name,
     merchantCategory = merchantCategory,
-    merchant = MerchantDescriptor.normalise(description)?.let { merchants[it] }?.toResponse(),
+    merchant = MerchantDescriptor.parse(description)?.let { parsed ->
+        merchants[parsed.key]?.toResponse(
+            location = parsed.cityToken?.let { locations["${parsed.key}|$it"] },
+        )
+    },
 )
 
-private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
-    CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)
+private fun CursorPage<Transaction>.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    locations: Map<String, MerchantLocationEntity> = emptyMap(),
+) = CursorPage(data = data.map { it.toResponse(merchants, locations) }, pagination = pagination)
+
+/**
+ * Strict enum parsing for request inputs (issue #8699). The previous
+ * `runCatching { X.valueOf(it) }.getOrNull()` turned an unparseable value into a LEGAL null, and
+ * null then did two different wrong things: on the search filters it DROPPED the condition, so
+ * `?status=FAILDE` returned every transaction with a 200 (while a malformed date three lines
+ * below correctly 400s), and on the initiate path it persisted a money-path debit with
+ * `rail = null` under a 201. Absent and unparseable must stay distinguishable: absent stays null,
+ * unparseable is the caller's error — IllegalArgumentException, which libs-runtime maps to 400
+ * (#526: never a service-local mapper).
+ */
+private inline fun <reified E : Enum<E>> parseEnumParam(name: String, raw: String?): E? {
+    raw ?: return null
+    return enumValues<E>().firstOrNull { it.name == raw }
+        ?: throw IllegalArgumentException(
+            "'$name' has unknown value '$raw' (allowed: ${enumValues<E>().joinToString()})",
+        )
+}

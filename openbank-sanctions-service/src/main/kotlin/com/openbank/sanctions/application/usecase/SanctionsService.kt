@@ -46,7 +46,7 @@ class SanctionsService(
      * route the `aliases[i]` guard in [screen] already relies on.
      */
     private fun resolveTargetLists(cmd: ScreenEntityCommand): List<SanctionsListType> {
-        val requested = cmd.listTypes?.filterNot { it.isBlank() }.orEmpty()
+        val requested = cmd.listTypes?.filterNotNull()?.filterNot { it.isBlank() }.orEmpty()
         if (requested.isEmpty()) return SanctionsListType.entries
         val known = SanctionsListType.entries.joinToString(", ") { it.name }
         return requested.map { raw ->
@@ -112,6 +112,11 @@ class SanctionsService(
         // collection elements, so `[null]` reaches here despite the Kotlin element type.
         cmd.aliases.forEachIndexed { index, alias ->
             requireNotNull(alias) { "aliases[$index] must not be null" }
+        }
+        // Same defect class one field over, found by fleet fuzzing (run 34017868446):
+        // `{"listTypes": [null]}` NPE'd inside resolveTargetLists' isBlank and answered 500.
+        cmd.listTypes?.forEachIndexed { index, listType ->
+            requireNotNull(listType) { "listTypes[$index] must not be null" }
         }
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val targetLists = resolveTargetLists(cmd)

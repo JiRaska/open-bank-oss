@@ -3,7 +3,16 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.53.0
+  # 1.53.1 -> 1.54.0 (#9044): additive — optional termsVersionShown on OpenTermDepositRequest
+  # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
+  # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
+  # on POST /term-deposits.
+  # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
+  # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
+  # this took the next minor.
+  # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
+  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
+  version: 1.57.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -185,6 +194,11 @@ paths:
           description: Missing idempotency key or malformed product ID
         '404':
           description: Product is not an active public term-deposit offer, or party is absent
+        '409':
+          description: >-
+            Terms version mismatch — the client displayed a terms version that no longer governs
+            (#9044); re-display the current terms and retry. Also returned when the product has
+            no currently effective terms document.
         '422':
           description: KYC not approved
 
@@ -830,6 +844,35 @@ paths:
                 $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
+
+  /merchants/{descriptorKey}/logo:
+    get:
+      tags: [Transactions]
+      summary: A merchant's logo, as a square PNG
+      description: >-
+        Proxied from transaction-service, which stores the bitmap. The bank serves it itself for one
+        reason: a logo loaded from an external host would tell that host the customer's IP address
+        and which merchant they paid, every time a statement renders. Public business data, so there
+        is no account to own and no ownership check — authentication is the gate. Follow the
+        `merchant.logoUrl` this API returns rather than constructing the path; it carries a `v` token
+        so a replaced logo is a new URL and the response may be cached hard.
+      operationId: getMerchantLogo
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: descriptorKey, in: path, required: true, schema: {type: string}}
+        - {name: size, in: query, required: false, schema: {type: integer, enum: [64, 128], default: 64}}
+        - {name: v, in: query, required: false, description: Cache-busting token echoed from logoUrl., schema: {type: string}}
+      responses:
+        '200':
+          description: The logo bitmap
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing descriptor key
+        '404':
+          description: No logo stored for this merchant
 
   /statements/{accountId}:
     get:
@@ -3335,7 +3378,10 @@ paths:
         edge began reserving against it before each delegated payment. Keeping the refusal made a
         payment-capable grant unconstructible — with a ceiling this route refused it and without one
         the upstream refused it with SPEND_WITHOUT_CEILING — which also left POST /cards/delegated
-        unreachable, since it requires exactly such a grant.
+        unreachable, since it requires exactly such a grant. `exposure` is not accepted: it would
+        claim redaction, watermark or view-count enforcement that raw document delivery cannot
+        prove. The edge relays the stable 400 `EXPOSURE_UNSUPPORTED` from delegation-service before
+        any SCA is spent.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
@@ -3345,7 +3391,7 @@ paths:
           description: >-
             Body is not a JSON object, or upstream validation failed — including
             `code: SPEND_WITHOUT_CEILING` when ACCOUNT_INITIATE_PAYMENT is asked for with no
-            cumulative ceiling.
+            cumulative ceiling, or `code: EXPOSURE_UNSUPPORTED` when exposure is non-null.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
   /delegations/preview:
@@ -3378,11 +3424,14 @@ paths:
                 perTransactionLimit: {type: object}
                 dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
-                exposure: {type: object}
+                exposure:
+                  type: object
+                  deprecated: true
+                  description: Non-null is refused with 400 EXPOSURE_UNSUPPORTED; historical metadata is audit-only.
                 validTo: {type: string, format: date-time}
       responses:
         '200': {description: Draft is currently eligible to proceed to SCA}
-        '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
+        '400': {description: Invalid draft, including non-null exposure (EXPOSURE_UNSUPPORTED)}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
 
@@ -3438,6 +3487,42 @@ paths:
           schema: { type: string }
       responses:
         '200': {description: Schemes}
+
+  /business/search:
+    get:
+      tags: [Business]
+      summary: Find a company by NAME and town — the entry screen for a founder who does not know their IČO
+      description: |
+        Read-only over a public register; creates nothing. A hit carries the identifier, which still
+        goes through `/business/lookup` and the ordinary extract confirmation before any case is
+        bound — picking the wrong identically-named company is otherwise silent.
+
+        `tooManyMatches` is a third outcome next to hits and no-hits, and it is the common one for a
+        short term: the register refuses a query above its match cap and the customer is told to add
+        a town or more of the name. It is not an outage and is answered 200.
+      operationId: searchBusiness
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 2 }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 100 }
+        - name: city
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': {description: Pickable rows, possibly empty, or a tooManyMatches marker}
+        '400': {description: Missing or malformed parameter}
+        '404': {description: The country's register cannot be searched by name}
+        '503': {description: Register unavailable}
 
   /business/lookup:
     post:
@@ -4356,6 +4441,13 @@ components:
             logoUrl:
               type: string
               nullable: true
+              description: >-
+                Path to the logo ON THIS EDGE, e.g.
+                "/customer/v1/merchants/ALZACZ/logo?size=64&v=<hash>". The edge rewrites the prefix
+                transaction-service emits so the path resolves against the host that served this
+                response; it is never an external URL, because a logo fetched from a third party
+                would tell that party who the customer paid. Absent when no logo has been ingested —
+                render what you render today, never a placeholder.
             category:
               type: string
               nullable: true
@@ -4974,6 +5066,14 @@ components:
             Optional opaque reservation returned by /incentives/claims. The edge commits it only
             after account-service returns the authoritative openedAt; deterministic rejection
             releases it, while transient failure leaves it retryable until its TTL.
+        termsVersionShown:
+          type: string
+          description: >-
+            The terms document version the client RENDERED to the customer (#9044). The edge
+            resolves the currently effective version from the catalogue; when the two differ the
+            open is refused with 409, so a terms rollout can never bind the customer to a
+            document they were not shown. The version actually opened under is recorded on the
+            account by account-service.
 
     ClaimCampaignIncentiveRequest:
       type: object
@@ -5055,9 +5155,12 @@ components:
           description: Monthly account fee as the catalogue states it. Sent even when zero.
         annualRate:
           type: number
+          example: 5.8
           description: >-
-            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
-            absence means "not priced here", not 0 %.
+            Term deposits only — one fixed rate for one fixed term, as a PERCENT (5.8 means
+            5.8 % p.a.), which is how every rate crossing this edge is stated. The platform keeps
+            rates as decimal fractions internally; the conversion happens here so no client has to
+            know that. Absent for every other type; absence means "not priced here", not 0 %.
         term:
           type: object
           description: The term deposit's own TermDepositConfig, verbatim.
@@ -5083,6 +5186,7 @@ components:
         currency: {type: string, example: CZK}
         minimumDeposit: {type: number, nullable: true}
         maximumDeposit: {type: number, nullable: true}
+        # Percent, not a fraction: 5.8 means 5.8 % p.a. (see ProductOffer.annualRate).
         annualRate: {type: number, format: double, example: 5.8}
         term:
           type: object

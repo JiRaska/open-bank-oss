@@ -3,56 +3,35 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
+import { parseSecurityEnvelope, summarizeReachable, serviceVerdict, type PlatformSecurityReport, type SecurityEnvelope, type ServiceScanResult } from '@/lib/security/summary'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
 // maps straight onto <DataUnavailable kind=...>.
-type SecurityEnvelope =
-  | { available: true; report: PlatformReport }
-  | { available: false; reason: 'not_deployed' | 'unreachable' | 'error' | 'unauthorized'; detail?: string }
-
-interface ScanResult {
-  serviceName: string; serviceUrl: string
-  score: number; grade: string; scannedAt: string
-  findings: Finding[]
-  reachable: boolean; durationMs: number
-  headersPresent: Record<string, boolean>
-  openApiAvailable: boolean
-}
-
-interface PlatformReport {
-  reportId: string; generatedAt: string
-  totalServices: number; reachableServices: number
-  serviceResults: ScanResult[]
-  platformScore: number; platformGrade: string
-  criticalFindings: number; highFindings: number
-  owaspCoverage: Record<string, number>
-  complianceStatus: Record<string, boolean>
-}
-
-interface Finding {
-  id: string; category: string; severity: string; title: string
-  description: string; remediation: string; cweId?: string; cvssScore?: number; endpoint?: string
-}
-
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  CRITICAL: { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' },
+  CRITICAL: { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' },
   HIGH:     { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
   MEDIUM:   { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
   LOW:      { bg: 'var(--info-bg)',     text: 'var(--info-text)',     border: 'var(--info-border)' },
   INFO:     { bg: 'var(--surface-3)',   text: 'var(--text-tertiary)', border: 'var(--border)' },
 }
 
-const GRADE_COLORS: Record<string, string> = {
-  'A+': '#059669', A: '#10b981', B: '#3b82f6', C: '#f59e0b', D: '#ef4444', F: '#991b1b'
+const GRADE_TONES: Record<string, { text: string; bg: string; border: string }> = {
+  'A+': { text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  A: { text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  B: { text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
+  C: { text: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  D: { text: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
+  F: { text: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
 }
+
+const gradeTone = (grade: string) => GRADE_TONES[grade] ?? { text: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)' }
 
 const OWASP_LABELS: Record<string, [string, string]> = {
   A01_BROKEN_ACCESS_CONTROL:       ['A01 Řízení přístupu',      'A01 Access Control'],
@@ -68,11 +47,13 @@ const OWASP_LABELS: Record<string, [string, string]> = {
 }
 
 export default function SecurityPage() {
-  const [report, setReport] = useState<PlatformReport | null>(null)
+  const [report, setReport] = useState<PlatformSecurityReport | null>(null)
   const { t, language } = useLanguage()
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<ScanResult | null>(null)
+  const [selected, setSelected] = useState<ServiceScanResult | null>(null)
   const [filter, setFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH'>('ALL')
+  const requestRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
   // When the scanner can't be reached we render <DataUnavailable> instead of an
   // empty "run the first scan" prompt that an operator misreads as "broken".
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind; detail?: string } | null>(null)
@@ -89,22 +70,45 @@ export default function SecurityPage() {
   }, [])
 
   const load = useCallback(async () => {
+    const request = ++requestRef.current
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), 8_000)
     setLoading(true)
     try {
-      const res = await fetch('/api/security', { cache: 'no-store' })
-      const data: SecurityEnvelope = await res.json()
+      const res = await fetch('/api/security', { cache: 'no-store', signal: controller.signal })
+      const data = parseSecurityEnvelope(await res.json())
+      if (request !== requestRef.current) return
       applyEnvelope(data)
     } catch {
+      if (request !== requestRef.current) return
       // The route is designed never to throw; a failure here is the internal
       // route itself being unavailable, which is still a "can't load" state.
       setReport(null)
       setUnavailable({ kind: 'error' })
     } finally {
-      setLoading(false)
+      window.clearTimeout(timeout)
+      if (request === requestRef.current) {
+        controllerRef.current = null
+        setLoading(false)
+      }
     }
   }, [applyEnvelope])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => {
+      // main's cleanup only cleared the timer. On unmount an in-flight fetch would still land and
+      // call setState on a gone component, and — worse for an evidence page — a stale response
+      // could overwrite a fresher one. Bumping the generation invalidates any reply still on the
+      // wire (every handler above re-checks `request !== requestRef.current`) and the abort stops
+      // the request itself.
+      window.clearTimeout(initialLoad)
+      requestRef.current += 1
+      controllerRef.current?.abort()
+    }
+  }, [load])
 
   const results = report?.serviceResults ?? []
   // Only services the scanner could actually reach have a meaningful verdict. An
@@ -124,7 +128,7 @@ export default function SecurityPage() {
 
   const formatDate = (d: string) => {
     try {
-      return new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(d))
+      return new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(d))
     } catch {
       return d
     }
@@ -146,9 +150,9 @@ export default function SecurityPage() {
             {report && (
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 800,
                 padding: '4px 12px', borderRadius: '20px',
-                background: ['A+','A'].includes(platformGrade) ? 'var(--success-bg)' : ['B'].includes(platformGrade) ? 'var(--info-bg)' : ['C'].includes(platformGrade) ? 'var(--warning-bg)' : 'var(--danger-bg)',
-                color: ['A+','A'].includes(platformGrade) ? 'var(--success-text)' : ['B'].includes(platformGrade) ? 'var(--info-text)' : ['C'].includes(platformGrade) ? 'var(--warning-text)' : 'var(--danger-text)',
-                border: `1px solid ${['A+','A'].includes(platformGrade) ? 'var(--success-border)' : ['B'].includes(platformGrade) ? 'var(--info-border)' : ['C'].includes(platformGrade) ? 'var(--warning-border)' : 'var(--danger-border)'}` }}>
+                background: gradeTone(platformGrade).bg,
+                color: gradeTone(platformGrade).text,
+                border: `1px solid ${gradeTone(platformGrade).border}` }}>
                 <Shield size={12} /> {platformGrade} · {avgScore}/100
               </span>
             )}
@@ -171,11 +175,11 @@ export default function SecurityPage() {
         </p>
 
         {criticalCount > 0 && (
-          <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
-            background: '#fef2f2', border: '1px solid #fecaca',
+          <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
+            background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
             display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <AlertTriangle size={16} style={{ color: '#dc2626', flexShrink: 0 }} />
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#991b1b' }}>
+            <AlertTriangle size={16} aria-hidden="true" style={{ color: 'var(--danger-text)', flexShrink: 0 }} />
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--danger-text)' }}>
               {criticalCount} {criticalCount > 1 ? t('kritické zranitelnosti', 'critical vulnerabilities') : t('kritická zranitelnost', 'critical vulnerability')} — {t('okamžitá akce nutná', 'immediate action required')}
             </span>
           </div>
@@ -183,14 +187,14 @@ export default function SecurityPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Průměrné skóre', 'Platform Score'), value: `${avgScore}/100`, icon: <Shield size={16} />, color: avgScore >= 80 ? 'var(--success)' : avgScore >= 60 ? 'var(--warning)' : 'var(--danger)' },
-            { label: t('Kritické', 'Critical'), value: criticalCount, icon: <AlertTriangle size={16} />, color: '#dc2626' },
-            { label: t('Vysoké', 'High'), value: highCount, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
-            { label: t('Skenované služby', 'Scanned Services'), value: `${report?.reachableServices ?? 0}/${report?.totalServices ?? 0}`, icon: <CheckCircle2 size={16} />, color: 'var(--accent)' },
+            { label: t('Průměrné skóre', 'Platform Score'), value: `${avgScore}/100`, icon: <Shield size={16} />, text: avgScore >= 80 ? 'var(--success-text)' : avgScore >= 60 ? 'var(--warning-text)' : 'var(--danger-text)', bg: avgScore >= 80 ? 'var(--success-bg)' : avgScore >= 60 ? 'var(--warning-bg)' : 'var(--danger-bg)' },
+            { label: t('Kritické', 'Critical'), value: criticalCount, icon: <AlertTriangle size={16} />, text: 'var(--danger-text)', bg: 'var(--danger-bg)' },
+            { label: t('Vysoké', 'High'), value: highCount, icon: <AlertTriangle size={16} />, text: 'var(--danger-text)', bg: 'var(--danger-bg)' },
+            { label: t('Skenované služby', 'Scanned Services'), value: `${report?.reachableServices ?? 0}/${report?.totalServices ?? 0}`, icon: <CheckCircle2 size={16} />, text: 'var(--accent-text)', bg: 'var(--accent-bg)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: k.bg,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.text, marginBottom: '10px' }}>{k.icon}</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
@@ -286,7 +290,7 @@ export default function SecurityPage() {
                       style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
                         background: filter === f ? 'var(--surface-1)' : 'transparent',
                         color: filter === f ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        boxShadow: filter === f ? '0 1px 2px rgba(0,0,0,0.05)' : 'none', transition: 'all 0.2s' }}>
+                        boxShadow: filter === f ? 'var(--shadow-xs)' : 'none', transition: 'all 0.2s' }}>
                       {f === 'ALL' ? t('Vše', 'All') : f === 'CRITICAL' ? t('Kritické', 'Critical') : t('Vysoké', 'High')}
                     </button>
                   ))}
@@ -322,7 +326,7 @@ export default function SecurityPage() {
                           <td style={{ padding: '12px 16px' }}>
                             {r.reachable ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ fontSize: '14px', fontWeight: 800, color: GRADE_COLORS[r.grade] ?? 'var(--text-secondary)' }}>{r.grade}</span>
+                                <span style={{ fontSize: '14px', fontWeight: 800, color: gradeTone(r.grade).text }}>{r.grade}</span>
                                 <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{r.score}</span>
                               </div>
                             ) : (
@@ -371,7 +375,7 @@ export default function SecurityPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     {selected.reachable ? (
                       <>
-                        <span style={{ fontSize: '20px', fontWeight: 900, color: GRADE_COLORS[selected.grade] ?? 'var(--text-secondary)' }}>{selected.grade}</span>
+                        <span style={{ fontSize: '20px', fontWeight: 900, color: gradeTone(selected.grade).text }}>{selected.grade}</span>
                         <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{selected.score}/100</span>
                       </>
                     ) : (
@@ -396,7 +400,7 @@ export default function SecurityPage() {
                     </div>
                   ) : (selected.findings ?? []).length === 0 ? (
                     <div style={{ padding: '48px 32px', textAlign: 'center' }}>
-                      <CheckCircle2 size={32} style={{ color: 'var(--success)', marginBottom: '12px', marginInline: 'auto' }} />
+                      <CheckCircle2 size={32} style={{ color: 'var(--success-text)', marginBottom: '12px', marginInline: 'auto' }} />
                       <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('Žádné nálezy', 'No findings')}</div>
                       <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('Tato služba prošla všemi kontrolami.', 'This service passed all checks.')}</div>
                     </div>
@@ -414,7 +418,7 @@ export default function SecurityPage() {
                             {f.cweId && <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{f.cweId}{f.cvssScore ? ` · CVSS ${f.cvssScore}` : ''}</div>}
                             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', lineHeight: 1.5 }}>{f.description}</div>
                             {f.remediation && (
-                              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', background: 'rgba(0,0,0,0.02)', padding: '8px 12px', borderRadius: '4px', borderLeft: '3px solid var(--accent)' }}>
+                              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', background: 'var(--surface-2)', padding: '8px 12px', borderRadius: '4px', borderLeft: '3px solid var(--accent-border)' }}>
                                 {f.remediation}
                               </div>
                             )}

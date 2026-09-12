@@ -1358,6 +1358,7 @@ class LendingServiceTest {
             haircut = BigDecimal("0.40"),
         )
         every { valuation.revalue("VEHICLE", eur("5000.00")) } returns Uni.createFrom().item(eur("5000.00"))
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
         val saved = slot<Collateral>()
         every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
 
@@ -1377,6 +1378,59 @@ class LendingServiceTest {
 
         assertThatThrownBy { service.register(loanId, request, "").await().indefinitely() }
             .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a retried register with the same tuple replays the original PENDING collateral`() {
+        // ADR-0297 (#8351): a retried POST with an identical caller tuple must not stack a
+        // duplicate PENDING row that a checker could approve twice.
+        val loanId = LoanId.random()
+        val request = CollateralRequest(
+            type = CollateralType.VEHICLE,
+            description = "van",
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+        )
+        val original = collateralItem(
+            loanId,
+            eur("5000.00"),
+            BigDecimal("0.40"),
+            CollateralType.VEHICLE,
+            status = CollateralStatus.PENDING,
+        ).copy(description = "van")
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(listOf(original))
+
+        val result = service.register(loanId, request, "officer-1").await().indefinitely()
+
+        assertThat(result.id).isEqualTo(original.id)
+        verify(exactly = 0) { collateral.save(any()) }
+    }
+
+    @Test
+    fun `a register after the original was decided is a legitimate new registration`() {
+        val loanId = LoanId.random()
+        val request = CollateralRequest(
+            type = CollateralType.VEHICLE,
+            description = "van",
+            marketValue = eur("5000.00"),
+            haircut = BigDecimal("0.40"),
+        )
+        val decided = collateralItem(
+            loanId,
+            eur("5000.00"),
+            BigDecimal("0.40"),
+            CollateralType.VEHICLE,
+            status = CollateralStatus.APPROVED,
+        ).copy(description = "van")
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(listOf(decided))
+        every { valuation.revalue("VEHICLE", eur("5000.00")) } returns Uni.createFrom().item(eur("5000.00"))
+        val saved = slot<Collateral>()
+        every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
+
+        val result = service.register(loanId, request, "officer-1").await().indefinitely()
+
+        assertThat(result.id).isNotEqualTo(decided.id)
+        verify(exactly = 1) { collateral.save(any()) }
     }
 
     @Test

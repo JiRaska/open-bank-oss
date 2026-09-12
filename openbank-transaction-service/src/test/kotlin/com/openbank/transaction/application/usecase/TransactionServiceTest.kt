@@ -465,10 +465,12 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         coEvery {
-            transactionRepository.update(match { it.status == TransactionStatus.REVERSED })
+            transactionRepository.update(match { it.status == TransactionStatus.REVERSED }, any())
         } answers { firstArg() }
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany listOf(null, null)
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        // #8745: the COMPLETED -> REVERSED transition now carries an outbox event.
+        every { eventPublisher.reversedPayload(any(), any()) } returns "{\"event\":\"reversed\"}"
         stubWorkflowCommitted(TransactionStatus.COMPLETED)
         // The original is read by id too; the reversal credit's own reload comes from the stub above.
         coEvery { transactionRepository.findById(original.id) } returns original
@@ -479,7 +481,15 @@ class TransactionServiceTest {
         assertThat(result.type).isEqualTo(TransactionType.REVERSAL)
         assertThat(result.targetAccountId).isEqualTo(originalSourceId)
         assertThat(result.sourceAccountId).isNull()
-        coVerify { transactionRepository.update(match { it.status == TransactionStatus.REVERSED }) }
+        // #8841: the reversal must say WHAT it reversed — the id is available at the call site.
+        assertThat(result.reversalOf).isEqualTo(original.id)
+        assertThat(result.isReversal).isTrue()
+        coVerify {
+            transactionRepository.update(
+                match { it.status == TransactionStatus.REVERSED },
+                match { it.eventType == "openbank.transactions.transaction.reversed" },
+            )
+        }
     }
 
     @Test

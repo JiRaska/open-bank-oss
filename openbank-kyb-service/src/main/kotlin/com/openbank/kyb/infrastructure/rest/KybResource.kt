@@ -4,19 +4,28 @@
 
 package com.openbank.kyb.infrastructure.rest
 
+import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
+import com.openbank.kyb.application.port.`in`.RegistrySearchUseCase
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
+import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
+import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
+import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -24,10 +33,14 @@ import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
 import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
 import com.openbank.kyb.infrastructure.rest.dto.MatchInitiatorRequest
 import com.openbank.kyb.infrastructure.rest.dto.RejectRequest
+import com.openbank.kyb.infrastructure.rest.dto.RepresentationDecisionResponse
 import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
 import com.openbank.kyb.infrastructure.rest.dto.SchemeResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchHitResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchResponse
 import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
+import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
@@ -47,6 +60,7 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -65,7 +79,13 @@ class KybResource {
 
     @Inject lateinit var lookup: RegistryLookupUseCase
 
+    @Inject lateinit var search: RegistrySearchUseCase
+
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
+
+    @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var representation: RepresentationAttestationUseCase
 
     @Inject lateinit var identity: SecurityIdentity
 
@@ -95,11 +115,52 @@ class KybResource {
                             "version" to it.version,
                             "registry" to it.registry.name,
                             "uboFallback" to it.uboRegister.fallback,
+                            "supportsNameSearch" to it.registry.supportsNameSearch,
                         )
                     },
                 "schemes" to list.map { SchemeResponse(it.name, it.country, it.displayName, it.checksum, example(it)) },
             ),
         ).build()
+    }
+
+    /**
+     * Find a company by name and town (issue #9707). Reuses the `kyb.lookup` action on purpose:
+     * it returns a strict subset of what `/lookup` returns (public-register data, less of it), and
+     * a new action would need a `role_action_matrix` line, a `shared_m2m_matrix_write_grants`
+     * entry and a ~79-bundle OPA restamp — a governance change for no extra exposure.
+     *
+     * Parameters are nullable and checked in the body: a non-null `String` query param is a 500
+     * for the absent case, never a 400 (root CLAUDE.md, `nonnull-jaxrs-param-ratchet`).
+     */
+    @GET
+    @Path("/registry/search")
+    @Authorize(action = "kyb.lookup")
+    @Operation(
+        summary = "Find a company by name, optionally narrowed by town (404 when this register cannot search)",
+    )
+    suspend fun searchRegistry(
+        @QueryParam("country") country: String?,
+        @QueryParam("name") name: String?,
+        @QueryParam("city") city: String?,
+        @QueryParam("limit") limit: Int?,
+    ): Response {
+        val c = requireNotNull(country?.takeIf { it.isNotBlank() }) { "query parameter 'country' is required" }
+        val n = requireNotNull(name?.takeIf { it.isNotBlank() }) { "query parameter 'name' is required" }
+        val result = search.search(
+            SearchRegistryCommand(
+                country = c.uppercase(),
+                name = n,
+                city = city,
+                limit = limit ?: RegistrySearchQuery.DEFAULT_LIMIT,
+            ),
+        ) ?: return Response.status(Response.Status.NOT_FOUND).entity(
+            mapOf("error" to "the register for country '$c' does not support name search"),
+        ).build()
+        val pack = packs.packFor(c.uppercase(), LocalDate.now(clock))
+        val hits = result.hits.map { h ->
+            SearchHitResponse.from(h, h.legalFormCode?.let { code -> pack?.legalFormLabels?.get(code)?.get("cs") })
+        }
+        return Response.ok(SearchResponse(hits, result.totalMatches, result.tooManyMatches)).build()
     }
 
     @POST
@@ -118,6 +179,30 @@ class KybResource {
                     ),
                 ).build()
         return Response.ok(ExtractResponse.from(extract)).build()
+    }
+
+    @GET
+    @Path("/ubo")
+    @Authorize(action = "kyb.ubo.read")
+    @Operation(
+        summary = "Beneficial owners of a business identifier, as its jurisdiction's register states them",
+    )
+    suspend fun ubo(@QueryParam("scheme") scheme: String?, @QueryParam("identifier") identifier: String?): Response {
+        // Nullable declarations, not `String`: JAX-RS injects null for an absent parameter, and a
+        // non-null Kotlin parameter turns that into a 500 at offset 0 — the guard in the body would
+        // be dead code (rules.yaml: nonnull-jaxrs-param-ratchet). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        requireNotNull(scheme) { "query parameter 'scheme' is required" }
+        requireNotNull(identifier) { "query parameter 'identifier' is required" }
+        val parsed = LegalEntityIdentifier.of(
+            runCatching { IdentifierScheme.valueOf(scheme.uppercase()) }
+                .getOrElse { throw IllegalArgumentException("unknown identifier scheme '$scheme'") },
+            identifier,
+        )
+        // Always 200. A finding whose source is UNAVAILABLE or SELF_DECLARATION is an ANSWER the
+        // analyst has to act on, not an error: 404 here would read as "this company has no owners",
+        // which is the one conclusion none of the three sources supports.
+        return Response.ok(UboResponse.from(ubo.lookup(parsed))).build()
     }
 
     @POST
@@ -156,8 +241,14 @@ class KybResource {
             return Response.ok(onboarding.listForParty(partyId).map { CaseResponse.from(it, partyId) }).build()
         }
         requireOperator()
-        val st =
-            status?.let { runCatching { CaseStatus.valueOf(it.uppercase()) }.getOrNull() } ?: CaseStatus.MANUAL_REVIEW
+        // #9038: absent status means the operator review queue (MANUAL_REVIEW), but an UNPARSEABLE
+        // one used to silently substitute MANUAL_REVIEW too — a typo answered the WRONG list with
+        // a 200. libs-runtime maps IllegalArgumentException to 400; never a service-local mapper
+        // (#526).
+        val st = status?.let {
+            runCatching { CaseStatus.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown case status '$it'") }
+        } ?: CaseStatus.MANUAL_REVIEW
         return Response.ok(
             onboarding.listByStatus(st, page.coerceAtLeast(0), size.coerceIn(1, MAX_PAGE)).map {
                 CaseResponse.from(it, null)
@@ -273,8 +364,76 @@ class KybResource {
     @Operation(summary = "Operator confirms a manually attested extract / power of attorney and sets the signer count")
     suspend fun resolveReview(@PathParam("id") id: UUID, request: ResolveReviewRequest?): Response {
         val required = requireNotNull(request?.requiredSignatures) { "requiredSignatures is required" }
-        val case = onboarding.resolveReview(ResolveReviewCommand(id, required, identity.principal?.name ?: "operator"))
+        val case = onboarding.resolveReview(
+            ResolveReviewCommand(
+                id,
+                required,
+                identity.principal?.name ?: "operator",
+                request.requiredSignerRoles.orEmpty(),
+            ),
+        )
         return Response.ok(CaseResponse.from(case, null)).build()
+    }
+
+    // --- representation attestation (#9711) --------------------------------------------------
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "What the attestation store says about this entity's CURRENT register rule text")
+    suspend fun representationDecision(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val decision = representation.decisionFor(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(RepresentationDecisionResponse.from(decision)).build()
+    }
+
+    @POST
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Operator confirms how this entity is represented; supersedes any earlier confirmation")
+    suspend fun attestRepresentation(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+        request: AttestRepresentationRequest?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
+        val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
+        val attested = representation.attest(
+            AttestRepresentationCommand(
+                scheme = IdentifierScheme.valueOf(scheme.uppercase()),
+                identifier = identifier,
+                ruleTextHash = hash,
+                confirmedSigners = signers,
+                confirmedRoles = request.confirmedRoles.orEmpty(),
+                operator = identity.principal?.name ?: "operator",
+                note = request.note,
+            ),
+        )
+        return Response.ok(AttestationResponse.from(attested)).build()
+    }
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}/history")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Every confirmation ever made for this entity, superseded ones included")
+    suspend fun representationHistory(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val rows = representation.history(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+        return Response.ok(rows.map { AttestationResponse.from(it) }).build()
     }
 
     @POST

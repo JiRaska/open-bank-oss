@@ -92,7 +92,7 @@ describe('Trace Explorer — loading / empty / failed are three distinct states'
 })
 
 describe('Trace Explorer — a failed SPAN fetch is not an empty trace', () => {
-  const TRACE = { traceID: 'abc123def456', rootServiceName: 'ledger', rootTraceName: 'GET /accounts', durationMs: 42 }
+  const TRACE = { traceID: 'abc123def456abcd', rootServiceName: 'ledger', rootTraceName: 'GET /accounts', durationMs: 42 }
 
   it('renders the failure panel, not "no data", when the span fetch 502s', async () => {
     const fetchMock = vi.fn(async (url: string) =>
@@ -122,6 +122,43 @@ describe('Trace Explorer — a failed SPAN fetch is not an empty trace', () => {
     await waitFor(() => {
       expect(screen.getByText(/No data yet|Zatím žádná data/)).toBeInTheDocument()
     })
+    expect(screen.queryByText(/is not responding|neodpovídá/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Trace Explorer — malformed evidence is not absence', () => {
+  it('rejects a malformed successful search instead of reporting no data', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ status: 'success' })))
+    renderPage()
+
+    expect(await screen.findByText(/Failed to load|Načtení selhalo/)).toBeInTheDocument()
+    expect(screen.queryByText(/No data yet|Zatím žádná data/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the last verified list visible when refresh evidence is invalid', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ traces: [{ traceID: 'abc123def456abcd', rootServiceName: 'ledger' }] }))
+      .mockResolvedValueOnce(json({ traces: 'not-an-array' }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: /ledger/ })).toBeInTheDocument()
+    screen.getByRole('button', { name: /Refresh traces|Obnovit trasy/ }).click()
+    expect(await screen.findByText(/last verified trace list|poslední ověřený seznam tras/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /ledger/ })).toBeInTheDocument()
+  })
+
+  it('rejects malformed trace detail as an evidence error, not no data or unreachable', async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url.includes('/api/tempo/api/search')
+        ? json({ traces: [{ traceID: 'abc123def456abcd', rootServiceName: 'ledger' }] })
+        : json({ batches: [{ scopeSpans: 'invalid' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+
+    ;(await screen.findByRole('button', { name: /ledger/ })).click()
+    expect(await screen.findByText(/Failed to load|Načtení selhalo/)).toBeInTheDocument()
+    expect(screen.queryByText(/No data yet|Zatím žádná data/)).not.toBeInTheDocument()
     expect(screen.queryByText(/is not responding|neodpovídá/)).not.toBeInTheDocument()
   })
 })

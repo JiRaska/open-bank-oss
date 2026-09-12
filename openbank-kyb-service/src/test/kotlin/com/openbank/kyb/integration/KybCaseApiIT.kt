@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.integration
 
+import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubPartyGateway
 import io.quarkus.test.common.QuarkusTestResource
@@ -38,6 +39,27 @@ class KybCaseApiIT {
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.jdbc.url")
     lateinit var jdbcUrl: String
 
+    private fun seedAttestation(ico: String, ruleText: String, confirmedSigners: Int) {
+        val hash = RepresentationAttestation.hashOf(ruleText)
+        DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
+            c.prepareStatement(
+                "INSERT INTO kyb_representation_attestations (id, attestation_id, identifier_scheme, " +
+                    "identifier_value, rule_text_hash, rule_text, parsed_mode, parsed_signers, " +
+                    "confirmed_signers, confirmed_roles, attested_by, attested_at) " +
+                    "VALUES (nextval('kyb_representation_attestations_seq'), ?, 'CZ_ICO', ?, ?, ?, " +
+                    "'JOINT_N', 2, ?, '[]', 'operator-anna', now()) " +
+                    "ON CONFLICT DO NOTHING",
+            ).use { st ->
+                st.setObject(1, UUID.randomUUID())
+                st.setString(2, ico)
+                st.setString(3, hash)
+                st.setString(4, ruleText)
+                st.setInt(5, confirmedSigners)
+                st.executeUpdate()
+            }
+        }
+    }
+
     private val initiator = UUID.randomUUID()
     private val cosigner = UUID.randomUUID()
 
@@ -65,7 +87,15 @@ class KybCaseApiIT {
             body("""{"scheme":"CZ_ICO","identifier":"45274649","initiatorPartyId":"${UUID.randomUUID()}"}""")
         } When { post("/api/v1/kyb/cases") } Then { statusCode(403) }
 
-        // 3. start
+        // 3. an operator has confirmed how this entity is represented (#9711). Seeded directly,
+        // because confirming is an OPERATOR action and starting a case is a CUSTOMER one —
+        // @TestSecurity binds one identity per test, and pretending the customer could confirm
+        // their own signing rule would be the wrong thing to demonstrate. The API path is covered
+        // by RepresentationAttestationApiIT. Without this row the case below goes to MANUAL_REVIEW
+        // however confidently the register text parses, which is the point of the control.
+        seedAttestation("45274649", "dva jednatelé společně", confirmedSigners = 2)
+
+        // 4. start
         val caseId = (
             Given {
                 contentType("application/json")
@@ -191,5 +221,25 @@ class KybCaseApiIT {
         } When
             { post("/api/v1/kyb/lookup") } Then
             { statusCode(404) }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_KYC"])
+    fun `a typo in the case status filter is a 400, not the MANUAL_REVIEW list`() {
+        // #9038: an unparseable status used to silently substitute MANUAL_REVIEW and answer the
+        // WRONG list with a 200. Absent still means the operator review queue.
+        Given {
+            queryParam("status", "MANUAL_REVIE")
+        } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(400) }
+        Given { this } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(200) }
+        Given {
+            queryParam("status", "MANUAL_REVIEW")
+        } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(200) }
     }
 }

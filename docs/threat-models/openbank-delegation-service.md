@@ -104,8 +104,11 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
-- External disclosure links (D7b): OTP, expiry, watermark, view counting — threat model
-  update required when that lands (leaked-link = leaked-document analysis).
+- Exposure-shaped object disclosure (D7b): **fail closed.** New non-null `exposure` is refused
+  with `EXPOSURE_UNSUPPORTED`, before SCA or persistence. Historical rows remain readable for
+  audit but are excluded from the authorization decision and shared-document list. This stays the
+  rule until delivery creates a transformed artifact and atomically enforces redaction, watermark,
+  download policy and view counting; proxying original object bytes would not implement any of them.
 - EUDI verifiable-credential delivery channel (follow-up ADR on ADR-0094).
 - `AccountAuthorization` migration dual-run window (two grant sources for accounts).
 - ~~**Cumulative daily/monthly ceilings are REFUSED at the API, not silently accepted.**~~
@@ -140,6 +143,13 @@ gap closes only with a consumer pact or a run against a deployed stack.
   acting person to hold `delegation.manage` on that entity.
 
 ## Change log
+
+- **2026-09-07** — Role-preset creation is now replay-safe (#8351, ADR-0292). A retried
+  `POST /api/v1/delegation-role-presets` stacked a duplicate catalog row; `create` now checks the
+  admin-supplied natural key (name, resourceType) first and replays the original, with
+  `uq_delegation_role_presets_name_type` (V15) as the race backstop. The grant-offer idempotency
+  (Berlin Group `X-Request-ID`, already enforced) is recorded in ADR-0292. No new caller, endpoint
+  or privilege. Rollback: revert + `DROP INDEX uq_delegation_role_presets_name_type`.
 
 - **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
   now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest

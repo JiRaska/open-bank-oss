@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.19.0
+  version: 1.22.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -25,6 +25,26 @@ paths:
       tags: [Lending]
       operationId: applyForLoan
       summary: Submit a loan application (maker)
+      description: >-
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application, because a customer may
+        legitimately apply twice (no natural key exists).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -64,12 +84,29 @@ paths:
         neither price their own loan nor choose which ADR-0212 compliance pack judges them. Only the
         configured customer-edge service principal may call it; any other caller is refused 403.
         This is the MAKER leg only — the application still needs a human four-eyes decision.
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application.
       parameters:
         - name: X-Customer-Party-Id
           in: header
           required: true
           description: The applicant's party id, set by customer-edge from the customer JWT.
           schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -150,6 +187,41 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/lending/credit-offers/eligibility/{partyId}:
+    get:
+      tags: [Lending]
+      operationId: creditOfferEligibility
+      summary: Whether an UNPROMPTED credit offer may be surfaced to this party
+      description: >-
+        ADR-0269 rules 1 and 2, for callers OUTSIDE this service. The eligibility gate is the one
+        place a credit offer is cleared, but it had no wire surface, so every push surface the ADR
+        governs — a campaign step, a pre-approved tile, an agent nudge — had no way to ask, and the
+        distress floor was enforced nowhere on that side.
+
+        The surface is fixed to PUSH and is deliberately NOT a parameter: PULL skips the consent
+        half because a customer who asked has already spoken for themselves, and letting a caller
+        name its own surface would hand that exemption to anyone who passed the right string. A
+        caller serving a customer-initiated request wants /intake/quotes instead.
+
+        Answers 200 for BOTH outcomes. "You may not offer" is a successful answer to the question
+        asked, not a client error, and a caller distinguishing a refusal from a transport failure by
+        status code will eventually get it wrong in the permissive direction. A caller that cannot
+        reach this route must refuse to offer: not knowing whether it may market credit is answered
+        no, never "probably fine".
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The decision, allowed or suppressed with its reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditOfferEligibilityDecision'
+        '403': { description: Caller is not permitted this action }
+
   /api/v1/lending/intake/quotes:
     post:
       tags: [Lending]
@@ -161,6 +233,8 @@ paths:
         binding offer. Price, currency and bounds are lending-side configuration; the body carries
         only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
         floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+        Inherently idempotent (ADR-0297): a pure computation over configuration and the body —
+        no persistence, so a retry simply recomputes the same indicative price.
       parameters:
         - name: X-Customer-Party-Id
           in: header
@@ -652,6 +726,10 @@ paths:
         The registrant identity is the JWT subject. The registered collateral is PENDING and is not
         consulted by the IFRS 9 ECL calculation until a different principal approves it via
         POST /api/v1/lending/collateral/{id}/decision.
+        Idempotent (ADR-0297): while the original registration is still PENDING, a retry with an
+        identical tuple (type, description, market value, haircut) replays the ORIGINAL PENDING
+        collateral instead of stacking a duplicate a checker could approve twice. Once the
+        original is decided, an identical new registration is legitimate and persists.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       requestBody:
@@ -803,6 +881,9 @@ paths:
       description: >-
         Strict, fail-closed pack decoding (ADR-0212): an unknown key, enum value or type rejects the
         whole proposal. The pack activates only after a DIFFERENT compliance principal approves it.
+        Idempotent (ADR-0297): the pack content hash is the natural key — while an identical pack
+        proposal is still PROPOSED, a retry replays it instead of queuing a duplicate for the
+        checker. Re-proposing after a decision creates a fresh proposal.
       requestBody:
         required: true
         content:
@@ -1166,6 +1247,25 @@ components:
         tables:
           type: array
           items: { $ref: '#/components/schemas/PolicyTableView' }
+    CreditOfferEligibilityDecision:
+      type: object
+      required: [allowed, policyVersion]
+      properties:
+        allowed: { type: boolean }
+        reasonCode:
+          type: string
+          nullable: true
+          description: >-
+            Null when allowed. Part of the contract rather than a log line: a caller must be able to
+            count "declined for arrears" separately from "never opted in", and a conduct review asks
+            for exactly that split. SIGNALS_UNAVAILABLE means the gate could not read what it needed
+            and refused rather than guessed.
+          enum: [CONSENT_ABSENT, SIGNALS_UNAVAILABLE, INSOLVENCY, ENFORCEMENT, ARREARS, HARDSHIP,
+                 NEGATIVE_BALANCE, AFFORDABILITY_COOLING, BUFFER_BELOW_FLOOR, FREQUENCY_CAP,
+                 NO_MATERIAL_CHANGE, HISTORY_TOO_THIN]
+        policyVersion:
+          type: integer
+          description: The version of the decision table that produced this answer (ADR-0213).
     CustomerQuoteRequest:
       type: object
       required: [amount, termMonths]
@@ -1288,7 +1388,11 @@ components:
         The acting principal is the authenticated JWT subject (server-side), never a client-supplied
         field, so only the audit reason is carried in the body.
       properties:
-        reason: { type: string, nullable: true }
+        writtenOffBy:
+          type: string
+        reason:
+          type: string
+          nullable: true
     RescheduleRequest:
       type: object
       description: >-

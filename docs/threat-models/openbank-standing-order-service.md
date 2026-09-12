@@ -109,12 +109,14 @@ openbank-sdd-service.
   burn-down). `CreateStandingOrderRequest.amountMinorUnits` is a Kotlin primitive, so Jackson
   silently substitutes 0 when the field is omitted — an undocumented bypass that would have
   created a zero-amount order; a new `init { require(amountMinorUnits > 0) }` turns the
-  omission (and an explicit 0/negative) into a 400 via libs-runtime. The same PR corrects
-  the POST request schema in openapi.yaml (1.6.0): it previously named fields the DTO never
-  had (`debtorAccountId`, `amount`, `currencyCode`) and omitted five the DTO requires —
-  including `idempotencyKey`, whose dedup replay the use case already enforced. No new
-  endpoint, caller, role or network edge; the schema now understates nothing the code
-  demands, so the change removes ambiguity rather than adding surface.
+  omission (and an explicit 0/negative) into a 400 via libs-runtime. Shipped split across two
+  PRs (the api-contract gate requires a spec-only diff to reclassify a breaking document
+  change as a correction, ADR-0048 D5): #8968 corrected the POST request schema in
+  openapi.yaml (1.6.0) — it previously named fields the DTO never had (`debtorAccountId`,
+  `amount`, `currencyCode`) and omitted five the DTO requires — and the follow-up code PR
+  adds the `init` guard. No new endpoint, caller, role or network edge; the schema now
+  understates nothing the code demands, so the change removes ambiguity rather than adding
+  surface.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 

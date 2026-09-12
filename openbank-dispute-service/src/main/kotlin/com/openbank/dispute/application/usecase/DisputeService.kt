@@ -107,19 +107,32 @@ class DisputeService(
                     resolution = request.resolution ?: dispute.resolution,
                     chargebackAmount = request.chargebackAmount ?: dispute.chargebackAmount,
                     resolvedBy = request.resolvedBy ?: dispute.resolvedBy,
-                    resolvedAt = if (request.status in listOf(
-                            DisputeStatus.RESOLVED_CUSTOMER,
-                            DisputeStatus.RESOLVED_MERCHANT,
-                            DisputeStatus.WITHDRAWN,
-                        )
-                    ) {
+                    resolvedAt = if (request.status in TERMINAL_STATUSES) {
                         OffsetDateTime.now(clock)
                     } else {
                         dispute.resolvedAt
                     },
                     updatedAt = OffsetDateTime.now(clock),
                 )
-                disputeRepo.update(updated).flatMap { saved ->
+                // #8745 finding 2: this endpoint knowingly handles the three terminal statuses
+                // (it stamps resolvedAt for them), so the same terminal state emitted
+                // dispute.resolved through resolveRemediation and NOTHING through here — an
+                // ADR-0220 exclusion applied on dispute.opened would never lift for a dispute
+                // resolved on this path. Mirror doResolve: the transition INTO a terminal
+                // status carries the event, committed atomically with the row.
+                val messages =
+                    if (updated.status in TERMINAL_STATUSES && dispute.status !in TERMINAL_STATUSES) {
+                        listOf(resolvedOutboxMessage(updated))
+                    } else {
+                        emptyList()
+                    }
+                val write =
+                    if (messages.isEmpty()) {
+                        disputeRepo.update(updated)
+                    } else {
+                        disputeRepo.update(updated, messages)
+                    }
+                write.flatMap { saved ->
                     val event = DisputeTimelineEvent(
                         disputeId = saved.id,
                         eventType = "STATUS_CHANGED",
@@ -300,7 +313,12 @@ class DisputeService(
         // would never lift. Additive, and `dispute.remediation_requested` already carries one.
         payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
-            """"outcome":"${dispute.remediationOutcome}",""" +
+            // WITHDRAWN reaches this builder with no remediation outcome (`update` does not set
+            // one, and the domain default is null), so interpolating it inside quotes puts the
+            // four-character string "null" in the field. Only THIS builder can see a null:
+            // `remediationRequestedOutboxMessage` is reached solely from doResolve, where
+            // `remediationOutcome = request.outcome` is non-null by type.
+            """"outcome":${dispute.remediationOutcome?.let { "\"$it\"" } ?: "null"},""" +
             """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
             """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
             """"sourceService":"$SOURCE_SERVICE"}""",
@@ -346,6 +364,18 @@ class DisputeService(
 
     companion object {
         private val BANK_TIME: ZoneId = ZoneId.of("Europe/Prague")
+
+        /**
+         * The states in which a dispute is over. Declared once because [update] needs it twice --
+         * for the `resolvedAt` stamp and for the `dispute.resolved` emission -- and the two
+         * disagreeing about what "terminal" means is precisely how a terminal transition once
+         * stamped a resolution time while announcing nothing (#8745 finding 2).
+         */
+        internal val TERMINAL_STATUSES = setOf(
+            DisputeStatus.RESOLVED_CUSTOMER,
+            DisputeStatus.RESOLVED_MERCHANT,
+            DisputeStatus.WITHDRAWN,
+        )
 
         /** States from which a remediation resolution may be recorded (evidence-gathering states). */
         internal val RESOLVABLE_FROM = setOf(

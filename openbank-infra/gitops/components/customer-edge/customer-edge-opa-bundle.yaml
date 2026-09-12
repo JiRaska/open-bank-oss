@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "63f5769df67380c8"
+    openbank.tech/policy-checksum: "8ebcd1d6472d238d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -244,6 +244,43 @@ data:
     	role in input.principal.roles
     	not startswith(input.principal.id, "service-account-")
     	input.action == "opsmessage.approval.decide"
+    }
+
+    # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
+    # not `ROLE_OPERATOR` — the checker of the bank's VOICE is a distinct job function from an
+    # operator's account/payment writes, and D6 declares the roles separately for exactly that
+    # reason. commstyle.publish is ALSO gated at the application layer (a draft's own maker can
+    # never be the caller here — CommunicationStyleService.publish, D3's literal "the maker can
+    # never approve their own version"), which is a second, independent check on top of the pause
+    # below: this rule only says WHO may attempt the call, not whether that specific draft is
+    # theirs.
+    allowed_reasons contains "commstyle-publish" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "commstyle.publish"
+    }
+
+    # Checker side of the same four-eyes flow. Identical shape to operator-decide-message-approval
+    # above, gated to the comms-specific role rather than ROLE_OPERATOR — a lone ROLE_COMMS_APPROVER
+    # with no ROLE_OPERATOR grant must still be able to decide a commstyle approval, which the
+    # generic operator-read-any rule below (keyed to ROLE_OPERATOR/ROLE_ADMIN only) would not admit.
+    allowed_reasons contains "commstyle-decide-publish-approval" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "commstyle.approval.decide"
+    }
+
+    # Read side of the same queue (ADR-0227 D2 unified inbox). Same role gate as the decide rule
+    # above, for the same reason operator-read-any alone would not admit a lone ROLE_COMMS_APPROVER.
+    allowed_reasons contains "commstyle-read-publish-approval" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "commstyle.approval.read"
     }
 
     # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
@@ -869,6 +906,18 @@ data:
                                                 # force-execute endpoint to maker-checker gate; add a verb here if one is
                                                 # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
+                                                # transactionClient.initiatePayment for SCT/SCT_INST/domestic/SIPO — it
+                                                # initiates real payments like sdd/standing-order do, consent- and
+                                                # SCA-gated upstream (ADR-0090, ADR-0126). Already treated as money-path
+                                                # by the OPA-bundle converge work (#3422); this makes the list agree.
+                                                # Threat model: docs/threat-models/openbank-psd2-service.md.
+                                                # four-eyes assessed: initiation is TPP-driven under an eIDAS consent with
+                                                # SCA on the debtor — a maker/checker pair does not exist for a
+                                                # customer-consented machine flow; the bank-side actions that WOULD deserve
+                                                # a gate (TPP revocation, consent termination by an operator) are not
+                                                # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
+                                                # joins the #3679 cohort.
+      - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -948,6 +997,18 @@ data:
       actions:
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
+        - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
+                                             # playbook version. Confirmed no M2M caller — the only allow
+                                             # rule for this action (rest.rego commstyle-publish) requires
+                                             # HUMAN + (ROLE_COMMS_APPROVER or ROLE_ADMIN) and explicitly
+                                             # excludes any service-account-* principal id; D6 deliberately
+                                             # never grants commstyle.publish to a service account
+                                             # (shared_m2m_matrix_write_grants stays empty for it). Also
+                                             # enforced at the application layer, independently: the
+                                             # draft's own maker can never be the caller here
+                                             # (CommunicationStyleService.publish), D3's literal "the
+                                             # maker can never approve their own version" — two separate
+                                             # checks, not one restated twice.
         - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                              # Confirmed no M2M caller — the only allow rule for this
                                              # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -1076,6 +1137,10 @@ data:
             - ledger.read
             - lending.list
             - lending.read
+            # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+            # than relying on the generic operator ".read" rule so the worklist route is granted
+            # explicitly, the same way every other list action in this matrix is.
+            - merchant.list
             - notification.list
             - notification.read
             # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -1144,6 +1209,7 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.lookup
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1152,6 +1218,11 @@ data:
             - lending.repay
             - lending.reschedule
             - lending.writeoff
+            # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+            # trading name, a logo, a shop location — never anything customer-derived, and not
+            # reachable through customer-edge.
+            - merchant.delete
+            - merchant.update
             - party.approval.decide
             - party.consent.update
             - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
@@ -1226,6 +1297,7 @@ data:
             - kyb.case.read
             - kyb.case.reject
             - kyb.case.review.resolve
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
             - audit.read
@@ -1596,5 +1668,35 @@ data:
           - money.*
           - gh.pr.*
           - secrets.*
+    - id: kyb-analyst
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - kyb
+          - governance
+        - tier: write_proposal
+          resources:
+          - case-thread
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: business-copilot
+      tools:
+        allow:
+        - query.balance.readonly
+        - query.transaction.readonly
+        - propose.payment
+        - propose.card_freeze
+        - propose.dispute
+        deny:
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

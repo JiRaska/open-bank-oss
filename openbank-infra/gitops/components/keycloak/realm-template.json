@@ -4,6 +4,9 @@
   "displayName": "OpenBank",
   "displayNameHtml": "OpenBank Framework",
   "loginTheme": "openbank",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self' https://admin.open-bank.tech; frame-ancestors 'self' https://admin.open-bank.tech; object-src 'none';"
+  },
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -81,6 +84,14 @@
       {
         "name": "ROLE_LENDING_OFFICER",
         "description": "Lending officer: opens and services loan applications, cannot take the credit decision (four-eyes with ROLE_CREDIT_RISK). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
+      },
+      {
+        "name": "ROLE_COMMS_EDITOR",
+        "description": "Communication Studio maker: drafts and submits style/playbook versions (ADR-0285 D6). Cannot publish (four-eyes with ROLE_COMMS_APPROVER)."
+      },
+      {
+        "name": "ROLE_COMMS_APPROVER",
+        "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
       },
       {
         "name": "ROLE_DEMO",

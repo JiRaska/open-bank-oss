@@ -6,7 +6,12 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
   # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.4.0
+  version: 2.0.0
+  # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
+  # required the whole external-feed fan-out to finish inside the request, which was the defect.
+  # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
+  # /api/v2/sanctions/lists/refresh-all (202) now carries the operation, while the v1 path keeps
+  # its 200 + array shape for the deprecation window (both defer the imports to the scheduler).
   description: >-
     Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -219,17 +224,54 @@ paths:
   /api/v1/sanctions/lists/refresh-all:
     post:
       tags: [SanctionsLists]
-      summary: Trigger manual refresh of all enabled lists
+      summary: Trigger manual refresh of all enabled lists (deprecated v1 shape)
+      description: >-
+        DEPRECATED — use POST /api/v2/sanctions/lists/refresh-all, which answers 202 (#9048).
+        This v1 operation keeps its 200 + array shape for the deprecation window but no longer
+        performs the imports in-request: it flags every enabled list for the scheduler and
+        returns the enabled lists in their PRE-refresh state immediately. Per-list progress is
+        observable through each list's lastUpdatedAt.
+      deprecated: true
       operationId: refreshAllSanctionsLists
       responses:
         '200':
-          description: All enabled lists refreshed
+          description: Enabled lists flagged for refresh (pre-refresh state)
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/SanctionsList'
+
+  /api/v2/sanctions/lists/refresh-all:
+    post:
+      tags: [SanctionsLists]
+      summary: Trigger manual refresh of all enabled lists
+      description: >-
+        Flags every enabled list for refresh and answers immediately (#9048). The imports run
+        on subsequent scheduler ticks, one list at a time, and per-list progress is observable
+        through each list's lastUpdatedAt on GET /api/v1/sanctions/lists.
+      operationId: refreshAllSanctionsListsV2
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            Required on money-path POSTs (#8351). Flagging is idempotent by construction, so a
+            retried key converges to the same state.
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Refresh of all enabled lists queued on the scheduler.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requested:
+                    type: integer
+                    description: How many enabled lists were flagged for refresh.
 
   /api/v1/sanctions/approvals:
     get:

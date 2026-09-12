@@ -1,7 +1,9 @@
 openapi: 3.1.0
 info:
   title: OpenBank KYB Service API
-  version: 1.0.0
+  # 1.2.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 shipped the name
+  # search (#9707); this is the next free minor as of live main.
+  version: 1.3.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -69,6 +71,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RegistryExtract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/registry/search:
+    get:
+      tags: [KYB]
+      summary: Find a company by name, optionally narrowed by town
+      description: >-
+        For the customer who does not know their identifier. Returns only what tells two companies
+        apart; a chosen row still goes through /lookup, so a search hit can never bind a case by
+        itself. `tooManyMatches` is a distinct outcome, not an error: the register refuses to
+        answer a query above its match cap (ARES: 1 000) and the customer should narrow it.
+        404 when the register for `country` declares no name search (see `supportsNameSearch`
+        on /schemes).
+      operationId: searchRegistry
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, example: CZ }
+        - name: name
+          in: query
+          required: true
+          description: Free text matched against the registered company name (min 3 characters)
+          schema: { type: string, minLength: 3 }
+        - name: city
+          in: query
+          required: false
+          description: Narrowing hint matched against the registered seat; the seat is often an accountant's address, so absence of a match is not absence of the company
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Candidate rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -310,6 +356,62 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/representation/{scheme}/{identifier}:
+    get:
+      tags: [KYB]
+      summary: What the attestation store says about this entity's current register rule text
+      operationId: representationDecision
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentationDecision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [KYB]
+      summary: Operator confirms how this entity is represented; supersedes any earlier confirmation
+      operationId: attestRepresentation
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttestRepresentationRequest'
+      responses:
+        '200':
+          description: The stored attestation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attestation'
+        '409':
+          description: The register rule text changed since the form was opened; re-read and confirm again
+  /api/v1/kyb/representation/{scheme}/{identifier}/history:
+    get:
+      tags: [KYB]
+      summary: Every confirmation ever made for this entity, superseded ones included
+      operationId: representationHistory
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Attestations, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attestation'
   /api/v1/kyb/cases/{id}/reject:
     post:
       tags: [KYB]
@@ -332,6 +434,36 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/ubo:
+    get:
+      tags: [KYB]
+      summary: Beneficial owners of a business identifier, as its jurisdiction's register states them
+      operationId: lookupBeneficialOwners
+      description: >-
+        Always 200. `source` is the field to read first: REGISTER means a beneficial-ownership
+        register answered, SELF_DECLARATION means the jurisdiction has no queryable register and the
+        customer must declare, UNAVAILABLE means a register exists and could not be reached. An empty
+        `owners` list means something different under each, which is why a filed register statement
+        ("no individual PSC identified") is carried separately rather than collapsed into the absence.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scheme
+          in: query
+          required: true
+          schema: { type: string, example: GB_CRN }
+        - name: identifier
+          in: query
+          required: true
+          schema: { type: string, example: "OC123456" }
+      responses:
+        '200':
+          description: What is known about the entity's beneficial owners right now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboFinding' }
+        '400':
+          description: Missing or unparseable scheme/identifier
 components:
   securitySchemes:
     bearerAuth:
@@ -339,6 +471,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    reprScheme:
+      name: scheme
+      in: path
+      required: true
+      schema: { type: string }
+    reprIdentifier:
+      name: identifier
+      in: path
+      required: true
+      schema: { type: string }
     caseId:
       name: id
       in: path
@@ -386,6 +528,141 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    SearchHit:
+      type: object
+      required: [scheme, identifier, name]
+      properties:
+        scheme: { type: string, example: CZ_ICO }
+        identifier: { type: string, example: "27074358" }
+        name: { type: string }
+        legalFormCode: { type: string, nullable: true }
+        legalForm: { type: string, nullable: true, description: Label from the country pack, when the code is known }
+        registeredAddress: { type: string, nullable: true }
+    SearchResponse:
+      type: object
+      required: [hits, totalMatches, tooManyMatches]
+      properties:
+        hits:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+        totalMatches: { type: integer, description: The register's own count; may exceed hits.length }
+        tooManyMatches: { type: boolean, description: The register refused the query as too broad; narrow it }
+    Attestation:
+      type: object
+      required: [id, scheme, identifier, ruleTextHash, parsedMode, confirmedSigners, confirmedRoles, attestedBy, attestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scheme: { type: string }
+        identifier: { type: string }
+        ruleTextHash:
+          type: string
+          description: SHA-256 of the register rule text after case/diacritic/whitespace folding.
+        ruleText: { type: string, nullable: true }
+        parsedMode:
+          type: string
+          description: What the heuristic parser said when the operator was asked. Recorded to measure the parser, never to gate on.
+        parsedSigners: { type: integer, nullable: true }
+        confirmedSigners:
+          type: integer
+          minimum: 1
+          description: What the human decided. This is what binds an agreement.
+        confirmedRoles:
+          type: array
+          items: { type: string }
+          description: The offices that must sign. Empty means a plain count — any listed representatives may sign.
+        attestedBy: { type: string }
+        attestedAt: { type: string, format: date-time }
+        supersededAt: { type: string, format: date-time, nullable: true }
+        note: { type: string, nullable: true }
+    AttestRepresentationRequest:
+      type: object
+      required: [confirmedSigners, ruleTextHash]
+      properties:
+        confirmedSigners: { type: integer, minimum: 1 }
+        confirmedRoles:
+          type: array
+          items: { type: string }
+        ruleTextHash:
+          type: string
+          description: Hash of the text the operator actually read; a mismatch answers 409.
+        note: { type: string }
+    RepresentationDecision:
+      type: object
+      required: [state, ruleTextHash, parserMode, parserSuggestsRoles]
+      properties:
+        state:
+          type: string
+          enum: [ATTESTED, UNATTESTED, SUPERSEDED]
+          description: >-
+            SUPERSEDED means this entity HAS been confirmed before and the register text has since
+            changed — the old confirmation must not be reused.
+        ruleText: { type: string, nullable: true }
+        ruleTextHash: { type: string }
+        parserSuggestsSigners: { type: integer, nullable: true }
+        parserSuggestsRoles:
+          type: array
+          items: { type: string }
+        parserMode: { type: string }
+        attestation:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+        previous:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+          description: The confirmation that was superseded, so the reviewer is told what changed.
+    UboFinding:
+      type: object
+      properties:
+        scheme: { type: string }
+        identifier: { type: string }
+        source:
+          type: string
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE]
+        owners:
+          type: array
+          items: { $ref: '#/components/schemas/BeneficialOwner' }
+        registerStatements:
+          type: array
+          description: Statements the company filed, e.g. that no individual PSC has been identified.
+          items: { type: string }
+        threshold:
+          type: number
+          format: double
+          description: The jurisdiction's ownership threshold from its country pack (AMLD5 default 0.25).
+        registerName: { type: string, nullable: true }
+        sourceRef: { type: string, nullable: true }
+        requiresDeclaration:
+          type: boolean
+          description: True whenever the source is not a register — the bank still has to ask a human.
+        fetchedAt: { type: string, format: date-time }
+      required: [scheme, identifier, source, owners, registerStatements, threshold, requiresDeclaration, fetchedAt]
+    BeneficialOwner:
+      type: object
+      description: >-
+        One person or entity a register names as a beneficial owner. `band` is a band and never a
+        percentage: the UK PSC register publishes `ownership-of-shares-25-to-50-percent` and nothing
+        finer, so a precise figure would be invented rather than reported. `natureOfControl` carries
+        the register's own vocabulary verbatim.
+      properties:
+        fullName: { type: string }
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+          description: Null where the register publishes only a partial date (Companies House gives month and year).
+        nationality: { type: string, nullable: true }
+        countryOfResidence: { type: string, nullable: true }
+        band:
+          type: string
+          enum: [BELOW_THRESHOLD, PCT_25_TO_50, PCT_50_TO_75, PCT_75_TO_100, UNQUANTIFIED]
+        natureOfControl:
+          type: array
+          items: { type: string }
+        notifiedOn: { type: string, format: date, nullable: true }
+        corporate:
+          type: boolean
+          description: True when the owner is itself a company, so the ownership chain does not end here.
+      required: [fullName, band, natureOfControl, corporate]
     Error:
       type: object
       properties:
@@ -632,6 +909,12 @@ components:
           format: uuid
         requiredSignatures:
           type: [integer, 'null']
+        requiredSignerRoles:
+          type: array
+          items: { type: string }
+          description: >-
+            The offices the attested rule requires. Empty means a plain count — any listed
+            representatives may sign. Non-empty means each office must be filled by a distinct signer.
         signedCount:
           type: integer
         extract:
