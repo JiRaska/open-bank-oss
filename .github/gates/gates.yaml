@@ -2540,6 +2540,32 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-matrix-write-grants.py"]
 
+  # The sibling above asks whether an M2M-reachable matrix WRITE grant was declared. This one
+  # asks a different question the same data can answer: does the action's own rest.rego rule
+  # already carry `not startswith(input.principal.id, "service-account-")`? Where it does and the
+  # matrix grants it anyway, the two artifacts contradict each other — the rule keeps machines out,
+  # `matrix-allows` lets them in on type+role alone, and `allow` is a disjunction. Neither existing
+  # gate can see it: check-matrix-write-grants never reads the exclusions, and the rego has no view
+  # of the matrix. Subject derived from rest.rego, today's two contradictions baselined in
+  # rules.yaml: matrix_sa_excluded_action_grants, ratchet both ways.
+  - id: matrix-sa-excluded-actions
+    name: "an SA-excluded action is not matrix-reachable (rest.rego vs role_action_matrix, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A rule's `not startswith(input.principal.id, \"service-account-\")` is the only thing separating staff from the platform's own services, because a client_credentials JWT is classified HUMAN; `matrix-allows` grants on type plus role alone and cannot express that exclusion, so a matrix entry over such an action silently defeats it and no policy layer can veto a base-layer reason."
+    review_after: "2027-09-12"
+    budget_seconds: 10                   # two file reads and a set intersection; measured 0.2s
+    min_subjects: 3                      # SA-excluded actions in rest.rego, 4 today. A floor because
+                                         # this gate's whole value is the derived subject: if the
+                                         # exclusion pattern is ever reworded, the parser matches
+                                         # nothing and the gate goes green about an empty set. The
+                                         # script also refuses a subject of exactly zero on its own.
+    run: |
+      python3 .github/scripts/check-matrix-excluded-actions.py --enforce
+    selftest: python3 .github/scripts/check-matrix-excluded-actions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-matrix-excluded-actions.py"]
+
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
   # plus machine-checkable repo facts (agents.yaml, prompt-registry coverage, evals
