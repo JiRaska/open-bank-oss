@@ -187,7 +187,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or resource ownership could not be established }
   /api/v1/delegations/{id}:
     get:
