@@ -37,6 +37,8 @@ data class PartyMandate(
     val agentPartyId: UUID,
     val role: MandateRole,
     val authority: MandateAuthority,
+    /** Exact register quorum. Null only for legacy JOINT rows whose threshold was historically discarded. */
+    val requiredSignatures: Int?,
     val source: MandateSource,
     val status: MandateStatus,
     /** Where the fact came from: a kyb case + signature, a register extract, an operator's note. */
@@ -48,6 +50,16 @@ data class PartyMandate(
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
+    init {
+        require(requiredSignatures == null || requiredSignatures >= 1) { "requiredSignatures must be positive" }
+        require(requiredSignatures == null || authority == MandateAuthority.JOINT || requiredSignatures == 1) {
+            "SOLE authority requires exactly one signature"
+        }
+        require(requiredSignatures == null || authority == MandateAuthority.SOLE || requiredSignatures >= 2) {
+            "JOINT authority requires at least two signatures"
+        }
+    }
+
     fun isActiveAt(at: Instant): Boolean =
         status == MandateStatus.ACTIVE && !at.isBefore(validFrom) && (validTo == null || at.isBefore(validTo))
 }

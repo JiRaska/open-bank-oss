@@ -57,14 +57,40 @@ enum class RepresentationMode {
     UNKNOWN,
 }
 
-data class RepresentationRule(val mode: RepresentationMode, val requiredSigners: Int?, val sourceText: String?) {
+data class RepresentationRule(
+    val mode: RepresentationMode,
+    val requiredSigners: Int?,
+    val sourceText: String?,
+    /**
+     * The offices the register names as having to sign, when it names them (issue #9709).
+     *
+     * A count cannot express *"předseda představenstva spolu s jedním členem představenstva"*: two
+     * ordinary board members satisfy a count of two and do not satisfy that rule. Flattening a
+     * role-specific rule into [JOINT_N] would therefore be wrong in the dangerous direction — the
+     * bank would accept the signatures of the wrong people — so the offices are carried here and
+     * [isRoleConstrained] sends the case to a human, who reads [sourceText].
+     */
+    val requiredRoles: List<String> = emptyList(),
+) {
 
-    /** How many DISTINCT verified signatures the agreement needs, or null when a human must decide. */
-    fun signaturesRequired(representativeCount: Int): Int? = when (mode) {
-        RepresentationMode.SOLE -> 1
-        RepresentationMode.JOINT_ALL -> representativeCount.coerceAtLeast(1)
-        RepresentationMode.JOINT_N -> requiredSigners?.coerceIn(1, representativeCount.coerceAtLeast(1))
-        RepresentationMode.UNKNOWN -> null
+    /** True when the register names WHICH offices must sign, not merely how many. */
+    val isRoleConstrained: Boolean get() = requiredRoles.isNotEmpty()
+
+    /**
+     * How many DISTINCT verified signatures the agreement needs, or null when a human must decide.
+     *
+     * Null for a role-constrained rule as well as for [RepresentationMode.UNKNOWN]: the count is
+     * known there, and it is not sufficient, so answering it would invite a caller to check the
+     * number and stop.
+     */
+    fun signaturesRequired(representativeCount: Int): Int? = when {
+        isRoleConstrained -> null
+        else -> when (mode) {
+            RepresentationMode.SOLE -> 1
+            RepresentationMode.JOINT_ALL -> representativeCount.coerceAtLeast(1)
+            RepresentationMode.JOINT_N -> requiredSigners?.coerceIn(1, representativeCount.coerceAtLeast(1))
+            RepresentationMode.UNKNOWN -> null
+        }
     }
 
     companion object {

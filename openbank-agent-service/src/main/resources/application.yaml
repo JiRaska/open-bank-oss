@@ -113,6 +113,13 @@ quarkus:
       url: http://localhost:8135
     sepa-instant-service:
       url: http://localhost:8127
+    # ADR-0285 D5 — PublishedStyleProvider's client-credentials read of the published style for
+    # the ui-assistant persona. Not wired into AgentChatService.systemPrompt() yet (see
+    # PublishedStyleProvider's KDoc).
+    communication-service:
+      url: ${COMMUNICATION_SERVICE_URL:http://localhost:8158}
+      connect-timeout: 2000
+      read-timeout: 3000
     # Observability stack (anonymous in-cluster read; no OIDC filter on these clients).
     prometheus:
       url: http://localhost:9090

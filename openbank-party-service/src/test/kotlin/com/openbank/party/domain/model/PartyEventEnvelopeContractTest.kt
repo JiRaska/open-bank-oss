@@ -103,6 +103,34 @@ class PartyEventEnvelopeContractTest {
     }
 
     @Test
+    fun `PARTY_MANDATE_GRANTED preserves the exact statutory quorum on the wire`() {
+        val mandate = PartyMandate(
+            id = UUID.randomUUID(),
+            principalPartyId = UUID.randomUUID(),
+            agentPartyId = UUID.randomUUID(),
+            role = MandateRole.LEGAL_REPRESENTATIVE,
+            authority = MandateAuthority.JOINT,
+            requiredSignatures = 3,
+            source = MandateSource.REGISTRY,
+            status = MandateStatus.ACTIVE,
+            evidenceRef = "registry-extract:revision-7",
+            validFrom = at,
+            validTo = null,
+            createdAt = at,
+            updatedAt = at,
+        )
+        val event = PartyEvents.mandateGranted(
+            mandate,
+            at,
+            PartyActor.system("kyb-service"),
+        )
+        val json = mapper.readTree(mapper.writeValueAsString(event.envelope))
+
+        assertThat(json.get("authority").asText()).isEqualTo("JOINT")
+        assertThat(json.get("requiredSignatures").asInt()).isEqualTo(3)
+    }
+
+    @Test
     fun `synthetic classification is preserved in the lifecycle contract`() {
         val canary = individual().copy(classification = PartyClassification.SYNTHETIC)
         val event = PartyEvents.created(canary, at, PartyActor.system("canary"))

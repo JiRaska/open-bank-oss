@@ -294,13 +294,20 @@ export default function SanctionsPage() {
       setLists(nextLists)
       // Reconciliation may reveal that an ambiguous PUT actually disabled a list. Remove only
       // types that are no longer enabled; never add back a list the operator deliberately omitted.
-      setSelectedListTypes(current => {
-        if (!listScopeInitialisedRef.current) {
-          listScopeInitialisedRef.current = true
-          return nextLists.filter(list => list.enabled).map(list => list.listType)
-        }
-        return retainEnabledSelectedListTypes(current, nextLists)
-      })
+      //
+      // The ref flip must happen HERE, not inside the setSelectedListTypes updater: React
+      // StrictMode double-invokes updater functions in dev to catch impure ones, and an updater
+      // that mutates a ref as a side effect is exactly that — the throwaway first invocation
+      // flips the ref, so the real second invocation sees `initialised = true` with a still-empty
+      // `current` and takes the retain branch against nothing, permanently discarding the initial
+      // scope. Since `next dev` (not a prod build) backs the Playwright webServer, this reproduced
+      // on every single run (#9736).
+      if (!listScopeInitialisedRef.current) {
+        listScopeInitialisedRef.current = true
+        setSelectedListTypes(nextLists.filter(list => list.enabled).map(list => list.listType))
+      } else {
+        setSelectedListTypes(current => retainEnabledSelectedListTypes(current, nextLists))
+      }
     } catch (error) {
       setListsError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
     }
