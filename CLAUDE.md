@@ -749,9 +749,24 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
   `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
   `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
-  linter's output hides the failures that are not findings), and `probe_zombie_runs`.
+  linter's output hides the failures that are not findings), `probe_commit_touches_path` (below),
+  and `probe_zombie_runs`.
   Each is held to a known-positive **and** a known-negative by the enforced
   `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`git show <sha> -- <path>` exits 0 and prints NOTHING in three different situations, and in a
+  monorepo the likeliest one is that you were standing in the wrong directory.** Pathspec arguments
+  resolve against `$PWD`, while `git status` / `--name-only` PRINT repo-root-relative paths — so
+  copying a path out of one command's output into another's argument is wrong exactly when you are
+  not at the root. Measured from inside `openbank-admin-ui/`: the root-relative path answered
+  `exit=0, 0 bytes`, the same as a path that has never existed, and the same as a genuine
+  "unchanged" — three states, one indistinguishable answer, and the two failures read as the
+  negative finding you were testing for. Use `probe_commit_touches_path <sha> <repo-root-path>`,
+  which anchors the pathspec with git's `:/` magic prefix (CWD-independent) and separates exit 1
+  ("looked; it does not") from exit 2 ("that path names no file — could not look"). The `:/` prefix
+  alone is NOT the whole fix: it cures the CWD dependence and still answers `exit 0`, empty, for a
+  misspelled path. Same family as the `--before=<bare date>` and `date -j -f` traps above; caught
+  twice within one session on #9736, the second time by `git add` erroring loudly where `git show`
+  had not.
 - **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
   record never transitioned while every one of its jobs is `completed`, the oldest from
   2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`
