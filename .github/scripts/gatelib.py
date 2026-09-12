@@ -65,6 +65,7 @@ import hashlib
 import marshal
 import os
 import pathlib
+import re
 import tempfile
 from typing import Any
 
@@ -222,6 +223,68 @@ def subjects_unresolved(reason: str) -> None:
     skips the floor for that run only; a run that DID read its corpus is still held to it.
     """
     print(f"{SUBJECTS_PREFIX}{SUBJECTS_UNRESOLVED}  # {reason}")
+
+
+# --------------------------------------------------------------------------------------------
+# Shared "is this `gh` failure about REACHABILITY?" vocabulary
+# --------------------------------------------------------------------------------------------
+# The repo has been here before: four private copies of this judgement, agreeing on 23 of a
+# 31-message corpus and disagreeing on 8, each missing five genuinely transient messages
+# (gh-transient-patterns.txt documents the measurement). #9695 removed the fourth copy by
+# pointing check-ruleset-bypass-actors.py at the shared file — but pointing at it is not the
+# same as sharing the READER, so the next gate that needs this writes a fifth loader. This is
+# that reader, so there is one.
+#
+# Widening this set is not free and not symmetric: a message wrongly called transient degrades
+# a gate to UNRESOLVED, which reads as "could not check" rather than "found nothing" — so a
+# genuine permission misconfiguration would go quiet. The vocabulary file carries eleven
+# permission-denial messages as FINAL cases precisely to hold that line. Add patterns THERE,
+# with a case, never here.
+
+_PATTERNS_FILE = pathlib.Path(__file__).resolve().parent / "gh-transient-patterns.txt"
+_transient_cache: list[re.Pattern] | None = None
+
+
+def gh_transient_patterns() -> list[re.Pattern]:
+    """Compile the [rate_limit] + [transient] sections of the shared vocabulary.
+
+    Raises on an unreadable or empty vocabulary rather than returning nothing. An empty pattern
+    list matches nothing, so every failure would classify as FINAL while each call still handed
+    back a perfectly plausible boolean — the exact shape of a probe that fails by reporting
+    clean.
+    """
+    global _transient_cache
+    if _transient_cache is not None:
+        return _transient_cache
+    section: str | None = None
+    pats: dict[str, list[str]] = {"rate_limit": [], "transient": []}
+    for raw in _PATTERNS_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if section in pats:
+            pats[section].append(line)
+    if not pats["rate_limit"] or not pats["transient"]:
+        raise RuntimeError(
+            f"transient-pattern vocabulary at {_PATTERNS_FILE} has an empty [rate_limit] or "
+            f"[transient] section; refusing to classify with no patterns."
+        )
+    _transient_cache = [
+        re.compile(x, re.IGNORECASE) for x in pats["rate_limit"] + pats["transient"]
+    ]
+    return _transient_cache
+
+
+def is_gh_transient(message: str) -> bool:
+    """True when a `gh` failure is about reachability — a quota, a 5xx, a dropped connection.
+
+    False for anything that describes the SUBJECT, including every permission denial: those are
+    findings about the gate's own configuration and must stay loud.
+    """
+    return any(r.search(message) for r in gh_transient_patterns())
 
 
 def clear() -> None:
