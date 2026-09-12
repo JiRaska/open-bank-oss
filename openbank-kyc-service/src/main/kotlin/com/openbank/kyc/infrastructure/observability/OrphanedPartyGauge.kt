@@ -32,6 +32,11 @@ import java.util.concurrent.atomic.AtomicLong
  *    longest-stranded party has been waiting, `0` when there are none. Triage: separates a
  *    mis-configuration that started this morning from the months-old backlog #5698 found.
  *  - `openbank_kyc_orphan_detection_parties_scanned{service="kyc"}` — the DENOMINATOR.
+ *  - `openbank_kyc_orphaned_parties_pre_consumer{service="kyc"}` — orphans excluded from the first
+ *    gauge because they were created before the oldest KYC case in the store, so the auto-open
+ *    consumer cannot have been running when they appeared (issue #9726). Published rather than
+ *    silently dropped, because the exclusion is a claim about the environment: this series is what
+ *    lets someone check it, and a step change in it is itself worth a look.
  *
  * ### Why the denominator is published
  *
@@ -99,6 +104,7 @@ class OrphanedPartyGauge(
     private val orphanCount = AtomicLong(0)
     private val oldestOrphanAgeSeconds = AtomicLong(0)
     private val partiesScanned = AtomicLong(0)
+    private val preConsumerParties = AtomicLong(0)
     private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
@@ -107,6 +113,7 @@ class OrphanedPartyGauge(
         gauge(r, "openbank.kyc.orphaned.parties", orphanCount)
         gauge(r, "openbank.kyc.orphaned.parties.oldest.age.seconds", oldestOrphanAgeSeconds)
         gauge(r, "openbank.kyc.orphan.detection.parties.scanned", partiesScanned)
+        gauge(r, "openbank.kyc.orphaned.parties.pre.consumer", preConsumerParties)
     }
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -144,12 +151,27 @@ class OrphanedPartyGauge(
             val report = detector.detect()
             orphanCount.set(report.orphanCount.toLong())
             partiesScanned.set(report.partiesScanned)
+            preConsumerParties.set(report.preConsumerCount.toLong())
             oldestOrphanAgeSeconds.set(
                 report.oldestOrphanCreatedAt
                     ?.let { maxOf(0L, Duration.between(it, Instant.now(clock)).seconds) }
                     ?: 0L,
             )
             liveness?.recordSuccess()
+            if (report.preConsumerCount > 0) {
+                // Not a warning: these are not stranded customers and nothing is to be done about
+                // them. It is here so the number in the gauge has a visible composition — the
+                // absence of one is what let two separate readers rank a pile of pre-consumer rows
+                // and e2e fixtures as the estate's highest-severity finding (#9726).
+                log.infof(
+                    "[orphan-detection] %d party(ies) with no case predate the oldest case in this " +
+                        "store (%s) — created before the auto-open consumer existed, so no case was " +
+                        "ever possible; excluded from openbank_kyc_orphaned_parties: %s",
+                    report.preConsumerCount,
+                    report.firstCaseCreatedAt,
+                    report.preConsumerPartyIds.joinToString(),
+                )
+            }
             if (report.orphanCount > 0) {
                 // The ids, not just the count: remediation is a manual replay per party (#5698), so
                 // the log line has to be actionable on its own. Party ids are opaque identifiers,

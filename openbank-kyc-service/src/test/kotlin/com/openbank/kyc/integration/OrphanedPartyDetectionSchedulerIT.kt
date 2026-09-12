@@ -85,7 +85,9 @@ class OrphanedPartyDetectionSchedulerIT {
     }
 
     /**
-     * A two-party register: one that never got a KYC case (the #5698 defect) and one that did.
+     * A three-party register: one that never got a KYC case (the #5698 defect), one that did, and
+     * one created before the oldest case in the store — which is #9726's eligibility cutoff, so it
+     * must be reported as pre-consumer rather than counted as stranded.
      * Both ids are hardcoded literals for the classloader reason above.
      */
     @Alternative
@@ -98,6 +100,7 @@ class OrphanedPartyDetectionSchedulerIT {
                 items = listOf(
                     PartySummary(UUID.fromString(STRANDED_PARTY_ID), "PENDING_KYC", CREATED_AT),
                     PartySummary(UUID.fromString(HANDLED_PARTY_ID), "PENDING_KYC", CREATED_AT),
+                    PartySummary(UUID.fromString(PRE_CONSUMER_PARTY_ID), "PENDING_KYC", PRE_CONSUMER_CREATED_AT),
                 ),
                 total = TOTAL,
             )
@@ -118,11 +121,13 @@ class OrphanedPartyDetectionSchedulerIT {
             c.prepareStatement(
                 """
                 INSERT INTO kyc_cases (case_id, party_id, status, risk_level, checks_json, created_at, updated_at)
-                VALUES (?, ?, 'OPEN', 'MEDIUM', '[]', NOW(), NOW())
+                VALUES (?, ?, 'OPEN', 'MEDIUM', '[]', ?, ?)
                 """.trimIndent(),
             ).use { st ->
                 st.setObject(1, UUID.randomUUID())
                 st.setObject(2, UUID.fromString(HANDLED_PARTY_ID))
+                st.setObject(3, java.sql.Timestamp.from(CASE_CREATED_AT))
+                st.setObject(4, java.sql.Timestamp.from(CASE_CREATED_AT))
                 st.executeUpdate()
             }
         }
@@ -171,9 +176,17 @@ class OrphanedPartyDetectionSchedulerIT {
 
         assertThat(awaitGaugeValue("openbank.kyc.orphaned.parties") { it == 1.0 })
             .describedAs(
-                "exactly one of the two seeded parties has no kyc_cases row, so the orphan gauge " +
-                    "must read 1 — 0 would mean the batched IN projection matched everything, 2 " +
-                    "that it matched nothing",
+                "of the three seeded parties one has a case, one predates the oldest case and one " +
+                    "is genuinely stranded, so the orphan gauge must read 1 — 0 would mean the " +
+                    "batched IN projection matched everything, 2 that the #9726 cutoff is not " +
+                    "applied at all",
+            )
+            .isEqualTo(1.0)
+
+        assertThat(gauge("openbank.kyc.orphaned.parties.pre.consumer"))
+            .describedAs(
+                "the excluded party is PUBLISHED, not dropped: without this series the exclusion " +
+                    "is a claim about the environment that nobody can check (#9726)",
             )
             .isEqualTo(1.0)
 
@@ -226,13 +239,32 @@ class OrphanedPartyDetectionSchedulerIT {
         assertThat(scrape)
             .describedAs("the denominator that separates 'no orphans' from 'scanned nothing'")
             .contains("openbank_kyc_orphan_detection_parties_scanned{")
+        assertThat(scrape)
+            .describedAs("the composition series the alert's description points a reader at (#9726)")
+            .contains("openbank_kyc_orphaned_parties_pre_consumer{")
     }
 
     private companion object {
         const val STRANDED_PARTY_ID = "fad8c8db-0000-4000-8000-000000005698"
         const val HANDLED_PARTY_ID = "58fb3ae8-0000-4000-8000-000000005698"
-        const val TOTAL = 2L
+        const val PRE_CONSUMER_PARTY_ID = "7c1f0a44-0000-4000-8000-000000009726"
+        const val TOTAL = 3L
         val CREATED_AT: Instant = Instant.parse("2026-06-07T10:00:00Z")
+
+        /**
+         * Before [CASE_CREATED_AT], so this party predates every case the store holds — the
+         * structural shape of the six sandbox parties that predated `PartyEventConsumer` (#9726).
+         */
+        val PRE_CONSUMER_CREATED_AT: Instant = Instant.parse("2026-05-01T10:00:00Z")
+
+        /**
+         * The seeded case's `created_at`, and therefore the derived cutoff. Written explicitly
+         * rather than `NOW()`: with `NOW()` every party in the register predates the only case and
+         * the whole register classifies as pre-consumer, which is a true answer to the wrong
+         * question — this test exists to exercise the split, not to demonstrate it swallowing
+         * everything.
+         */
+        val CASE_CREATED_AT: Instant = Instant.parse("2026-06-01T10:00:00Z")
 
         /** Generous vs the 2s cron so a slow CI runner cannot flake the wait. */
         const val SCAN_BUDGET_NANOS = 60_000_000_000L

@@ -131,9 +131,29 @@ class OrphanedPartyDetector(
             .filter { it.id !in withCases }
             .sortedBy { it.createdAt }
 
+        // Split the orphans by an eligibility cutoff DERIVED from the data (issue #9726). A party
+        // created before the oldest KYC case in the store predates every case that has ever been
+        // opened, so the auto-open consumer cannot have been running when it was created: no case
+        // was opened for it and none ever could have been. Counting those alongside genuinely
+        // stranded parties put a permanent floor of 6 under the sandbox gauge, so `> 0` was a
+        // threshold the environment could never satisfy and a real seventh orphan would have been
+        // indistinguishable from the floor.
+        //
+        // A null cutoff (no case has ever existed, including a wiped store) classifies NOTHING as
+        // ineligible. The other direction would let an empty kyc-db report a clean register, which
+        // is the report-clean failure this whole control exists to prevent.
+        val firstCaseAt = kycCaseRepository.earliestCaseCreatedAt()
+        val (preConsumer, stranded) = if (firstCaseAt == null) {
+            emptyList<PartySummary>() to orphans
+        } else {
+            orphans.partition { it.createdAt.isBefore(firstCaseAt) }
+        }
+
         return OrphanedPartyReport(
-            orphanedPartyIds = orphans.map { it.id },
-            oldestOrphanCreatedAt = orphans.firstOrNull()?.createdAt,
+            orphanedPartyIds = stranded.map { it.id },
+            preConsumerPartyIds = preConsumer.map { it.id },
+            firstCaseCreatedAt = firstCaseAt,
+            oldestOrphanCreatedAt = stranded.firstOrNull()?.createdAt,
             partiesScanned = scanned,
             checkedAt = now,
         )
@@ -167,15 +187,27 @@ class OrphanedPartyDetector(
  *   is indistinguishable from a healthy register unless the denominator is published alongside. The
  *   fleet has been bitten by exactly this shape — a probe that cannot express its own failure
  *   reports "clean".
+ * @param preConsumerPartyIds parties with no case that were created BEFORE the oldest case this
+ *   store holds — i.e. before the auto-open consumer demonstrably worked. They are reported
+ *   separately rather than dropped: the exclusion is a claim about the environment, and a claim
+ *   nobody can see is one nobody can falsify. Empty when [firstCaseCreatedAt] is null.
+ * @param firstCaseCreatedAt the derived cutoff itself, so a reader can check what was excluded and
+ *   why without re-deriving it. Null means the store holds no case at all, in which case nothing
+ *   was excluded.
  * @param oldestOrphanCreatedAt creation time of the longest-stranded orphan, or `null` when there
  *   are none. Drives the age gauge that tells a fresh mis-configuration apart from the months-old
  *   backlog #5698 found.
  */
 data class OrphanedPartyReport(
     val orphanedPartyIds: List<UUID>,
+    val preConsumerPartyIds: List<UUID> = emptyList(),
+    val firstCaseCreatedAt: Instant? = null,
     val oldestOrphanCreatedAt: Instant?,
     val partiesScanned: Long,
     val checkedAt: Instant,
 ) {
     val orphanCount: Int get() = orphanedPartyIds.size
+
+    /** How many orphans were excluded as structurally ineligible. Published, never silently dropped. */
+    val preConsumerCount: Int get() = preConsumerPartyIds.size
 }
