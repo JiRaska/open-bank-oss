@@ -87,17 +87,17 @@ export default function ServiceConfigPage() {
       />
       {/* Status summary */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-        <StatusPill color="#059669" bg="#ecfdf5" count={upCount} label={t('V pořádku', 'Healthy')} />
-        {degradedCount > 0 && <StatusPill color="#d97706" bg="#fffbeb" count={degradedCount} label={t('Zhoršené', 'Degraded')} />}
-        {downCount > 0 && <StatusPill color="#dc2626" bg="#fef2f2" count={downCount} label={t('Nedostupné', 'Unreachable')} />}
+        <StatusPill color="var(--success-text)" bg="var(--success-bg)" count={upCount} label={t('V pořádku', 'Healthy')} />
+        {degradedCount > 0 && <StatusPill color="var(--warning-text)" bg="var(--warning-bg)" count={degradedCount} label={t('Zhoršené', 'Degraded')} />}
+        {downCount > 0 && <StatusPill color="var(--danger-text)" bg="var(--danger-bg)" count={downCount} label={t('Nedostupné', 'Unreachable')} />}
       </div>
 
       {/* Legend row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-        <LegendCard icon={<Zap size={14}/>}       label={t('Limit požadavků', 'Rate Limit')}     desc={t('Max souběžných požadavků', 'Max concurrent requests')}    accent="#7c3aed" accentBg="#f5f3ff" />
-        <LegendCard icon={<Shield size={14}/>}     label="Circuit Breaker"                         desc={t('Aktivuje se při trvalých selháních', 'Trips on sustained failures')} accent="#2563eb" accentBg="#eff6ff" />
-        <LegendCard icon={<RefreshCw size={14}/>}  label={t('Opakování', 'Retry')}                 desc={t('Automatické opakování s jitterem', 'Auto-retry with jitter')}     accent="#059669" accentBg="#ecfdf5" />
-        <LegendCard icon={<Clock size={14}/>}      label={t('Timeout', 'Timeout')}                 desc={t('Max čekání na odchozí volání', 'Max wait per outbound call')}   accent="#d97706" accentBg="#fffbeb" />
+        <LegendCard icon={<Zap size={14}/>}       label={t('Limit požadavků', 'Rate Limit')}     desc={t('Max souběžných požadavků', 'Max concurrent requests')}    accent="var(--accent-text)" accentBg="var(--accent-bg)" />
+        <LegendCard icon={<Shield size={14}/>}     label="Circuit Breaker"                         desc={t('Aktivuje se při trvalých selháních', 'Trips on sustained failures')} accent="var(--info-text)" accentBg="var(--info-bg)" />
+        <LegendCard icon={<RefreshCw size={14}/>}  label={t('Opakování', 'Retry')}                 desc={t('Automatické opakování s jitterem', 'Auto-retry with jitter')}     accent="var(--success-text)" accentBg="var(--success-bg)" />
+        <LegendCard icon={<Clock size={14}/>}      label={t('Timeout', 'Timeout')}                 desc={t('Max čekání na odchozí volání', 'Max wait per outbound call')}   accent="var(--warning-text)" accentBg="var(--warning-bg)" />
       </div>
 
       {/* Loading state */}
@@ -161,12 +161,12 @@ export default function ServiceConfigPage() {
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {!snap.reachable && (
-                    <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>{t('Nedostupné', 'Unreachable')}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--danger-text)', fontWeight: 600 }}>{t('Nedostupné', 'Unreachable')}</span>
                   )}
-                  {cfg?.rateLimit     && <PolicyBadge color="#7c3aed" bg="#f5f3ff" icon={<Zap size={10}/>}      label={`${cfg.rateLimit.maxConcurrent} concurrent`} />}
-                  {cfg?.circuitBreaker && <PolicyBadge color="#2563eb" bg="#eff6ff" icon={<Shield size={10}/>}   label="Circuit Breaker" />}
-                  {cfg?.retry         && <PolicyBadge color="#059669" bg="#ecfdf5" icon={<RefreshCw size={10}/>} label={`${cfg.retry.maxRetries}× retry`} />}
-                  {cfg?.timeout       && <PolicyBadge color="#d97706" bg="#fffbeb" icon={<Clock size={10}/>}     label={`${cfg.timeout.valueMs / 1000}s timeout`} />}
+                  {cfg?.rateLimit     && <PolicyBadge color="var(--accent-text)" bg="var(--accent-bg)" icon={<Zap size={10}/>}      label={`${cfg.rateLimit.maxConcurrent} concurrent`} />}
+                  {cfg?.circuitBreaker && <PolicyBadge color="var(--info-text)" bg="var(--info-bg)" icon={<Shield size={10}/>}   label="Circuit Breaker" />}
+                  {cfg?.retry         && <PolicyBadge color="var(--success-text)" bg="var(--success-bg)" icon={<RefreshCw size={10}/>} label={`${cfg.retry.maxRetries}× retry`} />}
+                  {cfg?.timeout       && <PolicyBadge color="var(--warning-text)" bg="var(--warning-bg)" icon={<Clock size={10}/>}     label={`${cfg.timeout.valueMs / 1000}s timeout`} />}
                   {snap.reachable && !hasCustomConfig && (
                     <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{t('pouze výchozí', 'defaults only')}</span>
                   )}
@@ -177,8 +177,8 @@ export default function ServiceConfigPage() {
               {isOpen && (
                 <div id={panelId} role="region" aria-label={t('Detail konfigurace služby', 'Service configuration details')} style={{ padding: '16px', background: 'var(--surface)' }}>
                   {!snap.reachable ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#dc2626', fontSize: '13px', padding: '8px 0' }}>
-                      <Circle size={10} fill="#dc2626" stroke="none" />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger-text)', fontSize: '13px', padding: '8px 0' }}>
+                      <Circle size={10} fill="var(--danger-text)" stroke="none" />
                       {t('Služba je nedostupná — nelze načíst živou konfiguraci.', 'Service is unreachable — cannot fetch live configuration.')}
                     </div>
                   ) : !cfg ? (
@@ -199,11 +199,11 @@ export default function ServiceConfigPage() {
                               <span key={check.name} style={{
                                 display: 'inline-flex', alignItems: 'center', gap: '4px',
                                 padding: '3px 8px', borderRadius: '4px', fontSize: '11px',
-                                background: check.status === 'UP' ? '#ecfdf5' : '#fef2f2',
-                                color: check.status === 'UP' ? '#059669' : '#dc2626',
-                                border: `1px solid ${check.status === 'UP' ? '#05966933' : '#dc262633'}`,
+                                background: check.status === 'UP' ? 'var(--success-bg)' : 'var(--danger-bg)',
+                                color: check.status === 'UP' ? 'var(--success-text)' : 'var(--danger-text)',
+                                border: `1px solid ${check.status === 'UP' ? 'var(--success-border)' : 'var(--danger-border)'}`,
                               }}>
-                                <Circle size={6} fill={check.status === 'UP' ? '#059669' : '#dc2626'} stroke="none" />
+                                <Circle size={6} fill={check.status === 'UP' ? 'var(--success-text)' : 'var(--danger-text)'} stroke="none" />
                                 {check.name}
                               </span>
                             ))}
@@ -215,7 +215,7 @@ export default function ServiceConfigPage() {
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                         <PolicyPanel
                           title={t('Limit požadavků', 'Rate Limit')} icon={<Zap size={13}/>}
-                          accent="#7c3aed" accentBg="#f5f3ff"
+                          accent="var(--accent-text)" accentBg="var(--accent-bg)"
                           active={!!cfg.rateLimit}
                         >
                           {cfg.rateLimit
@@ -225,7 +225,7 @@ export default function ServiceConfigPage() {
 
                         <PolicyPanel
                           title="Circuit Breaker" icon={<Shield size={13}/>}
-                          accent="#2563eb" accentBg="#eff6ff"
+                          accent="var(--info-text)" accentBg="var(--info-bg)"
                           active={!!cfg.circuitBreaker}
                         >
                           {cfg.circuitBreaker ? <>
@@ -238,7 +238,7 @@ export default function ServiceConfigPage() {
 
                         <PolicyPanel
                           title={t('Opakování', 'Retry')} icon={<RefreshCw size={13}/>}
-                          accent="#059669" accentBg="#ecfdf5"
+                          accent="var(--success-text)" accentBg="var(--success-bg)"
                           active={!!cfg.retry}
                         >
                           {cfg.retry ? <>
@@ -250,7 +250,7 @@ export default function ServiceConfigPage() {
 
                         <PolicyPanel
                           title={t('Timeout', 'Timeout')} icon={<Clock size={13}/>}
-                          accent="#d97706" accentBg="#fffbeb"
+                          accent="var(--warning-text)" accentBg="var(--warning-bg)"
                           active={!!cfg.timeout}
                         >
                           {cfg.timeout
@@ -281,9 +281,9 @@ export default function ServiceConfigPage() {
         <Info size={14} style={{ color: 'var(--info)', flexShrink: 0, marginTop: '1px' }} />
         <p style={{ fontSize: '13px', color: 'var(--info)', lineHeight: 1.6 }}>
           {t('Hodnoty jsou načítány', 'Values are fetched')} <strong>{t('živě', 'live')}</strong> {t('z endpointu', 'from each service\'s')}{' '}
-          <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'rgba(2,132,199,0.1)', padding: '1px 5px', borderRadius: '3px' }}>/api/v1/config</code>{' '}
+          <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'var(--info-bg)', padding: '1px 5px', borderRadius: '3px' }}>/api/v1/config</code>{' '}
           {t('každé služby. Pro změnu hodnot aktualizujte', 'endpoint. To change values, update')}{' '}
-          <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'rgba(2,132,199,0.1)', padding: '1px 5px', borderRadius: '3px' }}>application.yaml</code>{' '}
+          <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'var(--info-bg)', padding: '1px 5px', borderRadius: '3px' }}>application.yaml</code>{' '}
           {t('v příslušné službě a nasaďte znovu. Stav zdraví se aktualizuje každých', 'in the respective service and redeploy. Health status updates every')} {POLL_INTERVAL / 1000} {t('sekund.', 'seconds.')}
         </p>
       </div>
@@ -298,7 +298,7 @@ function StatusPill({ color, bg, count, label }: { color: string; bg: string; co
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '6px',
       padding: '5px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600,
-      background: bg, color, border: `1px solid ${color}33`,
+      background: bg, color, border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
     }}>
       <Circle size={7} fill={color} stroke="none" />
       {count} {label}
@@ -307,7 +307,7 @@ function StatusPill({ color, bg, count, label }: { color: string; bg: string; co
 }
 
 function HealthDot({ status }: { status: 'up' | 'down' | 'degraded' }) {
-  const color = status === 'up' ? '#059669' : status === 'down' ? '#dc2626' : '#d97706'
+  const color = status === 'up' ? 'var(--success-text)' : status === 'down' ? 'var(--danger-text)' : 'var(--warning-text)'
   return (
     <span style={{ display: 'flex', position: 'relative' }}>
       <Circle size={8} fill={color} stroke="none" />
@@ -364,7 +364,7 @@ function PolicyBadge({ color, bg, icon, label }: { color: string; bg: string; ic
       borderRadius: '20px',
       fontSize: '11px', fontWeight: 600,
       background: bg, color,
-      border: `1px solid ${color}33`,
+      border: `1px solid color-mix(in srgb, ${color} 20%, transparent)`,
     }}>
       {icon}{label}
     </span>
@@ -377,7 +377,7 @@ function PolicyPanel({ title, icon, accent, accentBg, active, children }: {
   const { t } = useLanguage()
   return (
     <div style={{
-      border: `1px solid ${active ? accent + '33' : 'var(--border)'}`,
+      border: `1px solid ${active ? `color-mix(in srgb, ${accent} 20%, transparent)` : 'var(--border)'}`,
       borderRadius: 'var(--r-md)',
       overflow: 'hidden',
       opacity: active ? 1 : 0.5,
@@ -386,7 +386,7 @@ function PolicyPanel({ title, icon, accent, accentBg, active, children }: {
       <div style={{
         padding: '9px 12px',
         background: active ? accentBg : 'var(--surface-2)',
-        borderBottom: `1px solid ${active ? accent + '22' : 'var(--border)'}`,
+        borderBottom: `1px solid ${active ? `color-mix(in srgb, ${accent} 13%, transparent)` : 'var(--border)'}`,
         display: 'flex', alignItems: 'center', gap: '7px',
       }}>
         <span style={{ color: active ? accent : 'var(--text-tertiary)', display: 'flex' }}>{icon}</span>

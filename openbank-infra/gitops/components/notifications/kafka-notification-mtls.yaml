@@ -3,9 +3,16 @@
 # secret is projected into `notifications` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: notification-service reads from four topics using four separate consumer
-# groups, and — since ADR-0239 D2 — WRITES delivery outcomes onto one topic. That
-# Write grant is the whole of its producer surface; it is not a general producer.
+# ACLs, by SHAPE rather than by count — read the KafkaUser below for the current set, because a
+# comment naming a number goes stale exactly like one asserting current remote state, and this one
+# already had: two versions of it said "four topics / four groups" and "three topics / three
+# groups" while the real set was neither.
+#
+# notification-service reads one topic per incoming channel, each under its OWN consumer group
+# (never a shared one — #5752), and its Write grants are exactly two kinds: the ADR-0239 D2
+# delivery-outcomes topic, its one real producer surface, plus one explicit dead-letter topic per
+# incoming channel (#5745). It is not a general producer, and a Write grant that is neither of
+# those two kinds does not belong here.
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -70,6 +77,19 @@ spec:
           name: openbank.delegation.events
           patternType: literal
         operations: [Read, Describe]
+        host: "*"
+      # #8346 (tail of #5745): SmallRye dead-letter topic for the delegation-events-in channel.
+      # Without Write here the DLQ send itself fails and the consumer wedges on the very failure it
+      # was meant to park — strictly worse than no DLQ at all, which is why this grant lands in the
+      # same change as the failure-strategy and the KafkaTopic CR, not after it. Named explicitly
+      # in application.yaml (nested form, issue #686) because account-service and
+      # card-issuance-service consume the same channel name and would otherwise share the implicit
+      # `dead-letter-topic-delegation-events-in` (#5752).
+      - resource:
+          type: topic
+          name: openbank.dlq.notification.delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       # #5698: SmallRye dead-letter topic for the party-events-in channel. Without Write here
       # the DLQ send itself fails and the consumer wedges on the very failure it was meant to

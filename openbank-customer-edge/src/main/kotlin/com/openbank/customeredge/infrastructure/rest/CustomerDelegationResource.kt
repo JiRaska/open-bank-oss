@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -132,6 +133,57 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             limit?.let { add("limit=${it.coerceIn(1, MAX_ACTIVITY_PAGE)}") }
         }.joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
         return upstream.get("$auditServiceUrl/api/v1/audit/on-behalf-of/$partyId$query", partyId)
+    }
+
+    /**
+     * Named account portfolios owned by the active customer profile. A portfolio is a reusable
+     * selection for a later delegation journey; it is deliberately not a grant, an account
+     * ownership assertion, or payment/co-signing authority.
+     */
+    @GET
+    @Path("/portfolios")
+    @Blocking
+    fun portfolios(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/owner/$partyId", partyId)
+    }
+
+    /**
+     * Creates a portfolio for the active profile. The public shape intentionally has no
+     * `ownerPartyId`: accepting it, even only to overwrite it, makes a forged owner look valid to
+     * a buggy client. The edge supplies the verified active profile and upstream checks it again.
+     */
+    @POST
+    @Path("/portfolios")
+    @Blocking
+    fun createPortfolio(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val partyId = partyId()
+        val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        if (requested.has(FIELD_PORTFOLIO_OWNER)) {
+            return refuse(Response.Status.FORBIDDEN, "ownerPartyId is derived from the authenticated profile")
+        }
+        val command = json.createObjectNode().apply {
+            requested.get(FIELD_PORTFOLIO_NAME)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_NAME, it)
+            }
+            requested.get(FIELD_PORTFOLIO_ACCOUNTS)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_ACCOUNTS, it)
+            }
+        }
+        command.put(FIELD_PORTFOLIO_OWNER, partyId)
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command), key)
+    }
+
+    /** A guessed id is left to the upstream owner check, which returns 404 without an existence oracle. */
+    @GET
+    @Path("/portfolios/{id}")
+    @Blocking
+    fun portfolio(@PathParam("id") id: UUID): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/$id", partyId)
     }
 
     /**
@@ -300,8 +352,12 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
+        const val PORTFOLIOS = "/api/v1/delegation-portfolios"
         const val FIELD_GRANTOR = "grantorPartyId"
         const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
+        const val FIELD_PORTFOLIO_OWNER = "ownerPartyId"
+        const val FIELD_PORTFOLIO_NAME = "name"
+        const val FIELD_PORTFOLIO_ACCOUNTS = "accountIds"
         const val DEFAULT_REASON = "Revoked by grantor"
 
         /** Constraints the schema still names but no service enforces. See [offer]. */

@@ -44,6 +44,9 @@ dependencies {
     implementation("io.temporal:temporal-sdk:1.25.1")
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.65.1")
+    // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
+    // `trace` evidence) without exporting trace ids, attribute values or payloads.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)

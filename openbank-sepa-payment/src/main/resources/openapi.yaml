@@ -3,10 +3,23 @@
 openapi: 3.1.0
 info:
   title: SEPA Payment Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
-  # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
-  # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.7.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  # 1.7 -> 1.8 (#9670): CORRECTION (#5962) — the published status vocabularies never matched
+  # SepaPaymentStatus. RECALLED has never existed in the code and PENDING was removed before this
+  # spec was written, while RECEIVED/VALIDATED/RETURNED/CANCELLED — all reachable and all returned
+  # — went unpublished. oasdiff reads the removals as breaking; they are not, because no server
+  # behaviour changes, so it takes the correction class: minor, not major.
+  # 1.6 -> 1.7: additive only — GET /approvals (the checker's queue, issue #5679) plus two
+  # additive fields on ApprovalResponse (makerId, createdAt).
+  # 1.9 -> 1.10 (#9395): ADR-0300 returns idempotency.
+  #
+  # 1.11.0 (#8833, this branch): the request schemas the resources actually accept.
+  # This branch held 1.9.0 on the assumption that it would land before #9395. It did not: #9395
+  # merged at 1.10.0 and is on live main, so 1.9.0 is now BEHIND the published contract and
+  # 1.11.0 is the next free number. Read off live origin/main in the same turn as this edit —
+  # a taken version is textually identical to a free one, so no merge could have caught it, and
+  # the four-PR queue on this one spec is exactly the shape that keeps producing the collision.
+  version: 1.11.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -63,7 +76,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, PROCESSING, COMPLETED, REJECTED, RECALLED]
+            enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         - name: debtorAccountId
           in: query
           schema:
@@ -95,6 +108,10 @@ paths:
     post:
       tags: [SEPA Payments]
       summary: Handle inbound pacs.004 payment return from clearing
+      description: >-
+        Idempotent (ADR-0300): the return is keyed on the pacs.004 OrgnlEndToEndId and guarded by
+        the RETURNED state — a re-delivered return message replays the already-returned payment
+        instead of posting a second ledger reversal.
       operationId: handleSepaPaymentReturn
       security:
         - bearerAuth: [ROLE_API, ROLE_ADMIN]
@@ -332,11 +349,22 @@ components:
 
     CreateSepaPaymentRequest:
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, endToEndId]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (CreateSepaPaymentRequest in SepaPaymentDtos.kt). Before #8828 this schema published
+      # currencyCode and requestedExecutionDate, neither of which exists on that DTO, and
+      # omitted type, debtorIban and debtorName, all three non-nullable — so a client
+      # generated from this document could not create a SEPA payment at all.
+      required: [type, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, currency]
       properties:
+        type:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
@@ -345,24 +373,23 @@ components:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           example: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
           type: string
-        requestedExecutionDate:
+        endToEndId:
           type: string
-          format: date
-
     TransitionStatusRequest:
       type: object
       required: [targetStatus]
       properties:
         targetStatus:
           type: string
-          enum: [PROCESSING, COMPLETED, REJECTED, RECALLED]
+          # A DELIBERATE SUBSET of SepaPaymentStatus: every value `canTransitionTo` can reach.
+          # RECEIVED is the entry state only — no transition targets it — so it is absent here
+          # while being present on the read filter above.
+          enum: [VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         reason:
           type: string
 

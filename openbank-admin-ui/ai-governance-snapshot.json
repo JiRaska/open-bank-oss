@@ -221,7 +221,7 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "8326ffc1f5a537aa",
+      "sha256": "6372285504647940",
       "counts": {
         "external": 2,
         "not-applicable": 2,
@@ -267,7 +267,9 @@
           "catalog-review.v1"
         ],
         "customer-copilot": [
-          "system.v1"
+          "system.v1",
+          "core.v1",
+          "style.v1"
         ],
         "devops-agent": [
           "diagnosis.v1",
@@ -372,6 +374,13 @@
           "buildFile": "openbank-control-liveness-sentinel/build.gradle.kts"
         },
         {
+          "module": "openbank-copilot-service",
+          "charters": [
+            "customer-copilot"
+          ],
+          "buildFile": "openbank-copilot-service/build.gradle.kts"
+        },
+        {
           "module": "openbank-devops-agent",
           "charters": [
             "devops-agent"
@@ -414,12 +423,13 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 10,
+      "serviceCount": 11,
       "registeredChartersLoadedFromRegistry": [
         "authz-policy-auditor",
         "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",
+        "customer-copilot",
         "devops-agent",
         "docs-truth-agent",
         "finops-agent",
@@ -428,9 +438,7 @@
         "release-steward",
         "ui-assistant"
       ],
-      "registeredChartersStillInline": [
-        "customer-copilot"
-      ]
+      "registeredChartersStillInline": []
     },
     "governanceDefaults": {
       "enforcement": "block",

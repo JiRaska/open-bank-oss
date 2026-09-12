@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 
 function jsonRes(status: number, body: unknown): Response {
@@ -93,12 +93,19 @@ describe('useServiceResource', () => {
     expect(result.current.unavailable).toEqual({ kind: 'unreachable' })
   })
 
-  it('exposes HTTP status metadata without changing the shared failure classification', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(403, { error: 'forbidden' })))
-    const { result } = renderHook(() => useServiceResource('/api/svc/x/api/v1/items'))
+  it.each([401, 403])('purges retained privileged data after HTTP %s', async (status) => {
+    let authorized = true
+    vi.stubGlobal('fetch', vi.fn(async () => authorized
+      ? jsonRes(200, [{ id: 'private' }])
+      : jsonRes(status, { error: status === 401 ? 'unauthorized' : 'forbidden' })))
+    const { result } = renderHook(() => useServiceResource<Array<{ id: string }>>('/api/svc/x/api/v1/items'))
 
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.unavailable).toEqual({ kind: 'error', status: 403 })
+    await waitFor(() => expect(result.current.data).toEqual([{ id: 'private' }]))
+    authorized = false
+    act(() => result.current.reload())
+    await waitFor(() => expect(result.current.unavailable).toEqual({ kind: 'unauthorized', status }))
+    expect(result.current.data).toBeNull()
+    expect(result.current.unavailable).toEqual({ kind: 'unauthorized', status })
   })
 
   it('does nothing when url is null', async () => {
