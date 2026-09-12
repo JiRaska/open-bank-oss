@@ -151,4 +151,21 @@ class SharedDocumentTest {
 
         assertThat(body).isEmpty()
     }
+
+    @Test
+    fun `a legacy exposure grant is omitted and never fetches the document`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("documents?partyRef=$grantee") }, any()) } returns
+            Response.ok("[]").build()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
+            """[{"status":"ACTIVE","resourceType":"DOCUMENT","resourceId":"$theirs","capabilities":["OBJECT_READ"],"exposure":{"maxViews":1}}]""",
+        ).build()
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listDocuments().entity.toString())
+
+        assertThat(body).isEmpty()
+        verify(exactly = 0) { upstream.get(match { it.endsWith("/documents/$theirs") }, any()) }
+    }
 }

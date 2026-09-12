@@ -5,6 +5,7 @@
 package com.openbank.kyb.infrastructure.registry
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.application.port.out.RegistryAdapter
 import com.openbank.kyb.application.port.out.RegistryUnavailableException
@@ -17,12 +18,17 @@ import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchHit
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
 import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -56,6 +62,16 @@ interface AresRestClient {
     @GET
     @Path("/ekonomicke-subjekty-vr/{ico}")
     suspend fun publicRegister(@PathParam("ico") ico: String): JsonNode
+
+    /**
+     * Name search (issue #9707). POST, and the body shape is not guessable — see
+     * [AresRegistryAdapter.search] for the two fields that were measured against the live service
+     * and the one that silently does nothing.
+     */
+    @POST
+    @Path("/ekonomicke-subjekty/vyhledat")
+    @Consumes(MediaType.APPLICATION_JSON)
+    suspend fun searchSubjects(body: JsonNode): JsonNode
 }
 
 @ApplicationScoped
@@ -256,8 +272,78 @@ class AresRegistryAdapter : RegistryAdapter {
         runCatching { LocalDate.parse(it.take(DATE_LENGTH)) }.getOrNull()
     }
 
+    /**
+     * Find companies by name, optionally narrowed by town.
+     *
+     * **The town filter is `sidlo.textovaAdresa`, NOT `sidlo.nazevObce`.** Measured against the
+     * live service on 2026-09-11 with `obchodniJmeno=Asseco` (6 matches in total):
+     *
+     * ```
+     * sidlo.textovaAdresa = Praha -> 4   Brno -> 0   Ostrava -> 0   Bratislava -> 2      (4+2 = 6)
+     * sidlo.nazevObce     = Praha -> 6   Brno -> 6                  Bratislava -> 6
+     * ```
+     *
+     * `nazevObce` is the field name that appears in every RESPONSE and is the obvious one to reach
+     * for; the search endpoint ignores it, returning the unfiltered set for any town including one
+     * in another country. A town box wired to it would look like it worked — results still come
+     * back, they are simply not filtered — so this is a comment that has to stay next to the code.
+     *
+     * The over-limit answer is an error document rather than a truncated page: above 1 000 matches
+     * ARES returns `VYSTUP_PRILIS_MNOHO_VYSLEDKU` and `pocet` does not help, because the cap is on
+     * the match count, not the page size. That is a refine-the-query outcome, not an outage, and
+     * [RegistrySearchResult.tooManyMatches] carries it as such.
+     */
+    override suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? {
+        if (!supports(scheme)) return null
+        val response = try {
+            ares.searchSubjects(searchBody(query))
+        } catch (e: WebApplicationException) {
+            // A 400 here is ARES rejecting the QUERY, not the service being down. The only one we
+            // translate is the over-limit case; anything else is a genuine bad request we surface
+            // as unavailable rather than as "no such company".
+            val doc = runCatching { e.response.readEntity(JsonNode::class.java) }.getOrNull()
+            if (doc?.text("subKod") == TOO_MANY) {
+                return RegistrySearchResult.tooMany(parseMatchCount(doc.text("popis")))
+            }
+            log.warnf(e, "ARES search failed: %s", doc?.text("popis") ?: e.message)
+            throw RegistryUnavailableException("ares search: ${e.message}", e)
+        }
+        return toResult(response)
+    }
+
+    /**
+     * Visible for tests, and the single place the field names live. `sidlo.textovaAdresa` is
+     * load-bearing — see the measurement in [search].
+     */
+    internal fun searchBody(query: RegistrySearchQuery): JsonNode = JsonNodeFactory.instance.objectNode().apply {
+        put("obchodniJmeno", query.name)
+        put("pocet", query.limit)
+        query.city?.let { putObject("sidlo").put("textovaAdresa", it) }
+    }
+
+    /** Visible for tests: ARES search payload → hits. A row with no IČO or no name is dropped. */
+    internal fun toResult(response: JsonNode): RegistrySearchResult {
+        val hits = response.path("ekonomickeSubjekty").mapNotNull { toHit(it) }
+        return RegistrySearchResult(hits = hits, totalMatches = response.path("pocetCelkem").asInt(hits.size))
+    }
+
+    private fun toHit(node: JsonNode) = node.text("ico")?.let { ico ->
+        RegistrySearchHit(
+            identifier = LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, ico),
+            name = node.text("obchodniJmeno") ?: return@let null,
+            legalFormCode = node.text("pravniForma"),
+            registeredAddress = node.path("sidlo").text("textovaAdresa"),
+        )
+    }
+
+    /** The count lives only in the message text (`"... vrací příliš mnoho výsledků (2 818)."`). */
+    private fun parseMatchCount(popis: String?): Int =
+        popis?.let { Regex("\\(([\\d\\s\u00a0]+)\\)").find(it)?.groupValues?.get(1) }
+            ?.replace(Regex("[\\s\u00a0]"), "")?.toIntOrNull() ?: 0
+
     companion object {
         const val SOURCE = "ares"
+        private const val TOO_MANY = "VYSTUP_PRILIS_MNOHO_VYSLEDKU"
         private const val NOT_FOUND = 404
         private const val ARES_TIMEOUT_MS = 4000L
         private const val DATE_LENGTH = 10

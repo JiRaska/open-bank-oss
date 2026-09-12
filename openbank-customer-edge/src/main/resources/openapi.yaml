@@ -9,8 +9,10 @@ info:
   # on POST /term-deposits.
   # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
   # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
-  # this takes the next minor; whoever lands second renumbers.
-  version: 1.55.0
+  # this took the next minor.
+  # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
+  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
+  version: 1.57.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3376,7 +3378,10 @@ paths:
         edge began reserving against it before each delegated payment. Keeping the refusal made a
         payment-capable grant unconstructible — with a ceiling this route refused it and without one
         the upstream refused it with SPEND_WITHOUT_CEILING — which also left POST /cards/delegated
-        unreachable, since it requires exactly such a grant.
+        unreachable, since it requires exactly such a grant. `exposure` is not accepted: it would
+        claim redaction, watermark or view-count enforcement that raw document delivery cannot
+        prove. The edge relays the stable 400 `EXPOSURE_UNSUPPORTED` from delegation-service before
+        any SCA is spent.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
@@ -3386,7 +3391,7 @@ paths:
           description: >-
             Body is not a JSON object, or upstream validation failed — including
             `code: SPEND_WITHOUT_CEILING` when ACCOUNT_INITIATE_PAYMENT is asked for with no
-            cumulative ceiling.
+            cumulative ceiling, or `code: EXPOSURE_UNSUPPORTED` when exposure is non-null.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
   /delegations/preview:
@@ -3419,11 +3424,14 @@ paths:
                 perTransactionLimit: {type: object}
                 dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
-                exposure: {type: object}
+                exposure:
+                  type: object
+                  deprecated: true
+                  description: Non-null is refused with 400 EXPOSURE_UNSUPPORTED; historical metadata is audit-only.
                 validTo: {type: string, format: date-time}
       responses:
         '200': {description: Draft is currently eligible to proceed to SCA}
-        '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
+        '400': {description: Invalid draft, including non-null exposure (EXPOSURE_UNSUPPORTED)}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
 
@@ -3479,6 +3487,42 @@ paths:
           schema: { type: string }
       responses:
         '200': {description: Schemes}
+
+  /business/search:
+    get:
+      tags: [Business]
+      summary: Find a company by NAME and town — the entry screen for a founder who does not know their IČO
+      description: |
+        Read-only over a public register; creates nothing. A hit carries the identifier, which still
+        goes through `/business/lookup` and the ordinary extract confirmation before any case is
+        bound — picking the wrong identically-named company is otherwise silent.
+
+        `tooManyMatches` is a third outcome next to hits and no-hits, and it is the common one for a
+        short term: the register refuses a query above its match cap and the customer is told to add
+        a town or more of the name. It is not an outage and is answered 200.
+      operationId: searchBusiness
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 2 }
+        - name: name
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 100 }
+        - name: city
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        '200': {description: Pickable rows, possibly empty, or a tooManyMatches marker}
+        '400': {description: Missing or malformed parameter}
+        '404': {description: The country's register cannot be searched by name}
+        '503': {description: Register unavailable}
 
   /business/lookup:
     post:

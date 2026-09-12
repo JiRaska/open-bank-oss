@@ -4,7 +4,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionProvider } from 'next-auth/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
@@ -593,6 +593,79 @@ describe('campaign studio', () => {
 
     await waitFor(() => expect(screen.getByText('Approve and activate')).toBeTruthy(), { timeout: 8000 })
     expect(screen.getByText(/Someone other than marketa must approve/)).toBeTruthy()
+  }, 15000)
+
+  it('returns a pointer-opened review to its exact trigger when dismissed', async () => {
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('PENDING_APPROVAL') }))
+    renderDetail()
+
+    const trigger = await screen.findByRole('button', { name: 'Approve and activate' }, { timeout: 8000 })
+    const workspace = screen.getByRole('region', { name: 'Campaign workspace' })
+    workspace.focus()
+    expect(workspace).toHaveFocus()
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Approve and activate' })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Back to review' })).toHaveFocus())
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(trigger).toHaveFocus())
+  }, 15000)
+
+  it('blocks dismissal in flight and restores focus to the stable workspace after success', async () => {
+    let state = 'PENDING_APPROVAL'
+    let resolveAction: ((value: { ok: boolean; json: () => Promise<object> }) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/actions') && init?.method === 'POST') {
+        return new Promise(resolve => { resolveAction = resolve })
+      }
+      if (url.includes(`/api/campaigns/${CAMPAIGN_ID}`)) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => detail(state) })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
+    }))
+    renderDetail()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve and activate' }, { timeout: 8000 }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Approve and activate' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm action' }))
+    await waitFor(() => expect(dialog).toHaveAttribute('aria-busy', 'true'))
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+
+    state = 'ACTIVE'
+    await act(async () => {
+      resolveAction?.({ ok: true, json: async () => ({ state: 'ok' }) })
+    })
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Campaign workspace' })).toHaveFocus())
+    expect(screen.queryByRole('button', { name: 'Approve and activate' })).toBeNull()
+  }, 15000)
+
+  it('returns focus to the surviving enrol trigger after a successful non-state-changing action', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/actions') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ action: 'enrol' })
+        return { ok: true, status: 200, json: async () => ({ state: 'ok' }) }
+      }
+      if (url.includes(`/api/campaigns/${CAMPAIGN_ID}`)) {
+        return { ok: true, status: 200, json: async () => detail('ACTIVE') }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    renderDetail()
+
+    const trigger = await screen.findByRole('button', { name: 'Enrol audience' }, { timeout: 8000 })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm action' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await waitFor(() => expect(trigger).toHaveFocus())
   }, 15000)
 
   it('only the transitions the current state allows are offered', async () => {
