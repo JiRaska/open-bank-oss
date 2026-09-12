@@ -79,8 +79,13 @@ Assets protected, in priority order:
 ```
 
 Trust boundaries crossed: (1) external customer → REST/SSE; (model leg) service → model provider;
-(token exchange) service → downstream services as the scoped customer; (2) service → each domain service.
-Domain layer is framework-free (ADR-0002).
+(token exchange) service → downstream services as the scoped customer; (2) service → each domain service;
+(3) service → `openbank-communication-service`, client-credentials, read-only (`PublishedStyleProvider`,
+ADR-0285 D5) — fetches the published style for a persona, cached with a short TTL and a
+git-registered-baseline fallback on failure. NOT wired into `CopilotChatService.systemPrompt()` yet
+(infrastructure only; the actual composition cutover needs the ADR-0148 evals replayed against the
+reordered core+style text first — see `RegisteredPromptTemplates`'s KDoc). Domain layer is
+framework-free (ADR-0002).
 
 ## 3. STRIDE analysis
 
@@ -97,6 +102,7 @@ Domain layer is framework-free (ADR-0002).
 | D1 | Reasoning loop / model | **DoS / cost exhaustion** — flood of turns or long generations starves the service or burns the model budget | Per-customer rate limits; token/cost budgets at the gateway (ADR-0031 D7); **kill switch** (global + per-capability) halts the fleet; fault-tolerance timeouts | Gateway rate-limit tuning — infra scope; load test before GA |
 | E1 | Authorization | **Elevation** — assistant performs an action the customer is not entitled to, or acts without a human | Deny-by-default OPA (ADR-0034); action whitelist; **HITL + SCA mandatory** for every state change (T2); the assistant holds **less** privilege than the customer, never more (ADR-0089 principle) | OPA enforce still advisory — *open* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — copilot reuses the shared `openbank-services` confidential client / shared Vault key | Secret Vault-projected (never in git/state); confidential client; token additionally audience-scoped per customer | **Shared-credential blast radius accepted for sandbox only.** Dedicated Vault path + per-service Keycloak client before prod; **prod go-live needs the second approver to sign this residual** (ADR-0030) — *open* |
+| I4 | `communication-service` leg | **Information disclosure / tampering** — a compromised communication-service serves a poisoned style, or the read exposes something it shouldn't | The read is read-only, client-credentials, `GET .../published` only — no write path, no customer data crosses this boundary (style content is bank-authored prose, never PII). A poisoned style is bounded by composition order (ADR-0285 D1: core is always first, style can only ever be appended after it, never touch tool-routing or safety rules) — and moot today regardless, since nothing composes the fetched style into a live prompt yet (`PublishedStyleProvider` is unused infrastructure, not wired into `systemPrompt()`) | Blast radius reassessed when the composition cutover ships — *open, tracked with that cutover* |
 
 ## 4. Key invariants (must never regress)
 
@@ -129,9 +135,19 @@ Domain layer is framework-free (ADR-0002).
 - **Dedicated OIDC credential (S2/I2):** per-service Vault path + dedicated confidential client before prod.
 - **DomainMetrics (I3, ADR-0077):** deferred to next libs ship to avoid a fleet rebuild.
 - **gitops/ArgoCD manifest:** the service is not yet deployed; deployment is a separate follow-up.
+- **`CopilotChatService.systemPrompt()` composition cutover (I4, ADR-0285 D5):** `PublishedStyleProvider`
+  is built and tested but not called from `systemPrompt()` — composing `core.v1 + style.v1` reorders the
+  one style-eligible sentence relative to `system.v1`'s original mid-document position, and this
+  environment has no live model-endpoint access to re-record the ADR-0148 evals against the reordered
+  text before cutover. Next step, not this change.
 
 ## 6. Change log
 
+- **2026-09-11 (ADR-0285 D5 client infra, I4):** Added `PublishedStyleProvider` (client-credentials
+  read of `communication-service`'s published style, cache + short TTL + git-baseline fallback) and
+  `CommunicationStyleClient`/`CommunicationStyleAdapter`. Infrastructure only — not called from
+  `systemPrompt()`, no runtime behaviour change. New trust boundary (3): outbound, read-only, no
+  customer data crosses it. See I4 and the matching open item.
 - **2026-08-04 (copilot conversation memory T1 (#3710), #3710):** Added Postgres conversation-history store. Trust-boundary
   change: conversation messages (personal data — what the customer asked and the assistant answered)
   now persist in `openbank_copilot` Postgres (CNPG, ADR-0009 database-per-service), not only in

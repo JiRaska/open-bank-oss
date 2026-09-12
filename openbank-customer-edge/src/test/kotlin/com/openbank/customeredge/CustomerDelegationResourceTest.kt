@@ -101,6 +101,47 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `portfolio list is scoped to the active token profile`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).portfolios()
+
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegation-portfolios/owner/$caller")
+    }
+
+    @Test
+    fun `portfolio creation supplies owner from token and preserves only portfolio fields`() {
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+
+        val response = resource(
+            upstream,
+        ).createPortfolio("""{"name":"Finance","accountIds":["$GRANT_ID"],"ignored":"x"}""", "portfolio-create-1")
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(body.captured).contains("\"ownerPartyId\":\"$caller\"")
+        assertThat(body.captured).contains("\"name\":\"Finance\"")
+        assertThat(body.captured).contains("\"accountIds\"")
+        assertThat(body.captured).doesNotContain("ignored")
+    }
+
+    @Test
+    fun `portfolio creation rejects a forged owner before upstream`() {
+        val upstream = mockk<UpstreamClient>()
+
+        val response = resource(upstream).createPortfolio(
+            """{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""",
+            "portfolio-create-1",
+        )
+
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `every read forwards the token party as the upstream party header`() {
         val upstream = mockk<UpstreamClient>()
         val party = slot<String>()
