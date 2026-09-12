@@ -351,6 +351,8 @@ components:
         classification:
           type: string
 
+        createdBy:
+          type: string
     PreviewTemplateRequest:
       type: object
       required: [bodyHtml]

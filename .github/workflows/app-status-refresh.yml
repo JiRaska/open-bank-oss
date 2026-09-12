@@ -37,8 +37,10 @@ jobs:
     name: regenerate the dossier and open a PR on drift
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      # All writes below use the separately minted GitHub App token. Keep the
+      # ambient workflow token read-only so a compromised generation step cannot
+      # push code or open a PR with GITHUB_TOKEN.
+      contents: read
     env:
       APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}

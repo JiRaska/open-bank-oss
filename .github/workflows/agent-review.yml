@@ -187,7 +187,7 @@ jobs:
           git diff "$mb".."$head" -- . \
             ':!**/*.lock' ':!**/package-lock.json' ':!**/CHANGELOG.md' \
             ':!openbank-infra/gitops/**/*-opa-bundle.yaml' \
-            ':!docs/adr/README.md' ':!docs/adr/DIGEST.md' ':!docs/adr/index.json' \
+            ':!docs/adr/README.md' ':!docs/adr/DIGEST.md' ':!docs/adr/CURRENT.md' ':!docs/adr/index.json' \
             > /tmp/pr.diff || true
           lines=$(wc -l < /tmp/pr.diff)
           echo "raw_lines=${lines}" >> "$GITHUB_OUTPUT"

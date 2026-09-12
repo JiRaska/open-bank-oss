@@ -3,14 +3,14 @@ import { signInAsOperator } from './helpers/auth'
 
 const dispute = {
   id: 'dispute-001',
-  referenceNumber: 'DSP-2026-0042',
+  reference: 'DSP-2026-0042',
   disputeType: 'CARD_NOT_PRESENT',
   status: 'UNDER_REVIEW',
-  claimantAccountId: 'account-123',
+  accountId: 'account-123',
   transactionId: 'transaction-12345678',
   amount: 2450,
   currency: 'CZK',
-  slaDeadline: '2026-08-01T00:00:00Z',
+  resolutionDeadline: '2026-08-01',
   createdAt: '2026-07-01T09:00:00Z',
 }
 
@@ -33,7 +33,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 test('keeps dispute and SLA evidence visible after a failed refresh', async ({ page }) => {
   let unavailable = false
-  await page.route('**/api/svc/dispute-service/api/v1/disputes**', route => unavailable
+  await page.route('**/api/disputes', route => unavailable
     ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }) })
     : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([dispute]) }))
 

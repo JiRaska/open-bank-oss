@@ -1,11 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-const cardId = '11111111-1111-1111-1111-111111111111'
+// RFC-4122 shape is load-bearing: parseCard (clientContract.ts) validates the version and
+// variant nibbles, so a repeated-digit placeholder is rejected and the page renders its
+// service-unavailable state instead of the card (#9736).
+const cardId = '11111111-1111-4111-8111-111111111111'
 const card = {
   id: cardId,
-  partyId: '22222222-2222-2222-2222-222222222222',
-  accountId: '33333333-3333-3333-3333-333333333333',
+  partyId: '22222222-2222-4222-8222-222222222222',
+  accountId: '33333333-3333-4333-8333-333333333333',
   productCode: 'DEBIT-CLASSIC',
   cardType: 'DEBIT',
   network: 'VISA',

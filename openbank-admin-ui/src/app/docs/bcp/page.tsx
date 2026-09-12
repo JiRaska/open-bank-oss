@@ -29,7 +29,7 @@ const TIERS: {
     id: 0,
     label: ['Tier 0 — Infrastrukturní prerekvizity', 'Tier 0 — Infrastructure Prerequisites'],
     labelShort: ['Infrastruktura', 'Infrastructure'],
-    color: '#6b7280',
+    color: 'var(--text-secondary)',
     rto: '5 min',
     rpo: '0 (zero loss)',
     priority: 'P0',
@@ -49,7 +49,7 @@ const TIERS: {
     id: 1,
     label: ['Tier 1 — Hlavní účetní kniha a identita', 'Tier 1 — Core Ledger & Identity'],
     labelShort: ['Hlavní účetní kniha', 'Core Ledger'],
-    color: '#2563eb',
+    color: 'var(--info)',
     rto: '15 min',
     rpo: '< 1 min',
     priority: 'P1',
@@ -67,7 +67,7 @@ const TIERS: {
     id: 2,
     label: ['Tier 2 — Compliance gate', 'Tier 2 — Compliance Gate'],
     labelShort: ['Compliance gate', 'Compliance Gate'],
-    color: '#dc2626',
+    color: 'var(--danger)',
     rto: '20 min',
     rpo: '< 5 min',
     priority: 'P1',
@@ -87,7 +87,7 @@ const TIERS: {
     id: 3,
     label: ['Tier 3 — PSD2 / SCA', 'Tier 3 — PSD2 / SCA'],
     labelShort: ['PSD2 / SCA', 'PSD2 / SCA'],
-    color: '#d97706',
+    color: 'var(--warning)',
     rto: '30 min',
     rpo: '< 5 min',
     priority: 'P2',
@@ -105,7 +105,7 @@ const TIERS: {
     id: 4,
     label: ['Tier 4 — Zpracování plateb', 'Tier 4 — Payment Processing'],
     labelShort: ['Platby', 'Payments'],
-    color: '#7c3aed',
+    color: 'var(--accent)',
     rto: '30 min',
     rpo: '< 1 min',
     priority: 'P2',
@@ -126,7 +126,7 @@ const TIERS: {
     id: 5,
     label: ['Tier 5 — Provoz a observabilita', 'Tier 5 — Operations & Observability'],
     labelShort: ['Provoz', 'Operations'],
-    color: '#059669',
+    color: 'var(--success)',
     rto: '60 min',
     rpo: '< 15 min',
     priority: 'P3',
@@ -150,15 +150,14 @@ const INCIDENTS: {
   severity: string
   label: Bilingual
   color: string
-  bg: string
   criteria: Bilingual
   response: Bilingual
   reporting: Bilingual
 }[] = [
-  { severity: 'P0', label: ['Kritický', 'Critical'], color: '#dc2626', bg: '#fef2f2', criteria: ['Tier 0 nebo Tier 1 down; platební zpracování zastaveno', 'Tier 0 or Tier 1 down; payment processing halted'], response: ['Okamžitě', 'Immediately'], reporting: ['CNB do 24h (DORA Art. 17)', 'CNB within 24h (DORA Art. 17)'] },
-  { severity: 'P1', label: ['Vysoký', 'High'],     color: '#d97706', bg: '#fffbeb', criteria: ['Tier 2 compliance gate down; AML/Sanctions nedostupné', 'Tier 2 compliance gate down; AML/Sanctions unavailable'], response: ['< 15 min', '< 15 min'], reporting: ['Interní eskalace; CNB pokud > 4h', 'Internal escalation; CNB if > 4h'] },
-  { severity: 'P2', label: ['Střední', 'Medium'],   color: '#7c3aed', bg: '#f5f3ff', criteria: ['Tier 3-4 částečná degradace; některé typy plateb nedostupné', 'Tier 3-4 partial degradation; some payment types unavailable'], response: ['< 30 min', '< 30 min'], reporting: ['Interní tracking', 'Internal tracking'] },
-  { severity: 'P3', label: ['Nízký', 'Low'],      color: '#059669', bg: '#f0fdf4', criteria: ['Tier 5 operační nástroje down; žádný dopad na zákazníky', 'Tier 5 operational tools down; no customer impact'], response: ['< 2h', '< 2h'], reporting: ['Interní tracking', 'Internal tracking'] },
+  { severity: 'P0', label: ['Kritický', 'Critical'], color: 'var(--danger)', criteria: ['Tier 0 nebo Tier 1 down; platební zpracování zastaveno', 'Tier 0 or Tier 1 down; payment processing halted'], response: ['Okamžitě', 'Immediately'], reporting: ['CNB do 24h (DORA Art. 17)', 'CNB within 24h (DORA Art. 17)'] },
+  { severity: 'P1', label: ['Vysoký', 'High'],     color: 'var(--warning)', criteria: ['Tier 2 compliance gate down; AML/Sanctions nedostupné', 'Tier 2 compliance gate down; AML/Sanctions unavailable'], response: ['< 15 min', '< 15 min'], reporting: ['Interní eskalace; CNB pokud > 4h', 'Internal escalation; CNB if > 4h'] },
+  { severity: 'P2', label: ['Střední', 'Medium'],   color: 'var(--accent)', criteria: ['Tier 3-4 částečná degradace; některé typy plateb nedostupné', 'Tier 3-4 partial degradation; some payment types unavailable'], response: ['< 30 min', '< 30 min'], reporting: ['Interní tracking', 'Internal tracking'] },
+  { severity: 'P3', label: ['Nízký', 'Low'],      color: 'var(--success)', criteria: ['Tier 5 operační nástroje down; žádný dopad na zákazníky', 'Tier 5 operational tools down; no customer impact'], response: ['< 2h', '< 2h'], reporting: ['Interní tracking', 'Internal tracking'] },
 ]
 
 type HealthStatus = 'healthy' | 'unhealthy' | 'starting' | 'unknown'
@@ -282,10 +281,10 @@ export default function BcpPage() {
   const overallTotal = TIERS.reduce((acc, t) => acc + t.services.length, 0)
 
   const StatusIcon = ({ status, size = 14 }: { status: HealthStatus; size?: number }) => {
-    if (status === 'healthy')   return <CheckCircle2 size={size} style={{ color: '#16a34a' }} />
-    if (status === 'unhealthy') return <XCircle size={size} style={{ color: '#dc2626' }} />
-    if (status === 'starting')  return <Clock size={size} style={{ color: '#d97706' }} />
-    return <AlertTriangle size={size} style={{ color: '#9ca3af' }} />
+    if (status === 'healthy')   return <CheckCircle2 size={size} style={{ color: 'var(--success)' }} />
+    if (status === 'unhealthy') return <XCircle size={size} style={{ color: 'var(--danger)' }} />
+    if (status === 'starting')  return <Clock size={size} style={{ color: 'var(--warning)' }} />
+    return <AlertTriangle size={size} style={{ color: 'var(--text-tertiary)' }} />
   }
 
   const statusLabel = (s: HealthStatus) => ({
@@ -294,10 +293,10 @@ export default function BcpPage() {
 
   const statusBadgeStyle = (s: HealthStatus): React.CSSProperties => {
     const map: Record<HealthStatus, React.CSSProperties> = {
-      healthy:   { background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' },
-      unhealthy: { background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' },
-      starting:  { background: '#fef9c3', color: '#a16207', border: '1px solid #fef08a' },
-      unknown:   { background: '#f3f4f6', color: '#6b7280', border: '1px solid #e5e7eb' },
+      healthy:   { background: 'var(--success-bg)', color: 'var(--text-primary)', border: '1px solid var(--success-border)' },
+      unhealthy: { background: 'var(--danger-bg)', color: 'var(--text-primary)', border: '1px solid var(--danger-border)' },
+      starting:  { background: 'var(--warning-bg)', color: 'var(--text-primary)', border: '1px solid var(--warning-border)' },
+      unknown:   { background: 'var(--surface-3)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' },
     }
     return map[s]
   }
@@ -314,10 +313,10 @@ export default function BcpPage() {
           </>}
         title={t('Plán kontinuity provozu', 'Business Continuity Plan')}
         subtitle={t('Prioritizovaný plán obnovy dle DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines', 'Prioritized recovery plan per DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines')}
-        icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: '#dc2626' }} />}
+        icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: 'var(--danger)' }} />}
         actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
               {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
@@ -349,51 +348,47 @@ export default function BcpPage() {
             label: t('Celkový stav', 'Overall status'),
             value: loading ? '…' : overallHealthy === overallTotal ? 'NOMINAL' : 'DEGRADED',
             sub: loading ? '' : t(`${overallHealthy}/${overallTotal} služeb healthy`, `${overallHealthy}/${overallTotal} services healthy`),
-            color: overallHealthy === overallTotal ? '#16a34a' : '#dc2626',
-            bg: overallHealthy === overallTotal ? '#dcfce7' : '#fee2e2',
+            color: overallHealthy === overallTotal ? 'var(--success-text)' : 'var(--danger-text)',
           },
           {
             label: t('Compliance gate', 'Compliance gate'),
             value: loading ? '…' : complianceTierStatus.status === 'healthy' ? 'CLEAR' : 'BLOCKED',
             sub: '5AMLD Art. 18 / DORA Art. 12',
-            color: complianceTierStatus.status === 'healthy' ? '#16a34a' : '#dc2626',
-            bg: complianceTierStatus.status === 'healthy' ? '#dcfce7' : '#fee2e2',
+            color: complianceTierStatus.status === 'healthy' ? 'var(--success-text)' : 'var(--danger-text)',
           },
           {
             label: t('Platební zpracování', 'Payment processing'),
             value: loading ? '…' : paymentsBlocked ? t('BLOKOVÁNO', 'BLOCKED') : t('POVOLENO', 'ALLOWED'),
             sub: t('Tier 4 platební služby', 'Tier 4 payment services'),
-            color: paymentsBlocked ? '#dc2626' : '#16a34a',
-            bg: paymentsBlocked ? '#fee2e2' : '#dcfce7',
+            color: paymentsBlocked ? 'var(--danger-text)' : 'var(--success-text)',
           },
           {
             label: t('Cílový RTO (full stack)', 'Target RTO (full stack)'),
             value: '< 8 min',
             sub: t('Předpřipravené Docker images', 'Pre-built Docker images'),
-            color: '#2563eb',
-            bg: '#eff6ff',
+            color: 'var(--info-text)',
           },
         ].map(stat => (
           <div key={stat.label} className="card" style={{ padding: '16px' }}>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
             <div style={{ fontSize: '20px', fontWeight: 800, color: stat.color, marginBottom: '4px' }}>{stat.value}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{stat.sub}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-primary)' }}>{stat.sub}</div>
           </div>
         ))}
       </div>
 
       {paymentsBlocked && (
         <div style={{
-          background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '10px',
+          background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '10px',
           padding: '14px 18px', marginBottom: '20px',
           display: 'flex', alignItems: 'center', gap: '10px',
         }}>
-          <AlertTriangle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
+          <AlertTriangle size={18} style={{ color: 'var(--danger)', flexShrink: 0 }} />
           <div>
-            <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '14px' }}>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '14px' }}>
               {t('⛔ Compliance gate selhala — platební zpracování BLOKOVÁNO', '⛔ Compliance gate failed — payment processing BLOCKED')}
             </div>
-            <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '2px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginTop: '2px' }}>
               {t('AML, Sanctions nebo Balance service není healthy. Platby nesmí být zpracovávány. Regulatorní základ: 5AMLD Art. 18, DORA Art. 12.', 'AML, Sanctions or Balance service is not healthy. Payments must not be processed. Regulatory basis: 5AMLD Art. 18, DORA Art. 12.')}
             </div>
           </div>
@@ -403,11 +398,11 @@ export default function BcpPage() {
       {/* Completeness cross-check: catalog services not assigned to any tier */}
       {unclassified.length > 0 && (
         <div className="card" style={{
-          marginBottom: '24px', padding: '12px 16px', borderLeft: '4px solid var(--warning, #d97706)',
+          marginBottom: '24px', padding: '12px 16px', borderLeft: '4px solid var(--warning)',
           display: 'flex', alignItems: 'flex-start', gap: '10px',
         }}>
-          <AlertTriangle size={16} style={{ color: 'var(--warning, #d97706)', flexShrink: 0, marginTop: '2px' }} />
-          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+          <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '2px' }} />
+          <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
             {t(
               `${unclassified.length} služeb z katalogu zatím není zařazeno do žádné tieru kontinuity (ADR-0029 cross-check): `,
               `${unclassified.length} catalog service(s) are not yet assigned to any continuity tier (ADR-0029 cross-check): `,
@@ -445,7 +440,7 @@ export default function BcpPage() {
                   {/* Tier number */}
                   <div style={{
                     width: '28px', height: '28px', borderRadius: '50%',
-                    background: tier.color, color: '#fff',
+                    background: tier.color, color: 'var(--text-inverse)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '12px', fontWeight: 800, flexShrink: 0,
                   }}>
@@ -457,28 +452,28 @@ export default function BcpPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(...tier.label)}</span>
-                      {(tier as any).isComplianceGate && (
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }}>
+                      {tier.isComplianceGate && (
+                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px', background: 'var(--danger-bg)', color: 'var(--text-primary)', border: '1px solid var(--danger-border)' }}>
                           {t('COMPLIANCE GATE', 'COMPLIANCE GATE')}
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t(...tier.regulatoryBasis)}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>{t(...tier.regulatoryBasis)}</div>
                   </div>
 
                   {/* RTO/RPO */}
                   <div style={{ display: 'flex', gap: '16px', flexShrink: 0 }}>
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>RTO</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-primary)', textTransform: 'uppercase' }}>RTO</div>
                       <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tier.rto}</div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>RPO</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-primary)', textTransform: 'uppercase' }}>RPO</div>
                       <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tier.rpo}</div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Priorita', 'Priority')}</div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: tier.color }}>{tier.priority}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-primary)', textTransform: 'uppercase' }}>{t('Priorita', 'Priority')}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tier.priority}</div>
                     </div>
                   </div>
 
@@ -498,7 +493,7 @@ export default function BcpPage() {
                   <div style={{ borderTop: '1px solid var(--border)', padding: '12px 18px' }}>
                     {/* Startup sequence note */}
                     {idx > 0 && (
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '10px', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '10px', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: '6px' }}>
                         {t(`⏱ Startuje po Tier ${tier.id - 1} — všechny služby v tomto tieru startují `, `⏱ Starts after Tier ${tier.id - 1} — all services in this tier start `)}<strong>{t('paralelně', 'in parallel')}</strong>
                         {tier.id === 3 && t(' (výjimka: psd2-service čeká na consent-service healthy)', ' (exception: psd2-service waits for consent-service healthy)')}
                       </div>
@@ -515,8 +510,8 @@ export default function BcpPage() {
                             <StatusIcon status={svcStatus} size={14} />
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{svc.label}</div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t(...svc.note)}</div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px', fontFamily: 'monospace' }}>{svc.name}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>{t(...svc.note)}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-primary)', marginTop: '2px', fontFamily: 'monospace' }}>{svc.name}</div>
                             </div>
                             <span style={{ ...statusBadgeStyle(svcStatus), fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '20px', flexShrink: 0 }}>
                               {loading ? '…' : statusLabel(svcStatus)}
@@ -536,22 +531,22 @@ export default function BcpPage() {
       {/* Incident classification */}
       <div style={{ marginBottom: '32px' }}>
         <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <AlertTriangle size={15} style={{ color: '#d97706' }} />
+          <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
           {t('Klasifikace incidentů (DORA Art. 17)', 'Incident classification (DORA Art. 17)')}
         </h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {INCIDENTS.map(inc => (
             <div key={inc.severity} className="card" style={{ padding: '14px 18px', borderLeft: `4px solid ${inc.color}` }}>
               <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 120px 200px', gap: '16px', alignItems: 'center' }}>
-                <span style={{ fontSize: '13px', fontWeight: 800, color: inc.color }}>{inc.severity} — {t(...inc.label)}</span>
+                <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>{inc.severity} — {t(...inc.label)}</span>
                 <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{t(...inc.criteria)}</span>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(...inc.response)}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t(...inc.reporting)}</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t(...inc.reporting)}</span>
               </div>
             </div>
           ))}
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '8px', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
           <strong>{t('DORA Art. 17 — Práh významného incidentu:', 'DORA Art. 17 — Major incident threshold:')}</strong> {t('> 4h výpadek NEBO > 10 % transakcí zasaženo NEBO > EUR 1M dopad → hlášení CNB do 24h, závěrečná zpráva do 1 měsíce.', '> 4h downtime OR > 10 % of transactions affected OR > EUR 1M impact → report to CNB within 24h, final report within 1 month.')}
         </div>
       </div>
@@ -567,7 +562,7 @@ export default function BcpPage() {
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>
                 {[t('Typ testu', 'Test type'), t('Frekvence', 'Frequency'), t('Rozsah', 'Scope'), t('Vlastník', 'Owner')].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--text-primary)', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid var(--border)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -581,15 +576,15 @@ export default function BcpPage() {
               ] as { type: Bilingual; freq: Bilingual; scope: Bilingual; owner: Bilingual }[]).map((row, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(...row.type)}</td>
-                  <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{t(...row.freq)}</td>
-                  <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{t(...row.scope)}</td>
-                  <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{t(...row.owner)}</td>
+                  <td style={{ padding: '10px 14px', color: 'var(--text-primary)' }}>{t(...row.freq)}</td>
+                  <td style={{ padding: '10px 14px', color: 'var(--text-primary)' }}>{t(...row.scope)}</td>
+                  <td style={{ padding: '10px 14px', color: 'var(--text-primary)' }}>{t(...row.owner)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '8px' }}>
           {t('Záznamy z testů musí být uchovávány ', 'Test records must be retained for ')}<strong>{t('5 let', '5 years')}</strong>{t(' (DORA Art. 11(6)).', ' (DORA Art. 11(6)).')}
         </div>
       </div>

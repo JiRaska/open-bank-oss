@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "338b036ad6d3c9e4"
+        openbank.tech/policy-checksum: "778aa4d189af34b7"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -132,12 +132,6 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: CARD_ISSUANCE_SERVICE_URL
               value: http://card-issuance-service.payments.svc:8118
-            # Recipient-bound sealed disclosure export. The endpoint's OPA rule accepts
-            # only the named disclosure OIDC client; this URL also derives the network edge.
-            - name: DOCUMENT_SERVICE_URL
-              value: https://document-service.documents.svc:8443
-            - name: QUARKUS_TLS_DISCLOSURE_TRUST_STORE_PEM_CERTS
-              value: /mnt/document-tls/ca.crt
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot
             # (OIDC defers discovery to the first request) — it just makes every
             # authenticated call fail later with `Name does not resolve`.
@@ -148,14 +142,6 @@ spec:
                 secretKeyRef:
                   name: delegation-service-oidc
                   key: OIDC_CLIENT_SECRET
-            # Dedicated client-credentials identity for the future sealed external
-            # disclosure export. It is intentionally separate from OIDC_CLIENT_SECRET,
-            # which remains the resource-server configuration during the staged rollout.
-            - name: DISCLOSURE_OIDC_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: delegation-service-oidc
-                  key: DISCLOSURE_OIDC_CLIENT_SECRET
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.
@@ -194,10 +180,6 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            - name: document-tls-trust
-              mountPath: /mnt/document-tls/ca.crt
-              subPath: ca.crt
-              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -284,10 +266,6 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
-        - name: document-tls-trust
-          secret:
-            secretName: delegation-internal-tls
-            optional: false
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore

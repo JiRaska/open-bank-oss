@@ -117,6 +117,11 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
+- Exposure-shaped object disclosure (D7b): **fail closed.** New non-null `exposure` is refused
+  with `EXPOSURE_UNSUPPORTED`, before SCA or persistence. Historical rows remain readable for
+  audit but are excluded from the authorization decision and shared-document list. This stays the
+  rule until delivery creates a transformed artifact and atomically enforces redaction, watermark,
+  download policy and view counting; proxying original object bytes would not implement any of them.
 - D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
   delivery/attempt throttling, recipient-facing rate limit and audit-envelope routing. The
   disclosure persistence boundary is implemented, but **no external ingress is enabled** until

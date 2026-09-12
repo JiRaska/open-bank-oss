@@ -18,7 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -34,7 +34,6 @@ const PREVIEW_PATH = `${TEMPLATES_PATH}/preview`
 const DOCUMENTS_PATH = '/api/v1/documents'
 
 const PAGE_SIZE = 25
-const CONTENT_TABS = ['templates', 'documents'] as const
 
 type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'RETIRED'
 
@@ -197,19 +196,6 @@ export default function DocumentTemplatesPage() {
   const canEdit = hasPermission(roles, 'templates:edit')
 
   const [tab, setTab] = useState<'templates' | 'documents'>('templates')
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let nextIndex: number | null = null
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % CONTENT_TABS.length
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + CONTENT_TABS.length) % CONTENT_TABS.length
-    if (event.key === 'Home') nextIndex = 0
-    if (event.key === 'End') nextIndex = CONTENT_TABS.length - 1
-    if (nextIndex === null) return
-    event.preventDefault()
-    setTab(CONTENT_TABS[nextIndex])
-    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
-  }
 
   // ── Templates list ──────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<DocumentTemplate[]>([])
@@ -222,6 +208,13 @@ export default function DocumentTemplatesPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
 
   const [modalOpen, setModalOpen] = useState(false)
+  const modalCloseRef = useRef<HTMLButtonElement>(null)
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null)
+  // Unsaved-draft guard (#9187). main's merge of this page rebuilt the editor on Radix and kept
+  // the focus-return half; this is the other half — closing a DIRTY editor must ask first.
+  const [discardEditorOpen, setDiscardEditorOpen] = useState(false)
+  const [editorBaseline, setEditorBaseline] = useState('')
+  const discardCancelRef = useRef<HTMLButtonElement>(null)
   const [editingTemplate, setEditingTemplate] = useState<DocumentTemplate | null>(null)
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
@@ -374,17 +367,46 @@ export default function DocumentTemplatesPage() {
     previewRequestIdRef.current++
   }
 
-  const openCreateModal = () => {
+  // The baseline is what the editor opened WITH; dirty is any divergence from it. Comparing
+  // against a snapshot rather than tracking edits means a change that is typed and then undone
+  // correctly reads as clean, and no per-field wiring can be forgotten.
+  const editorSnapshot = useCallback(
+    (draft: Partial<DocumentTemplate>, sample: string) => JSON.stringify({ draft, sample }),
+    [],
+  )
+  const editorDirty = canEdit && editorBaseline !== editorSnapshot(formData, sampleDataText)
+
+  function requestEditorClose() {
+    if (saving) return
+    if (editorDirty) {
+      setDiscardEditorOpen(true)
+      return
+    }
+    setModalOpen(false)
+  }
+
+  function discardEditor() {
+    setDiscardEditorOpen(false)
+    setModalOpen(false)
+  }
+
+  const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(null)
-    setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
+    const next = { code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
   }
 
-  const openEditModal = (tpl: DocumentTemplate) => {
+  const openEditModal = (event: React.MouseEvent<HTMLButtonElement>, tpl: DocumentTemplate) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(tpl)
-    setFormData({ ...tpl })
+    const next = { ...tpl }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
@@ -476,21 +498,17 @@ export default function DocumentTemplatesPage() {
             </button>
           </div>} />
 
-        <div role="tablist" aria-label={t('Obsah šablon dokumentů', 'Document template content')} style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
-          {([
-            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} /> },
-            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} /> },
-          ]).map((tb, index) => (
-            <button key={tb.id} ref={element => { tabRefs.current[index] = element }} id={`document-${tb.id}-tab`} role="tab" tabIndex={tab === tb.id ? 0 : -1} aria-selected={tab === tb.id} aria-controls={`document-${tb.id}-panel`} onKeyDown={event => moveTabFocus(event, index)} onClick={() => setTab(tb.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '13px', fontWeight: 600,
-                border: 'none', borderBottom: tab === tb.id ? '2px solid var(--accent)' : '2px solid transparent',
-                background: 'none', cursor: 'pointer', color: tab === tb.id ? 'var(--accent)' : 'var(--text-secondary)',
-              }}>
-              <span aria-hidden="true">{tb.icon}</span>{tb.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          items={[
+            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} />, tabId: 'document-templates-tab', panelId: 'document-templates-panel' },
+            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} />, tabId: 'document-documents-tab', panelId: 'document-documents-panel' },
+          ] satisfies readonly TabItem<typeof tab>[]}
+          value={tab}
+          onChange={setTab}
+          label={t('Obsah šablon dokumentů', 'Document template content')}
+          idPrefix="document"
+          style={{ marginBottom: 18, borderBottom: '1px solid var(--border)' }}
+        />
 
         <section id="document-templates-panel" role="tabpanel" aria-labelledby="document-templates-tab" hidden={tab !== 'templates'}>
             {unavailable && (
@@ -574,7 +592,7 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
+                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={event => openEditModal(event, tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
@@ -608,15 +626,44 @@ export default function DocumentTemplatesPage() {
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" role="dialog" aria-modal="true" aria-labelledby="template-editor-title" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <Dialog.Root open onOpenChange={open => { if (!open) requestEditorClose() }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.65)' }} />
+            <Dialog.Content
+              className="card"
+              aria-busy={saving}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                const codeInput = document.getElementById('template-code') as HTMLInputElement | null
+                if (codeInput && !codeInput.disabled) codeInput.focus()
+                else modalCloseRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                if (modalReturnFocusRef.current?.isConnected) modalReturnFocusRef.current.focus()
+              }}
+              onEscapeKeyDown={event => { if (saving) event.preventDefault() }}
+              onPointerDownOutside={event => { if (saving) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(920px, calc(100% - 40px))', maxHeight: '92vh', overflowY: 'auto' }}
+            >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 id="template-editor-title" style={{ fontSize: '15px', fontWeight: 700 }}>
+              <Dialog.Title style={{ fontSize: '15px', fontWeight: 700 }}>
                 {!canEdit
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
-              </h2>
-              <button type="button" aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              </Dialog.Title>
+              {/* Radix warns when a Dialog.Content has no description, and a screen reader then
+                  announces the title alone — "New Template" says nothing about what the form does.
+                  Visually hidden rather than rendered: the header is a title/close row and has no
+                  space for a sentence, but the accessible name still needs one. */}
+              <Dialog.Description style={{
+                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+                overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+              }}>
+                {t('Upravte metadata, HTML obsah a vzorová data. Náhled se obnovuje automaticky.',
+                   'Edit metadata, HTML content and sample data. The preview refreshes automatically.')}
+              </Dialog.Description>
+              <button ref={modalCloseRef} type="button" disabled={saving} aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={requestEditorClose} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -795,7 +842,7 @@ export default function DocumentTemplatesPage() {
                 )}
               </fieldset>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zavřít', 'Close')}</button>
+                <button type="button" className="btn btn-secondary" onClick={requestEditorClose} disabled={saving}>{t('Zavřít', 'Close')}</button>
                 {canEdit && (
                   <button type="submit" className="btn btn-primary" disabled={saving}>
                     {saving ? t('Ukládám…', 'Saving…') : t('Uložit šablonu', 'Save Template')}
@@ -803,8 +850,33 @@ export default function DocumentTemplatesPage() {
                 )}
               </div>
             </form>
-          </div>
-        </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
+      {discardEditorOpen && (
+        <Dialog.Root open onOpenChange={open => { if (!open) setDiscardEditorOpen(false) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,0.72)' }} />
+            <Dialog.Content
+              role="alertdialog"
+              className="card"
+              onOpenAutoFocus={event => { event.preventDefault(); discardCancelRef.current?.focus() }}
+              onCloseAutoFocus={event => { event.preventDefault(); modalCloseRef.current?.focus() }}
+              style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(440px, calc(100vw - 32px))', padding: 20 }}
+            >
+              <Dialog.Title style={{ margin: 0, fontSize: 17 }}>{t('Zahodit neuložené změny?', 'Discard unsaved changes?')}</Dialog.Title>
+              <Dialog.Description style={{ margin: '8px 0 0', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {t('Změny šablony a ukázkových dat nejsou uložené. Po zahození je nelze obnovit.', 'Template and sample-data changes have not been saved. They cannot be recovered after discarding.')}
+              </Dialog.Description>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <Dialog.Close asChild><button ref={discardCancelRef} type="button" className="btn btn-secondary">{t('Pokračovat v úpravách', 'Keep editing')}</button></Dialog.Close>
+                <button type="button" className="btn btn-danger" onClick={discardEditor}>{t('Zahodit změny', 'Discard changes')}</button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Inline confirm for publish/retire — never a raw browser confirm()/alert() */}

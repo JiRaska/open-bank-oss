@@ -13,10 +13,13 @@
 # conclusions, so the rerun is always the full one.
 #
 # WHAT THIS DOES
-# When one of the watched workflows completes `cancelled`, this re-runs it automatically,
-# bounded to one retry (run_attempt 1 only — see LOOP SAFETY below). A spot reclaim then costs
-# one queued re-run instead of a human round-trip; the job lands on a fresh spot node (or the
-# on-demand warm pool) and proceeds.
+# One five-minute reconciliation run reads completed runs from each watched workflow with one
+# paginated query per workflow, then re-runs qualifying spot kills automatically. The 30-minute
+# lookback tolerates delayed schedules and overlaps intentionally; `run_attempt == 1` and the
+# flake ledger marker make repeated scans idempotent. Before #9645, `workflow_run: completed`
+# created a new Actions run for every watched completion, including ordinary successes whose
+# jobs were all skipped. A PR burst exhausted the installation's 5,000-call API quota and made
+# unrelated security gates fail with rate-limit 403s.
 #
 # ALSO `failure` — a reclaim that takes only PART of a multi-job run (issue #2841).
 # A spot kill sets the killed STEP to `cancelled`, which makes its JOB `failure`, which makes
@@ -50,7 +53,7 @@
 # killed job, which is a different and larger change.
 #
 # LOOP SAFETY
-# github.event.workflow_run.run_attempt is 1 for the original run and 2 for the first rerun,
+# GitHub's run_attempt is 1 for the original run and 2 for the first rerun,
 # so gating on run_attempt == 1 gives exactly one automatic retry per run — a cancelled retry
 # (run_attempt 2) never re-triggers, and a run cancelled for a real reason (superseded by a
 # newer push to the same PR — the concurrency group's normal operation) is only retried once,
@@ -101,17 +104,62 @@
 name: Auto-retry spot-killed CI runs
 
 on:
-  workflow_run:
-    workflows: ["Services CI", "Security scan", "Dependency submission"]
-    types: [completed]
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-reconcile
+  cancel-in-progress: false
 
 permissions:
-  actions: write   # re-run the cancelled workflow
+  contents: read
+  actions: read
 
 jobs:
+  discover:
+    name: Find recent runs requiring reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      retry: ${{ steps.select.outputs.retry }}
+      flakes: ${{ steps.select.outputs.flakes }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          sparse-checkout: .github/scripts/select-ci-reconcile-candidates.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Read recent completions from the three watched workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          for workflow in services-ci.yml security.yml dependency-submission.yml; do
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f status=completed -f per_page=100 -f "created=>=${cutoff}" --paginate --slurp \
+              | jq 'map(.workflow_runs) | add' > "${RUNNER_TEMP}/${workflow}.json"
+          done
+          jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
+      - name: Select bounded, deduplicated candidates
+        id: select
+        run: |
+          set -euo pipefail
+          candidates=$(python3 .github/scripts/select-ci-reconcile-candidates.py \
+            --runs-file "${RUNNER_TEMP}/runs.json" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --lookback-minutes 30)
+          echo "retry=$(jq -c '.retry' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
+          echo "flakes=$(jq -c '.flakes' <<< "${candidates}")" >> "${GITHUB_OUTPUT}"
+
   retry:
     name: Re-run spot-killed run (once)
+    needs: discover
+    if: needs.discover.outputs.retry != '[]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
     # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
     # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run
@@ -119,12 +167,8 @@ jobs:
     # the job sit for the 360-min default. ubuntu-latest is free on a public repo, so the trade
     # is a concurrency slot against a reclaimed CI run that otherwise needs a human.
     timeout-minutes: 50
-    # `failure` is admitted here only so the step below can inspect the jobs; the decision to
-    # re-run is made there, not by this expression. A job-level `if:` cannot reach the jobs API.
-    if: >-
-      (github.event.workflow_run.conclusion == 'cancelled' ||
-       github.event.workflow_run.conclusion == 'failure') &&
-      github.event.workflow_run.run_attempt == 1
+    # Candidate selection is batched in `discover`; the script still owns the job-level
+    # spot-kill classification and is the final authority on whether a rerun is issued.
     steps:
       # A SPARSE checkout, added by #6255. The header note above says this job has none, and
       # that was true and load-bearing while the decision logic lived inline in this file. It
@@ -141,16 +185,48 @@ jobs:
       # what a privileged control should execute. Checking out the triggering branch here would
       # let any PR author rewrite this script and have it run with `actions: write`.
       - name: Fetch the decision script (sparse, default branch)
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
-          # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
-          # is a hand-kept list of what the script needs — the failure mode CLAUDE.md warns
-          # about for any gate whose scope is maintained separately from its subject.
+          # ALL THREE files: spot-kill-retry.sh `source`s gh-retry.sh, which READS
+          # gh-transient-patterns.txt. The comment here used to say "BOTH files" and warn, in so
+          # many words, that a sparse checkout is a hand-kept list of what the script needs —
+          # "the failure mode CLAUDE.md warns about for any gate whose scope is maintained
+          # separately from its subject". It then missed the third file, and the job failed
+          # exactly as predicted (#7976):
+          #
+          #   gh_retry: cannot read the transient-pattern vocabulary at
+          #   '.github/scripts/gh-transient-patterns.txt'. Refusing to classify
+          #
+          # Refusing was right — with no patterns loaded, every failure would classify as final.
+          # The step below asserts the list is complete, so the next missing dependency fails at
+          # checkout time with a name, instead of inside a control that then declines to act.
           sparse-checkout: |
             .github/scripts/spot-kill-retry.sh
             .github/scripts/gh-retry.sh
+            .github/scripts/gh-transient-patterns.txt
           sparse-checkout-cone-mode: false
+
+      - name: Assert the sparse checkout is complete
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in .github/scripts/spot-kill-retry.sh \
+                   .github/scripts/gh-retry.sh \
+                   .github/scripts/gh-transient-patterns.txt; do
+            [ -r "$f" ] || { echo "::error::sparse checkout is missing $f"; missing=1; }
+          done
+          # Not just present — non-empty in both sections, because an empty vocabulary makes
+          # gh-retry.sh refuse to classify just as surely as a missing file does.
+          for section in rate_limit transient; do
+            n=$(awk -v s="[$section]" '
+              $0==s {inside=1; next}
+              /^\[/ {inside=0}
+              inside && $0 !~ /^#/ && NF {c++}
+              END {print c+0}' .github/scripts/gh-transient-patterns.txt)
+            [ "$n" -gt 0 ] || { echo "::error::gh-transient-patterns.txt has an empty [$section] section"; missing=1; }
+            echo "[$section] patterns: $n"
+          done
+          [ "$missing" -eq 0 ]
           persist-credentials: false
 
       - name: Re-run only if the runner was reclaimed
@@ -160,9 +236,7 @@ jobs:
           # `gh` call added later that forgets it, and is what check-gh-repo-context.py reads
           # at PR time.
           GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
-          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RETRY_CANDIDATES: ${{ needs.discover.outputs.retry }}
           # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
           # with room for four of them plus the calls themselves.
           GH_RETRY_MAX_WAIT_SECONDS: "600"
@@ -175,11 +249,22 @@ jobs:
         # control could not do its job, which routes to raise-issue below. The script's header
         # carries the full rationale, including why an unreadable jobs API is NOT a pass here
         # and why a rate limit must be told from a permission denial by message text.
-        run: bash .github/scripts/spot-kill-retry.sh
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS=$'\t' read -r run_id run_url conclusion; do
+            echo "::group::Classify ${run_url}"
+            if ! RUN_ID="${run_id}" RUN_URL="${run_url}" CONCLUSION="${conclusion}" \
+                 bash .github/scripts/spot-kill-retry.sh; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.[] | [.run_id, .run_url, .conclusion] | @tsv' <<< "${RETRY_CANDIDATES}")
+          exit "${failed}"
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────
   # Why this exists: this workflow failed 208 times without anyone noticing. It is
-  # `workflow_run`-triggered, so there is no PR to show a red check on and no commit status
+  # schedule-triggered, so there is no PR to show a red check on and no commit status
   # anyone reads — its red is addressed to nobody, the same blind spot dependency-submission
   # sat in for three days before it grew a raise-issue job.
   #
@@ -229,9 +314,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TARGET_URL: ${{ github.event.workflow_run.html_url }}
-          TARGET_NAME: ${{ github.event.workflow_run.name }}
-          TARGET_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TARGET_NAME: batched CI reconciliation
+          TARGET_CONCLUSION: one or more retry candidates failed processing
         run: |
           set -euo pipefail
           TITLE="Spot-kill auto-retry is failing — reclaimed CI runs are not being re-run"
@@ -308,8 +393,8 @@ jobs:
   # Why this lives HERE, in the workflow that already re-runs things, and not in a new listener:
   # the flake evidence exists exactly once, at the moment a re-run's FINAL attempt concludes --
   # after that, a query over run conclusions sees only `success` and the fact that attempt 1 was
-  # genuinely red is gone. This job is the second `workflow_run` listener on the same three
-  # workflows (`retry` above is the first), triggered independently by the SAME event.
+  # genuinely red is gone. The reconciler selects successful later attempts in the same bounded
+  # query that selects retry candidates, then this matrix records each one idempotently.
   #
   # NOT every re-run is a flake. `retry` re-runs a run for one of two reasons -- a whole-run
   # spot-kill (`cancelled`, at least one job's steps show it was running when reclaimed) or a
@@ -327,9 +412,12 @@ jobs:
   # `success` catches both.
   record-flake:
     name: Record a flake if a re-run turned a genuine failure green
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.run_attempt > 1
+    needs: discover
+    if: needs.discover.outputs.flakes != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.flakes) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5 # API + a handful of small artifact downloads
     permissions:
@@ -339,12 +427,12 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      RUN_ID: ${{ github.event.workflow_run.id }}
-      RUN_URL: ${{ github.event.workflow_run.html_url }}
-      FINAL_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RUN_ID: ${{ matrix.run_id }}
+      RUN_URL: ${{ matrix.run_url }}
+      FINAL_ATTEMPT: ${{ matrix.run_attempt }}
+      WORKFLOW_NAME: ${{ matrix.workflow_name }}
+      HEAD_SHA: ${{ matrix.head_sha }}
+      HEAD_BRANCH: ${{ matrix.head_branch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -460,6 +548,15 @@ jobs:
           existing=$(bash .github/scripts/resolve-tracking-issue.sh \
             --title "$TITLE" --pinned "$LEDGER_ISSUE")
 
+          # The 30-minute lookback deliberately overlaps scheduler ticks. Pinning identity
+          # to run id + final attempt makes those overlaps idempotent instead of duplicating ledger rows.
+          comments=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${existing}/comments?per_page=100" \
+            --jq '.[].body')
+          marker="<!-- flake-record-id:${RUN_ID}:${FINAL_ATTEMPT} -->"
+          if grep -Fq "${marker}" <<< "${comments}"; then
+            echo "Run ${RUN_ID} attempt ${FINAL_ATTEMPT} is already present in #${existing}; skipping."
+            exit 0
+          fi
           for f in "${RUNNER_TEMP}"/comments/record-*.json; do
             [ -e "$f" ] || continue
             python3 .github/scripts/record-rerun-flake.py render --record "$f" \
