@@ -303,6 +303,7 @@ class BusinessOnboardingServiceTest {
                 it.principalPartyId == entityParty &&
                     it.role == "LEGAL_REPRESENTATIVE" &&
                     it.authority == "JOINT" &&
+                    it.requiredSignatures == 2 &&
                     it.source == "REGISTRY"
             }
 
@@ -331,6 +332,7 @@ class BusinessOnboardingServiceTest {
         service.sign(SignCommand(started.id, initiator, "cer-1"))
         assertThat(mandate.captured.role).isEqualTo("OWNER")
         assertThat(mandate.captured.authority).isEqualTo("SOLE")
+        assertThat(mandate.captured.requiredSignatures).isEqualTo(1)
     }
 
     @Test
