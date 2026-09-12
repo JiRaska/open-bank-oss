@@ -5,7 +5,12 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.13.0
+  # 1.12.0 -> 1.13.0 was taken on main by an unrelated PR while this branch also wrote 1.13.0.
+  # Both sides produced the SAME text, so git merged them cleanly and the collision left no
+  # conflict to resolve — the trap CLAUDE.md records for this axis. 1.14.0 is additive
+  # (POST/GET /api/v1/delegation-portfolios), read off live origin/main (1.13.0) and confirmed
+  # unused with `git log -S 'version: 1.14.0'` on this file.
+  version: 1.14.0
 servers:
   - url: http://localhost:8126
 tags:
