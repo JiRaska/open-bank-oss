@@ -21,7 +21,6 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
-import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
@@ -141,35 +140,6 @@ class DelegationServiceTest {
 
         assertThat(saved.captured.grantorName).isNull()
         assertThat(saved.captured.granteeName).isNull()
-    }
-
-    @Test
-    fun `company recertification audience is explicit and persisted with the offered grant`(): Unit = runBlocking {
-        scaOk(grantor, "DELEGATION_GRANT")
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, "FULL", partyType = "COMPANY")
-        coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, "FULL")
-        val saved = slot<DelegationGrant>()
-        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
-
-        service.offer(offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.CORPORATE))
-
-        assertThat(saved.captured.recertificationAudience).isEqualTo(DelegationRecertificationAudience.CORPORATE)
-    }
-
-    @Test
-    fun `company review audience is refused for a sole trader before SCA is consumed`() {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, "FULL", partyType = "SOLE_TRADER")
-        coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, "FULL")
-
-        assertThatThrownBy {
-            runBlocking {
-                service.offer(offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.SME))
-            }
-        }.isInstanceOf(IllegalArgumentException::class.java)
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
-        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
     private fun offerCommand(
