@@ -67,6 +67,11 @@ on:
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.
+      # Heals a derived artefact stale on main (#9755). Its red is the one state that must
+      # not stay silent: either the regeneration itself broke, or a generator stopped being a
+      # pure projection of its sources — and in both cases the fleet-wide merge freeze this
+      # workflow exists to end is back, with nothing else reporting it.
+      - "Derived artefact autoheal"
       - "ADR registry"
       - "Agent charter registry"
       - "AI governance snapshot"
