@@ -11,13 +11,28 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side Pact verification for the contracts consumers publish against
@@ -70,8 +85,19 @@ import org.junit.jupiter.api.extension.ExtendWith
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class DocumentPactProviderVerificationTest {
 
+    private companion object {
+        val DISCLOSURE_DOCUMENT_ID: UUID = UUID.fromString("77777777-8888-4999-8aaa-bbbbbbbbbbbb")
+        const val DISCLOSURE_OWNER_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
+    }
+
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
+
+    @Inject
+    lateinit var documents: DocumentRepositoryPort
+
+    @Inject
+    lateinit var vertx: Vertx
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -106,5 +132,59 @@ class DocumentPactProviderVerificationTest {
     @State("the template preview renderer is available")
     fun statePreviewRendererAvailable() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    @State("a document owned by a known party exists")
+    fun stateOwnedDocumentExists() = runOnVertxContext {
+        documents.save(disclosureDocument())
+    }
+
+    /**
+     * The NEGATIVE state, and it is deliberately a NO-OP: the point is that nothing is seeded, so
+     * the id in the pact resolves to no row and the endpoint must answer 404.
+     *
+     * This is the half the consumer's fail-closed design rests on.
+     * `RestResourceOwnershipClient` maps 404 to `NOT_OWNED` — a definitive refusal — and every
+     * other failure to `UNVERIFIABLE`. So if this endpoint ever answered 403 or 500 for a document
+     * the caller may not see, delegation-service would silently reclassify every unknown document
+     * from "refused" to "retry later". A success-only contract stays green through exactly that
+     * change, which is what ADR-0279 #3 exists to stop.
+     */
+    @State("no document with that id is visible to the caller")
+    fun stateDocumentAbsent() {
+        // Intentionally empty — the absence IS the state.
+    }
+
+    private fun disclosureDocument() = Document(
+        id = DISCLOSURE_DOCUMENT_ID,
+        templateCode = "DISCLOSURE_PACT",
+        templateVersion = "1",
+        sha256 = "0".repeat(64),
+        storageKey = "pact/disclosure.pdf",
+        contentType = "application/pdf",
+        sizeBytes = 1,
+        status = DocumentStatus.SIGNED,
+        metadata = emptyMap(),
+        partyRef = DISCLOSURE_OWNER_ID,
+        caseRef = null,
+        productRef = null,
+        retainUntil = null,
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+    )
+
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val context = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(context, true)
+        val dispatcher = Executor { command -> context.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
     }
 }
