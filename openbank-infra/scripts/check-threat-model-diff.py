@@ -49,8 +49,6 @@ import re
 import subprocess
 import sys
 
-import yaml
-
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 REST_RE = re.compile(r"^(openbank-[^/]+)/src/main/.*/infrastructure/rest/")
@@ -208,6 +206,67 @@ def boundary_docs_text(full_text: str) -> str:
     """
     return "\n---\n".join(
         doc for doc in split_yaml_documents(full_text) if BOUNDARY_DOC_KIND.search(doc)
+    )
+
+
+def documents_naming(service: str, full_text: str) -> str:
+    """The YAML documents in a manifest whose own `metadata.name` names this service.
+
+    One `network-policies.yaml` holds a policy per service in the namespace, and the generator
+    rewrites the whole file whenever a service is added — so adding card-processing's policy made
+    the caller demand a threat-model update from sepa-payment and domestic-payment, neither of
+    whose documents changed by a byte (#8809).
+
+    The match is `gitops_tokens` + `token_in`, the same loose pair the rest of this script uses,
+    applied to `metadata.name` only. Loose on purpose and NOT made exact here: it over-reports to
+    same-token neighbours (openbank-domestic-payment carries the token `payment`, which matches a
+    document named `sepa-payment-...`), which is the safe direction. What it removes is the case
+    where NO document naming the service changed at all.
+
+    Returns "" when nothing names the service, which the caller reads as "not this service's
+    change". A file with no `metadata.name` at all yields "" too, and the caller falls back rather
+    than treating that as a clean bill — see own_document_diff.
+    """
+    tokens = gitops_tokens(service)
+    named = []
+    for doc in split_yaml_documents(full_text):
+        m = re.search(r"^\s*name:\s*(\S+)", doc, re.MULTILINE)
+        if m and token_in(tokens, m.group(1)):
+            named.append(doc)
+    return "\n---\n".join(named)
+
+
+def own_document_diff(service: str, rel: str, base: str | None, head: str) -> str | None:
+    """A synthetic diff of only the documents in `rel` that name `service`.
+
+    Built by differencing the service's own documents at base and at head rather than by filtering
+    the file's real diff: a hunk in a shared manifest carries no marker saying which document it
+    belongs to, so filtering hunk text cannot attribute them.
+
+    Returns None — "cannot tell, do not narrow" — when either side is unreadable, which keeps the
+    caller on its existing, more conservative path. Returns "" when the service's own documents are
+    byte-identical across the change, which is the whole point: a neighbour's rewrite stops being
+    this service's finding.
+    """
+    if base is None:
+        return None
+    before = read_at_ref(base, rel)
+    after = read_at_ref(head, rel)
+    if before is None or after is None:
+        return None
+    own_before = documents_naming(service, before)
+    own_after = documents_naming(service, after)
+    if not own_before and not own_after:
+        # Nothing in this file names the service at either end. That is not evidence the change is
+        # innocent — it is evidence this narrowing does not apply — so hand back None.
+        return None
+    if own_before == own_after:
+        return ""
+    return "\n".join(
+        difflib.unified_diff(
+            own_before.splitlines(), own_after.splitlines(),
+            fromfile=f"a/{rel}", tofile=f"b/{rel}", lineterm="",
+        )
     )
 
 
