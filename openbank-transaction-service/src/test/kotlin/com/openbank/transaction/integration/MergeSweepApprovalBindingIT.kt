@@ -109,6 +109,19 @@ class MergeSweepApprovalBindingIT {
             // already paid for once (#2148). The tests that exist to prove a scheduler runs
             // re-enable it in their own profile and shrink the cron.
             "quarkus.scheduler.enabled" to "false",
+
+            // Step 4 is the ONLY step that gets past the four-eyes gate and reaches
+            // `transactionUseCase.initiateTransaction`, and it is the only step that fails — twice,
+            // as a HANG (SocketTimeoutException at the RestAssured POST) rather than a wrong status,
+            // after which the JVM does not exit and the task burns to its 25-minute Gradle timeout.
+            // Steps 1-3 all stop at a 202 or a refusal and pass.
+            //
+            // `TransactionService` injects `WorkflowClient` and `TemporalConfig`, and a @QuarkusTest
+            // has no Temporal server, so a workflow start on that path has nothing to answer it.
+            // `PaymentWorkerRegistrar` already carries the switch for exactly this, and its comment
+            // claims "Tests set openbank.transaction.worker.enabled=false" — which no test in this
+            // module did, in `application.properties` or in either profile. This makes that true.
+            "openbank.transaction.worker.enabled" to "false",
         )
 
         override fun getEnabledAlternatives() = setOf<Class<*>>(AlwaysFourEyesPdp::class.java)
