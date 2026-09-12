@@ -55,6 +55,7 @@ data class MandateBody(
     val agentPartyId: UUID,
     val role: String,
     val authority: String,
+    val requiredSignatures: Int,
     val source: String,
     val evidenceRef: String,
 )
@@ -134,7 +135,14 @@ class PartyServiceGateway : PartyGateway {
     override suspend fun grantMandate(request: MandateRequest) {
         client.grantMandate(
             request.principalPartyId,
-            MandateBody(request.agentPartyId, request.role, request.authority, request.source, request.evidenceRef),
+            MandateBody(
+                request.agentPartyId,
+                request.role,
+                request.authority,
+                request.requiredSignatures,
+                request.source,
+                request.evidenceRef,
+            ),
         )
     }
 
