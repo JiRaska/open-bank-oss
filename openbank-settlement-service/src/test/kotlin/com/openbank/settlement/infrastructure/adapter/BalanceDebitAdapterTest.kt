@@ -46,7 +46,7 @@ class BalanceDebitAdapterTest {
         val request = slot<MoneyMovementRequest>()
         every { balanceClient.debit(settlement.payerAccountId, capture(request)) } returns
             Uni.createFrom().item(
-                BalanceResponse(settlement.payerAccountId, "CZK", BigDecimal("100"), BigDecimal("100")),
+                BalanceResponse(settlement.payerAccountId, "CZK"),
             )
 
         BalanceDebitAdapter(balanceClient, repo).debit(settlement.id)

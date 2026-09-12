@@ -46,7 +46,7 @@ class BalanceCreditAdapterTest {
         val request = slot<MoneyMovementRequest>()
         every { balanceClient.credit(settlement.payeeAccountId, capture(request)) } returns
             Uni.createFrom().item(
-                BalanceResponse(settlement.payeeAccountId, "EUR", BigDecimal("42"), BigDecimal("42")),
+                BalanceResponse(settlement.payeeAccountId, "EUR"),
             )
 
         BalanceCreditAdapter(balanceClient, repo).credit(settlement.id)
