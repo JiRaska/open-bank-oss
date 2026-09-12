@@ -137,6 +137,23 @@ class PartyEventPactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    /**
+     * Serves the NEGATIVE interaction of the VoP pact: a party id the bank does not hold must
+     * answer 404, not an empty party. The absence IS the state — nothing is seeded, and the id in
+     * the pact is one no other state creates — but a handler still has to exist, because pact-jvm
+     * fails on an unknown state string before it issues the request at all (#8889).
+     *
+     * The git-pact twin has had this since #8889; THIS class did not, and this class is the one
+     * whose results reach the broker. So every main push published `success=false` for the
+     * vop→party pact (`MissingStateChangeMethod`), and `can-i-deploy` — which reads the broker and
+     * nothing else — classified vop-service as a contract REGRESSION and blocked its deploy from
+     * 2026-09-07 until this was fixed (issue #9752).
+     */
+    @State("no party exists for the id")
+    fun noPartyForId() {
+        // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
     @State("a party has been created")
     fun partyHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
