@@ -3,7 +3,7 @@
 import { CARD_NETWORKS, CARD_TYPES, type AccountRef, type Card, type CardEntitlements, type PartyRef } from './types'
 import { CARD_STATUSES } from './lifecycle'
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const CURRENCY = /^[A-Z]{3}$/
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/
 const DISPLAY_EXPIRY = /^(0[1-9]|1[0-2])\/\d{2}$/
