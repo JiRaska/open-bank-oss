@@ -135,7 +135,9 @@ gates:
     group: registry
     mode: enforced
     budget_seconds: 20
-    min_subjects: 2  # 3 declared observed 2026-09-05; 2 lets one service be demoted, a wipe cannot pass
+    # 3 declared observed 2026-09-05; 2 after #9790 removed card-issuance's wrong T1, so the
+    # floor is met exactly and the next removal fails here — which is what the floor is for.
+    min_subjects: 2
     review_after: "2027-03-05"
     rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returned 0 for every finding (advisory until finops_tiers.enforced flips; #9678 has since made CONFIG errors block, but the DRIFT half this gate is named for is still advisory and still returns 0). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure. The floored count is the DECLARED side alone, not the 26-service union: 23 of that union are money_path_services, already floored at 20 by journey-money-path-accountability, so a union floor would stay green through the `declared: {}` wipe this gate exists to catch."
     selftest: python3 openbank-infra/scripts/check-finops-tiers.py --self-test

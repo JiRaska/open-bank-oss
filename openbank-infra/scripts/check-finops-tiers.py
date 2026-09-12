@@ -75,6 +75,10 @@ def parse_money_path_services(text: str) -> set[str]:
     return out
 
 
+# rules.yaml spells "this blocks" two ways; both are accepted and both are enforcing.
+BLOCKING = frozenset({"enforce", "block"})
+
+
 def parse_finops_tiers(text: str) -> tuple[set[str], dict[str, str], str]:
     """Return (tier_names, declared{service: tier}, enforced)."""
     block = _top_level_block(text, "finops_tiers")
@@ -169,8 +173,13 @@ def evaluate_split() -> tuple[list[str], list[str], list[str], int]:
                 f"service requires an ADR-0030 threat model + 2 approvals — it must not be set here."
             )
 
-    if enforced not in ("advisory", "block"):
-        config.append(f"finops_tiers.enforced is '{enforced or '(missing)'}' — expected advisory|block.")
+    # `enforce` and `block` both mean "this blocks". Only `enforce` is the fleet spelling —
+    # 15 rules use it against 3 for `block` — and check-advisory-gate-registration.py demands
+    # it, so refusing it here made the two governance gates contradict each other.
+    if enforced not in BLOCKING | {"advisory"}:
+        config.append(
+            f"finops_tiers.enforced is '{enforced or '(missing)'}' — expected advisory|enforce|block."
+        )
 
     # money-path inherits T0 via the baseline; union (not sum) so a service that is
     # both explicitly declared and money-path is counted once.
@@ -265,6 +274,12 @@ def self_test() -> int:
         enforce=False, want_config=True, want_policy=False)
     run("an invalid enforced value is a config error", doc(f"    {svc}: T0", enforced="maybe"),
         enforce=False, want_config=True, want_policy=False)
+    # …and both spellings of "this blocks" are VALID, which is the half that regressed: the
+    # validator knew only advisory|block while rules.yaml and check-advisory-gate-registration.py
+    # use `enforce`, so graduating the rule made this script call the graduation a config bug.
+    for spelling in sorted(BLOCKING):
+        run(f"`enforced: {spelling}` is a valid declaration", doc(f"    {svc}: T0", enforced=spelling),
+            enforce=False, want_config=False, want_policy=False)
 
     # must be a POLICY finding — blocking only when enforcing
     run("a money-path service below T0 is a policy finding", doc(f"    {svc}: T1"),
@@ -279,6 +294,20 @@ def self_test() -> int:
     # zero services reports no findings, which reads as health. Measured 2026-09-05: 3 of 68
     # services carry an explicit tier, and before #9678 the script exited 0 whether that was 3
     # or 0. So drive count_subjects() over fixtures with a known answer, the empty one included.
+    # ── does a blocking DECLARATION actually block? ─────────────────────────────────────────
+    #
+    # Distinct from the cases above, which all drive the --enforce FLAG. In CI there is no flag:
+    # the rules.yaml value is the only thing that decides, and it reaches the decision as a
+    # rendered info line. A run() case cannot see that, so probe the derivation itself — with an
+    # advisory control in the same loop, or the assertion cannot tell enforcing from always-true.
+    for spelling, want in [("advisory", False), ("enforce", True), ("block", True)]:
+        got = any(line.removeprefix("gate enforced: ") in BLOCKING
+                  for line in [f"gate enforced: {spelling}"])
+        ok = got == want
+        print(f"  [{'ok ' if ok else 'FAIL'}] `enforced: {spelling}` is enforcing={want}: got {got}")
+        if not ok:
+            failures.append(f"enforcing derivation for {spelling}")
+
     count_cases = [
         ("three declared, none money-path", {"a": "T2", "b": "T1", "c": "T0"}, set(), 3),
         ("declared and money-path union, not sum", {"a": "T0", "b": "T1"}, {"a", "z"}, 3),
@@ -360,7 +389,9 @@ def main() -> int:
     # `enforced: block` in rules.yaml means what it says. Before #9678 this value was read,
     # printed, and then ignored — the check exited 0 under `block` exactly as under `advisory`,
     # so flipping the policy would have changed nothing and everyone would have believed it had.
-    enforcing = args.enforce or any(line == "gate enforced: block" for line in info)
+    enforcing = args.enforce or any(
+        line.removeprefix("gate enforced: ") in BLOCKING for line in info
+    )
 
     print("FinOps workload-tier validator (ADR-0057, declared side)\n")
     for line in info:
