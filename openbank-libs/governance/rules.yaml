@@ -2493,12 +2493,17 @@ finops_tiers:
   # t0_baseline and need no explicit entry.
   declared:
     openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
-    # ADR-0173 D3 reconciliation (2026-07-29): card-issuance carries a live HTTPScaledObject
-    # with an openbank.io/finops-tier: T1 label and was missing here. Not money-path, so T1
-    # is declarable on the evidence of the live scaled object + classifier-measured idle —
-    # HELD AT min:1 (warm floor) pending a cold-start SLO re-measurement on the current path,
-    # the same hold product-catalog carries below.
-    openbank-card-issuance-service: T1      # live HTTPScaledObject (payments/card-issuance-http), held at min:1 — see ADR-0173 D3
+    # card-issuance was declared T1 here on 2026-07-29 (ADR-0173 D3) on the stated premise
+    # "Not money-path". That premise expired: ADR-0283 phase 0 (#8808) added
+    # openbank-card-issuance-service to money_path_services, because it ships the card
+    # AUTHORISATION decision. A money-path service inherits T0 from t0_baseline and needs no
+    # entry, so the declaration is removed rather than rewritten to T0.
+    #
+    # Nothing about the running workload changes, and that is the point: the live
+    # HTTPScaledObject payments/card-issuance-http is min:1 / max:3 and the Deployment is 1/1,
+    # i.e. it already never scales to zero — the T0 mechanism, not T1's. All three sources
+    # agreed on always-on; only this line said otherwise, and it was the one producing
+    # `check-finops-tiers` POLICY FINDING "money-path service declared 'T1' (below T0)".
     # sdd-service and interest-service ALSO carry T1-labeled HTTPScaledObjects (sdd/ and
     # interest/ namespaces) — but both are money_path_services, so they inherit T0 via
     # t0_baseline and a T1 label on the deployment is the drift ADR-0173 D3 describes:
