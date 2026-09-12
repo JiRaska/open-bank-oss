@@ -764,6 +764,15 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   regressions.
 
 ### ADR registry
+- **A stale derived ADR file reddens EVERY open PR, and each one reads as its own failure.**
+  `check-adr-registry.sh` is enforced, so when `CURRENT.md` drifted on `main` (2026-09-11: ADR-0300
+  absent from its tag listings, ADR-0285 still `planned`, the standing count 279 vs 280) the
+  `gates (registry-kotlin-data)` shard was red on every open PR — and `Validate manifests` was red
+  too, with the single message *"One or more gate shards failed"*, i.e. one cause reported twice.
+  It was found only because a test-only PR touching no ADR failed that gate. **When a gate fails on
+  a PR whose diff cannot plausibly reach it, run that gate against bare `origin/main` first** — one
+  worktree and one command, and it distinguishes "my branch is broken" from "main is broken" before
+  any branch is touched (#9711 innocent, fixed by #9720).
 - **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
   failing check restores the four derived files (`README.md`, `DIGEST.md`, `CURRENT.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
