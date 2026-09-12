@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "e5757e80f409b556"
+    openbank.tech/policy-checksum: "9b7f697f684391b8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -919,6 +919,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read
