@@ -2575,8 +2575,13 @@ finops_tiers:
   # idle 95% of the time with no money-path justification) raises a FinOps finding /
   # tracking issue (ADR-0052), not a silent drift.
   gate: finops-tier-drift
-  enforced: advisory                      # ADR-0057; -> block when the classifier lands
-  target_enforce_date: "2026-09-30"   # ADR-0144
+  # Graduated together with the gate itself. `.github/gates/gates.yaml` registers
+  # finops-tier-drift as `mode: enforced`, so the control BLOCKS from the moment this PR
+  # lands; leaving `advisory` here is the permanent-advisory failure ADR-0144 exists to
+  # prevent, and the stale target date would additionally fail check-gate-graduation.sh on
+  # EVERY PR the day it passed, over a control that already enforces (#7897).
+  enforced: enforce
+  enforced_since: "2026-09-12"        # ADR-0144
   blocked_on: "the measured-signal classifier shipped 2026-07-29 (finops-tier-classifier CronJob, daily report in the admin-ui) — the advisory gate now reads its findings; 3 services have a declared tier today (notification-service T2, product-catalog T0, card-issuance T1-held-at-min:1)"
   # Added by issue #2392: the rule carried `enforced`/`target_enforce_date` but never named the
   # script that produces the finding, so nothing tied the advisory CI step to this deadline.
