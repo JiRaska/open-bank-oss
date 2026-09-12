@@ -63,8 +63,6 @@ const OBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--danger', '--surface'], // 3.76:1
   ['--danger', '--surface-1'], // 3.76:1
   ['--accent', '--accent-bg'], // 3.99:1
-  ['--text-tertiary', '--surface-3'], // 4.34:1
-  ['--text-muted', '--surface-3'], // 4.34:1
 ]
 
 // Pairs that fail arithmetically but which that sweep did not observe — mostly combinations nobody
@@ -129,6 +127,8 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--danger-text', '--sidebar-bg'], // 2.99:1
   ['--danger', '--surface-4'], // 3.05:1
   ['--info', '--accent-bg'], // 3.29:1
+  ['--text-tertiary', '--sidebar-bg'], // 3.34:1
+  ['--text-muted', '--sidebar-bg'], // 3.34:1
   ['--info', '--surface-3'], // 3.36:1
   ['--info', '--danger-bg'], // 3.36:1
   ['--danger', '--accent-bg'], // 3.37:1
@@ -147,25 +147,15 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--info', '--surface'], // 3.68:1
   ['--info', '--surface-1'], // 3.68:1
   ['--warning-text', '--sidebar-bg'], // 3.85:1
-  ['--text-tertiary', '--surface-4'], // 3.86:1
-  ['--text-muted', '--surface-4'], // 3.86:1
-  ['--text-tertiary', '--sidebar-bg'], // 4.06:1
-  ['--text-muted', '--sidebar-bg'], // 4.06:1
   ['--warning-text', '--surface-4'], // 4.07:1
   ['--accent', '--surface-3'], // 4.08:1
   ['--accent', '--danger-bg'], // 4.08:1
   ['--accent', '--info-bg'], // 4.1:1
   ['--accent', '--success-bg'], // 4.24:1
-  ['--text-tertiary', '--accent-bg'], // 4.26:1
-  ['--text-muted', '--accent-bg'], // 4.26:1
   ['--accent', '--surface-2'], // 4.27:1
   ['--accent', '--bg'], // 4.28:1
   ['--accent', '--warning-bg'], // 4.31:1
   ['--accent', '--sidebar-bg'], // 4.33:1
-  ['--text-tertiary', '--danger-bg'], // 4.35:1
-  ['--text-muted', '--danger-bg'], // 4.35:1
-  ['--text-tertiary', '--info-bg'], // 4.37:1
-  ['--text-muted', '--info-bg'], // 4.37:1
   ['--success-text', '--surface-4'], // 4.45:1
   ['--accent', '--surface'], // 4.47:1
   ['--accent', '--surface-1'], // 4.47:1
@@ -202,9 +192,12 @@ describe('admin UI token contrast', () => {
     const declared = new Set(BELOW_AA[name].map(([text, surface]) => `${text} on ${surface}`))
     const unexpected: string[] = []
     const stale: string[] = []
+    const missing: string[] = []
     for (const text of TEXT_TOKENS) {
       for (const surface of SURFACE_TOKENS) {
-        if (!tokens[text] || !tokens[surface]) continue
+        // Never `continue` past a missing token: that is how a renamed or deleted token turns this
+        // loop into a no-op that still passes. Listed tokens must exist — asserted below.
+        if (!tokens[text] || !tokens[surface]) { missing.push(!tokens[text] ? text : surface); continue }
         const [fg, bg] = [resolve(tokens, text), resolve(tokens, surface)]
         if (!fg.startsWith('#') || !bg.startsWith('#')) continue
         const key = `${text} on ${surface}`
@@ -213,7 +206,8 @@ describe('admin UI token contrast', () => {
         if (ratio >= AA && declared.has(key)) stale.push(`${key} = ${ratio.toFixed(2)}:1 now passes — drop it from BELOW_AA`)
       }
     }
-    expect({ unexpected, stale }).toEqual({ unexpected: [], stale: [] })
+    expect({ unexpected, stale, missing: [...new Set(missing)] })
+      .toEqual({ unexpected: [], stale: [], missing: [] })
   })
 
   // Sabotage that motivated this test: removing '--surface-3' from SURFACE_TOKENS left the suite
@@ -236,6 +230,13 @@ describe('admin UI token contrast', () => {
     const missingTexts = [...texts, ...tones]
       .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
     expect({ missingSurfaces, missingTexts }).toEqual({ missingSurfaces: [], missingTexts: [] })
+  })
+
+  // Ported from the light-theme guard #9788 added, which this file subsumes: if the arithmetic is
+  // wrong, every comparison above is wrong in the same direction and the suite agrees with itself.
+  it('reproduces two known ratios, so the arithmetic is not self-confirming', () => {
+    expect(contrast('#64748b', '#e2e8f0')).toBeCloseTo(3.86, 1)  // the pre-#9788 tertiary failure
+    expect(contrast('#ffffff', '#000000')).toBeCloseTo(21, 0)    // the absolute bound
   })
 
   it('the alias --text-muted is covered, not skipped', () => {
