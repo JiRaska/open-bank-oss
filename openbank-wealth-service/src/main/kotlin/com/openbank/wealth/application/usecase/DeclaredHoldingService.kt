@@ -11,6 +11,7 @@ import com.openbank.wealth.application.port.`in`.DeclaredHoldingUseCase
 import com.openbank.wealth.application.port.`in`.RevalueHoldingCommand
 import com.openbank.wealth.application.port.out.DeclaredHoldingRepository
 import com.openbank.wealth.application.port.out.HoldingNotFoundException
+import com.openbank.wealth.application.port.out.RecordedValuation
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingDeclared
 import com.openbank.wealth.domain.model.HoldingRevalued
@@ -80,6 +81,7 @@ class DeclaredHoldingService(
                 currency = revalued.valuation.currency,
                 valuedAt = revalued.valuation.valuedAt,
                 valuationSource = revalued.valuation.source,
+                ownershipShare = revalued.ownershipShare,
                 occurredAt = now,
             ),
         )
@@ -105,4 +107,9 @@ class DeclaredHoldingService(
     override suspend fun findById(holdingId: UUID): DeclaredHolding? = repository.findById(holdingId)
 
     override suspend fun listForParty(ownerPartyId: UUID): List<DeclaredHolding> = repository.listForParty(ownerPartyId)
+
+    override suspend fun valuationHistory(holdingId: UUID): List<RecordedValuation> {
+        repository.findById(holdingId) ?: throw HoldingNotFoundException(holdingId)
+        return repository.valuationHistory(holdingId)
+    }
 }

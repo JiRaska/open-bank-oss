@@ -1,6 +1,7 @@
 -- ADR-0301 D1: customer-declared holdings the bank does not hold.
 -- Rollback:
---   DROP TABLE wealth_outbox; DROP TABLE declared_holdings;
+--   DROP TABLE wealth_outbox; DROP TABLE declared_holding_valuations;
+--   DROP TABLE declared_holdings;
 --   DROP SEQUENCE wealth_outbox_seq; DROP SEQUENCE declared_holdings_seq;
 
 CREATE TABLE declared_holdings (
@@ -40,6 +41,31 @@ ALTER TABLE declared_holdings
     ADD CONSTRAINT declared_holdings_pledge_consistent
     CHECK ((status = 'PLEDGED') = (pledged_to_loan_id IS NOT NULL));
 
+-- Append-only valuation series. The holding carries the LATEST valuation denormalised (every read
+-- wants it); this table is the record that a value was ever asserted at all.
+--
+-- Without it the previous value is simply gone: `revalue` overwrites the row, and the only other
+-- trace is a HoldingRevalued event on a 7-day `cleanup.policy: delete` topic that no service
+-- consumes. For an asset class whose whole point is its trajectory, and for the audit question
+-- "what did this customer claim in 2024", that is unrecoverable — and unlike every other gap in
+-- this service it cannot be closed later, because the data was never written.
+CREATE TABLE declared_holding_valuations (
+    id                   BIGSERIAL PRIMARY KEY,
+    holding_id           UUID NOT NULL REFERENCES declared_holdings (holding_id),
+    valuation_amount     NUMERIC(19, 4) NOT NULL,
+    valuation_currency   CHAR(3) NOT NULL,
+    valued_at            DATE NOT NULL,
+    valuation_source     VARCHAR(32) NOT NULL,
+    appraiser_reference  VARCHAR(256),
+    recorded_at          TIMESTAMPTZ NOT NULL
+);
+
+-- `recorded_at` DESC, not `valued_at`: a backdated appraisal is legitimate (a 2019 valuation
+-- declared today), so the series is ordered by when the bank learned it, not by the date it
+-- asserts. Both columns are kept because they answer different questions.
+CREATE INDEX idx_declared_holding_valuations_holding
+    ON declared_holding_valuations (holding_id, recorded_at DESC);
+
 -- Transactional outbox (ADR-0003 / ADR-0050), same shape as the rest of the fleet.
 CREATE TABLE wealth_outbox (
     id              BIGSERIAL PRIMARY KEY,
@@ -68,6 +94,7 @@ ALTER TABLE wealth_outbox
 -- BIGSERIAL does not create. Unquoted, lowercase, INCREMENT BY 50 — the repo convention after
 -- party V19 / delegation V2 / kyb V1.
 CREATE SEQUENCE IF NOT EXISTS declared_holdings_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS declared_holding_valuations_seq INCREMENT BY 50;
 CREATE SEQUENCE IF NOT EXISTS wealth_outbox_seq INCREMENT BY 50;
 
 GRANT ALL ON ALL TABLES IN SCHEMA public TO openbank;

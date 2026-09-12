@@ -165,6 +165,21 @@ class DeclaredHoldingServiceTest {
     }
 
     @Test
+    fun `the revalued event carries the ownership share`(): Unit = runBlocking {
+        // Without it a projection cannot compute the attributable amount AS OF this revaluation
+        // without joining back to a holding row that may itself have moved since.
+        val current = existing(null).copy(ownershipShare = BigDecimal("0.5"))
+        coEvery { repository.findById(current.id) } returns current
+        val payload = slot<String>()
+        coEvery { repository.save(any(), HoldingRevalued.EVENT_TYPE, capture(payload)) } answers { firstArg() }
+
+        service.revalue(RevalueHoldingCommand(current.id, valuation))
+
+        val event = objectMapper.readValue(payload.captured, HoldingRevalued::class.java)
+        assertThat(event.ownershipShare).isEqualByComparingTo("0.5")
+    }
+
+    @Test
     fun `withdrawing emits the withdrawn event`(): Unit = runBlocking {
         val current = existing(null)
         coEvery { repository.findById(current.id) } returns current

@@ -129,6 +129,50 @@ class WealthHoldingApiIT {
         assertThat(types).contains("wealth.holding.withdrawn.v1")
     }
 
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `revaluing keeps the previous value, it does not overwrite it`() {
+        val id = declare("SN-${UUID.randomUUID()}")
+
+        given()
+            .contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .body(
+                """{"valuation":{"amount":400000.00,"currency":"CZK","valuedAt":"2026-09-10","source":"EXPERT_APPRAISAL","appraiserReference":"APP-7"}}""",
+            )
+            .`when`().put("/api/v1/holdings/$id/valuation")
+            .then().statusCode(200)
+            .body("amount", equalTo(400000.00f))
+
+        // TWO entries: the original declaration and the revaluation. Before the append-only series
+        // existed, the first number was simply gone — the row was overwritten and the only other
+        // trace was an event on a 7-day delete topic that nothing consumes.
+        val history = given()
+            .header("X-Customer-Party-Id", party.toString())
+            .`when`().get("/api/v1/holdings/$id/valuations")
+            .then().statusCode(200)
+            .extract().jsonPath().getList<Map<String, Any>>("")
+
+        assertThat(history).hasSize(2)
+        assertThat(history[0]["source"]).isEqualTo("EXPERT_APPRAISAL")
+        assertThat(history[1]["source"]).isEqualTo("CUSTOMER_DECLARED")
+        assertThat(history[1]["amount"].toString().toDouble()).isEqualTo(250000.00)
+    }
+
+    @Test
+    @TestSecurity(user = "edge", roles = ["ROLE_API"])
+    fun `a liability type is declared and reads back as a liability`() {
+        val body = declareBody(null).replace("\"COLLECTIBLE\"", "\"MORTGAGE\"")
+        given()
+            .contentType("application/json")
+            .header("X-Customer-Party-Id", party.toString())
+            .body(body)
+            .`when`().post("/api/v1/holdings")
+            .then().statusCode(201)
+            .body("isLiability", equalTo(true))
+            .body("holdingType", equalTo("MORTGAGE"))
+    }
+
     private fun declare(reference: String): String = given()
         .contentType("application/json")
         .header("X-Customer-Party-Id", party.toString())

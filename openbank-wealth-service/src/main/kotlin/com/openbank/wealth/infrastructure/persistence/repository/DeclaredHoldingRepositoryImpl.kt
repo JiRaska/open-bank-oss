@@ -7,6 +7,7 @@ package com.openbank.wealth.infrastructure.persistence.repository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.wealth.application.port.out.DeclaredHoldingRepository
+import com.openbank.wealth.application.port.out.RecordedValuation
 import com.openbank.wealth.application.port.out.WealthOutboxRepository
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingStatus
@@ -14,6 +15,7 @@ import com.openbank.wealth.domain.model.HoldingType
 import com.openbank.wealth.domain.model.Valuation
 import com.openbank.wealth.domain.model.ValuationSource
 import com.openbank.wealth.infrastructure.persistence.entity.DeclaredHoldingEntity
+import com.openbank.wealth.infrastructure.persistence.entity.DeclaredHoldingValuationEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -25,6 +27,7 @@ import java.util.UUID
 @ApplicationScoped
 class DeclaredHoldingRepositoryImpl(
     private val outbox: WealthOutboxRepository,
+    private val valuations: DeclaredHoldingValuationRepository,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
 ) : DeclaredHoldingRepository,
@@ -49,14 +52,52 @@ class DeclaredHoldingRepositoryImpl(
                     holdingId = holding.id
                     createdAt = holding.createdAt
                 }
+                val valuationChanged = existing == null || existing.valuationDiffersFrom(holding)
                 entity.fill(holding)
                 // persist() on a NEW entity inserts; an entity already loaded in this session is
                 // managed, so mutating it is enough and persist would be a no-op on it.
                 val persisted = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
-                persisted.flatMap { outbox.persistInTransaction(message) }
+                persisted
+                    .flatMap { if (valuationChanged) appendValuation(holding) else Uni.createFrom().voidItem() }
+                    .flatMap { outbox.persistInTransaction(message) }
             }
         }.awaitSuspending()
         return holding
+    }
+
+    /**
+     * Read BEFORE `fill` overwrites the managed entity — afterwards the old value is already gone
+     * from the session, which is the same overwrite this table exists to survive.
+     */
+    private fun DeclaredHoldingEntity.valuationDiffersFrom(holding: DeclaredHolding): Boolean =
+        valuationAmount.compareTo(holding.valuation.amount) != 0 ||
+            valuationCurrency != holding.valuation.currency ||
+            valuedAt != holding.valuation.valuedAt ||
+            valuationSource != holding.valuation.source.name
+
+    private fun appendValuation(holding: DeclaredHolding): Uni<Void> = DeclaredHoldingValuationEntity().apply {
+        holdingId = holding.id
+        valuationAmount = holding.valuation.amount
+        valuationCurrency = holding.valuation.currency
+        valuedAt = holding.valuation.valuedAt
+        valuationSource = holding.valuation.source.name
+        appraiserReference = holding.valuation.appraiserReference
+        recordedAt = clock.instant()
+    }.let { valuations.persist(it).replaceWithVoid() }
+
+    override suspend fun valuationHistory(holdingId: UUID): List<RecordedValuation> = Panache.withSession {
+        valuations.find("holdingId = ?1 order by recordedAt desc, id desc", holdingId).list()
+    }.awaitSuspending().map {
+        RecordedValuation(
+            valuation = Valuation(
+                amount = it.valuationAmount,
+                currency = it.valuationCurrency,
+                valuedAt = it.valuedAt,
+                source = ValuationSource.valueOf(it.valuationSource),
+                appraiserReference = it.appraiserReference,
+            ),
+            recordedAt = it.recordedAt,
+        )
     }
 
     override suspend fun findById(holdingId: UUID): DeclaredHolding? = Panache.withSession {

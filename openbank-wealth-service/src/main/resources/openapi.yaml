@@ -100,6 +100,28 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/holdings/{id}/valuations:
+    get:
+      tags: [Wealth]
+      operationId: getValuationHistory
+      summary: Every value ever asserted for this holding
+      description: |
+        Append-only and newest first by `recordedAt`, which is when the BANK learned the value and
+        is not the same as `valuedAt`, which is the date the value asserts. A backdated appraisal
+        is legitimate, so the two can disagree by years.
+      parameters:
+        - $ref: '#/components/parameters/HoldingId'
+      responses:
+        '200':
+          description: The valuation series
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecordedValuation'
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/holdings/{id}/valuation:
     put:
       tags: [Wealth]
@@ -168,8 +190,9 @@ components:
     HoldingType:
       type: string
       description: |
-        Closed vocabulary. `EXTERNAL_LIABILITY` is the only value that reduces net worth; read
-        `isLiability` rather than inferring it from the name.
+        Closed vocabulary. Which side of net worth a holding falls on is fixed BY the type and
+        reported as `isLiability`; there is no separate side field, because REAL_ESTATE combined
+        with LIABILITY would mean nothing.
       enum:
         - REAL_ESTATE
         - COLLECTIBLE
@@ -178,7 +201,10 @@ components:
         - VEHICLE
         - EXTERNAL_DEPOSIT
         - PRIVATE_CLAIM
-        - EXTERNAL_LIABILITY
+        - MORTGAGE
+        - CONSUMER_CREDIT
+        - PRIVATE_DEBT
+        - OTHER_LIABILITY
 
     ValuationSource:
       type: string
@@ -211,6 +237,20 @@ components:
           $ref: '#/components/schemas/ValuationSource'
         appraiserReference:
           type: [string, 'null']
+
+    RecordedValuation:
+      type: object
+      required: [amount, currency, valuedAt, source, recordedAt]
+      properties:
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        valuedAt: { type: string, format: date }
+        source: { $ref: '#/components/schemas/ValuationSource' }
+        appraiserReference: { type: [string, 'null'] }
+        recordedAt:
+          type: string
+          format: date-time
+          description: When the bank learned this value.
 
     DeclareHoldingRequest:
       type: object
@@ -254,6 +294,7 @@ components:
         - valuationSource
         - ownershipShare
         - attributableAmount
+        - valuationAgeDays
         - documentIds
         - status
         - createdAt
@@ -273,6 +314,13 @@ components:
         attributableAmount:
           type: number
           description: amount x ownershipShare. Not a bank figure.
+        valuationAgeDays:
+          type: integer
+          format: int64
+          description: |
+            Days between `valuedAt` and today. On the wire because `valuedAt` alone makes a
+            years-old number look identical to a fresh one, and no rule may treat a stale
+            self-declared figure as current.
         externalReference: { type: [string, 'null'] }
         documentIds:
           type: array

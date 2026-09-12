@@ -95,7 +95,10 @@ components:
         - VEHICLE
         - EXTERNAL_DEPOSIT
         - PRIVATE_CLAIM
-        - EXTERNAL_LIABILITY
+        - MORTGAGE
+        - CONSUMER_CREDIT
+        - PRIVATE_DEBT
+        - OTHER_LIABILITY
 
     ValuationSource:
       type: string
@@ -144,6 +147,7 @@ components:
         - currency
         - valuedAt
         - valuationSource
+        - ownershipShare
         - occurredAt
         - sourceService
       properties:
@@ -154,6 +158,7 @@ components:
         currency: { type: string, minLength: 3, maxLength: 3 }
         valuedAt: { type: string, format: date }
         valuationSource: { $ref: '#/components/schemas/ValuationSource' }
+        ownershipShare: { type: number }
         occurredAt: { type: string, format: date-time }
         sourceService:
           type: string

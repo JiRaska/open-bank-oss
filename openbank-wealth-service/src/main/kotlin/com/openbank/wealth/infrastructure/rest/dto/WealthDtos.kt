@@ -4,6 +4,7 @@
 
 package com.openbank.wealth.infrastructure.rest.dto
 
+import com.openbank.wealth.application.port.out.RecordedValuation
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingStatus
 import com.openbank.wealth.domain.model.HoldingType
@@ -38,6 +39,28 @@ data class DeclareHoldingRequest(
 
 data class RevalueHoldingRequest(val valuation: ValuationDto)
 
+/** One entry of the append-only valuation series. */
+data class RecordedValuationResponse(
+    val amount: BigDecimal,
+    val currency: String,
+    val valuedAt: LocalDate,
+    val source: ValuationSource,
+    val appraiserReference: String?,
+    /** When the BANK learned this value, as distinct from [valuedAt], which is what it asserts. */
+    val recordedAt: Instant,
+) {
+    companion object {
+        fun from(r: RecordedValuation) = RecordedValuationResponse(
+            amount = r.valuation.amount,
+            currency = r.valuation.currency,
+            valuedAt = r.valuation.valuedAt,
+            source = r.valuation.source,
+            appraiserReference = r.valuation.appraiserReference,
+            recordedAt = r.recordedAt,
+        )
+    }
+}
+
 /**
  * [valuationSource] is on the wire for every holding, always.
  *
@@ -58,6 +81,8 @@ data class HoldingResponse(
     val appraiserReference: String?,
     val ownershipShare: BigDecimal,
     val attributableAmount: BigDecimal,
+    /** Age of the asserted value in days. See DeclaredHolding.valuationAgeDays for why it is here. */
+    val valuationAgeDays: Long,
     val externalReference: String?,
     val documentIds: List<UUID>,
     val status: HoldingStatus,
@@ -79,6 +104,7 @@ data class HoldingResponse(
             appraiserReference = h.valuation.appraiserReference,
             ownershipShare = h.ownershipShare,
             attributableAmount = h.attributableAmount,
+            valuationAgeDays = h.valuationAgeDays(LocalDate.now()),
             externalReference = h.externalReference,
             documentIds = h.documentIds,
             status = h.status,

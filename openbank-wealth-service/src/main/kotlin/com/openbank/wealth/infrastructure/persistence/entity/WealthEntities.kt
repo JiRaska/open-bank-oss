@@ -77,6 +77,37 @@ class DeclaredHoldingEntity : PanacheEntity() {
     lateinit var updatedAt: Instant
 }
 
+/**
+ * One row per value ever asserted for a holding. Never updated, never deleted while the holding
+ * lives: the point of the table is that the previous number still exists after the holding row has
+ * moved on.
+ */
+@Entity
+@Table(name = "declared_holding_valuations")
+class DeclaredHoldingValuationEntity : PanacheEntity() {
+    @Column(name = "holding_id", nullable = false)
+    lateinit var holdingId: UUID
+
+    @Column(name = "valuation_amount", nullable = false)
+    lateinit var valuationAmount: BigDecimal
+
+    @Column(name = "valuation_currency", nullable = false)
+    lateinit var valuationCurrency: String
+
+    @Column(name = "valued_at", nullable = false)
+    lateinit var valuedAt: LocalDate
+
+    @Column(name = "valuation_source", nullable = false)
+    lateinit var valuationSource: String
+
+    @Column(name = "appraiser_reference")
+    var appraiserReference: String? = null
+
+    /** When the BANK learned the value, as distinct from the date the value asserts. */
+    @Column(name = "recorded_at", nullable = false)
+    lateinit var recordedAt: Instant
+}
+
 @Entity
 @Table(name = "wealth_outbox")
 class WealthOutboxEntity : PanacheOutboxEntity() {

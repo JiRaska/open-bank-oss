@@ -4,6 +4,7 @@
 
 package com.openbank.wealth.application.port.`in`
 
+import com.openbank.wealth.application.port.out.RecordedValuation
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingType
 import com.openbank.wealth.domain.model.Valuation
@@ -51,4 +52,7 @@ interface DeclaredHoldingUseCase {
 
     /** Active and pledged holdings for one party; withdrawn rows are excluded. */
     suspend fun listForParty(ownerPartyId: UUID): List<DeclaredHolding>
+
+    /** Every value ever asserted for this holding, newest first. Empty is impossible for a live holding. */
+    suspend fun valuationHistory(holdingId: UUID): List<RecordedValuation>
 }

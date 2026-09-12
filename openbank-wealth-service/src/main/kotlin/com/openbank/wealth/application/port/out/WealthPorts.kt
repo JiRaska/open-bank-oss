@@ -8,7 +8,9 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.wealth.domain.model.DeclaredHolding
 import com.openbank.wealth.domain.model.HoldingType
+import com.openbank.wealth.domain.model.Valuation
 import io.smallrye.mutiny.Uni
+import java.time.Instant
 import java.util.UUID
 
 /** Raised when a command names a holding that does not exist. Mapped to 404. */
@@ -32,7 +34,13 @@ interface DeclaredHoldingRepository {
     ): DeclaredHolding?
 
     suspend fun listForParty(ownerPartyId: UUID): List<DeclaredHolding>
+
+    /** Every value ever asserted for this holding, newest first by when the bank learned it. */
+    suspend fun valuationHistory(holdingId: UUID): List<RecordedValuation>
 }
+
+/** One entry of the append-only series: the valuation, plus when it was recorded. */
+data class RecordedValuation(val valuation: Valuation, val recordedAt: Instant)
 
 /**
  * This service's outbox table.

@@ -60,6 +60,10 @@ data class HoldingRevalued(
     val currency: String,
     val valuedAt: LocalDate,
     val valuationSource: ValuationSource,
+    // Carried here too, not only on Declared: without it a projection cannot compute the
+    // attributable amount AS OF this revaluation without joining back to the holding row, which
+    // by then may itself have moved.
+    val ownershipShare: BigDecimal,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
 ) {

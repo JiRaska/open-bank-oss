@@ -13,6 +13,7 @@ import com.openbank.wealth.application.port.out.HoldingNotFoundException
 import com.openbank.wealth.domain.model.Valuation
 import com.openbank.wealth.infrastructure.rest.dto.DeclareHoldingRequest
 import com.openbank.wealth.infrastructure.rest.dto.HoldingResponse
+import com.openbank.wealth.infrastructure.rest.dto.RecordedValuationResponse
 import com.openbank.wealth.infrastructure.rest.dto.RevalueHoldingRequest
 import com.openbank.wealth.infrastructure.rest.dto.ValuationDto
 import jakarta.annotation.security.RolesAllowed
@@ -98,6 +99,13 @@ class WealthResource {
     @Authorize(action = "wealth.holding.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): HoldingResponse =
         holdings.findById(id)?.let(HoldingResponse::from) ?: throw HoldingNotFoundException(id)
+
+    @GET
+    @Path("/{id}/valuations")
+    @Operation(summary = "Every value ever asserted for this holding, newest first")
+    @Authorize(action = "wealth.holding.read", resource = "#id")
+    suspend fun valuationHistory(@PathParam("id") id: UUID): List<RecordedValuationResponse> =
+        holdings.valuationHistory(id).map(RecordedValuationResponse::from)
 
     @PUT
     @Path("/{id}/valuation")

@@ -130,11 +130,29 @@ class DeclaredHoldingTest {
     }
 
     @Test
-    fun `only the liability type is a liability`() {
-        // Asserted over the WHOLE enum, not a sample: a value added later is covered by this test
-        // the day it is added, which a hand-listed pair of cases would not be.
-        val liabilities = HoldingType.entries.filter { it.isLiability }
-        assertThat(liabilities).containsExactly(HoldingType.EXTERNAL_LIABILITY)
+    fun `side is fixed by the type, and every type declares one`() {
+        // Asserted over the WHOLE enum, not a sample: a value added later is covered the day it is
+        // added, which a hand-listed pair of cases would not be. The point of deriving side from
+        // the type is that REAL_ESTATE + LIABILITY is unrepresentable — there is no second field
+        // to disagree with.
+        assertThat(HoldingType.entries.filter { it.isLiability })
+            .containsExactlyInAnyOrder(
+                HoldingType.MORTGAGE,
+                HoldingType.CONSUMER_CREDIT,
+                HoldingType.PRIVATE_DEBT,
+                HoldingType.OTHER_LIABILITY,
+            )
+        assertThat(HoldingType.entries.filterNot { it.isLiability }).hasSize(7)
+        assertThat(HoldingType.entries.map { it.side }).doesNotContainNull()
+    }
+
+    @Test
+    fun `valuation age is measured from the date the value asserts, not from the row`() {
+        // The whole reason the field is on the wire: a 2019 number and a 2026 number are otherwise
+        // indistinguishable to a consumer that does not do this subtraction itself.
+        val h = holding()
+        assertThat(h.valuationAgeDays(LocalDate.of(2026, 9, 12))).isEqualTo(11)
+        assertThat(h.valuationAgeDays(LocalDate.of(2026, 9, 1))).isZero()
     }
 
     @Test
