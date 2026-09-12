@@ -4,12 +4,13 @@
 
 'use client'
 
-import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X } from 'lucide-react'
+import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X, Moon, Sun } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useTheme } from '@/lib/theme/useTheme'
 import { CommandPalette } from '@/components/search/CommandPalette'
 import styles from './Header.module.css'
 
@@ -18,6 +19,7 @@ interface BuildInfo { version: string; gitSha: string; buildDate: string }
 export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
   const { data: session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { theme, toggle: toggleTheme } = useTheme()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
   const userMenuButtonRef = useRef<HTMLButtonElement>(null)
@@ -158,6 +160,27 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             )}
           </Link>
         )}
+        {/* Theme (#9831): the `.dark` tokens existed and nothing could apply them. */}
+        <button
+          type="button"
+          aria-label={theme === 'dark'
+            ? t('Přepnout na světlý motiv', 'Switch to the light theme')
+            : t('Přepnout na tmavý motiv', 'Switch to the dark theme')}
+          title={t('Přepnout motiv', 'Switch theme')}
+          aria-pressed={theme === 'dark'}
+          onClick={toggleTheme}
+          style={{
+            width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: '6px', border: 'none', background: 'transparent',
+            color: 'var(--text-secondary)', cursor: 'pointer', transition: 'background 0.12s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+          {theme === 'dark'
+            ? <Sun size={15} aria-hidden="true" />
+            : <Moon size={15} aria-hidden="true" />}
+        </button>
         <button
           type="button"
           aria-label={t('Přepnout na angličtinu', 'Switch to Czech')}
