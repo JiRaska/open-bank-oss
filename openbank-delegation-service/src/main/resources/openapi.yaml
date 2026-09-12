@@ -5,11 +5,15 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  # 1.13.0 -> 1.14.0 (#9286): additive — delegated account portfolios.
+  # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios.
   #
-  # 1.14.0 -> 1.19.0 (#9417, this branch): additive — SCA-bound approval groups.
-  # 1.15.0 is held by the open #9215, 1.16.0 by #9481/#9484, 1.17.0 by #9237 and
-  # 1.18.0 by #9522, so 1.19.0 is the first free number.
+  # 1.14.0 -> 1.18.0 (#9522): additive — organization grant authority. Now on main.
+  #
+  # 1.18.0 -> 1.19.0 (#9417, this branch): additive — SCA-bound approval groups. NOT the next
+  # integer off an older main: 1.15.0 is held by the open #9468/#9474, 1.16.0 by #9481/#9484 and
+  # 1.17.0 by #9237/#9495, so 1.19.0 is the first free number. Re-read this off live origin/main
+  # together with the open PRs after any rebase — a taken version is textually identical to a free
+  # one, so no merge can catch the collision (ADR-0048).
   version: 1.19.0
 servers:
   - url: http://localhost:8126
@@ -135,6 +139,7 @@ paths:
           in: header
           schema: { type: string }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -161,8 +166,9 @@ paths:
               can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+        '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
       tags: [Delegations]
@@ -175,6 +181,7 @@ paths:
         directory.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -189,6 +196,7 @@ paths:
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
         '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or resource ownership could not be established }
+        '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -640,6 +648,16 @@ components:
         query string is a claim by the caller, this header is not.
 
         Absent on an operator/back-office call, which is gated by role and OPA instead.
+      schema: { type: string, format: uuid }
+    CustomerActorPartyId:
+      name: X-Customer-Actor-Party-Id
+      in: header
+      required: false
+      description: |
+        The natural person authenticated by customer-edge. Required together with
+        X-Customer-Party-Id on customer preview/offer calls. It equals the principal for an
+        individual profile; for an organization profile it differs and the service verifies the
+        actor's active PartyMandate before accepting the request. Never supplied by the app.
       schema: { type: string, format: uuid }
     DelegationId:
       name: id

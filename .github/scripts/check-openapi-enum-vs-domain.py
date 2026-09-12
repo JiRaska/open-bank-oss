@@ -116,8 +116,6 @@ BASELINE: dict[str, str] = {
     "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
         "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
-    "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
-        "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
     # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
