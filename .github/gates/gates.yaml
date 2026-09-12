@@ -2552,6 +2552,8 @@ gates:
     name: "an SA-excluded action is not matrix-reachable (rest.rego vs role_action_matrix, enforced)"
     group: registry
     mode: enforced
+    rationale: "A rule's `not startswith(input.principal.id, \"service-account-\")` is the only thing separating staff from the platform's own services, because a client_credentials JWT is classified HUMAN; `matrix-allows` grants on type plus role alone and cannot express that exclusion, so a matrix entry over such an action silently defeats it and no policy layer can veto a base-layer reason."
+    review_after: "2027-09-12"
     budget_seconds: 10                   # two file reads and a set intersection; measured 0.2s
     min_subjects: 3                      # SA-excluded actions in rest.rego, 4 today. A floor because
                                          # this gate's whole value is the derived subject: if the
