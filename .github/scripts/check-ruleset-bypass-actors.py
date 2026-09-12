@@ -78,6 +78,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -112,19 +113,76 @@ class Unreadable(RuntimeError):
     """
 
 
-def gh_api(path: str) -> list | dict:
-    """`gh api <path>`, parsed. Raises RuntimeError on every failure mode.
+# The vocabulary is NOT defined here. `gh-transient-patterns.txt` next to this file is the one
+# shared list, read by `gh-retry.sh` and `check-ruleset-context-parity.py` as well. Its header
+# carries the measurement that produced it: three hand-written classifiers of this exact question
+# agreed on 23 of 31 real `gh` messages and disagreed on 8, each missing five the others caught.
+# A private regex here would have been the fourth — and this one's first draft was, missing
+# `Too Many Requests (HTTP 429)`, `abuse detection mechanism`, and a bare `HTTP 503`.
+_PATTERNS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gh-transient-patterns.txt")
+_PATTERN_CACHE: list[re.Pattern] | None = None
 
-    A missing `gh` binary, a network error, a rate limit and a non-JSON body all become one
-    exception type, so the caller's single `except RuntimeError` covers them. A gate that
-    cannot reach its subject must say so, never report a clean pass.
+
+def _transient_patterns() -> list[re.Pattern]:
+    """Compile [rate_limit] + [transient] from the shared vocabulary.
+
+    An unreadable or empty vocabulary raises — it must NOT silently classify everything as final.
+    An empty pattern list matches nothing, so every failure would read as a real finding while
+    each call still returned a plausible boolean.
+    """
+    global _PATTERN_CACHE
+    if _PATTERN_CACHE is not None:
+        return _PATTERN_CACHE
+    section, pats = None, {"rate_limit": [], "transient": []}
+    with open(_PATTERNS_FILE) as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+                continue
+            if section in pats:
+                pats[section].append(line)
+    if not pats["rate_limit"] or not pats["transient"]:
+        raise RuntimeError(
+            f"transient-pattern vocabulary at {_PATTERNS_FILE} has an empty [rate_limit] or "
+            f"[transient] section; refusing to classify with no patterns."
+        )
+    _PATTERN_CACHE = [re.compile(x, re.IGNORECASE) for x in pats["rate_limit"] + pats["transient"]]
+    return _PATTERN_CACHE
+
+
+def _is_transient(message: str) -> bool:
+    """True when a `gh` failure is about REACHABILITY, not about the bypass actors."""
+    return any(r.search(message) for r in _transient_patterns())
+
+
+def gh_api(path: str) -> list | dict:
+    """`gh api <path>`, parsed. Raises Unreadable on a rate limit, RuntimeError otherwise.
+
+    A missing `gh` binary, a network error and a non-JSON body are BROKEN — the gate could not
+    do its job and must go red. A rate limit is different in kind: nothing is wrong with the
+    call, the subject simply was not read, which is the UNRESOLVED case this gate already models
+    for a token without admin scope. Collapsing the two made an org-wide API budget problem
+    render as a policy violation on an unrelated PR: measured 2026-09-11, `lint-supplychain-security`
+    was red on 6 open PRs for this reason, gating the required `Validate manifests` context.
+    A gate that cannot reach its subject must still never report a clean pass — UNRESOLVED is
+    neither pass nor fail, and run-gates skips the min_subjects floor for it.
     """
     try:
         p = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"could not run `gh api {path}`: {exc}") from exc
     if p.returncode != 0:
-        raise RuntimeError(f"gh api {path} failed (rc={p.returncode}): {p.stderr.strip()}")
+        stderr = p.stderr.strip()
+        if _is_transient(stderr):
+            raise Unreadable(
+                f"gh api {path} was RATE LIMITED (rc={p.returncode}): {stderr}. The subject was "
+                f"never read, so this run says nothing about bypass actors either way — it is "
+                f"UNRESOLVED, not a finding and not a pass."
+            )
+        raise RuntimeError(f"gh api {path} failed (rc={p.returncode}): {stderr}")
     try:
         return json.loads(p.stdout)
     except json.JSONDecodeError as exc:
@@ -279,6 +337,54 @@ def self_test() -> int:
         if rc != 1:
             fails.append(f"a broken API call must still exit 1, got {rc}")
 
+        # A RATE LIMIT is the third state, and both halves of the split have to be held or the
+        # change is untested: the limit must NOT go red, and everything else must still go red.
+        def _rate_limited(path):
+            raise Unreadable("gh api ... was RATE LIMITED (rc=1): API rate limit exceeded for installation")
+
+        globals()["gh_api"] = _rate_limited
+        rc = _run_main(["--enforce"])
+        if rc != 0:
+            fails.append(f"a rate-limited subject must exit 0 (UNRESOLVED), got {rc}")
+
+        # The classifier itself, not just the exception plumbing: the real gh_api decides by
+        # matching stderr, so a message that is NOT a rate limit must stay a RuntimeError. Without
+        # this, widening the pattern to `.*` would pass every case above.
+        _real_gh_api = _real
+        # The last three transient cases are exactly what a PRIVATE regex misses — the first
+        # draft of this gate had one and classified all three as final, which is a PR turned red
+        # for a reason its diff cannot cause. They come from the shared vocabulary's own corpus.
+        for msg, want_unreadable in (
+            ("API rate limit exceeded for installation", True),
+            ("You have exceeded a secondary rate limit", True),
+            ("gh: Too Many Requests (HTTP 429)", True),
+            ("You have triggered an abuse detection mechanism. Please wait and try again.", True),
+            ("HTTP 503", True),
+            ("Bad credentials", False),
+            ("Not Found", False),
+            ("Resource not accessible by integration", False),
+        ):
+            class _FakeProc:
+                returncode = 1
+                stdout = ""
+                stderr = msg
+
+            _saved_run = subprocess.run
+            try:
+                subprocess.run = lambda *a, **k: _FakeProc()
+                globals()["gh_api"] = _real_gh_api
+                try:
+                    _real_gh_api("x")
+                    fails.append(f"gh_api must raise for rc=1 ({msg!r})")
+                except Unreadable:
+                    if not want_unreadable:
+                        fails.append(f"{msg!r} must be a RuntimeError, not Unreadable")
+                except RuntimeError:
+                    if want_unreadable:
+                        fails.append(f"{msg!r} must be Unreadable (rate limited), not a bare RuntimeError")
+            finally:
+                subprocess.run = _saved_run
+
         globals()["gh_api"] = _fake_detail(
             {"conditions": {"ref_name": {"include": [TARGET_REF]}}}  # back to unreadable
         )
@@ -304,7 +410,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: ruleset-bypass-actors is falsifiable (12 cases, both directions, exit codes included)")
+    print("self-test ok: ruleset-bypass-actors is falsifiable (21 cases, both directions, exit codes and the shared transient vocabulary included)")
     return 0
 
 
@@ -322,13 +428,26 @@ def main() -> int:
     except Unreadable as exc:
         # NOT a pass: say out loud that nothing was checked, and let the runner's floor logic know
         # the corpus was never read, so this run cannot be mistaken for a clean one.
-        gatelib.subjects_unresolved("bypass_actors is not visible to this token (admin scope required)")
+        #
+        # Name the ACTUAL reason. There are two, they need different actions, and a message that
+        # names the wrong one sends the reader after the wrong fix — the rate-limit case reads as
+        # a permissions problem nobody can reproduce locally, because locally there is no limit.
+        rate_limited = "RATE LIMITED" in str(exc)
+        if rate_limited:
+            gatelib.subjects_unresolved("the rulesets API was rate limited — the subject was never read")
+        else:
+            gatelib.subjects_unresolved("bypass_actors is not visible to this token (admin scope required)")
         print(f"::warning::ruleset-bypass-actors: {exc}")
+        remedy = (
+            "wait for the limit to reset, or reduce what spends the installation's API budget"
+            if rate_limited
+            else "run it with an admin token to get a verdict"
+        )
         print(
-            "ruleset-bypass-actors: NOT EVALUATED on this run. The check has teeth only where the "
-            "token can read `bypass_actors` — run it with an admin token to get a verdict. Treating "
-            "an unreadable subject as red would make the gate permanently and uninformatively red; "
-            "treating it as green would be a lie. UNRESOLVED is neither."
+            f"ruleset-bypass-actors: NOT EVALUATED on this run. The check has teeth only where it "
+            f"can actually READ `bypass_actors` — {remedy}. Treating an unreadable subject as red "
+            f"would make the gate permanently and uninformatively red; treating it as green would "
+            f"be a lie. UNRESOLVED is neither."
         )
         return 0
     except RuntimeError as exc:

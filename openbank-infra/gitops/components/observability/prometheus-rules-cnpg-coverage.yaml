@@ -97,6 +97,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: communication
+            cluster: communication-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: consent
             cluster: consent-db
             origin: manifest
@@ -417,18 +423,49 @@ spec:
             )
 
         - alert: PostgresClusterUnscraped
-          # Fires when a cluster this repo declares has NO scrape target in Prometheus.
-          # `unless` is the whole alert: it yields the expected series that has no
-          # counterpart, which is a real vector -- where the sibling threshold alerts
-          # yield an empty one and stay silent forever.
+          # Fires when a cluster this repo declares has NO scrape target in Prometheus
+          # AND its namespace EXISTS -- i.e. something is deployed there and nobody is
+          # watching it. `unless` is the core of the alert: it yields the expected series
+          # that has no counterpart, which is a real vector -- where the sibling threshold
+          # alerts yield an empty one and stay silent forever.
+          #
+          # The `and on (namespace)` join is what keeps the REMEDY true. Without it this
+          # alert also caught clusters whose namespace had never been created, and told
+          # the operator to set enablePodMonitor on a Cluster that does not exist. Those
+          # are PostgresClusterDeclaredNotDeployed's, below.
           #
           # 15m absorbs a rollout: a Cluster being recreated loses its target briefly.
           expr: |
-            openbank:cnpg_cluster_expected
-              unless on (namespace, cluster) openbank:cnpg_cluster_scraped
+            (
+              openbank:cnpg_cluster_expected
+                unless on (namespace, cluster) openbank:cnpg_cluster_scraped
+            )
+            and on (namespace) (max by (namespace) (kube_namespace_created))
           for: 15m
           labels:
             severity: critical
           annotations:
-            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared but NOT scraped"
-            description: "This cluster is declared in gitops and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is deployed but NOT scraped"
+            description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+
+        - alert: PostgresClusterDeclaredNotDeployed
+          # The complement of the alert above, over the same unscraped set: the namespace
+          # itself is absent, so there is no database, no PodMonitor to enable and no
+          # backup to be worried about -- only a gitops declaration describing a fleet
+          # that was never delivered. Warning, not critical: nothing is at risk; the
+          # expected set is simply wrong, which is what erodes every alert built on it.
+          #
+          # 30m (longer than the sibling's 15m) absorbs a first-time Argo sync creating
+          # the namespace and the Cluster in sequence.
+          expr: |
+            (
+              openbank:cnpg_cluster_expected
+                unless on (namespace, cluster) openbank:cnpg_cluster_scraped
+            )
+            unless on (namespace) (max by (namespace) (kube_namespace_created))
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} is declared in gitops but its namespace does not exist"
+            description: "This cluster is declared in gitops and its NAMESPACE does not exist in the cluster, so nothing was ever deployed for it to scrape. Do NOT enable a PodMonitor -- there is no Cluster object to set it on. The subject is the Argo Application that should have created the namespace: check `kubectl get application -A` for one OutOfSync/Missing, or with no Application at all. Either deploy it, or delete the declaration so the expected set describes the fleet that exists rather than one that was planned."

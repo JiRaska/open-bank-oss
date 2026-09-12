@@ -16,6 +16,7 @@ const sections: {
   desc: [string, string]
   badge: string
   color: string
+  solid: string
 }[] = [
   {
     href: '/docs/identity-dedup',
@@ -26,7 +27,8 @@ const sections: {
       'How unified customer identity is built the modern way: principles, privacy-preserving blind index, a three-tier resolver and a worked deduplication example (ADR-0072, ADR-0094)',
     ],
     badge: 'ADR-0072 · 0094',
-    color: '#6366f1',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/customer-app',
@@ -37,7 +39,8 @@ const sections: {
       'Customer application (KMP/Compose): how it is built, integrated and secured — plan vs reality through the lens of governance, technology and security (ADR-0074)',
     ],
     badge: 'ADR-0074',
-    color: '#7c3aed',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/sensors',
@@ -48,7 +51,8 @@ const sections: {
       'Which device signals the customer app reads and what for: motion and gestures, proximity, environment, privacy and shortcuts — each with its use case, invocation, place in the app and setting (ADR-0074)',
     ],
     badge: 'ADR-0074 · 0095',
-    color: '#0891b2',
+    color: 'var(--info-text)',
+    solid: 'var(--info)',
   },
   {
     href: '/docs/qrlesspay',
@@ -59,7 +63,8 @@ const sections: {
       'Open BLE proximity-pay standard without QR: iOS→Android / Bank A→B sequence, security layers and a comparison vs QR (ADR-0095)',
     ],
     badge: 'ADR-0095',
-    color: '#6366f1',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/document-management',
@@ -70,7 +75,8 @@ const sections: {
       'Templating, PDF generation and the e-signature ceremony: why it is its own bounded context and how the flow runs from the editor to the signed event (ADR-0161, ADR-0162)',
     ],
     badge: 'ADR-0161 · 0162',
-    color: '#6366f1',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/cloud-architecture',
@@ -81,7 +87,8 @@ const sections: {
       'AWS architecture per ADR-0027 (EKS, substrate, OSS stack) with status overlay: what is live / partial / planned',
     ],
     badge: 'ADR-0027',
-    color: '#0ea5e9',
+    color: 'var(--info-text)',
+    solid: 'var(--info)',
   },
   {
     href: '/docs/service-map',
@@ -92,7 +99,8 @@ const sections: {
       'Interactive map of all microservices, their dependencies and communication channels',
     ],
     badge: 'Live',
-    color: '#2563eb',
+    color: 'var(--info-text)',
+    solid: 'var(--info)',
   },
   {
     href: '/docs/bpmn',
@@ -103,18 +111,20 @@ const sections: {
       'BPMN 2.0 diagrams of key processes: Account Opening, SEPA, KYC, AML Screening + 8 more',
     ],
     badge: '12 procesů',
-    color: '#7c3aed',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/api',
     icon: <FileCode size={22} />,
     title: ['API Katalog', 'API Catalog'],
     desc: [
-      'Swagger/OpenAPI dokumentace všech 33 services s live proklikem na Swagger UI',
-      'Swagger/OpenAPI documentation of all 33 services with live click-through to Swagger UI',
+      'Swagger/OpenAPI dokumentace služeb registrovaných v živém katalogu s proklikem na Swagger UI',
+      'Swagger/OpenAPI documentation for services registered in the live catalog, with click-through to Swagger UI',
     ],
-    badge: '33 services',
-    color: '#059669',
+    badge: 'Live catalog',
+    color: 'var(--success-text)',
+    solid: 'var(--success)',
   },
   {
     href: '/docs/compliance',
@@ -125,7 +135,8 @@ const sections: {
       'EBA/CNB/PSD2/GDPR compliance status, audit trail, data retention overview',
     ],
     badge: 'EBA + CNB',
-    color: '#dc2626',
+    color: 'var(--danger-text)',
+    solid: 'var(--danger)',
   },
   {
     href: '/docs/bcp',
@@ -136,7 +147,8 @@ const sections: {
       'Prioritised recovery plan, startup tiers, compliance gate, RTO/RPO — DORA Art. 11-12',
     ],
     badge: 'DORA + CNB',
-    color: '#7c3aed',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
   },
   {
     href: '/docs/adr',
@@ -147,7 +159,8 @@ const sections: {
       'Registry of all architecture decisions — context, decision and consequences, grouped by status',
     ],
     badge: 'Governance',
-    color: '#0891b2',
+    color: 'var(--info-text)',
+    solid: 'var(--info)',
   },
   {
     href: '/docs/threat-models',
@@ -158,7 +171,8 @@ const sections: {
       'STRIDE threat models of money-path services (ADR-0030) + overview of missing money-path coverage',
     ],
     badge: 'ADR-0030',
-    color: '#dc2626',
+    color: 'var(--danger-text)',
+    solid: 'var(--danger)',
   },
   {
     href: '/docs/zero-trust',
@@ -169,7 +183,8 @@ const sections: {
       'Defense in depth derived from real manifests: mTLS, NetworkPolicy default-deny, JWT, L7 authz and supply-chain admission',
     ],
     badge: 'NIS2 + DORA',
-    color: '#16a34a',
+    color: 'var(--success-text)',
+    solid: 'var(--success)',
   },
   {
     href: '/docs/control-tower',
@@ -180,7 +195,8 @@ const sections: {
       'Regulation → control → evidence matrix (DORA/NIS2/PSD2/GDPR/AMLD/EBA). Controls with the LIVE badge read state from real manifests',
     ],
     badge: 'Governance',
-    color: '#0891b2',
+    color: 'var(--info-text)',
+    solid: 'var(--info)',
   },
   {
     href: '/security/excellence',
@@ -191,7 +207,8 @@ const sections: {
       'A single ecosystem-wide security view: excellence score over 8 domains (posture, DORA incidents, fraud, AML, sanctions, maker-checker, audit, identity) — runbook docs/runbooks/0016',
     ],
     badge: 'LIVE',
-    color: '#059669',
+    color: 'var(--success-text)',
+    solid: 'var(--success)',
   },
 ]
 
@@ -221,7 +238,7 @@ export default function DocsPage() {
             }}
               onMouseEnter={e => {
                 (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'
-                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,0.08)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-lg)'
               }}
               onMouseLeave={e => {
                 (e.currentTarget as HTMLElement).style.transform = ''
@@ -232,8 +249,8 @@ export default function DocsPage() {
                 <div style={{ color: s.color }}>{s.icon}</div>
                 <span style={{
                   fontSize: '11px', fontWeight: 600, padding: '3px 8px',
-                  background: `${s.color}15`, color: s.color,
-                  borderRadius: '20px', border: `1px solid ${s.color}30`,
+                  background: `color-mix(in srgb, ${s.solid} 10%, transparent)`, color: s.color,
+                  borderRadius: '20px', border: `1px solid color-mix(in srgb, ${s.solid} 35%, var(--border))`,
                 }}>{s.badge}</span>
               </div>
               <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>{t(...s.title)}</div>

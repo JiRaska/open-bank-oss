@@ -14,6 +14,7 @@ import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -41,6 +42,7 @@ class MerchantLogoUrlTest {
     private lateinit var useCase: TransactionUseCase
     private lateinit var repository: PanacheTransactionRepository
     private lateinit var catalog: MerchantCatalogRepository
+    private lateinit var locations: MerchantLocationRepository
     private lateinit var resource: TransactionResource
 
     private val accountId: UUID = UUID.randomUUID()
@@ -51,7 +53,8 @@ class MerchantLogoUrlTest {
         useCase = mockk()
         repository = mockk()
         catalog = mockk()
-        resource = TransactionResource(useCase, repository, catalog)
+        locations = mockk()
+        resource = TransactionResource(useCase, repository, catalog, locations)
     }
 
     private fun transaction() = Transaction(
@@ -88,6 +91,7 @@ class MerchantLogoUrlTest {
         coEvery { useCase.listTransactions(any()) } returns
             CursorPage(listOf(transaction()), PageInfo(limit = 20, hasNextPage = false))
         coEvery { catalog.findByDescriptors(any()) } returns mapOf("ALZACZ" to entity)
+        coEvery { locations.findByKeys(any()) } returns emptyMap()
 
         val response = resource.listTransactions(accountId, 20, null)
 
