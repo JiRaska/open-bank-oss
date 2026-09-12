@@ -400,7 +400,13 @@ change_requirements:
       - "breaking event change ships as a NEW versioned event (-vN topic, ADR-0006), never an in-place edit"
     gate: schema-compat
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-10-31. The date could not be met and this file already
+    # said so: the GRADUATION EVIDENCE block below records 40 findings across 5 commits that would
+    # have been RED under --enforce, and states "a ruling is needed first" on whether an added
+    # non-nullable field is a real replay break. A ruling plus a 40-finding burn-down is not three
+    # days of work, and leaving the date would have failed EVERY PR in the repo via
+    # gate-graduation-guard rather than failing this rule.
+    target_enforce_date: "2026-10-31"   # ADR-0144
     # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
     # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
     # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
@@ -768,7 +774,13 @@ change_requirements:
       - "compliance scorecard reflects current live/partial/planned status"
     gate: docs-currency
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-11-30. Longer than the sibling move above because the
+    # blocker is different in kind: this rule has NO producer and, per the measurement below, the
+    # rule as written cannot have one that is worth running — a docs-touched-when-page-touched
+    # gate fails 95% of admin-ui page commits. What is missing is a decidable DEFINITION of
+    # currency scoped to changed controls, which is design work, not a checker. The `blocked_on`
+    # field below already said this; the date did not reflect it.
+    target_enforce_date: "2026-11-30"   # ADR-0144
     # MEASURED 2026-09-04, and the number is the argument: 451 commits in 30 days touch an
     # admin-ui `page.tsx`, and of a 60-commit sample only 3 (5%) also touch docs/, a .mmd
     # diagram or process.yaml. So the rule as written — "the section's documentation updated
