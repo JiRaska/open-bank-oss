@@ -139,6 +139,22 @@ class DocumentPactProviderVerificationTest {
         documents.save(disclosureDocument())
     }
 
+    /**
+     * The NEGATIVE state, and it is deliberately a NO-OP: the point is that nothing is seeded, so
+     * the id in the pact resolves to no row and the endpoint must answer 404.
+     *
+     * This is the half the consumer's fail-closed design rests on.
+     * `RestResourceOwnershipClient` maps 404 to `NOT_OWNED` — a definitive refusal — and every
+     * other failure to `UNVERIFIABLE`. So if this endpoint ever answered 403 or 500 for a document
+     * the caller may not see, delegation-service would silently reclassify every unknown document
+     * from "refused" to "retry later". A success-only contract stays green through exactly that
+     * change, which is what ADR-0279 #3 exists to stop.
+     */
+    @State("no document with that id is visible to the caller")
+    fun stateDocumentAbsent() {
+        // Intentionally empty — the absence IS the state.
+    }
+
     private fun disclosureDocument() = Document(
         id = DISCLOSURE_DOCUMENT_ID,
         templateCode = "DISCLOSURE_PACT",

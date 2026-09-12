@@ -29,6 +29,7 @@ class DelegationDocumentOwnershipPactConsumerTest {
     private companion object {
         const val DOCUMENT_ID = "77777777-8888-4999-8aaa-bbbbbbbbbbbb"
         const val OWNER_PARTY_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
+        const val UNKNOWN_DOCUMENT_ID = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
     }
 
     @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
@@ -47,6 +48,35 @@ class DelegationDocumentOwnershipPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    /**
+     * The NEGATIVE case, and it is not box-ticking: `RestResourceOwnershipClient` maps a 404 to
+     * `NOT_OWNED` — a definitive negative answer — and EVERY other failure to `UNVERIFIABLE`, so
+     * the grant is refused rather than waved through. That split is the whole fail-closed design,
+     * and it rests entirely on document-service answering 404 (not 403, not 500) for a document
+     * the caller may not see. Without this interaction the contract stays green if the provider
+     * ever changes that status, and the consumer silently flips every unknown document from a
+     * definitive refusal to a retryable outage.
+     */
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
+    fun documentNotFoundPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no document with that id is visible to the caller")
+        .uponReceiving("GET document metadata for an id the caller may not see")
+        .path("/api/v1/documents/$UNKNOWN_DOCUMENT_ID")
+        .method("GET")
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "documentNotFoundPact")
+    fun `an id the caller may not see answers 404, which the client reads as NOT_OWNED`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get(ClientRoute.of(DocumentServiceRestClient::class.java, "getDocument", "id" to UNKNOWN_DOCUMENT_ID))
+            .then()
+            .statusCode(404)
+    }
 
     @Test
     @PactTestFor(pactMethod = "getDocumentOwnerPact")

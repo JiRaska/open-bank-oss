@@ -24,6 +24,21 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET document metadata for an id the caller may not see",
+      "providerStates": [
+        {
+          "name": "no document with that id is visible to the caller"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/documents/99999999-aaaa-4bbb-8ccc-dddddddddddd"
+      },
+      "response": {
+        "status": 404
+      }
     }
   ],
   "metadata": {
