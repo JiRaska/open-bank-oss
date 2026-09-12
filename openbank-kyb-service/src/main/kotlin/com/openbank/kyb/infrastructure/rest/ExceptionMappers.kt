@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
+import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.CaseTransitionException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -21,6 +22,16 @@ private fun error(status: Int, code: String, message: String?): Response = Respo
     .entity(mapOf("error" to code, "message" to message))
     .type(MediaType.APPLICATION_JSON)
     .build()
+
+/**
+ * A confirmation submitted against a rule text that has since changed. 409, not 400: the request
+ * was well-formed and the state moved underneath it, and the operator must re-read the new text.
+ */
+@Provider
+class StaleAttestationMapper : ExceptionMapper<StaleAttestationException> {
+    override fun toResponse(e: StaleAttestationException): Response =
+        error(CONFLICT, "REPRESENTATION_RULE_CHANGED", e.message)
+}
 
 @Provider
 class CaseNotFoundMapper : ExceptionMapper<CaseNotFoundException> {

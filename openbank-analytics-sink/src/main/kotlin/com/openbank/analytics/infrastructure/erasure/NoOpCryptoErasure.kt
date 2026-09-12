@@ -24,6 +24,9 @@ class NoOpCryptoErasure : CryptoErasure {
     // so an attacker can't forge additional log lines (log forging, CWE-117).
     private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
 
+    /** No key material is destroyed here, so no caller may report an erasure on this binding. */
+    override val performsErasure: Boolean = false
+
     override suspend fun erase(key: AggregateKey): Long {
         log.warnf(
             "CryptoErasure no-op: would crypto-shred analytics data for %s/%s. Bind the KMS adapter in production (ADR-0023 F6).",
