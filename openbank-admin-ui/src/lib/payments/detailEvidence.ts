@@ -36,7 +36,7 @@ export interface PaymentDetailEvidence {
   updatedAt?: string
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const CURRENCY = /^[A-Z]{3}$/
 const SEPA_STATUSES = new Set(['RECEIVED', 'VALIDATED', 'PROCESSING', 'COMPLETED', 'REJECTED', 'RETURNED', 'CANCELLED'])
 const DOMESTIC_STATUSES = new Set(['RECEIVED', 'VALIDATED', 'SENT_TO_CLEARING', 'SETTLED', 'REJECTED', 'RETURNED', 'CANCELLED'])
