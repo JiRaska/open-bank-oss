@@ -3199,6 +3199,34 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
+    # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
+    # here rather than only in the realm; this is that declaration, and it is deliberately ONE
+    # read action rather than the role's full duty set. What is missing is missing on purpose:
+    #
+    #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
+    #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
+    #   has no service-account exclusion, and cannot express one. Both of those actions are write
+    #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
+    #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+    #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
+    #   that the bank's voice is set by people. Granting either through the matrix would add a
+    #   second permit path that drops that exclusion — a silent widening no policy layer can veto
+    #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
+    #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
+    #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+    #
+    #   commstyle.approval.read is safe and is here: its rule
+    #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
+    #   already, so this entry is a provable subset of today's effective grant and changes no
+    #   decision — the same seeding property the matrix was built on.
+    #
+    # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
+    # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
+    # editor duty has no action name for the matrix to key on. Declaring the editor role here
+    # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+    ROLE_COMMS_APPROVER:
+      grant:
+        - commstyle.approval.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
 # `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
@@ -3374,6 +3402,52 @@ shared_m2m_matrix_write_grants:
     - transaction.reverse
 
 # Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
+# An action whose OWN allow rule in rest.rego excludes service-account principals
+# (`not startswith(input.principal.id, "service-account-")`) must not also be reachable through
+# `authz.role_action_matrix`, because `matrix-allows` gates on principal.type == "HUMAN" plus the
+# role and nothing else — and a client_credentials JWT is classified HUMAN. Where both are true,
+# the two artifacts contradict each other and one of them is wrong: the rule says machines are
+# kept out, the matrix lets them in, and `allow` is a disjunction so the matrix wins.
+#
+# This is NOT the same question shared_m2m_matrix_write_grants asks. That register records that a
+# write action is M2M-reachable and accepted; it is indifferent to whether the action's own rule
+# was written to forbid exactly that. Both entries below are ALREADY declared there, so the reach
+# itself is a reviewed decision — what nothing recorded until now is that `rest.rego` states the
+# opposite, so anyone reading the rule alone concludes machines are excluded when they are not.
+#
+# Measured with `opa eval` on the derived data, 2026-09-12:
+#   service-account-openbank-services + ROLE_OPERATOR -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows"]                       (allowed)
+#   a human operator                                  -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows", "operator-compose-message"]
+# The bespoke rule fires for the person and not for the machine — doing precisely its job — while
+# the matrix carries the machine regardless.
+#
+# Resolving an entry means deciding which control is real: drop the matrix grant (and its
+# shared_m2m_matrix_write_grants line), or drop the now-decorative exclusion from the rego rule.
+# Declaring it here is neither — it records that the contradiction is known and unresolved.
+matrix_sa_excluded_action_grants:
+  gate: matrix-sa-excluded-actions
+  enforced: enforced
+  ci_producer: ".github/scripts/check-matrix-excluded-actions.py"
+  adr: ADR-0176                          # both entries are that ADR's operator-messaging actions
+  declared:
+    - action: opsmessage.compose
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]   # ROLE_ADMIN reaches it through the single inherits hop
+      rule: operator-compose-message
+      reason: >
+        ADR-0176 D5 wrote the exclusion so a machine cannot compose customer messages, and the
+        matrix grant predates the measurement that showed matrix-allows bypasses it. Unresolved:
+        needs a decision on whether operator messaging keeps a machine-reachable path at all.
+      issue: 3765
+    - action: opsmessage.approval.decide
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]
+      rule: operator-decide-message-approval
+      reason: >
+        Checker half of the same four-eyes flow, same cause. Sharper than its sibling: this is the
+        approval decision, so a machine-reachable path here is a machine that can approve.
+      issue: 3765
+
 # gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
 # check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
 # `openbank-infra/gitops/components/keycloak/*realm-template*.json`. Two other tracked realm
