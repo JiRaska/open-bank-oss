@@ -1,0 +1,160 @@
+quarkus:
+  application:
+    name: openbank-wealth-service
+  http:
+    port: 8154
+    test-port: 0
+    cors:
+      ~: true
+      origins: http://localhost:3000
+      headers: Content-Type,Authorization,X-Customer-Party-Id
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: no-referrer
+      Permissions-Policy:
+        value: geolocation=(), microphone=(), camera=()
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: max-age=31536000; includeSubDomains
+    limits:
+      max-body-size: 1M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_wealth
+    # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
+    # datasource, and a service that boots only because the environment supplied one cannot start
+    # from this repo alone (check-flyway-default-datasource.py, #3080).
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_wealth
+
+  flyway:
+    # Committing migrations does not run them — this key defaults to FALSE. security-scanner
+    # shipped V2+V3 with it set nowhere and its deployed database held zero tables, every write
+    # answering 42P01 as a 500, while the pod stayed Ready (#3350).
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    console:
+      format: '%d{HH:mm:ss} %-5p [%c{3.}] %s%e%n'
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-wealth-service
+
+  management:
+    enabled: true
+    port: 8090
+    host: 0.0.0.0
+    root-path: /q
+
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      wealth-events-out:
+        connector: smallrye-kafka
+        client.id: wealth-service-${quarkus.uuid}
+        topic: openbank.wealth.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  outbox:
+    # Defaults to FALSE fleet-wide. Without this line the holding lifecycle never leaves
+    # wealth_outbox: no error, attempt_count stays 0, every consumer stays permanently empty.
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
+  # an initializer, which a primitive would need.
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+
+authz:
+  enforce: "${AUTHZ_ENFORCE:true}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+  authz:
+    enforce: "false"
+
+"%test":
+  quarkus:
+    datasource:
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5433/openbank_wealth_test
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+  authz:
+    enforce: "false"

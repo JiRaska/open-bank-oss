@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_wealth
+dataLineageRole: producer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: false
+lineage:
+  downstream:
+    - serviceName: customer-edge
+      relationType: api
+      description: net-worth composition reads declared holdings as one labelled branch (ADR-0301 D2)
+databaseLineage:
+  ownedDatabases:
+    - openbank_wealth
+  dependentDatabases: []
