@@ -51,6 +51,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import pathlib
 import re
@@ -93,6 +94,38 @@ def claim_cnpg_clusters(root: pathlib.Path) -> dict[str, dict]:
                 "declares_backup": "barmanObjectStore" in doc,
                 "source": str(path.relative_to(root)),
             }
+    return out
+
+
+def claim_app_backup_exemptions(root: pathlib.Path) -> dict[str, str]:
+    """ArgoCD Application name -> the backup exemption its manifest declares, if any.
+
+    The live annotation is the primary route and stays so. This is the fallback for a cluster
+    whose metadata nobody in this repository controls: `glitchtip-pg` is rendered by a chart
+    whose `postgresql.cluster` passthrough accepts only instances and storage, so the annotation
+    can never reach it, and without a second route the check reports a settled decision forever.
+    A permanently red check is one people learn to skip, which reproduces #9834 one level up.
+
+    It is deliberately NOT a list of cluster names beside the manifests — that is the drift the
+    annotation design exists to prevent. The Application is joined to the cluster by the
+    tracking-id the live object already carries, so the exemption cannot outlive what it excuses,
+    and a cluster nobody manages carries no tracking-id and cannot be excused at all.
+
+    Parsed with the same regex idiom as the rest of the claim side; this script has no YAML
+    dependency on purpose.
+    """
+    out: dict[str, str] = {}
+    for path in sorted(root.glob("openbank-infra/gitops/apps/*.yaml")):
+        text = _read(path)
+        if "kind: Application" not in text:
+            continue
+        name = _field(text, "name")
+        m = re.search(rf"^\s+{re.escape(BACKUP_EXEMPT_ANNOTATION)}:\s*(.+)$", text, re.M)
+        if not (name and m):
+            continue
+        reason = m.group(1).strip().strip("\"'")
+        if reason:
+            out[name] = reason
     return out
 
 
@@ -179,7 +212,7 @@ def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
 BACKUP_EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
 
 
-def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
+def cmp_backup_recoverability(claims: dict, facts: dict, app_exemptions: dict | None = None) -> list[str]:
     """A cluster that declares a backup must have a recovery point.
 
     `Ready` and `ContinuousArchiving` are deliberately NOT consulted: on 2026-08-07 all three
@@ -214,11 +247,29 @@ def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
         reason = (fact.get("backup_exempt_reason") or "").strip()
         if reason:
             continue
+        # Second route to the same decision, for a cluster whose metadata this repository does
+        # not author. Joined by the tracking-id the live object carries, so it excuses exactly
+        # the cluster that Application renders and nothing else.
+        app = (fact.get("argocd_app") or "").strip()
+        if app and app in (app_exemptions or {}):
+            continue
         where = "is declared nowhere in gitops" if claim is None else "declares no backup destination"
         findings.append(
             f"{key}: live cluster {where} and carries no {BACKUP_EXEMPT_ANNOTATION} "
             f"annotation — it has no recovery point and nobody has said that is intended"
         )
+
+    # An exemption that excuses nothing is the failure mode this design exists to avoid: one left
+    # behind after the cluster was deleted, or after it was given a real backup, silently becomes
+    # cover for whatever lands under that Application next. Report it, so removing it is someone's
+    # job rather than a later audit's discovery.
+    live_apps = {(f.get("argocd_app") or "").strip() for f in facts.values()}
+    for app, reason in sorted((app_exemptions or {}).items()):
+        if app not in live_apps:
+            findings.append(
+                f"{app}: declares {BACKUP_EXEMPT_ANNOTATION} ({reason!r}) but renders no live "
+                f"CNPG cluster — the exemption excuses nothing and should be removed"
+            )
     return findings
 
 
@@ -358,6 +409,13 @@ def collect() -> dict:
             # Read from the LIVE object, not from gitops: a chart-rendered cluster has no manifest
             # in this tree, so the only place its exemption can be seen is here (#9834).
             "backup_exempt_reason": (meta.get("annotations") or {}).get(BACKUP_EXEMPT_ANNOTATION),
+            # Which ArgoCD Application renders this object, read off the object itself. The
+            # annotation above is the right home for an exemption and is not always reachable:
+            # a third-party chart decides its own metadata, and glitchtip's passes through only
+            # instances and storage. This is the join key that lets such a cluster be excused
+            # from its Application instead — without a list of cluster names that could drift.
+            "argocd_app": ((meta.get("annotations") or {}).get(
+                "argocd.argoproj.io/tracking-id") or "").split(":", 1)[0].strip(),
         }
     snap["facts"]["backup_recoverability"] = clusters
 
@@ -459,7 +517,10 @@ def check(root: pathlib.Path, snapshot: dict) -> int:
         if probe not in facts:
             print(f"::warning::{probe}: no facts in the snapshot — NOT CHECKED (this is not a pass)")
             continue
-        for finding in COMPARATORS[probe](claims[probe], facts[probe]):
+        comparator = COMPARATORS[probe]
+        if probe == "backup_recoverability":
+            comparator = functools.partial(comparator, app_exemptions=claim_app_backup_exemptions(root))
+        for finding in comparator(claims[probe], facts[probe]):
             print(f"::warning::{probe}: {finding}")
             total += 1
     verb = "divergence(s)" if total != 1 else "divergence"
@@ -543,6 +604,30 @@ def self_test() -> int:
         "backup: a BLANK exemption reason does not count as an exemption",
         len(cmp_backup_recoverability({}, {"observability/glitchtip-pg": {"backup_exempt_reason": "   "}})),
         1)
+    expect(
+        "backup: an exemption on the ARGOCD APPLICATION excuses the cluster it renders",
+        cmp_backup_recoverability(
+            {}, {"observability/glitchtip-pg": {"argocd_app": "glitchtip"}},
+            app_exemptions={"glitchtip": "rebuildable from the app; no customer data"}),
+        [])
+    expect(
+        "backup: ... and it excuses ONLY that Application's cluster, not a neighbour",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"argocd_app": "pricing"},
+                 "observability/glitchtip-pg": {"argocd_app": "glitchtip"}},
+            app_exemptions={"glitchtip": "rebuildable from the app; no customer data"})),
+        1)
+    expect(
+        "backup: ... and a cluster carrying NO tracking-id cannot be excused by any Application",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {}},
+            app_exemptions={"": "an empty join key must never match"})),
+        1)
+    expect(
+        "backup: an Application exemption that renders no live cluster is itself a finding",
+        "excuses nothing" in first(cmp_backup_recoverability(
+            {}, {}, app_exemptions={"glitchtip": "rebuildable from the app"})),
+        True)
     expect(
         "backup: the annotation key is the one the gitops gate honours",
         BACKUP_EXEMPT_ANNOTATION,
