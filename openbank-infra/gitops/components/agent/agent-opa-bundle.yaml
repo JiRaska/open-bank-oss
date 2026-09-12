@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "245f47687e9cf68e"
+    openbank.tech/policy-checksum: "148f0bbc8344f503"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -312,6 +312,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:
