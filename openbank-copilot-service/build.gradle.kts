@@ -64,6 +64,17 @@ dependencies {
     testImplementation(libs.pact.consumer)
 }
 
+// Package the live ADR-0148 registry prompts onto the classpath (mirrors openbank-agent-service's
+// identical processResources block) — currently just customer-copilot/style.v1, the git-registered
+// baseline PublishedStyleProvider falls back to (ADR-0285 D5). This copy is derived from
+// openbank-libs/governance/prompts/ — never hand-edit it here.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file("openbank-libs/governance/prompts/customer-copilot")) {
+        include("style.v1.md")
+        into("governance-prompts/customer-copilot")
+    }
+}
+
 // Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
 // Pact rootDir + Pact Broker property forwarding centralised into
