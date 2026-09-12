@@ -1,0 +1,68 @@
+# TEMPORARY, 2026-09-12 — namespace `pricing` only, and it should not outlive the
+# pipeline that makes it unnecessary.
+#
+# WHAT IS ACTUALLY MISSING, AND WHAT IS NOT
+# The openbank-pricing images carry a valid cosign signature and a CycloneDX SBOM
+# attestation — verified against the public key THESE policies pin, not the KMS alias:
+#   signature OK · cyclonedx OK · slsaprovenance MISSING
+# Only SLSA build provenance is absent, and it is absent for a structural reason rather
+# than an oversight: openbank-pricing has no image-building CI at all (pricing-ci.yml is
+# a single `verify` job; the repository contains zero references to cosign). Its images
+# were built and signed by hand, and SLSA provenance cannot honestly be minted by hand —
+# cosign_attest_slsa_provenance SKIPS outside GitHub Actions on purpose, because there is
+# no trustworthy invocation record to attest to.
+#
+# WHY THE EXCEPTION COVERS ALL THREE POLICIES ANYWAY
+# Not because the other two artifacts are missing. Measured 2026-09-12: a Deployment of
+# openbank-pricing-console is denied with all three policies named, five attempts out of
+# five, while openbank-pricing-service — identical attestation state — was admitted with
+# SLSA as a mere warning. Kyverno reports `unverified image` on the two Enforce policies
+# while logging only the SLSA error, so an exception naming only the failing policy would
+# leave two live denials. The asymmetry between those two images is unexplained and is
+# tracked as item 4 of #9805; this exception does not depend on explaining it.
+#
+# BLAST RADIUS
+# Namespace `pricing` only. That namespace holds one private, non-public console and its
+# API; it is not money-path, carries no customer data, and its ingress exposes only the
+# console. Nothing in the monorepo deploys there.
+#
+# REMOVAL CRITERIA — all three, then delete this file:
+#   1. openbank-pricing gains a build pipeline that signs and attests through the shared
+#      openbank-infra/scripts/lib/cosign-attest.sh (see #9793 for the same fix applied to
+#      runner-image.yml, which is the worked example).
+#   2. A rebuilt console image verifies all three predicates against the key these
+#      policies pin — signature, cyclonedx AND slsaprovenance.
+#   3. deploy/sandbox pinned to that image, and a dry-run Pod create in `pricing` admitted
+#      with this file removed. Admission is nondeterministic for unverifiable images
+#      (#9805 item 4), so repeat the probe and require unanimity; a single ADMITTED is
+#      roughly one-in-five a false pass.
+#
+# The July precedent for letting an exception outlive its cause is #908 -> #1053, and the
+# one from this morning is #9803 -> #9822, removed the same day. Match the second.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: pricing-image-exception
+  namespace: pricing
+spec:
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+          namespaces:
+            - pricing
+  exceptions:
+    - policyName: verify-openbank-image-signatures
+      ruleNames:
+        - verify-cosign-signature
+        - autogen-verify-cosign-signature
+    - policyName: verify-openbank-image-sbom-attestation
+      ruleNames:
+        - verify-cyclonedx-sbom-attestation
+        - autogen-verify-cyclonedx-sbom-attestation
+    - policyName: verify-openbank-image-slsa-provenance
+      ruleNames:
+        - verify-slsa-provenance
+        - autogen-verify-slsa-provenance
