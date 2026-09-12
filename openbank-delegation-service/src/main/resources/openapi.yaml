@@ -151,6 +151,9 @@ paths:
               monthlyLimit (ADR-0249 D5). Unlimited access to someone else's account is not
               something this platform grants by omission.
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
+            * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
+              for audit, but cannot authorize a raw object download until transformed-artifact delivery
+              can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
@@ -178,7 +181,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
-        '400': { description: Unsupported or inconsistent constraints }
+        '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or resource ownership could not be established }
   /api/v1/delegations/{id}:
@@ -280,6 +283,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '400': { description: SCA invalid or expired, or EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '403': { description: The authenticated party is not the grantee }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
@@ -346,6 +350,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/DelegationId'
       responses:
+        '400': { description: EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '200':
           description: Grant reinstated
           content:
@@ -672,7 +677,12 @@ components:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
             As dailyLimit, over the Europe/Prague calendar month.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
         note: { type: string }
@@ -701,7 +711,12 @@ components:
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
         dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
         monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
@@ -808,7 +823,12 @@ components:
           deprecated: true
           description: >-
             See dailyLimit. Not enforced; do not render it as a limit.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Historical audit metadata only. New non-null values are refused with 400
+            EXPOSURE_UNSUPPORTED and never authorize access.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         status:
