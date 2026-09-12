@@ -19,7 +19,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "075ac330b0343ff9"
+        openbank.tech/policy-checksum: "91b918655e871364"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication

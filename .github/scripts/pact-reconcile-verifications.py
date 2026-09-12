@@ -97,6 +97,33 @@ DEFAULT_BRANCH = "main"
 # it must never be mistaken for.
 DEFAULT_MAX_DISPATCH = 8
 
+# Enough of a broker error body to name the rejected selector; not enough to paste a page of HTML.
+HTTP_ERROR_DETAIL_CHARS = 400
+
+
+def redact_origin(url: str) -> str:
+    """Path plus query, never the host.
+
+    PACT_BROKER_URL is a secret here (the broker has no public ingress), and CI logs on a public
+    repository are readable by anyone. The host is also the one part of the URL that a selector
+    rejection is never about: a broker 400 on /matrix is about the q[] terms, which live in the
+    query. So the diagnosable half is safe to print and the unsafe half carries no information.
+    """
+    split = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(("", "", split.path, split.query, ""))
+
+
+def broker_error_message(reason, url: str, detail: str) -> str:
+    """What the caller's ::warning:: line says when the broker rejects a query.
+
+    Must name the SUBJECT (the path and the selectors) and must not name the HOST. The self-test
+    exercises this function rather than re-deriving the string, so a change to either half is
+    caught here instead of in a CI log two days later.
+    """
+    if len(detail) > HTTP_ERROR_DETAIL_CHARS:
+        detail = detail[:HTTP_ERROR_DETAIL_CHARS] + "\u2026"
+    return f"{reason} for {redact_origin(url)}" + (f" \u2014 {detail}" if detail else "")
+
 
 def http_json(url, user, password, timeout=30):
     req = urllib.request.Request(url)
@@ -104,8 +131,21 @@ def http_json(url, user, password, timeout=30):
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")
     req.add_header("Accept", "application/hal+json")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # `HTTPError.__str__` renders as "HTTP Error 400: Bad Request" and nothing else, so the
+        # caller's warning named a status and no subject — which is why #9776 sat unactionable for
+        # two days. The broker DOES say which selector it rejected, in the response body; re-raise
+        # with the body and the redacted path/query attached so the warning identifies the edge.
+        try:
+            detail = e.read().decode("utf-8", "replace").strip()
+        except OSError:
+            detail = ""
+        raise urllib.error.HTTPError(
+            e.url, e.code, broker_error_message(e.reason, url, detail), e.headers, None,
+        ) from None
 
 
 def integrations(root: pathlib.Path):
@@ -455,6 +495,36 @@ def self_test() -> int:
         print(f"  {okmark} {why}")
         if okmark == "BAD":
             bad.append(why)
+
+    # A broker rejection must NAME the edge it rejected. The old warning rendered
+    # `HTTPError` directly, which is "HTTP Error 400: Bad Request" and nothing else — a status
+    # with no subject, which is why #9776 could not be acted on for two days. Equally, the
+    # message must not carry the broker HOST: PACT_BROKER_URL is a secret and these logs are
+    # public. Both halves are asserted here, and the second is the one that regresses quietly.
+    print("\nself-test: broker-error message is diagnosable and host-free")
+    probe_url = "https://broker.internal.example/matrix?q[][pacticipant]=consumer-x&latestby=cvpv"
+    rendered = broker_error_message(
+        "Bad Request", probe_url, '{"error":"unknown pacticipant consumer-x"}',
+    )
+    checks = [
+        ("names the path", "/matrix" in rendered),
+        ("keeps the selector that was rejected", "q[][pacticipant]=consumer-x" in rendered),
+        ("carries the broker's own reason", "unknown pacticipant" in rendered),
+        ("does NOT leak the broker host", "broker.internal.example" not in rendered),
+        ("does NOT leak the scheme", "https://" not in rendered),
+    ]
+    for why, okay in checks:
+        print(f"  {'ok ' if okay else 'BAD'} {why}")
+        if not okay:
+            bad.append(why)
+
+    # Truncation must be a bound, not a silent drop: a huge body still has to say it was cut.
+    long_detail = "x" * (HTTP_ERROR_DETAIL_CHARS + 50)
+    truncated = broker_error_message("Bad Request", probe_url, long_detail)
+    trunc_ok = truncated.endswith("\u2026") and long_detail not in truncated
+    print(f"  {'ok ' if trunc_ok else 'BAD'} a long body is truncated and marked as truncated")
+    if not trunc_ok:
+        bad.append("truncation")
 
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))
