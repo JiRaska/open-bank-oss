@@ -60,6 +60,8 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     @Inject lateinit var timers: BusinessOnboardingWorkflowPort
 
+    @Inject lateinit var representation: RepresentationAttestationService
+
     @Inject lateinit var clock: Clock
 
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
@@ -87,7 +89,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
                 metrics.caseStarted(it.identifier.scheme.name, it.status.name)
                 armTimers(it)
             }
-        val verified = started.registryVerified(extract, now)
+        val verified = started.registryVerified(extract, representation.decide(extract), now)
         val withParty = if (verified.status == CaseStatus.REGISTRY_VERIFIED) {
             verified.entityPartyCreated(parties.createEntityParty(entityPartyRequest(verified.id, extract)), now)
         } else {
@@ -176,7 +178,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun resolveReview(cmd: ResolveReviewCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
-        var resolved = case.reviewResolved(cmd.requiredSignatures, now)
+        var resolved = case.reviewResolved(cmd.requiredSignatures, now, cmd.requiredSignerRoles)
         if (resolved.entityPartyId == null && resolved.extract != null) {
             resolved =
                 resolved.entityPartyCreated(
@@ -190,6 +192,18 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             cmd.operator,
             cmd.requiredSignatures,
         )
+        // A review can now COMPLETE a case: `reviewResolved` finishes one whose signatures were
+        // already collected and satisfy what the operator just confirmed (#9711). That path has to
+        // do everything `sign` does on the same transition — grant the mandates and emit the
+        // signed/completed events — or the entity goes active with NOBODY authorised to act for
+        // it, which is silent: the case reads ACTIVE from every angle and every later request by
+        // its own representatives is refused.
+        if (resolved.status == CaseStatus.SIGNED || resolved.status == CaseStatus.ACTIVE) {
+            grantMandates(resolved)
+            val saved = cases.update(resolved, KybEvents.agreementSigned(resolved, now, cmd.operator))
+            if (saved.status == CaseStatus.ACTIVE) cases.update(saved, KybEvents.completed(saved, now))
+            return saved.also(::armTimers)
+        }
         return cases.update(resolved, KybEvents.registryVerified(resolved, now)).also(::armTimers)
     }
 
