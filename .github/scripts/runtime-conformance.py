@@ -173,6 +173,12 @@ def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
 
 # ── comparators: claim vs fact. Pure. This is what the self-test drives. ──────────────────
 
+# The same annotation `check-cnpg-backup-declared.py` honours in the gitops tree. Repeated rather
+# than imported because that script lives under openbank-infra/scripts and this one under
+# .github/scripts; the two must agree, and the self-test below pins the string.
+BACKUP_EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
+
+
 def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
     """A cluster that declares a backup must have a recovery point.
 
@@ -192,6 +198,27 @@ def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
                 f"{key}: declares a backup destination and has NO firstRecoverabilityPoint "
                 f"(phase={fact.get('phase')!r}) — no restore is possible"
             )
+
+    # THE SECOND LOOP (#9834). Everything above starts from the CLAIM, so a database that exists in
+    # the cluster and is declared nowhere is unreachable — by this control and, for the same reason,
+    # by both gitops-scoped gates. `pricing/pricing-db` was live with ~10 MB and no backup while all
+    # three reported clean.
+    #
+    # This is the only control with the live snapshot, so it is the only one that CAN make the
+    # comparison. An exemption is honoured, but it must be on the live object: a decision recorded
+    # in a Helm values comment cannot travel with the thing it excuses.
+    for key, fact in sorted(facts.items()):
+        claim = claims.get(key)
+        if claim is not None and claim.get("declares_backup"):
+            continue  # handled above
+        reason = (fact.get("backup_exempt_reason") or "").strip()
+        if reason:
+            continue
+        where = "is declared nowhere in gitops" if claim is None else "declares no backup destination"
+        findings.append(
+            f"{key}: live cluster {where} and carries no {BACKUP_EXEMPT_ANNOTATION} "
+            f"annotation — it has no recovery point and nobody has said that is intended"
+        )
     return findings
 
 
@@ -328,6 +355,9 @@ def collect() -> dict:
         clusters[f"{meta.get('namespace')}/{meta.get('name')}"] = {
             "first_recoverability_point": status.get("firstRecoverabilityPoint"),
             "phase": status.get("phase"),
+            # Read from the LIVE object, not from gitops: a chart-rendered cluster has no manifest
+            # in this tree, so the only place its exemption can be seen is here (#9834).
+            "backup_exempt_reason": (meta.get("annotations") or {}).get(BACKUP_EXEMPT_ANNOTATION),
         }
     snap["facts"]["backup_recoverability"] = clusters
 
@@ -448,6 +478,11 @@ def self_test() -> int:
             print(f"  FAIL {name}\n       want {want}\n       got  {got}")
             fails = 1
 
+    def first(findings):
+        # An index into an empty finding list would abort the whole self-test at the first
+        # regression; returning "" keeps every later case reportable.
+        return findings[0] if findings else ""
+
     # backup: declared + no recovery point => flagged; declared + point => clean; undeclared => ignored
     expect(
         "backup: declared, no recovery point is flagged",
@@ -457,9 +492,9 @@ def self_test() -> int:
         1)
     expect(
         "backup: a healthy phase does NOT excuse a missing recovery point",
-        "no restore is possible" in cmp_backup_recoverability(
+        "no restore is possible" in first(cmp_backup_recoverability(
             {"ai/db": {"declares_backup": True}},
-            {"ai/db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})[0],
+            {"ai/db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})),
         True)
     expect(
         "backup: declared with a recovery point is clean",
@@ -468,13 +503,56 @@ def self_test() -> int:
             {"ai/db": {"first_recoverability_point": "2026-08-07T10:00:00Z"}}),
         [])
     expect(
-        "backup: a cluster declaring no backup is not our question",
+        "backup: a cluster declaring no backup and not running is not our question",
         cmp_backup_recoverability({"o/pg": {"declares_backup": False}}, {}),
         [])
     expect(
         "backup: declared but absent at runtime is flagged, not skipped",
         len(cmp_backup_recoverability({"ai/db": {"declares_backup": True}}, {})),
         1)
+
+    # the second loop (#9834): start from the LIVE side. Each of these is empty without it.
+    expect(
+        "backup: a LIVE cluster declared nowhere in gitops is flagged",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})),
+        1)
+    expect(
+        "backup: ... and the finding names it as undeclared, not as missing a recovery point",
+        "is declared nowhere in gitops" in first(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"first_recoverability_point": None}})),
+        True)
+    expect(
+        "backup: a LIVE cluster whose manifest declares no destination is flagged",
+        len(cmp_backup_recoverability(
+            {"o/pg": {"declares_backup": False}},
+            {"o/pg": {"first_recoverability_point": None}})),
+        1)
+    expect(
+        "backup: ... and that finding says the manifest declared none",
+        "declares no backup destination" in first(cmp_backup_recoverability(
+            {"o/pg": {"declares_backup": False}}, {"o/pg": {}})),
+        True)
+    expect(
+        "backup: the exemption annotation on the LIVE object silences it",
+        cmp_backup_recoverability(
+            {}, {"observability/glitchtip-pg": {
+                "backup_exempt_reason": "rebuildable from the app; no customer data"}}),
+        [])
+    expect(
+        "backup: a BLANK exemption reason does not count as an exemption",
+        len(cmp_backup_recoverability({}, {"observability/glitchtip-pg": {"backup_exempt_reason": "   "}})),
+        1)
+    expect(
+        "backup: the annotation key is the one the gitops gate honours",
+        BACKUP_EXEMPT_ANNOTATION,
+        "openbank.io/backup-exempt-reason")
+    expect(
+        "backup: a live cluster that declares AND has a recovery point stays clean under both loops",
+        cmp_backup_recoverability(
+            {"ai/db": {"declares_backup": True}},
+            {"ai/db": {"first_recoverability_point": "2026-08-07T10:00:00Z"}}),
+        [])
 
     # outbox: no writer => flagged even with an empty table; all-DEAD => flagged; healthy => clean
     expect(
