@@ -11,8 +11,20 @@ vi.mock('@/components/auth/AuthGuard', () => ({ Can: ({ children }: { children: 
 
 const HASH = 'a'.repeat(64)
 
-const withLogo = { descriptorKey: 'BILLA', cleanName: 'Billa', logoContentHash: HASH }
-const withoutLogo = { descriptorKey: 'ALZACZ', cleanName: 'Alza.cz', logoContentHash: null }
+const merchant = (descriptorKey: string, cleanName: string, logoContentHash: string | null) => ({
+  descriptorKey,
+  cleanName,
+  logoUrl: null,
+  logoContentHash,
+  category: null,
+  lat: null,
+  lon: null,
+  city: null,
+  country: null,
+  updatedAt: '2026-09-09T08:00:00Z',
+})
+const withLogo = merchant('BILLA', 'Billa', HASH)
+const withoutLogo = merchant('ALZACZ', 'Alza.cz', null)
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
