@@ -78,7 +78,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -119,43 +118,16 @@ class Unreadable(RuntimeError):
 # agreed on 23 of 31 real `gh` messages and disagreed on 8, each missing five the others caught.
 # A private regex here would have been the fourth — and this one's first draft was, missing
 # `Too Many Requests (HTTP 429)`, `abuse detection mechanism`, and a bare `HTTP 503`.
-_PATTERNS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gh-transient-patterns.txt")
-_PATTERN_CACHE: list[re.Pattern] | None = None
-
-
-def _transient_patterns() -> list[re.Pattern]:
-    """Compile [rate_limit] + [transient] from the shared vocabulary.
-
-    An unreadable or empty vocabulary raises — it must NOT silently classify everything as final.
-    An empty pattern list matches nothing, so every failure would read as a real finding while
-    each call still returned a plausible boolean.
-    """
-    global _PATTERN_CACHE
-    if _PATTERN_CACHE is not None:
-        return _PATTERN_CACHE
-    section, pats = None, {"rate_limit": [], "transient": []}
-    with open(_PATTERNS_FILE) as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("[") and line.endswith("]"):
-                section = line[1:-1]
-                continue
-            if section in pats:
-                pats[section].append(line)
-    if not pats["rate_limit"] or not pats["transient"]:
-        raise RuntimeError(
-            f"transient-pattern vocabulary at {_PATTERNS_FILE} has an empty [rate_limit] or "
-            f"[transient] section; refusing to classify with no patterns."
-        )
-    _PATTERN_CACHE = [re.compile(x, re.IGNORECASE) for x in pats["rate_limit"] + pats["transient"]]
-    return _PATTERN_CACHE
+# The vocabulary and its reader both live in gatelib now. This file used to carry its own loader
+# — the fourth copy of the judgement, removed by #9695 in favour of the shared FILE, which still
+# left the shared file with three private READERS. One more gate needing it (#9697's main-red
+# watch) made that the fifth. `gatelib.is_gh_transient` is the reader; add patterns to
+# gh-transient-patterns.txt with a [cases] entry, never in Python.
 
 
 def _is_transient(message: str) -> bool:
     """True when a `gh` failure is about REACHABILITY, not about the bypass actors."""
-    return any(r.search(message) for r in _transient_patterns())
+    return gatelib.is_gh_transient(message)
 
 
 def gh_api(path: str) -> list | dict:
