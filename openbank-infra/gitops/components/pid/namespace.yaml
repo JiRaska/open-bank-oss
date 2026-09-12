@@ -25,7 +25,14 @@ spec:
   # healthy by being unobservable (#7220).
   monitoring:
     enablePodMonitor: true
-  instances: 1
+  # Two instances, not one (#9691). CNPG puts a `minAvailable: 1` PDB on the
+  # primary; in a single-instance cluster the sole pod IS the primary, so
+  # `disruptionsAllowed` is pinned at 0 permanently and no eviction can ever be
+  # permitted. That is not a tuning choice, it is arithmetic — and it deadlocked
+  # three node drains for 9-15 days while the cluster paid for both those nodes
+  # and the idle replacements Karpenter had already provisioned. The replica is
+  # also the switchover target a single-instance cluster never had.
+  instances: 2
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
     storageClass: gp3

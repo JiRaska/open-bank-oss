@@ -11,6 +11,13 @@ import java.time.Instant
 const val TRANSACTION_COMPLETED: String = "TransactionCompleted"
 
 /**
+ * Event type emitted for an account balance change. Screaming case because that is what the
+ * producer puts on the wire — measured on the warehouse, all 205 of these events carry
+ * `bookedAmount` and `availableAmount`, and `aggregate_version` = 0 on every one of them.
+ */
+const val BALANCE_UPDATED: String = "BALANCE_UPDATED"
+
+/**
  * The settled money-flow features ADR-0282 phase 1 asks for (issue #8792), declared once and
  * computed by one pure function so the online and offline materialisations cannot skew
  * (ADR-0140, ADR-0201 D3).
@@ -22,13 +29,23 @@ const val TRANSACTION_COMPLETED: String = "TransactionCompleted"
  * TIME from the settlement and the AMOUNT from the instruction. An instruction that never settled
  * contributes nothing, which is the whole point — counting it would report money that never moved.
  *
- * WHAT IS DELIBERATELY NOT HERE. Buffer months needs a balance LEVEL rather than a flow, so it
- * reads a different event class (`BALANCE_UPDATED`, which does carry `bookedAmount`) and belongs in
- * its own definition rather than being bolted onto a flow feature. Category, MCC and merchant are
- * absent from every transaction payload today, so no spend-category feature can be declared
- * honestly, and none is.
+ * WHAT IS DELIBERATELY NOT HERE. Category, MCC and merchant are absent from every transaction
+ * payload today, so no spend-category feature can be declared honestly, and none is. Channel
+ * recency is the same: measured 2026-09-11, NOT ONE event in the warehouse carries a payload key
+ * containing "channel", so the feature #8792 asks for has no source to read.
+ *
+ * Buffer months used to be listed here as deferred for the same reason. It is not: it needs a
+ * balance LEVEL rather than a flow, and [BALANCE_UPDATED] supplies one — so it is declared below as
+ * its own definition rather than bolted onto a flow feature.
  */
 private const val D90: Long = 90
+
+/**
+ * Days per month for turning a windowed flow into a monthly rate. A nominal 30, not 30.44: the
+ * window is itself a round 90 days, so a calendar-accurate divisor would imply a precision the
+ * input does not have.
+ */
+private const val DAYS_PER_MONTH: Double = 30.0
 
 private fun windowStart(asOf: Instant, days: Long): Instant = asOf.minus(Duration.ofDays(days))
 
@@ -184,6 +201,60 @@ val MONEY_EVENTS_WITHOUT_AMOUNT_D90: FeatureDefinition =
     AmountlessSettlementFeature("money_events_without_amount_d90", D90)
 
 /**
+ * How many months of the entity's recent outflow its latest known balance would cover.
+ *
+ * `balance / (outflow_over_window / months_in_window)`. The only feature here that mixes a LEVEL
+ * with a FLOW, which is why it names three event types.
+ *
+ * THE BALANCE IS NOT WINDOWED, AND THAT IS THE LOAD-BEARING CHOICE. It is the latest
+ * [BALANCE_UPDATED] strictly before [asOf], at any age. Restricting it to the window would return
+ * [Double.NaN] for every account whose balance has not moved in 90 days — a dormant savings
+ * account — which is exactly the healthiest buffer a financial-health programme wants to see. A
+ * bank statement answers "last known balance" for the same reason. Staleness is the feature
+ * store's problem, not this function's: `ttl` bounds how long a computed value is served.
+ *
+ * [FeatureEvent.amountMinor] must carry the balance LEVEL. Which level is the ingest layer's
+ * decision and it matters: `bookedAmount` is the accounting balance, `availableAmount` subtracts
+ * holds. For "how long could this person keep spending" the available balance is the truthful one,
+ * since a hold is money already committed — so an ingest that maps `bookedAmount` will make this
+ * feature read HIGH for an account with large holds. Stated here rather than assumed, because
+ * nothing in the type says which arrived.
+ *
+ * UNDEFINED CASES, both [Double.NaN] for the reason [SAVINGS_RATE_D90] gives: no balance event at
+ * all, and zero outflow. Zero outflow is NOT an infinite buffer — it is an unknown one, and
+ * `Double.POSITIVE_INFINITY` would pass every `>` threshold a rewards rule could write, granting on
+ * an entity that has demonstrably not spent. NaN fails closed instead.
+ *
+ * NOT CLAMPED. A negative balance yields a negative result, which says the entity is already in
+ * deficit — a real state, and clamping it to zero would erase the customers who most need seeing.
+ */
+private class BufferMonthsFeature(override val name: String, private val days: Long) : FeatureDefinition {
+    override val type: FeatureType = FeatureType.DOUBLE
+    override val eventTypes: Set<String> = setOf(BALANCE_UPDATED, TRANSACTION_COMPLETED, TRANSACTION_INITIATED)
+    override val ttl: Duration = Duration.ofDays(1)
+
+    override fun compute(asOf: Instant, events: List<FeatureEvent>): Double {
+        // Strict `isBefore(asOf)` is the anti-leakage invariant (ADR-0140), the same bound
+        // `settledAmounts` applies — a balance stamped exactly at asOf is not yet knowable.
+        val balance = events
+            .filter { it.eventType == BALANCE_UPDATED && it.amountMinor != null }
+            .filter { it.occurredAt.isBefore(asOf) }
+            .maxByOrNull { it.occurredAt }
+            ?.amountMinor
+            ?: return Double.NaN
+
+        val outflow = settledAmounts(asOf, events, days, FlowDirection.OUT).sumOf { it.second }
+        if (outflow <= 0L) return Double.NaN
+
+        val monthsInWindow = days.toDouble() / DAYS_PER_MONTH
+        return balance.toDouble() / (outflow.toDouble() / monthsInWindow)
+    }
+}
+
+/** Months of recent outflow the latest known balance covers. NaN with no balance or no outflow. */
+val BUFFER_MONTHS_D90: FeatureDefinition = BufferMonthsFeature("buffer_months_d90", D90)
+
+/**
  * The settled money-flow features, declared together so a consumer registers the coverage signal
  * alongside the values it qualifies rather than picking the flattering half.
  */
@@ -193,5 +264,6 @@ val MONEY_FLOW_FEATURES: List<FeatureDefinition> =
         SETTLED_OUTFLOW_MINOR_D90,
         SAVINGS_RATE_D90,
         SPEND_CADENCE_DAYS_D90,
+        BUFFER_MONTHS_D90,
         MONEY_EVENTS_WITHOUT_AMOUNT_D90,
     )
