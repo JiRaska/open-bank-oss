@@ -193,6 +193,9 @@ class PartyMandateEntity : PanacheEntity() {
     @Column(name = "authority", nullable = false)
     lateinit var authority: String
 
+    @Column(name = "required_signatures")
+    var requiredSignatures: Int? = null
+
     @Column(name = "source", nullable = false)
     lateinit var source: String
 
