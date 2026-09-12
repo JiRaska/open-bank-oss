@@ -15,6 +15,7 @@ import com.openbank.delegation.application.usecase.DelegationNotGrantorException
 import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
 import com.openbank.delegation.application.usecase.DelegationPortfolioNotFound
 import com.openbank.delegation.application.usecase.DelegationPortfolioOwnershipUnavailable
+import com.openbank.delegation.application.usecase.DelegationRecertificationConflict
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
@@ -60,6 +61,14 @@ class DelegationLifecycleApprovalNotFoundMapper : ExceptionMapper<DelegationLife
 @Provider
 class DelegationLifecycleApprovalConflictMapper : ExceptionMapper<DelegationLifecycleApprovalConflict> {
     override fun toResponse(exception: DelegationLifecycleApprovalConflict): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationRecertificationConflictMapper : ExceptionMapper<DelegationRecertificationConflict> {
+    override fun toResponse(exception: DelegationRecertificationConflict): Response =
         Response.status(Response.Status.CONFLICT)
             .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
             .build()

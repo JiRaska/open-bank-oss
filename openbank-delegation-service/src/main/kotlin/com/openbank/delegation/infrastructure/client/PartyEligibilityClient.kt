@@ -26,6 +26,7 @@ import java.util.UUID
 data class PidPartyResponse(
     val id: UUID,
     val status: String,
+    val partyType: String? = null,
     val kycAttributes: PidKycAttributes?,
     val coreAttributes: PidCoreAttributes? = null,
 )
@@ -75,6 +76,7 @@ class ResilientPartyEligibilityClient @Inject constructor(@RestClient private va
             active = party.status == "ACTIVE",
             kycLevel = party.kycAttributes?.kycLevel ?: "NONE",
             displayName = displayNameOf(party.coreAttributes),
+            partyType = party.partyType,
         )
     }
 

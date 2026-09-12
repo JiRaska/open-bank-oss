@@ -10,6 +10,8 @@ import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationLifecycleApproval
 import com.openbank.delegation.domain.model.DelegationLifecycleOperation
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
+import com.openbank.delegation.domain.model.DelegationRecertificationCycle
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.Money
@@ -43,6 +45,7 @@ interface DelegationCandidate {
     val dailyLimit: Money?
     val monthlyLimit: Money?
     val exposure: Exposure?
+    val recertificationAudience: DelegationRecertificationAudience?
     val validTo: OffsetDateTime?
 }
 
@@ -59,6 +62,7 @@ data class PreviewDelegationCommand(
     override val dailyLimit: Money? = null,
     override val monthlyLimit: Money? = null,
     override val exposure: Exposure? = null,
+    override val recertificationAudience: DelegationRecertificationAudience? = null,
     override val validTo: OffsetDateTime?,
 ) : DelegationCandidate
 
@@ -75,6 +79,7 @@ data class OfferDelegationCommand(
     override val dailyLimit: Money? = null,
     override val monthlyLimit: Money? = null,
     override val exposure: Exposure? = null,
+    override val recertificationAudience: DelegationRecertificationAudience? = null,
     override val validTo: OffsetDateTime?,
     val grantScaSessionId: UUID,
     val note: String? = null,
@@ -178,4 +183,13 @@ interface DelegationLifecycleApprovalUseCase {
 interface DelegationLifecycleApprovalQuery {
     suspend fun get(id: UUID): DelegationLifecycleApproval
     suspend fun list(state: ProposalState?, limit: Int): List<DelegationLifecycleApproval>
+}
+
+interface DelegationRecertificationUseCase {
+    suspend fun listPending(grantorPartyId: UUID, callerPartyId: CallerPartyId): List<DelegationRecertificationCycle>
+    suspend fun confirm(
+        recertificationId: UUID,
+        grantorPartyId: UUID,
+        callerPartyId: CallerPartyId,
+    ): DelegationRecertificationCycle
 }

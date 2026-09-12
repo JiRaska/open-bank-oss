@@ -5,12 +5,13 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  # 1.12.0 -> 1.13.0 was taken on main by an unrelated PR while this branch also wrote 1.13.0.
-  # Both sides produced the SAME text, so git merged them cleanly and the collision left no
-  # conflict to resolve — the trap CLAUDE.md records for this axis. 1.14.0 is additive
-  # (POST/GET /api/v1/delegation-portfolios), read off live origin/main (1.13.0) and confirmed
-  # unused with `git log -S 'version: 1.14.0'` on this file.
-  version: 1.14.0
+  # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios. Both this
+  # branch and main once wrote 1.13.0 and git merged them as identical text, so that collision
+  # produced no conflict at all.
+  #
+  # 1.14.0 -> 1.15.0 (#9215, this branch): additive — recertification routes. 1.16.0 is held by the
+  # open #9481/#9484 and 1.17.0 by the open #9237. Read off live origin/main in the same turn.
+  version: 1.15.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -189,6 +190,51 @@ paths:
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or resource ownership could not be established }
+  /api/v1/delegations/recertifications/grantor/{partyId}:
+    get:
+      tags: [Delegations]
+      summary: List overdue delegation recertification tasks for the issuing party
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Pending review tasks; overdue does not suspend any delegation
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationRecertificationResponse' } }
+        '403': { description: Caller is not the issuing party }
+  /api/v1/delegations/recertifications/{id}/confirm:
+    post:
+      tags: [Delegations]
+      summary: Confirm an explicit review of the current active delegation revision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: grantorPartyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Review evidence saved; no capability or lifecycle state changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationRecertificationResponse' }
+        '400': { description: Missing grantorPartyId or Idempotency-Key }
+        '403': { description: Caller is not the issuing party }
+        '404': { description: Unknown task }
+        '409': { description: Task was already confirmed or the grant lifecycle changed }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -688,6 +734,14 @@ components:
           description: >-
             Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
             readable only for audit and do not authorize access.
+        recertificationAudience:
+          type: string
+          enum: [PERSONAL, FOP, SME, CORPORATE]
+          description: >-
+            Review-only context selected by the grantor. PERSONAL and FOP are reviewed every
+            12 months, SME every 6 months and CORPORATE every 3 months. It never changes a
+            grant's capabilities, eligibility or enforcement. SME versus CORPORATE is explicit;
+            the service does not infer company size.
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
         note: { type: string }
@@ -722,12 +776,28 @@ components:
           description: >-
             Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
             readable only for audit and do not authorize access.
+        recertificationAudience:
+          type: string
+          enum: [PERSONAL, FOP, SME, CORPORATE]
+          description: Review-only context; validated as it will be on offer, without SCA.
         validTo: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
       required: [valid]
       properties:
         valid: { type: boolean, const: true }
+    DelegationRecertificationResponse:
+      type: object
+      required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]
+      properties:
+        id: { type: string, format: uuid }
+        delegationId: { type: string, format: uuid }
+        expectedLifecycleRevision: { type: integer, format: int64, minimum: 0 }
+        audience: { type: string, enum: [PERSONAL, FOP, SME, CORPORATE] }
+        sequence: { type: integer, minimum: 1 }
+        dueAt: { type: string, format: date-time }
+        status: { type: string, enum: [PENDING, CONFIRMED] }
+        confirmedAt: { type: [string, 'null'], format: date-time }
     RevokeDelegationRequest:
       type: object
       required: [reason]
@@ -834,6 +904,13 @@ components:
           description: >-
             Historical audit metadata only. New non-null values are refused with 400
             EXPOSURE_UNSUPPORTED and never authorize access.
+        recertificationAudience:
+          type: string
+          nullable: true
+          enum: [PERSONAL, FOP, SME, CORPORATE]
+          description: >-
+            The grant's persisted review context. Null means a legacy grant has not been
+            classified; clients must not guess or display a review cadence for it.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         status:

@@ -36,6 +36,7 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -147,6 +148,7 @@ class DelegationService(
             dailyLimit = command.dailyLimit,
             monthlyLimit = command.monthlyLimit,
             exposure = command.exposure,
+            recertificationAudience = command.recertificationAudience,
             validFrom = now,
             validTo = command.validTo,
             grantScaSessionId = command.grantScaSessionId,
@@ -186,7 +188,31 @@ class DelegationService(
         rejectUnenforcedCeilings(command)
         rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
-        return verifyEligibility(command)
+        val parties = verifyEligibility(command)
+        validateRecertificationAudience(command.recertificationAudience, parties.grantorPartyType)
+        return parties
+    }
+
+    /**
+     * This check protects review evidence from becoming misleading. It does not grant, deny or
+     * otherwise alter any product capability; all authorization remains the resource/capability
+     * grant checked by product services.
+     */
+    private fun validateRecertificationAudience(
+        audience: DelegationRecertificationAudience?,
+        grantorPartyType: String?,
+    ) {
+        if (audience == null) return
+        val expected = when (audience) {
+            DelegationRecertificationAudience.PERSONAL -> "INDIVIDUAL"
+            DelegationRecertificationAudience.FOP -> "SOLE_TRADER"
+            DelegationRecertificationAudience.SME,
+            DelegationRecertificationAudience.CORPORATE,
+            -> "COMPANY"
+        }
+        require(grantorPartyType == expected) {
+            "recertification audience $audience is not valid for grantor party type ${grantorPartyType ?: "unknown"}"
+        }
     }
 
     private fun rejectUnsupportedExposure(command: DelegationCandidate) {
@@ -608,7 +634,11 @@ class DelegationService(
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
         requireGranteeKyc(command, grantee)
-        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
+        return CounterpartyNames(
+            grantorName = grantor.displayName,
+            granteeName = grantee.displayName,
+            grantorPartyType = grantor.partyType,
+        )
     }
 
     /**
@@ -629,7 +659,11 @@ class DelegationService(
     }
 
     /** The two labels the eligibility lookup yields as a by-product (issue #3604). */
-    private data class CounterpartyNames(val grantorName: String?, val granteeName: String?)
+    private data class CounterpartyNames(
+        val grantorName: String?,
+        val granteeName: String?,
+        val grantorPartyType: String?,
+    )
 
     private companion object {
         const val SCA_PURPOSE_GRANT = "DELEGATION_GRANT"
