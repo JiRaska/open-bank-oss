@@ -1,0 +1,197 @@
+# Self-heal a stale DERIVED artefact on `main` (#9755).
+#
+# WHY THIS EXISTS
+#   Every derived governance artefact here is regenerated PER BRANCH, against that branch's own
+#   merge-base. Two PRs can each regenerate correctly and still leave `main` stale: git merges the
+#   text of a derived file without reporting a conflict and keeps one side, silently dropping the
+#   other side's regeneration. Same class as the `.release-please-manifest.json` 56 -> 55 entry
+#   loss already recorded in CLAUDE.md.
+#
+#   `Validate manifests` is a REQUIRED context, and `adr-registry-integrity-check` runs inside it.
+#   So a stale derived file on `main` is not cosmetic drift — it is a fleet-wide merge freeze:
+#   every branch cut while `main` is stale inherits the stale file and goes red on a gate that has
+#   nothing to do with its own change. On 2026-09-11 that reddened every open PR, and the only
+#   remedy in the repo was a human noticing and hand-committing a regeneration: #9061, #9719,
+#   #9720, #9735 — four of them for the ADR index alone in six days.
+#
+#   This is the same shape `app-status-refresh.yml` already answers for the customer-app dossier
+#   (#3552), and it reuses the same machinery: regenerate, and open a signed PR if the tree moved.
+#   The difference is the trigger — that drift is created by an external release, this one is
+#   created by a merge into `main`, so this fires on the merge.
+#
+# WHAT IT IS NOT
+#   Not a replacement for the gate. `Validate manifests` still fails a PR whose committed derived
+#   artefact disagrees with its own sources. This removes the reason that keeps being true on
+#   `main` for reasons no single PR author can see.
+#
+# WHY IT CANNOT CHURN
+#   `regen-derived.sh` is an idempotent projection of committed sources, and that was measured, not
+#   assumed: on clean `origin/main` (e80ca1f26) `--all` runs all 7 generator groups and 45 bundle
+#   scripts and leaves ZERO dirty files. The determinism assertion below re-establishes that on
+#   every run rather than trusting the measurement: a generator whose output depends on the clock,
+#   the runner or a network read would open a PR on every push, and this job fails loudly instead.
+name: Derived artefact autoheal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The generator SOURCES, taken from the inventory in .github/scripts/regen-derived.sh.
+      # A source not listed here cannot make an artefact stale — and the `--selftest` assertion
+      # below is what stops that inventory silently growing past this list.
+      - "docs/adr/**"
+      - "openbank-libs/governance/rules.yaml"
+      - "openbank-libs/governance/agents.yaml"
+      - "prompts/registry.yaml"
+      - "**/*.rego"
+      - ".github/scripts/gen-*.py"
+      - "docs/adr/gen-index.sh"
+      - ".github/workflows/derived-artefact-autoheal.yml"
+  schedule:
+    # Daily backstop. The push trigger is the real mechanism; this catches a drift introduced by a
+    # path this list does not name, and a push whose workflow dispatch GitHub dropped (a delivery
+    # GitHub loses is never acquired retroactively — CLAUDE.md).
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel: a cancelled run leaves the drift in place and reports nothing. Serialise instead,
+  # so the last commit's regeneration is the one that opens the PR.
+  group: derived-artefact-autoheal
+  cancel-in-progress: false
+
+jobs:
+  autoheal:
+    name: regenerate every derived artefact and open a PR on drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      # Every write below uses the separately minted GitHub App token. The ambient workflow token
+      # stays read-only so a compromised generator cannot push or open a PR with GITHUB_TOKEN.
+      contents: read
+    env:
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A missing credential must be LOUD. This job's whole value is that a drift stops needing a
+      # human; a run that regenerates nothing and reports success would reproduce the exact vacuous
+      # green it replaces (the failure mode app-status-refresh.yml was written against, #2101).
+      - name: Require the credentials this autoheal cannot work without
+        run: |
+          set -euo pipefail
+          if [ -z "${GITOPS_APP_ID}" ]; then
+            echo "::error title=derived-autoheal::cannot open the heal PR — GITOPS_APP_ID is not set."
+            echo "Without it this job would regenerate, find drift, and silently fail to publish it." >&2
+            exit 1
+          fi
+
+      - name: Install OPA
+        run: |
+          # gen-agents-opa-data.py evaluates the real policy over both the full and the projected
+          # document and refuses to write unless every decision matches, so `opa` is not optional.
+          # Pinned + checksum-verified, identical to opa-policy.yml — bump both together.
+          mkdir -p "$HOME/bin"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          case "${OS}_${ARCH}" in
+            darwin_arm64)   SUFFIX="darwin_arm64_static"; OPA_SHA256="7d7debaf10bba97d32b7e67b7f8ce128c92e911b82e3c6cec24b95c34f8a5003" ;;
+            darwin_x86_64)  SUFFIX="darwin_amd64";        OPA_SHA256="088f6c9d8c7b0e2ee0bee450cba7599953e3167649f3623019bada67a26229a4" ;;
+            linux_aarch64)  SUFFIX="linux_arm64_static";  OPA_SHA256="9d8d4d18e4240e61d6259381066080420441a498f559bcb3a24f7561f76e25eb" ;;
+            linux_arm64)    SUFFIX="linux_arm64_static";  OPA_SHA256="9d8d4d18e4240e61d6259381066080420441a498f559bcb3a24f7561f76e25eb" ;;
+            *)              SUFFIX="linux_amd64";         OPA_SHA256="5485f9c32548af84bc0bfa06a7f40a98ecc742477a7f9f24ea3556d221dc295f" ;;
+          esac
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
+            "https://openpolicyagent.org/downloads/v1.17.0/opa_${SUFFIX}"
+          SHATOOL="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SHATOOL="shasum -a 256"
+          echo "${OPA_SHA256}  $HOME/bin/opa" | ${SHATOOL} -c - \
+            || { echo "::error::OPA v1.17.0 download failed checksum verification"; exit 1; }
+          chmod +x "$HOME/bin/opa"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/opa" version
+
+      - name: Install pyyaml (hash-pinned)
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
+      # The inventory this workflow's `paths:` filter mirrors must be complete, and regen-derived.sh
+      # already derives that claim from the filesystem. Running its self-test here means a generator
+      # added later cannot be silently left out of the autoheal.
+      - name: Assert the generator inventory is complete
+        run: bash .github/scripts/regen-derived.sh --selftest
+
+      - name: Regenerate every derived artefact
+        id: regen
+        run: |
+          set -euo pipefail
+          bash .github/scripts/regen-derived.sh --all
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Every derived artefact already matches its sources — nothing to heal."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --porcelain
+          fi
+
+      # A generator that is not a pure projection of committed sources would make this workflow open
+      # a PR on every single push, forever. Rather than trusting that none is, run the generators a
+      # second time over the already-regenerated tree and require it to add nothing: a stable second
+      # pass is the property that makes the first pass's diff mean "the sources moved". This is the
+      # negative case for the whole workflow, and it is armed on every run, not just on drift.
+      - name: Assert the regeneration is a fixed point
+        run: |
+          set -euo pipefail
+          git status --porcelain > /tmp/derived-pass1.txt
+          bash .github/scripts/regen-derived.sh --all >/dev/null
+          git status --porcelain > /tmp/derived-pass2.txt
+          if ! diff -u /tmp/derived-pass1.txt /tmp/derived-pass2.txt; then
+            echo "::error title=derived-autoheal::a second regeneration changed the tree again — a"
+            echo "::error::generator is not a pure projection of committed sources. Refusing to open"
+            echo "::error::a PR: this would churn a new commit on every push. Fix the generator."
+            exit 1
+          fi
+
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: steps.regen.outputs.changed == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - name: Open the heal PR
+        if: steps.regen.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          # An App installation token, for two independent reasons: `main-protection` enforces
+          # required_signatures and only the App path signs the commit, and a PR opened with
+          # GITHUB_TOKEN does not trigger the required checks (anti-recursion).
+          token: ${{ steps.app_token.outputs.token }}
+          sign-commits: true
+          branch: chore/derived-artefact-autoheal
+          delete-branch: true
+          commit-message: |
+            chore(governance): regenerate derived artefacts stale on main
+
+            Derived artefacts — regenerated by .github/workflows/derived-artefact-autoheal.yml
+            via .github/scripts/regen-derived.sh, never hand-edited.
+
+            Refs #9755
+          title: "chore(governance): regenerate derived artefacts stale on main"
+          body: |
+            One or more DERIVED artefacts on `main` disagree with the sources they are generated
+            from. This PR is the regenerated output of `.github/scripts/regen-derived.sh --all` —
+            the diff is a projection of what is already committed, not an edit.
+
+            Why it happens without anyone editing the artefact: derived files are regenerated per
+            branch against that branch's merge-base, and git merges their text without reporting a
+            conflict, so when two correctly-regenerated PRs land one side's regeneration is
+            silently dropped.
+
+            Why it is urgent rather than cosmetic: `Validate manifests` is a required context and
+            `adr-registry-integrity-check` runs inside it, so every branch cut while `main` is
+            stale inherits the stale file and goes red on a gate unrelated to its own change.
+
+            Refs #9755.
