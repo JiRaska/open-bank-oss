@@ -15,7 +15,7 @@ export interface MerchantCatalogueRow {
   lon: number | null
   city: string | null
   country: string | null
-  updatedAt: string
+  updatedAt: string | null
 }
 
 export interface MerchantCataloguePage { data: MerchantCatalogueRow[]; total: number }
@@ -31,15 +31,22 @@ function requiredString(record: Record<string, unknown>, field: string): string 
   return value
 }
 
+/** Absent and explicitly null mean the same thing to this UI: render an em dash.
+ *
+ *  Treating `undefined` as invalid would reject rows a backend may legitimately send — the page
+ *  already writes `m.category ?? '—'` and guards `m.updatedAt ? … : '—'` — and a parser throw is
+ *  indistinguishable from an outage here, because `useServiceResource` catches it in the same
+ *  branch as a network failure (#9738). The fields this parser genuinely cannot do without are
+ *  `descriptorKey` and `cleanName`; everything else is validated only when present. */
 function nullableString(record: Record<string, unknown>, field: string): string | null {
   const value = record[field]
-  if (value === null) return null
+  if (value === null || value === undefined) return null
   return requiredString(record, field)
 }
 
 function nullableNumber(record: Record<string, unknown>, field: string): number | null {
   const value = record[field]
-  if (value === null) return null
+  if (value === null || value === undefined) return null
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Invalid merchant ${field}`)
   return value
 }
@@ -48,13 +55,13 @@ function parseMerchant(value: unknown): MerchantCatalogueRow {
   if (!isRecord(value)) throw new Error('Invalid merchant row')
   const lat = nullableNumber(value, 'lat')
   const lon = nullableNumber(value, 'lon')
-  const updatedAt = requiredString(value, 'updatedAt')
+  const updatedAt = nullableString(value, 'updatedAt')
   if ((lat === null) !== (lon === null) || (lat !== null && (lat < -90 || lat > 90)) || (lon !== null && (lon < -180 || lon > 180))) throw new Error('Invalid merchant location')
-  if (Number.isNaN(Date.parse(updatedAt))) throw new Error('Invalid merchant updatedAt')
+  if (updatedAt !== null && Number.isNaN(Date.parse(updatedAt))) throw new Error('Invalid merchant updatedAt')
   return {
     descriptorKey: requiredString(value, 'descriptorKey'), cleanName: requiredString(value, 'cleanName'),
     logoUrl: nullableString(value, 'logoUrl'), logoContentHash: nullableString(value, 'logoContentHash'),
-    geoPrecision: value.geoPrecision === undefined ? null : nullableString(value, 'geoPrecision'),
+    geoPrecision: nullableString(value, 'geoPrecision'),
     category: nullableString(value, 'category'), lat, lon, city: nullableString(value, 'city'),
     country: nullableString(value, 'country'), updatedAt,
   }
