@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type CatalogueParam = { name: string; labelCs: string; labelEn: string; type: 'date' | 'number' | 'enum'; required: boolean; defaultValue?: string; options?: readonly string[] }
+export type CatalogueParam = { name: string; labelCs: string; labelEn: string; type: 'date' | 'month' | 'number' | 'enum'; required: boolean; defaultValue?: string; options?: readonly string[] }
 export type CatalogueColumn = { key: string; labelCs: string; labelEn: string; format: 'text' | 'number' | 'money' | 'datetime' }
 export type CatalogueReport = { id: string; titleCs: string; titleEn: string; descriptionCs: string; descriptionEn: string; permission: string; params: readonly CatalogueParam[]; columns: readonly CatalogueColumn[] }
 export type ReportResult = { available: boolean; reportId: string; columns: readonly CatalogueColumn[]; rows: Record<string, unknown>[]; generatedAt: string | null; rowCount: number; truncated: boolean; error?: string }
@@ -8,7 +8,7 @@ export type ReportResult = { available: boolean; reportId: string; columns: read
 const IDENTIFIER = /^[a-z][A-Za-z0-9_-]{0,127}$/
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 const FORMATS = ['text', 'number', 'money', 'datetime'] as const
-const PARAM_TYPES = ['date', 'number', 'enum'] as const
+const PARAM_TYPES = ['date', 'month', 'number', 'enum'] as const
 
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected object'); return value as Record<string, unknown> }
 function text(value: unknown, max = 2_000): string { if (typeof value !== 'string' || value.trim() === '' || value.length > max) throw new Error('Invalid text'); return value }

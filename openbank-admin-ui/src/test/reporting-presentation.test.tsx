@@ -23,9 +23,14 @@ it('does not present a truncated result as a period total', () => {
   expect(screen.queryByLabelText('Daily report trend')).not.toBeInTheDocument()
 })
 it('rejects impossible dates and inverted date ranges before querying', () => {
-  expect(validateParams(REPORT_REGISTRY[0], { from: '2026-02-30', to: '2026-03-01' }).ok).toBe(false)
-  expect(validateParams(REPORT_REGISTRY[0], { from: '2026-09-08', to: '2026-09-01' }).ok).toBe(false)
-  expect(validateParams(REPORT_REGISTRY[0], { from: '2024-02-29', to: '2024-03-01' }).ok).toBe(true)
+  // By id, not by position: REPORT_REGISTRY[0] silently becomes a DIFFERENT report the moment an
+  // entry is added above it, and a date-parameter assertion aimed at a month-parameter report
+  // fails for a reason that has nothing to do with dates. That is what happened when the
+  // financial pack landed (#8976).
+  const dateReport = REPORT_REGISTRY.find((entry) => entry.id === 'risk-settlement-daily')!
+  expect(validateParams(dateReport, { from: '2026-02-30', to: '2026-03-01' }).ok).toBe(false)
+  expect(validateParams(dateReport, { from: '2026-09-08', to: '2026-09-01' }).ok).toBe(false)
+  expect(validateParams(dateReport, { from: '2024-02-29', to: '2024-03-01' }).ok).toBe(true)
 })
 
 describe('report ownership', () => {
