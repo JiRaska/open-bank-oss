@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 
 /**
  * Security-native telemetry for every service (ADR-0279 WS2): authorization decisions and
@@ -39,6 +40,15 @@ class SecurityTelemetry {
     @Inject
     lateinit var registryInstance: Instance<MeterRegistry>
 
+    /**
+     * Emitting service, as the `service` tag on [AUTHZ_DECISIONS]. The alert groups by it and
+     * names it in its summary; without the tag the whole namespace collapses into one group
+     * labelled with an empty string. Same idiom as [com.openbank.libs.web.ServiceInfoResource] —
+     * Quarkus always supplies this property, the default only keeps a bare unit test booting.
+     */
+    @ConfigProperty(name = "quarkus.application.name", defaultValue = "openbank-service")
+    lateinit var serviceName: String
+
     private fun reg(): MeterRegistry? = if (registryInstance.isResolvable) registryInstance.get() else null
 
     /** Authorization outcome. The tag value is the enum name lowercased — low cardinality by construction. */
@@ -52,18 +62,38 @@ class SecurityTelemetry {
 
     /**
      * Record an authorization decision: increments [AUTHZ_DECISIONS] tagged
-     * `decision=allow|deny, reason=<reason>` and stamps the current span with
-     * [ATTR_AUTHZ_DECISION] / [ATTR_AUTHZ_REASON].
+     * `service=<app>, decision=allow|deny, reason=<reason>, enforced=true|false` and stamps
+     * the current span with [ATTR_AUTHZ_DECISION] / [ATTR_AUTHZ_REASON].
+     *
+     * Called from [com.openbank.libs.authz.AuthorizeInterceptor], which is the only place in
+     * the fleet that reaches an authorization verdict. Nothing else should call it: a
+     * hand-rolled second call site would double-count the ratio the alert reads.
      *
      * [reason] MUST be a low-cardinality code (e.g. `"role-missing"`, `"delegation-expired"`),
      * never a party id, token, or message — the cardinality contract of
-     * [com.openbank.libs.observability.DomainMetrics] applies here unchanged.
+     * [com.openbank.libs.observability.DomainMetrics] applies here unchanged. The reasons that
+     * actually reach it are `rest.rego`'s `allowed_reasons` set plus OpaSidecar's literal
+     * `"no matching policy rule"`, so the bound holds by construction.
+     *
+     * [enforced] mirrors `authz.enforce` (ADR-0034 D5). It is a TAG rather than a filter here
+     * because a policy deny is a security fact in both modes, but only an enforced one is an
+     * actual refusal — `AuthzDenyRatioElevated` scopes to `enforced="true"` so a service still
+     * in its advisory rollout window cannot page anybody with denials it did not act on.
      */
-    fun recordAuthorizationDecision(decision: AuthzDecision, reason: String) {
+    fun recordAuthorizationDecision(decision: AuthzDecision, reason: String, enforced: Boolean) {
         reg()?.let {
             Counter.builder(AUTHZ_DECISIONS)
                 .description("Authorization decisions by outcome and reason code")
-                .tags("decision", decision.tag, "reason", reason)
+                .tags(
+                    "service",
+                    serviceName,
+                    "decision",
+                    decision.tag,
+                    "reason",
+                    reason,
+                    "enforced",
+                    enforced.toString(),
+                )
                 .register(it)
                 .increment()
         }

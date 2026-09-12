@@ -10,6 +10,11 @@ describe('document template authoring accessibility', () => {
     expect(page).toContain("import * as Dialog from '@radix-ui/react-dialog'")
     expect(page).toContain('<Dialog.Content')
     expect(page).toContain('<Dialog.Title')
+    // Kept from this branch: main's set does not assert the dialog is DESCRIBED, only that it is
+    // titled, and an alertdialog with no description is the case these guards exist to catch.
+    // `<Dialog.Title asChild>` is NOT kept — main renders the title directly, so asserting
+    // `asChild` would be a guard about a shape the page does not have.
+    expect(page).toContain('<Dialog.Description')
     expect(page).toContain('onOpenAutoFocus={event =>')
     expect(page).toContain('onCloseAutoFocus={event =>')
     expect(page).toContain('onEscapeKeyDown={event =>')

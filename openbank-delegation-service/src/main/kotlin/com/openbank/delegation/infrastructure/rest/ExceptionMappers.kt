@@ -113,7 +113,8 @@ class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCaller
  * 400, not 422: the field is not merely unacceptable in this instance, it is not a field this
  * version of the API supports at all — no value of it would be accepted, so there is nothing for
  * the caller to retry with different content. Carries a machine-readable `code` so a client can
- * distinguish "you sent a ceiling we do not enforce" from every other 400 on this route.
+ * distinguish an unsupported constraint (including an unenforceable exposure request) from every
+ * other 400 on this route.
  */
 @Provider
 class DelegationUnsupportedConstraintExceptionMapper : ExceptionMapper<DelegationUnsupportedConstraintException> {

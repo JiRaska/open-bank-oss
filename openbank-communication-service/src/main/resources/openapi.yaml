@@ -1,13 +1,14 @@
 openapi: 3.0.3
 info:
   title: OpenBank Communication Service
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). 1.0.0 -> 1.1.0 (#9602): additive —
-  # the ADR-0285 phase 3 playbook layer. 1.0.0 is what origin/main holds, so this could not stay
-  # there: `openapi-version-not-taken` reads the base tip and an unchanged version on an additive
-  # change fails both that gate and `api-contract-gate`.
-  # SEQUENCED with #9633 (D4 golden set), which takes 1.2.0 — this one lands first. Neither number
-  # is on main yet, so nothing but these comments records the order.
-  version: 1.1.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  # 1.0.0 -> 1.1.0 (#9602, MERGED): additive — the ADR-0285 phase 3 playbook layer.
+  # 1.1.0 -> 1.2.0 (#9633, this): additive — the ADR-0285 D4 golden-set documents.
+  # The sequencing both files recorded has played out: #9602 landed at 1.1.0 (live main), so 1.2.0
+  # is the next free minor rather than a collision. Neither branch could stay at 1.0.0 — main
+  # holds it, and `openapi-version-not-taken` reads the base tip, so an unchanged version on an
+  # additive change fails that gate and `api-contract-gate` both.
+  version: 1.2.0
 paths:
   /api/v1/personas/{personaKey}/style-versions:
     post:
@@ -77,3 +78,17 @@ paths:
         - {name: q, in: query, required: true, schema: {type: string}}
         - {name: limit, in: query, required: false, schema: {type: integer}}
       responses: {"200": {description: Ranked hits, possibly empty}}
+  /api/v1/personas/{personaKey}/golden-set:
+    post:
+      summary: Create a golden-set entry (D4) — CRUD only, no replay/publish gate wired yet
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"201": {description: Created}, "400": {description: Validation failed}}
+    get:
+      summary: List a persona's golden-set entries
+      parameters: [{name: personaKey, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: Golden-set entries, possibly empty}}
+  /api/v1/personas/golden-set/{id}:
+    delete:
+      summary: Delete a golden-set entry
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"204": {description: Deleted}, "404": {description: No such entry}}
