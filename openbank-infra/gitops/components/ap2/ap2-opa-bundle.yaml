@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "cdaebb710b361719"
+    openbank.tech/policy-checksum: "83564da9e5fe960a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1655,6 +1655,34 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
+        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
+        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
+        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        #
+        #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
+        #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
+        #   has no service-account exclusion, and cannot express one. Both of those actions are write
+        #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
+        #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+        #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
+        #   that the bank's voice is set by people. Granting either through the matrix would add a
+        #   second permit path that drops that exclusion — a silent widening no policy layer can veto
+        #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
+        #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
+        #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+        #
+        #   commstyle.approval.read is safe and is here: its rule
+        #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
+        #   already, so this entry is a provable subset of today's effective grant and changes no
+        #   decision — the same seeding property the matrix was built on.
+        #
+        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
+        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
+        # editor duty has no action name for the matrix to key on. Declaring the editor role here
+        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        ROLE_COMMS_APPROVER:
+          grant:
+            - commstyle.approval.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

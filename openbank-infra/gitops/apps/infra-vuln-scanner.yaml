@@ -1,0 +1,37 @@
+# Daily Grype CVE scan of the running infra images (ADR-0077 evolution).
+# See gitops/components/infra-vuln-scanner/ for design rationale.
+#
+# Shape and destination copied from sbom-drift-scanner, the sibling that already
+# runs this way: a CronJob in namespace `admin-ui` that writes a ConfigMap admin-ui
+# mounts with optional: true. The component declares no Namespace of its own and its
+# RoleBindings target existing namespaces (admin-ui, messaging, iam, vault,
+# observability, accounts), so CreateNamespace stays false.
+#
+# Registered because the consumer has been waiting since the component landed: admin-ui
+# mounts ConfigMap `infra-vulns` (optional: true, "BFF degrades to 'not yet scanned'
+# gracefully") and openbank-admin-ui/infra-vulns.json is still the placeholder whose own
+# note says to "wire the infra-vuln-scanner CronJob". Nothing ever synced the component,
+# so that ConfigMap has never existed and the panel has never shown a scan.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-vuln-scanner
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/infra-vuln-scanner
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: admin-ui
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
