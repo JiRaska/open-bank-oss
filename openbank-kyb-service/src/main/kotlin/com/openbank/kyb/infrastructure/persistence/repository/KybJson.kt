@@ -114,6 +114,10 @@ internal object KybJson {
         )
     }
 
+    fun writeStrings(values: List<String>): String = mapper.writeValueAsString(values)
+
+    fun readStrings(json: String?): List<String> = if (json.isNullOrBlank()) emptyList() else mapper.readValue(json)
+
     fun writeSigners(signers: List<Signer>): String = mapper.writeValueAsString(signers)
 
     fun readSigners(json: String): List<Signer> = mapper.readValue(json)
