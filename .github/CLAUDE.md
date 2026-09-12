@@ -28,13 +28,30 @@
   supplychain` both passed and `gates (lint)` failed on two of the three. Both meta-gates had landed
   on `main` while the branch was open, which is the normal case, not bad luck. The full run is ~340 s
   CPU / ~50 s wall on 8 jobs; that is cheaper than one CI round trip.
-  **Six failures are environmental — know them or you will read them as your regression.** Five
-  diff-scoped gates (`api-contract`, `release-scope-mismatch`, `db-migration`, `schema-compat`,
-  `threat-model-updated-on-trust-boundary-change`) print `PR_DIFF_BASE is empty but this gate
-  requires it — refusing to run vacuously`, and `loki-rule-load-test` reports UNFALSIFIED on
-  `BASE_REF: unbound variable`. Both are variables only CI sets. Confirm rather than assume: run the
-  same ids in a throwaway `git worktree add --detach <tmp> origin/main` and check they fail
-  identically there. Anything that fails on your branch and passes on that control IS yours.
+  **A dozen-ish failures are environmental — and the count is not the thing to remember, because it
+  grows every time a diff-scoped gate is added.** Each one now SAYS SO in its own output: `<VAR> is
+  empty but this gate requires it — refusing to run vacuously` (`PR_DIFF_BASE` for the diff-scoped
+  gates; `BASE_REF`, `GITHUB_REPOSITORY`, `PR_BODY`, `PR_NUMBER` for the few that read the runner's
+  own context). Read the output, never the count — this bullet said **six** on 2026-09-12 when the
+  true number was eleven, and the five it did not name were read as "pre-existing red on `main`" and
+  published as such in a PR body. They were not; `main` was fine.
+  To run the whole manifest locally as CI sees it, supply what they ask for. Measured 2026-09-12
+  against `origin/main`: the bare `--all` gave **11 FAIL**, and this gave **0** — `220 gates
+  PASS=217 WARN=2 UNFALSIFIED=1`, the remaining three being a genuine advisory warning and a
+  network-bound gate, not environment.
+  ```
+  PR_DIFF_BASE=$(git rev-parse HEAD~1) BASE_REF=$(git rev-parse HEAD~1) \
+    GITHUB_REPOSITORY=JiRaska/open-bank-oss PR_NUMBER=<n> \
+    PR_BODY="$(gh pr view <n> --json body -q .body)" \
+    python3 .github/scripts/run-gates.py --all
+  ```
+  Leave one out and the gate needing it says which — that is the point; do not memorise the list.
+  **A control run answers "is this mine?", never "is this real?".** Running the same ids in a
+  throwaway `git worktree add --detach <tmp> origin/main` tells you only about authorship —
+  anything that fails on your branch and passes there IS yours, and anything that fails on BOTH is
+  merely *unclassified*. To classify it, make it PASS: give it the missing variable, credential or
+  input and watch it go green. Confirming a shared failure is a defect takes that second step, and
+  skipping it is how a false "main is red" gets published.
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
