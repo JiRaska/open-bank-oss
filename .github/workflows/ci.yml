@@ -187,7 +187,15 @@ jobs:
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: steps.browser_e2e.outcome == 'failure'
+        # `always() &&` is load-bearing. A step `if:` that names no status-check function is
+        # implicitly ANDed with success(), so `browser_e2e.outcome == 'failure'` could never hold:
+        # the E2E step has no continue-on-error, so its failure puts the job in a failed state and
+        # every later plain-`if:` step is skipped. Measured on five main runs (21590f0e8, bebbfc4fd,
+        # 8713dc4ba, 8db73dbbd, d57a02b6f): e2e=failure, the always() envelope step beside this one
+        # ran, and this upload was skipped — so the report existed for exactly the runs that did not
+        # need it. The three sibling `outcome == 'failure'` guards in dependency-review.yml and
+        # security.yml are correct as written because those steps DO set continue-on-error.
+        if: always() && steps.browser_e2e.outcome == 'failure'
         with:
           name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/playwright-report/

@@ -7,9 +7,9 @@
 // Why this screen exists: activating a pack was reachable only by hand-driving
 // POST /compliance-packs/proposals and .../decide with two separately-minted operator tokens.
 // A control that needs a shell is a control nobody exercises — and
-// `openbank.lending.compliance.enforce-pack` must stay false until a pack is active, because with
-// enforcement on and no active pack every origination is REFUSED. The gate and the only way
-// through it belong in the same place.
+// `lending.compliance.enforce-pack` (env `LENDING_ENFORCE_PACK`) must stay false until a pack
+// is active, because with enforcement on and no active pack every origination is REFUSED. The
+// gate and the only way through it belong in the same place.
 //
 // Maker != checker is NOT enforced here. The service raises MakerCheckerViolation (422) when one
 // principal tries both halves, and this page renders that refusal verbatim. A client-side copy of
