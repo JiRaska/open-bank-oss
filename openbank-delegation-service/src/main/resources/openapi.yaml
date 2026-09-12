@@ -5,14 +5,82 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.13.0
+  # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios.
+  #
+  # 1.14.0 -> 1.18.0 (#9522, this branch): additive — organization grant authority. NOT the next
+  # integer: 1.15.0 is held by the open #9215, 1.16.0 by #9481/#9484 and 1.17.0 by #9237. Read off
+  # live origin/main together with the open PRs, because a taken version is textually identical to
+  # a free one and no merge can catch the collision.
+  version: 1.18.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
 paths:
+  /api/v1/delegation-portfolios:
+    post:
+      tags: [Delegation portfolios]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        A durable account scope owned by the active profile. It is not a grant and never authorizes
+        payment or co-signing by itself; for a business profile customer-edge resolves the current
+        mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationPortfolioRequest' }
+      responses:
+        '201':
+          description: Portfolio created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '400': { description: Missing idempotency key, name, or account scope }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+        '422': { description: An account is not owned by the active profile }
+        '503':
+          description: Authoritative account ownership cannot currently be established; safe to retry
+          headers:
+            Retry-After: { schema: { type: integer } }
+  /api/v1/delegation-portfolios/owner/{ownerPartyId}:
+    get:
+      tags: [Delegation portfolios]
+      summary: List portfolios of the active profile
+      parameters:
+        - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Portfolios ordered by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationPortfolioResponse' } }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+  /api/v1/delegation-portfolios/{id}:
+    get:
+      tags: [Delegation portfolios]
+      summary: Read a portfolio of the active profile
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '403': { description: Authenticated active profile does not own the portfolio }
+        '404': { description: Portfolio not found }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -68,6 +136,7 @@ paths:
           in: header
           schema: { type: string }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -94,8 +163,9 @@ paths:
               can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+        '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
       tags: [Delegations]
@@ -108,6 +178,7 @@ paths:
         directory.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -120,8 +191,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
-        '403': { description: The authenticated party is not the grantor }
+        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or resource ownership could not be established }
+        '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -485,6 +557,16 @@ components:
 
         Absent on an operator/back-office call, which is gated by role and OPA instead.
       schema: { type: string, format: uuid }
+    CustomerActorPartyId:
+      name: X-Customer-Actor-Party-Id
+      in: header
+      required: false
+      description: |
+        The natural person authenticated by customer-edge. Required together with
+        X-Customer-Party-Id on customer preview/offer calls. It equals the principal for an
+        individual profile; for an organization profile it differs and the service verifies the
+        actor's active PartyMandate before accepting the request. Never supplied by the app.
+      schema: { type: string, format: uuid }
     DelegationId:
       name: id
       in: path
@@ -501,6 +583,31 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    DelegationPortfolioRequest:
+      type: object
+      required: [ownerPartyId, name, accountIds]
+      properties:
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    DelegationPortfolioResponse:
+      type: object
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]

@@ -400,7 +400,13 @@ change_requirements:
       - "breaking event change ships as a NEW versioned event (-vN topic, ADR-0006), never an in-place edit"
     gate: schema-compat
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-10-31. The date could not be met and this file already
+    # said so: the GRADUATION EVIDENCE block below records 40 findings across 5 commits that would
+    # have been RED under --enforce, and states "a ruling is needed first" on whether an added
+    # non-nullable field is a real replay break. A ruling plus a 40-finding burn-down is not three
+    # days of work, and leaving the date would have failed EVERY PR in the repo via
+    # gate-graduation-guard rather than failing this rule.
+    target_enforce_date: "2026-10-31"   # ADR-0144
     # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
     # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
     # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
@@ -768,7 +774,13 @@ change_requirements:
       - "compliance scorecard reflects current live/partial/planned status"
     gate: docs-currency
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-11-30. Longer than the sibling move above because the
+    # blocker is different in kind: this rule has NO producer and, per the measurement below, the
+    # rule as written cannot have one that is worth running — a docs-touched-when-page-touched
+    # gate fails 95% of admin-ui page commits. What is missing is a decidable DEFINITION of
+    # currency scoped to changed controls, which is design work, not a checker. The `blocked_on`
+    # field below already said this; the date did not reflect it.
+    target_enforce_date: "2026-11-30"   # ADR-0144
     # MEASURED 2026-09-04, and the number is the argument: 451 commits in 30 days touch an
     # admin-ui `page.tsx`, and of a 60-commit sample only 3 (5%) also touch docs/, a .mmd
     # diagram or process.yaml. So the rule as written — "the section's documentation updated
@@ -2493,12 +2505,17 @@ finops_tiers:
   # t0_baseline and need no explicit entry.
   declared:
     openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
-    # ADR-0173 D3 reconciliation (2026-07-29): card-issuance carries a live HTTPScaledObject
-    # with an openbank.io/finops-tier: T1 label and was missing here. Not money-path, so T1
-    # is declarable on the evidence of the live scaled object + classifier-measured idle —
-    # HELD AT min:1 (warm floor) pending a cold-start SLO re-measurement on the current path,
-    # the same hold product-catalog carries below.
-    openbank-card-issuance-service: T1      # live HTTPScaledObject (payments/card-issuance-http), held at min:1 — see ADR-0173 D3
+    # card-issuance was declared T1 here on 2026-07-29 (ADR-0173 D3) on the stated premise
+    # "Not money-path". That premise expired: ADR-0283 phase 0 (#8808) added
+    # openbank-card-issuance-service to money_path_services, because it ships the card
+    # AUTHORISATION decision. A money-path service inherits T0 from t0_baseline and needs no
+    # entry, so the declaration is removed rather than rewritten to T0.
+    #
+    # Nothing about the running workload changes, and that is the point: the live
+    # HTTPScaledObject payments/card-issuance-http is min:1 / max:3 and the Deployment is 1/1,
+    # i.e. it already never scales to zero — the T0 mechanism, not T1's. All three sources
+    # agreed on always-on; only this line said otherwise, and it was the one producing
+    # `check-finops-tiers` POLICY FINDING "money-path service declared 'T1' (below T0)".
     # sdd-service and interest-service ALSO carry T1-labeled HTTPScaledObjects (sdd/ and
     # interest/ namespaces) — but both are money_path_services, so they inherit T0 via
     # t0_baseline and a T1 label on the deployment is the drift ADR-0173 D3 describes:
@@ -2570,8 +2587,13 @@ finops_tiers:
   # idle 95% of the time with no money-path justification) raises a FinOps finding /
   # tracking issue (ADR-0052), not a silent drift.
   gate: finops-tier-drift
-  enforced: advisory                      # ADR-0057; -> block when the classifier lands
-  target_enforce_date: "2026-09-30"   # ADR-0144
+  # Graduated together with the gate itself. `.github/gates/gates.yaml` registers
+  # finops-tier-drift as `mode: enforced`, so the control BLOCKS from the moment this PR
+  # lands; leaving `advisory` here is the permanent-advisory failure ADR-0144 exists to
+  # prevent, and the stale target date would additionally fail check-gate-graduation.sh on
+  # EVERY PR the day it passed, over a control that already enforces (#7897).
+  enforced: enforce
+  enforced_since: "2026-09-12"        # ADR-0144
   blocked_on: "the measured-signal classifier shipped 2026-07-29 (finops-tier-classifier CronJob, daily report in the admin-ui) — the advisory gate now reads its findings; 3 services have a declared tier today (notification-service T2, product-catalog T0, card-issuance T1-held-at-min:1)"
   # Added by issue #2392: the rule carried `enforced`/`target_enforce_date` but never named the
   # script that produces the finding, so nothing tied the advisory CI step to this deadline.
@@ -3194,6 +3216,34 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
+    # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
+    # here rather than only in the realm; this is that declaration, and it is deliberately ONE
+    # read action rather than the role's full duty set. What is missing is missing on purpose:
+    #
+    #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
+    #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
+    #   has no service-account exclusion, and cannot express one. Both of those actions are write
+    #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
+    #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+    #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
+    #   that the bank's voice is set by people. Granting either through the matrix would add a
+    #   second permit path that drops that exclusion — a silent widening no policy layer can veto
+    #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
+    #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
+    #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+    #
+    #   commstyle.approval.read is safe and is here: its rule
+    #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
+    #   already, so this entry is a provable subset of today's effective grant and changes no
+    #   decision — the same seeding property the matrix was built on.
+    #
+    # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
+    # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
+    # editor duty has no action name for the matrix to key on. Declaring the editor role here
+    # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+    ROLE_COMMS_APPROVER:
+      grant:
+        - commstyle.approval.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
 # `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
@@ -3369,6 +3419,52 @@ shared_m2m_matrix_write_grants:
     - transaction.reverse
 
 # Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
+# An action whose OWN allow rule in rest.rego excludes service-account principals
+# (`not startswith(input.principal.id, "service-account-")`) must not also be reachable through
+# `authz.role_action_matrix`, because `matrix-allows` gates on principal.type == "HUMAN" plus the
+# role and nothing else — and a client_credentials JWT is classified HUMAN. Where both are true,
+# the two artifacts contradict each other and one of them is wrong: the rule says machines are
+# kept out, the matrix lets them in, and `allow` is a disjunction so the matrix wins.
+#
+# This is NOT the same question shared_m2m_matrix_write_grants asks. That register records that a
+# write action is M2M-reachable and accepted; it is indifferent to whether the action's own rule
+# was written to forbid exactly that. Both entries below are ALREADY declared there, so the reach
+# itself is a reviewed decision — what nothing recorded until now is that `rest.rego` states the
+# opposite, so anyone reading the rule alone concludes machines are excluded when they are not.
+#
+# Measured with `opa eval` on the derived data, 2026-09-12:
+#   service-account-openbank-services + ROLE_OPERATOR -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows"]                       (allowed)
+#   a human operator                                  -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows", "operator-compose-message"]
+# The bespoke rule fires for the person and not for the machine — doing precisely its job — while
+# the matrix carries the machine regardless.
+#
+# Resolving an entry means deciding which control is real: drop the matrix grant (and its
+# shared_m2m_matrix_write_grants line), or drop the now-decorative exclusion from the rego rule.
+# Declaring it here is neither — it records that the contradiction is known and unresolved.
+matrix_sa_excluded_action_grants:
+  gate: matrix-sa-excluded-actions
+  enforced: enforced
+  ci_producer: ".github/scripts/check-matrix-excluded-actions.py"
+  adr: ADR-0176                          # both entries are that ADR's operator-messaging actions
+  declared:
+    - action: opsmessage.compose
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]   # ROLE_ADMIN reaches it through the single inherits hop
+      rule: operator-compose-message
+      reason: >
+        ADR-0176 D5 wrote the exclusion so a machine cannot compose customer messages, and the
+        matrix grant predates the measurement that showed matrix-allows bypasses it. Unresolved:
+        needs a decision on whether operator messaging keeps a machine-reachable path at all.
+      issue: 3765
+    - action: opsmessage.approval.decide
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]
+      rule: operator-decide-message-approval
+      reason: >
+        Checker half of the same four-eyes flow, same cause. Sharper than its sibling: this is the
+        approval decision, so a machine-reachable path here is a machine that can approve.
+      issue: 3765
+
 # gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
 # check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
 # `openbank-infra/gitops/components/keycloak/*realm-template*.json`. Two other tracked realm

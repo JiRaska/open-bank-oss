@@ -1,0 +1,53 @@
+# Communication Studio (ADR-0285). communication-service serves the business-editable
+# style/playbook layer that sits on top of the immutable git prompt core, and admin-ui
+# edits it under four-eyes with evals-on-publish.
+#
+# Registered at the SAME stage referral was: the component declares the namespace, its
+# single-owner CNPG Postgres + daily ScheduledBackup, the OIDC ExternalSecret, the
+# internal TLS Certificate, the valkey cache, the OPA bundle and the workload — with the
+# Deployment at `replicas: 0`. Syncing this Application therefore provisions the domain
+# and starts NO pod; activation is a separate reviewed change that records live health
+# evidence, exactly as communication-service.yaml's own header states.
+#
+# Why it is registered now rather than at activation: admin-ui already ships a
+# RoleBinding for admin-ui-discovery into namespace `communication` (#9173) and lists
+# `communication` in OPENBANK_NAMESPACES. With no Application, that namespace did not
+# exist, and admin-ui's sync failed on every attempt —
+#   error running kubectl auth reconcile: error getting namespace communication:
+#   namespaces "communication" not found
+# — so admin-ui itself had been OutOfSync since 2026-09-10T21:10Z, and communication-db
+# fired PostgresClusterDeclaredNotDeployed. A component that nothing syncs is not a
+# staged rollout, it is a manifest no one applies; the staging lives in `replicas: 0`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: communication
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/communication
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: communication
+  syncPolicy:
+    syncOptions:
+      # The component carries an OPA bundle ConfigMap; client-side apply would store the
+      # whole object in the last-applied-configuration annotation and the API server
+      # rejects one over 256 KB, which ArgoCD retries forever while serving the previous
+      # policy. Gate: opa-bundle-apply-size.
+      - ServerSideApply=true
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

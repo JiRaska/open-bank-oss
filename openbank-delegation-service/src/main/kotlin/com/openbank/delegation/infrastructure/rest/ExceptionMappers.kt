@@ -7,11 +7,16 @@ package com.openbank.delegation.infrastructure.rest
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
+import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityException
+import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityUnavailableException
 import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalConflict
 import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalNotFound
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
+import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
+import com.openbank.delegation.application.usecase.DelegationPortfolioNotFound
+import com.openbank.delegation.application.usecase.DelegationPortfolioOwnershipUnavailable
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
@@ -71,6 +76,31 @@ class DelegationRolePresetNotFoundMapper : ExceptionMapper<DelegationRolePresetN
 }
 
 @Provider
+class DelegationPortfolioNotFoundMapper : ExceptionMapper<DelegationPortfolioNotFound> {
+    override fun toResponse(exception: DelegationPortfolioNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioAccessDeniedMapper : ExceptionMapper<DelegationPortfolioAccessDenied> {
+    override fun toResponse(exception: DelegationPortfolioAccessDenied): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioOwnershipUnavailableMapper : ExceptionMapper<DelegationPortfolioOwnershipUnavailable> {
+    override fun toResponse(exception: DelegationPortfolioOwnershipUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message))
+            .build()
+}
+
+@Provider
 class DelegationNotGranteeExceptionMapper : ExceptionMapper<DelegationNotGranteeException> {
     override fun toResponse(exception: DelegationNotGranteeException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
@@ -92,6 +122,34 @@ class DelegationScaExceptionMapper : ExceptionMapper<DelegationScaException> {
 class DelegationEligibilityExceptionMapper : ExceptionMapper<DelegationEligibilityException> {
     override fun toResponse(exception: DelegationEligibilityException): Response =
         Response.status(422).entity(errorBody(422, exception.message)).build()
+}
+
+@Provider
+class DelegationGrantorAuthorityExceptionMapper : ExceptionMapper<DelegationGrantorAuthorityException> {
+    override fun toResponse(exception: DelegationGrantorAuthorityException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(
+                mapOf(
+                    "error" to (exception.message ?: "Grantor authority rejected"),
+                    "code" to "GRANTOR_AUTHORITY_REJECTED",
+                ),
+            )
+            .build()
+}
+
+@Provider
+class DelegationGrantorAuthorityUnavailableExceptionMapper :
+    ExceptionMapper<DelegationGrantorAuthorityUnavailableException> {
+    override fun toResponse(exception: DelegationGrantorAuthorityUnavailableException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(
+                mapOf(
+                    "error" to (exception.message ?: "Grantor authority unavailable"),
+                    "code" to "GRANTOR_AUTHORITY_UNAVAILABLE",
+                ),
+            )
+            .build()
 }
 
 @Provider
