@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: psd2-service
     app.kubernetes.io/part-of: psd2
   annotations:
-    openbank.tech/policy-checksum: "e99ddb4c047fd37d"
+    openbank.tech/policy-checksum: "cc84f3e05d8a41f1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1013,6 +1013,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:

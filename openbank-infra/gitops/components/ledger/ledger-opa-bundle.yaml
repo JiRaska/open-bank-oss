@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "990f779d4f04d986"
+    openbank.tech/policy-checksum: "44c20408df7490db"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1066,6 +1066,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:

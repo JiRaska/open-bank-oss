@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "e72ddb4eb027c3b7"
+    openbank.tech/policy-checksum: "5fd1bb0fe5649ffc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -972,6 +972,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:
