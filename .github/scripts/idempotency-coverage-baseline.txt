@@ -46,7 +46,7 @@ openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/con
 openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/release  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-fraud-service POST /api/v1/fraud/score  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-fx-service POST /api/v1/fx/cnb/ingest  # creation POST with no idempotency key today — burn-down #8351
+openbank-fx-service POST /api/v1/fx/cnb/ingest  # per-currency natural key (source, validFrom) skip — verified inherent — ADR-0299, burn-down #8351
 openbank-interest-service POST /api/v1/interest/accrue  # natural-key replay (V12) — ADR-0291, burn-down #8351
 openbank-interest-service POST /api/v1/interest/accrue/all  # re-runnable batch, per-account natural-key dedup — ADR-0291, burn-down #8351
 openbank-interest-service POST /api/v1/interest/capitalize/{accountId}  # claim-based exactly-once (ADR-0033) — ADR-0291, burn-down #8351

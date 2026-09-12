@@ -101,6 +101,12 @@ quarkus:
       url: ${ANALYTICS_SINK_URL:http://localhost:8110}
       connect-timeout: 2000
       read-timeout: 3000
+    # ADR-0285 D5 — PublishedStyleProvider's client-credentials read of the published style. Not
+    # wired into CopilotChatService.systemPrompt() yet (see RegisteredPromptTemplates's KDoc).
+    communication-service:
+      url: ${COMMUNICATION_SERVICE_URL:http://localhost:8158}
+      connect-timeout: 2000
+      read-timeout: 3000
 
 # Customer copilot configuration (ADR-0089).
 copilot:
