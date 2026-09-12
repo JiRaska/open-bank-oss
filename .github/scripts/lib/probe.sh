@@ -290,6 +290,78 @@ probe_lint_findings() {
 }
 
 # ---------------------------------------------------------------------------------------------
+# probe_each <name-of-list-var> -> one item per line, safely, from a whitespace-separated string
+#
+# `for n in $LIST` does NOT word-split in zsh — the loop body runs ONCE with the whole string. The
+# command inside then answers about a nonsense argument, and with stderr discarded that reads as a
+# uniform negative: a PR-merge watcher reported `merged=0/29` for forty minutes while the true
+# count was 20. Nothing errored, and the number was plausible.
+#
+# Usage:  while read -r item; do …; done < <(probe_each MY_LIST)
+probe_each() {
+  local __name="$1" __raw
+  eval "__raw=\${$__name-}"
+  printf '%s\n' $__raw | awk 'NF'
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_edit_applied <file> <sed-or-perl-expression> -> exit 0 only if the file actually CHANGED
+#
+# An in-place edit that matches nothing is silent and exits 0. When such an edit is a test's
+# NEGATIVE case ("revert the fix and prove the suite fails"), the unchanged file re-runs the fixed
+# code, the suite passes, and the reading is "the fix does nothing" — the opposite of the truth.
+# Measured 2026-09-12 on an admin-ui contrast fix: a `sed` revert did not match the conditional
+# expression, so the negative case passed and briefly looked like a no-op change.
+probe_edit_applied() {
+  local file="$1" expr="$2" before after
+  before="$(shasum "$file" 2>/dev/null | awk '{print $1}')"
+  sed -i '' "$expr" "$file" 2>/dev/null || sed -i "$expr" "$file" 2>/dev/null
+  after="$(shasum "$file" 2>/dev/null | awk '{print $1}')"
+  [ -n "$before" ] && [ "$before" != "$after" ]
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_falsify <mutate-cmd> <restore-cmd> <check-cmd> -> exit 0 only if CHECK fails under MUTATION
+#
+# "Verify by effect" has its own failure mode: the sabotage is itself a probe, and a sabotage of the
+# wrong SHAPE leaves the subject untouched, so the check stays green and the reading is "this gate
+# is inert". Twice in one session: `java.time.Instant.EPOCH` against a gate whose regex is the
+# import form, and a bare `const val SOURCE_SERVICE` against a gate that matches emission sites.
+# Both times the gate was fine and the sabotage was wrong.
+#
+# This runs CHECK three times — clean, mutated, restored — and demands pass/fail/pass. A mutation
+# that changes nothing cannot satisfy it.
+probe_falsify() {
+  local mutate="$1" restore="$2" check="$3"
+  eval "$check" >/dev/null 2>&1 || { echo "probe_falsify: CHECK already fails before mutation" >&2; return 1; }
+  eval "$mutate" >/dev/null 2>&1 || { echo "probe_falsify: MUTATE command failed" >&2; return 1; }
+  if eval "$check" >/dev/null 2>&1; then
+    eval "$restore" >/dev/null 2>&1
+    echo "probe_falsify: CHECK still passes under mutation — the sabotage, not the subject, is suspect" >&2
+    return 1
+  fi
+  eval "$restore" >/dev/null 2>&1 || { echo "probe_falsify: RESTORE command failed" >&2; return 1; }
+  eval "$check" >/dev/null 2>&1 || { echo "probe_falsify: CHECK does not pass after restore" >&2; return 1; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_gh_json <gh-args…> -> the JSON on stdout; non-zero WITHOUT printing on any failure
+#
+# `gh … --json` answers HTTP 502/504 on a large query (measured: `gh pr list --limit 200` with
+# statusCheckRollup). The error goes to stderr and stdout is EMPTY, so `| jq length` reads 0 and a
+# full queue reports as no PRs. Never let an empty stdout from `gh` mean "none".
+probe_gh_json() {
+  local out rc
+  out="$(command gh "$@" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    echo "probe_gh_json: \`gh $*\` failed (rc=$rc) or returned nothing — UNKNOWN, not empty" >&2
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------------------------
 # self-test
 # ---------------------------------------------------------------------------------------------
 # Every case asserts BOTH directions. A probe that only ever sees its known-positive can still be
@@ -638,6 +710,63 @@ _probe_selftest() {
   _check "probe_commit_before_utc fails closed when nothing precedes the cutoff" \
     "$([ "$none_status" = "1" ] && [ -z "$none_out" ] && echo 1 || echo 0)"
   rm -rf "$crepo"
+
+  # --- probe_each -------------------------------------------------------------------------
+  # bash DOES word-split, so this cannot reproduce the zsh behaviour that caused the incident.
+  # What it pins is the property the caller needs either way: one line PER ITEM, whatever shell
+  # the script is read by.
+  PROBE_TEST_LIST="alpha beta gamma"
+  local each_n
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each yields one line per item (got $each_n, want 3)" \
+    "$([ "$each_n" = "3" ] && echo 1 || echo 0)"
+  PROBE_TEST_LIST="   solo   "
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each collapses padding to one item (got $each_n, want 1)" \
+    "$([ "$each_n" = "1" ] && echo 1 || echo 0)"
+  PROBE_TEST_LIST=""
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each yields nothing for an empty list (got $each_n, want 0)" \
+    "$([ "$each_n" = "0" ] && echo 1 || echo 0)"
+
+  # --- probe_edit_applied -----------------------------------------------------------------
+  local edit_dir; edit_dir="$(mktemp -d)"
+  printf 'alpha\nbeta\n' > "$edit_dir/f.txt"
+  _check "probe_edit_applied accepts an edit that changes the file" \
+    "$(probe_edit_applied "$edit_dir/f.txt" 's/alpha/ALPHA/' && echo 1 || echo 0)"
+  _check "probe_edit_applied REJECTS an expression that matches nothing" \
+    "$(probe_edit_applied "$edit_dir/f.txt" 's/no-such-token/x/' && echo 0 || echo 1)"
+  rm -rf "$edit_dir"
+
+  # --- probe_falsify ----------------------------------------------------------------------
+  local fals_dir; fals_dir="$(mktemp -d)"
+  printf 'GOOD\n' > "$fals_dir/subject"
+  _check "probe_falsify accepts a mutation the check can detect" \
+    "$(probe_falsify "printf 'BAD\n' > '$fals_dir/subject'" \
+                     "printf 'GOOD\n' > '$fals_dir/subject'" \
+                     "grep -q GOOD '$fals_dir/subject'" && echo 1 || echo 0)"
+  _check "probe_falsify REJECTS a mutation the check cannot see (the sabotage missed)" \
+    "$(probe_falsify "printf 'x\n' > '$fals_dir/unrelated'" \
+                     "rm -f '$fals_dir/unrelated'" \
+                     "grep -q GOOD '$fals_dir/subject'" && echo 0 || echo 1)"
+  _check "probe_falsify refuses when the check already fails before any mutation" \
+    "$(probe_falsify "true" "true" "grep -q GOOD '$fals_dir/absent'" && echo 0 || echo 1)"
+  rm -rf "$fals_dir"
+
+  # --- probe_gh_json ----------------------------------------------------------------------
+  # Stubbed: no network, no token. The known-negative is the point — an errored `gh` with empty
+  # stdout must be UNKNOWN, never an empty result set.
+  local gh_dir; gh_dir="$(mktemp -d)"
+  printf '#!/bin/sh\nprintf "[]"\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json returns the payload when gh succeeds" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 1 || echo 0)"
+  printf '#!/bin/sh\necho "HTTP 504" >&2\nexit 1\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json FAILS (never prints empty) when gh errors" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 0 || echo 1)"
+  printf '#!/bin/sh\nexit 0\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json FAILS on an EMPTY success — 'no results' and 'could not ask' differ" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 0 || echo 1)"
+  rm -rf "$gh_dir"
 
   echo "SUBJECTS=$executed  # self-test assertions executed"
 
