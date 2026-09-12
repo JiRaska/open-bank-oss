@@ -2276,7 +2276,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b7f594068f823500"
+        openbank.tech/policy-checksum: "b72c8128e094f8b8"
     spec:
       securityContext:
         runAsNonRoot: true
