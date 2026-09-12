@@ -197,21 +197,45 @@ def classify(name: str, classname: str, task: str, component: str, service: Path
     # using it here can manufacture end-to-end evidence from a unit/integration test.
     # The JUnit suite classname and Gradle/Playwright task are the producer-owned
     # identity used for categorisation instead.
-    # The report directory is producer-owned provenance. In particular, an E2E
-    # report remains E2E even when a spec happens to contain `contract` in its
-    # filename; conversely a Vitest guard that discusses Playwright is still a
-    # unit test.
-    if re.search(r"(?:^|[-_.])(?:e2e|playwright)(?:$|[-_.])", task, re.I):
-        return "e2e"
     identity = f"{classname} {task}"
     if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
         return "integration"
-    # Lowercase reporter/file tokens need delimiters (`compact` is not Pact).
-    # JVM class names conventionally expose the same words as CamelCase tokens,
-    # for example SwiftPactFolderProviderVerificationTest.
-    if (re.search(r"(?<![a-z0-9])(?:pact|contract)(?![a-z0-9])", identity.lower())
-            or re.search(r"(?:Pact|Contract)(?=$|[A-Z0-9])", identity)):
+
+    # The TASK is the producer's own declaration of which lane ran; the CLASSNAME is a
+    # filename someone chose. When they disagree the task wins, because a Playwright spec
+    # named `*-contract.spec.ts` is still an end-to-end run of the real screen, and counting
+    # it as contract evidence moves it into a dimension whose controls it cannot satisfy.
+    # Measured on a real Admin UI report (#8263): 2 cases from campaign-visual-contract.spec.ts
+    # were reported as contract while their task said e2e.
+    if re.search(r"\be2e\b|playwright", task, re.I):
+        return "e2e"
+
+    # Two ways `pact` legitimately appears, and one way it does not.
+    #
+    #   (?<![A-Za-z])pact   a separated token: `ledger-pact`, `pacts/`, `.pact.json`
+    #   (?<=[a-z0-9])Pact   a CamelCase segment: `LedgerPactTest` — case-SENSITIVE, the
+    #                       capital is what marks the boundary Kotlin class names use
+    #
+    # Neither matches `compact`, which is the second defect here: the previous unbounded
+    # search classified `compact-filters-a11y.guard.test.ts` as CONTRACT because
+    # "com-PACT-filters" contains the substring (#8263).
+    #
+    # A plain `\bpact\b` is NOT enough and looks like it is — it rejects `compact` correctly
+    # and also rejects `LedgerPactTest`, since there is no word boundary inside CamelCase.
+    # That silently reclassifies every Kotlin pact suite in the fleet as `unit`, which is a
+    # worse defect than the one being fixed and passes any test written only from the issue's
+    # three examples.
+    if re.search(r"(?<![A-Za-z])pacts?(?![A-Za-z])", identity, re.I) \
+            or re.search(r"(?<=[a-z0-9])Pacts?(?![a-z])", identity) \
+            or re.search(r"\bcontract\b", identity, re.I):
         return "contract"
+
+    # Only reachable when the task did not declare a lane — e.g. a Vitest run whose classname
+    # merely mentions Playwright. `\be2e\b` keeps that from promoting a unit test:
+    # `playwright-test-intelligence-evidence.guard.test.ts` is a Vitest guard ABOUT Playwright,
+    # not an end-to-end test, and it was being reported as e2e.
+    if re.search(r"\be2e\b", identity, re.I):
+        return "e2e"
     if component == "openbank-simulation":
         return "simulation"
     if service is not None and source_declared_kind(service, classname) == "integration":
@@ -1039,11 +1063,6 @@ def main() -> None:
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
             assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
             assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
-            assert classify("", "campaign-visual-contract.spec.ts", "e2e", "openbank-admin-ui") == "e2e"
-            assert classify("", "playwright-test-intelligence-evidence.guard.test.ts", "vitest", "openbank-admin-ui") == "unit"
-            assert classify("", "compact-filters-a11y.guard.test.ts", "vitest", "openbank-admin-ui") == "unit"
-            assert classify("", "opsmessage-api.contract.test.ts", "vitest", "openbank-admin-ui") == "contract"
-            assert classify("", "com.openbank.SwiftPactFolderProviderVerificationTest", "test", "openbank-swift") == "contract"
             observed = observations(service)
             assert [item["lifecycle"] for item in observed] == ["started", "started", "started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
@@ -1192,6 +1211,32 @@ def main() -> None:
                 raise AssertionError("a runtime observation after its run was accepted")
             except ValueError:
                 pass
+        # Classification, in BOTH directions. The three must-move cases come from #8263; the
+        # must-stay ones exist because the obvious fix for them is wrong: a plain `\bpact\b`
+        # rejects `compact` correctly AND rejects `LedgerPactTest`, since CamelCase has no word
+        # boundary — silently reclassifying every Kotlin pact suite in the fleet as `unit`.
+        # That regression passes any test written only from the issue's examples, which is why
+        # the must-stay rows are here.
+        for classname, task, want in [
+            # must MOVE (the reported defects)
+            ("campaign-visual-contract.spec.ts", "e2e", "e2e"),
+            ("playwright-test-intelligence-evidence.guard.test.ts", "test", "unit"),
+            ("compact-filters-a11y.guard.test.ts", "test", "unit"),
+            # must STAY (the regressions a narrower fix would cause)
+            ("opsmessage-api.contract.test.ts", "test", "contract"),
+            ("com.openbank.ledger.LedgerPactTest", "test", "contract"),
+            ("SwiftPactFolderProviderVerificationTest", "test", "contract"),
+            ("ledger-pact.spec.ts", "test", "contract"),
+            ("LedgerOutboxProjectionIT", "integrationTest", "integration"),
+            ("com.openbank.party.PartyServiceTest", "test", "unit"),
+            ("compaction-policy.guard.test.ts", "test", "unit"),
+        ]:
+            got = classify("a case", classname, task, "openbank-admin-ui")
+            if got != want:
+                raise AssertionError(
+                    f"classify({classname!r}, task={task!r}) returned {got!r}, expected {want!r}"
+                )
+
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:

@@ -68,6 +68,7 @@ class CountryPackRegistry(private val mapper: ObjectMapper) {
                 free = it.path("free").asBoolean(false),
                 listsRepresentatives = it.path("listsRepresentatives").asBoolean(false),
                 listsRepresentationRule = it.path("listsRepresentationRule").asBoolean(false),
+                supportsNameSearch = it.path("supportsNameSearch").asBoolean(false),
             )
         },
         uboRegister = n.path("uboRegister").let {
