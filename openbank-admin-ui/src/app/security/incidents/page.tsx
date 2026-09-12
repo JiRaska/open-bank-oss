@@ -37,14 +37,21 @@ export default function IncidentsPage() {
   const [severity, setSeverity] = useState(ALL)
   const [status, setStatus] = useState(ALL)
   const requestId = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
     const current = ++requestId.current
     setLoading(true)
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
     try {
+      // A timeout signal bounds a SLOW request; it does not cancel one when the screen goes
+      // away. This is a protected evidence read, so an unmount must stop it in flight rather than
+      // let it land on a gone component. Composing both keeps the 10s bound.
       const response = await fetch('/api/security/incidents', {
         cache: 'no-store',
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
       })
       const envelope = await response.json() as Envelope
       if (current !== requestId.current) return
@@ -73,7 +80,7 @@ export default function IncidentsPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
-    return () => { window.clearTimeout(timer); requestId.current += 1 }
+    return () => { window.clearTimeout(timer); requestId.current += 1; controllerRef.current?.abort() }
   }, [load])
 
   const active = useMemo(() => incidents.filter(item => ACTIVE_STATUSES.includes(item.status)), [incidents])

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "9568a895d29d042c"
+    openbank.tech/policy-checksum: "35c7e6720fd5b3e6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -944,22 +944,6 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
-      tools:
-        allow:
-        - tier: read
-          resources:
-          - read.governance
-        - tier: write_proposal
-          resources:
-          - draft.ticket
-        deny:
-        - tier: write
-          resources:
-          - '*'
-        - tier: execute
-          resources:
-          - '*'
-    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read
