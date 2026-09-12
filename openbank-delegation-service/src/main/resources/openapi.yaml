@@ -5,94 +5,81 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.14.0
+  # 1.13.0 -> 1.14.0 (#9286): additive — delegated account portfolios.
+  #
+  # 1.14.0 -> 1.19.0 (#9417, this branch): additive — SCA-bound approval groups.
+  # 1.15.0 is held by the open #9215, 1.16.0 by #9481/#9484, 1.17.0 by #9237 and
+  # 1.18.0 by #9522, so 1.19.0 is the first free number.
+  version: 1.19.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
-  - name: Approval groups
+  - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
 paths:
-  /api/v1/delegations/approval-groups/sca-reference:
+  /api/v1/delegation-portfolios:
     post:
-      tags: [Approval groups]
-      summary: Calculate the canonical reference that the management SCA must sign
-      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
-      responses:
-        '200':
-          description: Opaque, versioned SCA reference
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceResponse' }
-        '400': { description: Invalid create/revise shape }
-  /api/v1/delegations/approval-groups:
-    get:
-      tags: [Approval groups]
-      summary: List approval groups owned by the authenticated party
-      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
-      responses:
-        '200':
-          description: Versioned groups, including inactive history
-          content:
-            application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalGroupResponse' } }
-    post:
-      tags: [Approval groups]
-      summary: Create an SCA-bound approval group
+      tags: [Delegation portfolios]
+      summary: Create a named account portfolio for the active profile
+      description: >-
+        A durable account scope owned by the active profile. It is not a grant and never authorizes
+        payment or co-signing by itself; for a business profile customer-edge resolves the current
+        mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
-        - $ref: '#/components/parameters/CustomerActorPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+            schema: { $ref: '#/components/schemas/DelegationPortfolioRequest' }
       responses:
-        '201': { description: Approval group created }
-        '400': { description: Invalid roster or SCA }
-        '403': { description: Caller is not the group owner }
-  /api/v1/delegations/approval-groups/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-      - $ref: '#/components/parameters/CustomerPartyId'
-    get:
-      tags: [Approval groups]
-      summary: Get an owned approval group
-      responses:
-        '200':
-          description: Approval group
+        '201':
+          description: Portfolio created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ApprovalGroupResponse' }
-        '404': { description: Missing or owned by another party }
-    put:
-      tags: [Approval groups]
-      summary: Replace a roster under optimistic revision and a fresh SCA challenge
-      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '400': { description: Missing idempotency key, name, or account scope }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+        '422': { description: An account is not owned by the active profile }
+        '503':
+          description: Authoritative account ownership cannot currently be established; safe to retry
+          headers:
+            Retry-After: { schema: { type: integer } }
+  /api/v1/delegation-portfolios/owner/{ownerPartyId}:
+    get:
+      tags: [Delegation portfolios]
+      summary: List portfolios of the active profile
+      parameters:
+        - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
-        '200': { description: Approval group revised }
-        '400': { description: Invalid roster or SCA }
-        '409': { description: expectedRevision is stale }
-    delete:
-      tags: [Approval groups]
-      summary: Deactivate the group for future operation snapshots
-      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
+        '200':
+          description: Portfolios ordered by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationPortfolioResponse' } }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
+  /api/v1/delegation-portfolios/{id}:
+    get:
+      tags: [Delegation portfolios]
+      summary: Read a portfolio of the active profile
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
-        '200': { description: Approval group deactivated }
+        '200':
+          description: Portfolio
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
+        '403': { description: Authenticated active profile does not own the portfolio }
+        '404': { description: Portfolio not found }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -148,7 +135,6 @@ paths:
           in: header
           schema: { type: string }
         - $ref: '#/components/parameters/CustomerPartyId'
-        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -170,11 +156,13 @@ paths:
               monthlyLimit (ADR-0249 D5). Unlimited access to someone else's account is not
               something this platform grants by omission.
             * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
+            * `EXPOSURE_UNSUPPORTED` — exposure is non-null. It remains readable on historical grants
+              for audit, but cannot authorize a raw object download until transformed-artifact delivery
+              can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
-        '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
   /api/v1/delegations/preview:
     post:
       tags: [Delegations]
@@ -187,7 +175,6 @@ paths:
         directory.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
-        - $ref: '#/components/parameters/CustomerActorPartyId'
       requestBody:
         required: true
         content:
@@ -199,10 +186,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
-        '400': { description: Unsupported or inconsistent constraints }
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
+        '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or resource ownership could not be established }
-        '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -302,6 +288,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '400': { description: SCA invalid or expired, or EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '403': { description: The authenticated party is not the grantee }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
@@ -368,6 +355,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/DelegationId'
       responses:
+        '400': { description: EXPOSURE_UNSUPPORTED for a historical exposure grant }
         '200':
           description: Grant reinstated
           content:
@@ -545,8 +533,97 @@ paths:
           description: >-
             The reservation was confirmed. Releasing settled money would re-open a ceiling the
             delegate has already spent through.
+  /api/v1/delegations/approval-groups:
+    get:
+      tags: [Approval groups]
+      summary: List approval groups owned by the authenticated party
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      responses:
+        '200':
+          description: Versioned groups, including inactive history
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalGroupResponse' } }
+    post:
+      tags: [Approval groups]
+      summary: Create an SCA-bound approval group
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '201': { description: Approval group created }
+        '400': { description: Invalid roster or SCA }
+        '403': { description: Caller is not the group owner }
+  /api/v1/delegations/approval-groups/sca-reference:
+    post:
+      tags: [Approval groups]
+      summary: Calculate the canonical reference that the management SCA must sign
+      parameters: [{ $ref: '#/components/parameters/CustomerPartyId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
+      responses:
+        '200':
+          description: Opaque, versioned SCA reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceResponse' }
+        '400': { description: Invalid create/revise shape }
+  /api/v1/delegations/approval-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/CustomerPartyId'
+    get:
+      tags: [Approval groups]
+      summary: Get an owned approval group
+      responses:
+        '200':
+          description: Approval group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalGroupResponse' }
+        '404': { description: Missing or owned by another party }
+    put:
+      tags: [Approval groups]
+      summary: Replace a roster under optimistic revision and a fresh SCA challenge
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '200': { description: Approval group revised }
+        '400': { description: Invalid roster or SCA }
+        '409': { description: expectedRevision is stale }
+    delete:
+      tags: [Approval groups]
+      summary: Deactivate the group for future operation snapshots
+      parameters: [{ $ref: '#/components/parameters/CustomerActorPartyId' }]
+      responses:
+        '200': { description: Approval group deactivated }
 components:
   parameters:
+    CustomerActorPartyId:
+      name: X-Customer-Actor-Party-Id
+      in: header
+      required: false
+      description: |
+        The natural person authenticated by customer-edge. Required together with
+        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
+        individual profile; for an organization profile it differs and the service verifies the
+        actor's active PartyMandate before accepting the request. Never supplied by the app.
+      schema: { type: string, format: uuid }
     ApprovalId:
       name: approvalId
       in: path
@@ -564,16 +641,6 @@ components:
 
         Absent on an operator/back-office call, which is gated by role and OPA instead.
       schema: { type: string, format: uuid }
-    CustomerActorPartyId:
-      name: X-Customer-Actor-Party-Id
-      in: header
-      required: false
-      description: |
-        The natural person authenticated by customer-edge. Required together with
-        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
-        individual profile; for an organization profile it differs and the service verifies the
-        actor's active PartyMandate before accepting the request. Never supplied by the app.
-      schema: { type: string, format: uuid }
     DelegationId:
       name: id
       in: path
@@ -590,57 +657,29 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
-    ApprovalGroupScaReferenceRequest:
+    DelegationPortfolioRequest:
       type: object
-      required: [name, members, threshold]
+      required: [ownerPartyId, name, accountIds]
       properties:
-        groupId: { type: string, format: uuid, description: Present only for revision }
-        expectedRevision: { type: integer, format: int64, minimum: 1, description: Required with groupId }
-        name: { type: string, minLength: 1, maxLength: 120 }
-        members:
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        accountIds:
           type: array
           minItems: 1
-          maxItems: 50
+          maxItems: 500
           uniqueItems: true
           items: { type: string, format: uuid }
-        threshold: { type: integer, minimum: 1 }
-    ApprovalGroupScaReferenceResponse:
+    DelegationPortfolioResponse:
       type: object
-      required: [reference]
-      properties:
-        reference:
-          type: string
-          pattern: '^approval-group:v1:[0-9a-f]{64}$'
-          description: Pass as dynamicLinkingData.reference when initiating the SCA challenge.
-    ApprovalGroupWriteRequest:
-      type: object
-      required: [name, members, threshold, scaSessionId]
-      properties:
-        name: { type: string, minLength: 1, maxLength: 120 }
-        members:
-          type: array
-          minItems: 1
-          maxItems: 50
-          uniqueItems: true
-          items: { type: string, format: uuid }
-        threshold: { type: integer, minimum: 1 }
-        scaSessionId: { type: string, format: uuid }
-        expectedRevision:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Required on PUT; prevents a stale client from overwriting a newer roster.
-    ApprovalGroupResponse:
-      type: object
-      required: [id, ownerPartyId, name, members, threshold, revision, active, createdAt, updatedAt]
+      required: [id, ownerPartyId, name, accountIds, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         ownerPartyId: { type: string, format: uuid }
         name: { type: string }
-        members: { type: array, items: { type: string, format: uuid } }
-        threshold: { type: integer }
-        revision: { type: integer, format: int64 }
-        active: { type: boolean }
+        accountIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     DelegationRolePresetRequest:
@@ -732,7 +771,12 @@ components:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
             As dailyLimit, over the Europe/Prague calendar month.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
         note: { type: string }
@@ -761,7 +805,12 @@ components:
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
         dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
         monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
+            readable only for audit and do not authorize access.
         validTo: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
@@ -868,7 +917,12 @@ components:
           deprecated: true
           description: >-
             See dailyLimit. Not enforced; do not render it as a limit.
-        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        exposure:
+          $ref: '#/components/schemas/ExposureDto'
+          deprecated: true
+          description: >-
+            Historical audit metadata only. New non-null values are refused with 400
+            EXPOSURE_UNSUPPORTED and never authorize access.
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
         status:
@@ -947,3 +1001,56 @@ components:
         detail: { type: string }
         code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }
+    ApprovalGroupResponse:
+      type: object
+      required: [id, ownerPartyId, name, members, threshold, revision, active, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        name: { type: string }
+        members: { type: array, items: { type: string, format: uuid } }
+        threshold: { type: integer }
+        revision: { type: integer, format: int64 }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ApprovalGroupScaReferenceRequest:
+      type: object
+      required: [name, members, threshold]
+      properties:
+        groupId: { type: string, format: uuid, description: Present only for revision }
+        expectedRevision: { type: integer, format: int64, minimum: 1, description: Required with groupId }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+    ApprovalGroupScaReferenceResponse:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          pattern: '^approval-group:v1:[0-9a-f]{64}$'
+          description: Pass as dynamicLinkingData.reference when initiating the SCA challenge.
+    ApprovalGroupWriteRequest:
+      type: object
+      required: [name, members, threshold, scaSessionId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        threshold: { type: integer, minimum: 1 }
+        scaSessionId: { type: string, format: uuid }
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required on PUT; prevents a stale client from overwriting a newer roster.

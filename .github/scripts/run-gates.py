@@ -83,6 +83,38 @@ VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
 
+# Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
+# under `bash -euo pipefail` with `unbound variable`, which is the same failure the PR_DIFF_BASE
+# guard below already exists to dress properly — see its comment: "refusing to run vacuously" says
+# what went wrong, `unbound variable` does not. Measured 2026-09-12: 3 of 220 gates read one bare,
+# and locally they produced a red that reads exactly like a finding. `security-checklist-money-path`
+# walked GITHUB_REPOSITORY -> PR_NUMBER one crash at a time, and the 5 gates that looked like
+# "pre-existing red on main" in a local `--all` were all this.
+#
+# A hand-kept list of EXTERNAL FACTS (what the runner provides), not of coverage: a name missing
+# here leaves the old `unbound variable` crash, i.e. failing towards today's behaviour, never
+# towards a gate that silently passes. PR_DIFF_BASE is deliberately absent — it has its own
+# richer required/optional derivation below.
+CI_ONLY_ENV = (
+    "BASE_REF",
+    "GH_TOKEN",
+    "GITHUB_ACTOR",
+    "GITHUB_BASE_REF",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_EVENT_PATH",
+    "GITHUB_HEAD_REF",
+    "GITHUB_OUTPUT",
+    "GITHUB_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_RUN_ID",
+    "GITHUB_SERVER_URL",
+    "GITHUB_SHA",
+    "GITHUB_TOKEN",
+    "GITHUB_WORKSPACE",
+    "PR_BODY",
+    "PR_NUMBER",
+)
+
 
 # ---------------------------------------------------------------------------
 # Manifest
@@ -305,6 +337,14 @@ def load(root: pathlib.Path, path: str = MANIFEST):
             )
             sys.exit(2)
         g["needs_base"] = derived
+        # Same treatment for the other runner-only variables, DERIVED the same way so there is
+        # nothing to declare and nothing to drift: a bare `$NAME` is required, `${NAME:-}` supplies
+        # its own default and is not. No `when` restriction — unlike PR_DIFF_BASE these are set on
+        # push as well as on pull_request, so a required one is satisfiable under either event.
+        g["needs_env"] = sorted(
+            v for v in CI_ONLY_ENV
+            if re.search(r"\$\{?" + v + r"\b", run) and not re.search(r"\$\{" + v + r":[-=]", run)
+        )
         if derived == "required" and g["when"] != "pull_request":
             sys.stderr.write(
                 f"::error::gate {g['id']}: needs_base `required` with when `{g['when']}` can "
@@ -511,6 +551,19 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # supply their own default and are written to work without a base.
         r.status = "failed"
         r.output = "PR_DIFF_BASE is empty but this gate requires it — refusing to run vacuously\n"
+        return r
+    missing_env = [v for v in gate.get("needs_env", ()) if not os.environ.get(v)]
+    if missing_env:
+        # Say which variable and that the runner provides it. Without this the gate dies on
+        # `unbound variable` — same red, but it names a shell symptom instead of the cause, and
+        # reads like a finding to anyone running the manifest locally.
+        r.status = "failed"
+        r.output = (
+            f"{', '.join(missing_env)} {'is' if len(missing_env) == 1 else 'are'} empty but this "
+            f"gate requires {'it' if len(missing_env) == 1 else 'them'} — refusing to run "
+            f"vacuously. The Actions runner sets {'this' if len(missing_env) == 1 else 'these'}; "
+            f"locally, export {'it' if len(missing_env) == 1 else 'them'} to run this gate.\n"
+        )
         return r
 
     t0 = time.monotonic()
@@ -1245,6 +1298,36 @@ def self_test():
                 bad.append(
                     f"empty PR_DIFF_BASE + {decl}: failed for the wrong reason — expected "
                     f"the guard's message, got: {r.output.strip()[:120]}"
+                )
+
+        # The same guard for the other runner-only variables. Asserting the MESSAGE is the whole
+        # point here too: `bash -euo pipefail` already fails on a bare unset variable, so a status
+        # check alone passes against no guard at all. Known-positive (bare read, variable unset),
+        # known-negative in BOTH directions — the variable present, and the `${NAME:-}` form that
+        # supplies its own default and must run even when unset.
+        for body, env, want, want_text in (
+            ('run: "echo $GITHUB_REPOSITORY"', None, "failed", "GITHUB_REPOSITORY is empty"),
+            ('run: "echo $GITHUB_REPOSITORY"', "o/r", "ok", None),
+            ('run: "echo ${GITHUB_REPOSITORY:-}"', None, "ok", None),
+            ('run: "echo $PR_NUMBER $GITHUB_REPOSITORY"', None, "failed",
+             "GITHUB_REPOSITORY, PR_NUMBER are empty"),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+            )
+            os.environ.pop("GITHUB_REPOSITORY", None)
+            os.environ.pop("PR_NUMBER", None)
+            if env:
+                os.environ["GITHUB_REPOSITORY"] = env
+            g = load(tmp)[0]
+            r = execute(g, tmp, is_pr=True, timeout=5)
+            os.environ.pop("GITHUB_REPOSITORY", None)
+            if r.status != want:
+                bad.append(f"CI-only env {body} (env={env}): want {want}, got {r.status}")
+            if want_text and want_text not in r.output:
+                bad.append(
+                    f"CI-only env {body}: failed for the wrong reason — expected the guard's "
+                    f"message naming the variable, got: {r.output.strip()[:120]}"
                 )
 
         # --json end to end: a real file gets written and round-trips through json.load, and

@@ -218,14 +218,11 @@ components:
   schemas:
     InitiateScaRequest:
       type: object
-      required: [partyId, challengeType, purpose]
+      required: [partyId, purpose]
       properties:
         partyId:
           type: string
           format: uuid
-        challengeType:
-          type: string
-          enum: [OTP_SMS, OTP_EMAIL, TOTP, PUSH]
         purpose:
           type: string
           # The ScaPurpose enum as the service accepts it. PAYMENT_AUTHORIZATION / CONSENT /
@@ -235,16 +232,22 @@ components:
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
                  DELEGATION_APPROVAL_GROUP,
                  SAVINGS_WITHDRAW_APPROVAL]
-        contextData:
-          type: object
-
+        preferredMethod:
+          type: string
+        dynamicLinkingData:
+          type: string
+        redirectUrl:
+          type: string
+          nullable: true
     VerifyScaRequest:
       type: object
-      required: [code]
       properties:
-        code:
+        partyId:
           type: string
-
+          format: uuid
+        otp:
+          type: string
+          nullable: true
     ScaChallengeResponse:
       type: object
       properties:

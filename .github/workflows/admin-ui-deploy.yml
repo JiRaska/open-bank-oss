@@ -106,16 +106,16 @@ concurrency:
   # successful but belongs to an OLDER main SHA can therefore enter the shared queue, evict the
   # pending deploy for a newer push, and only then discover that it must skip. That exact race
   # cancelled the pending Test Intelligence deploy for 29dc20e2 in favour of a stale evidence
-  # refresh (#7211). Keep workflow-run events in a SHA-scoped queue; deploy-source independently
+  # refresh (#7211). Keep every source in a SHA-scoped queue; deploy-source independently
   # rejects a source SHA that has been superseded by build-relevant work before the privileged
-  # build. Push, dispatch and schedule retain one queue, so the newest operator/source-triggered
-  # deploy still wins normally. A waiting source remains eligible when main advanced solely through
+  # build. This also serializes a scheduled refresh with a workflow_run refresh for the same main
+  # tip. Without that boundary both build distinct immutable tags, update the same PR branch and
+  # invalidate its exact-head review and required checks (#9657). A waiting source remains eligible
+  # when main advanced solely through
   # this workflow's own image-pin commit; otherwise that harmless commit can starve the source that
   # produced it and leave newer UI code undeployed.
   group: >-
-    admin-ui-deploy-${{
-      github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'eligible'
-    }}
+    admin-ui-deploy-${{ github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -132,6 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       proceed: ${{ steps.source.outputs.proceed }}
     steps:
@@ -161,7 +162,21 @@ jobs:
             # ancestry window for the image-pin-only proof; a longer gap safely remains stale.
             git fetch --no-tags --depth=64 origin "$main_sha"
           fi
-          proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh "$source_sha" "$main_sha")"
+          # Automatic triggers for one SHA share the concurrency group above. Once the first
+          # admitted run has opened its deterministic deploy branch, every later automatic source
+          # is a duplicate and must stop before OIDC, ECR and the expensive image build. Manual
+          # dispatch is an explicit operator refresh and intentionally remains an override.
+          deploy_branch="chore/admin-ui-deploy-${source_sha}"
+          open_deploy_pr_exists=false
+          if git ls-remote --exit-code --heads origin "refs/heads/${deploy_branch}" >/dev/null 2>&1; then
+            # A closed-unmerged PR can leave its branch behind. Only an OPEN PR proves that an
+            # automatic build for this SHA is already on its way; a stale branch must not suppress
+            # recovery. `set -e` makes an API/rate-limit failure fail closed before privileged work.
+            open_deploy_pr_exists="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+              --head "$deploy_branch" --json number --jq 'length > 0')"
+          fi
+          proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh \
+            "$source_sha" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists")"
           echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
   build-push:
@@ -242,7 +257,7 @@ jobs:
         # Sets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN in env.
         # The role has ECR push + KMS sign permissions.
         # See "Stub AWS profile" step below for why a stub ~/.aws/config entry is also needed.
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1

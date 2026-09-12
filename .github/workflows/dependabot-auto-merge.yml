@@ -3,9 +3,8 @@
 # Policy: auto-merge PATCH Dependabot PRs (gradle, npm) once CI is green.
 # Everything else stays open for human review:
 #   - Minor + major bumps (any ecosystem) — minors regularly carry new transitive
-#     dependencies; the Gradle graph has no PR-time vuln gate (dependency-review
-#     doesn't parse Gradle and there is no gradle.lockfile for Trivy fs), so an
-#     auto-merged minor is an uninspected supply-chain entry point.
+#     dependencies and deserve semantic review even though dependency-submission
+#     plus dependency-review scan the submitted Gradle graph for known CVEs.
 #   - github-actions bumps (any size) — a version bump swaps the pinned commit SHA
 #     for NEW action code that then runs in CI with contents:write/id-token:write.
 #     A human must eyeball the diff of what will execute with those permissions.
@@ -29,12 +28,30 @@ name: Dependabot auto-merge
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    # NOT `synchronize` (#9031). GitHub's native auto-merge is a property of the PR, not of a
+    # commit: the `--auto` merge enabled once at `opened` survives every later push, including
+    # Dependabot's own rebases. So `synchronize` could only ever re-assert a setting already in
+    # place — while firing this workflow on every push to every open PR in the repository.
+    #
+    # Measured 2026-09-12 over a 0.32 h window of 300 workflow runs: this workflow ran 18 times
+    # and SKIPPED 18 of 18, every one of them triggered by a push to one of five non-Dependabot
+    # feature branches. A skipped job still costs a queued Actions run and its API calls, and the
+    # installation quota was exhausted that same morning — hard-failing `dependency-review` and
+    # the `CodeQL` SARIF upload across the open PRs with
+    # `API rate limit exceeded for installation`.
+    #
+    # `labeled` stays: a label is how a human re-opens the question for a PR this job already
+    # declined, and it fires rarely enough not to be part of the cost.
+    types: [opened, reopened, labeled]
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the auto-merge job below declares its own override for the write access it needs.
 permissions:
   contents: read
+
+concurrency:
+  group: dependabot-auto-merge-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   auto-merge:

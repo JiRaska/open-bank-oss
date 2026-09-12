@@ -28,14 +28,16 @@ surfaces in light and dark themes. The visual companion is `e2e/ui-primitives.sp
 
 ## Components and contracts
 
-Use `PageHeader`, `StatCard` and `StatusBadge` from `@/components/ui` today. `StatusBadge`
+Use `PageHeader`, `StatCard`, `StatusBadge` and `EmptyState` from `@/components/ui` today. `StatusBadge`
 maps `status -> Tone -> CSS class`; unknown values are neutral, never green. A domain may pass an
 explicit `tone` only when the same word has a documented different meaning (for example PID
-`REVOKED`). Components must accept caller-supplied Czech and English copy, expose native focus and
-disabled/loading state, and keep icons decorative unless they are the sole accessible label.
+`REVOKED`). `EmptyState` owns hierarchy and announcement semantics while the caller owns truthful
+domain copy and any recovery action. Components must accept caller-supplied Czech and English copy,
+expose native focus and disabled/loading state, and keep icons decorative unless they are the sole
+accessible label.
 
 The next primitive tranches, derived from repeated live page shapes, are: Button/FormField,
-Tabs, Pagination/FilterBar, dense Table, Card, modal/drawer, EmptyState and tooltip. Each needs
+Tabs, Pagination/FilterBar, dense Table, Card, modal/drawer and tooltip. Each needs
 default, hover, focus-visible, disabled, loading, error and empty-state evidence before adoption.
 
 ## Mechanical migration map

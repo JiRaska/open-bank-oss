@@ -7,6 +7,12 @@
 #
 # Case 1 is the negative case (absence MUST page). Cases 2 and 3 are the controls that stop it
 # passing vacuously: a rule that fired unconditionally would pass case 1 and fail both.
+#
+# Cases 4 and 5 hold the SPLIT between the two alerts, in both directions. The unscraped set is
+# identical for both; only `kube_namespace_created` separates them, so each case asserts the one
+# alert that must fire AND the sibling that must not. Drop the kube_namespace_created series and
+# case 1 goes red -- which is the point: it is the only thing distinguishing a deployed database
+# nobody scrapes from a namespace that was never created.
 
 rule_files:
   - prometheus-rules-db.yaml
@@ -15,7 +21,8 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
-  # 1. NEGATIVE CASE: accounts/accounts-db has no scrape target at all. Absence must page.
+  # 1. NEGATIVE CASE: accounts/accounts-db has no scrape target at all, and its namespace
+  #    EXISTS. Absence must page as UNSCRAPED.
   - interval: 1m
     name: "a declared cluster with no scrape target is a finding, not a silence"
     input_series:
@@ -38,6 +45,8 @@ tests:
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
@@ -143,6 +152,104 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="accounts"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 30m
         alertname: PostgresClusterUnscraped
@@ -153,8 +260,13 @@ tests:
               cluster: accounts-db
               origin: manifest
             exp_annotations:
-              summary: "CNPG cluster accounts/accounts-db is declared but NOT scraped"
-              description: "This cluster is declared in gitops and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+              summary: "CNPG cluster accounts/accounts-db is deployed but NOT scraped"
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+      # MIRROR: the namespace exists, so the not-deployed half must stay silent. Both
+      # directions, or the split is untested.
+      - eval_time: 40m
+        alertname: PostgresClusterDeclaredNotDeployed
+        exp_alerts: []
       # The threshold alerts a human would expect to catch this: all silent. That
       # silence IS the defect -- it is why the coverage alert has to exist.
       - eval_time: 40m
@@ -170,7 +282,7 @@ tests:
         alertname: PostgresInstanceDown
         exp_alerts: []
 
-  # 2. CONTROL: with every cluster scraped, the alert must be SILENT.
+  # 2. CONTROL: with every cluster scraped, BOTH alerts must be SILENT.
   - interval: 1m
     name: "a fully scraped fleet reports nothing unscraped"
     input_series:
@@ -196,6 +308,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
@@ -300,9 +414,110 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="accounts"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 30m
         alertname: PostgresClusterUnscraped
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: PostgresClusterDeclaredNotDeployed
         exp_alerts: []
 
   # 3. CONTROL: DOWN is not UNSCRAPED. `up == 0` means the target EXISTS and the
@@ -331,6 +546,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
@@ -435,6 +652,104 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="accounts"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
       - series: 'up{container="postgres",namespace="accounts",pod="accounts-db-1",job="accounts-db"}'
         values: "0+0x40"
     alert_rule_test:
@@ -453,3 +768,499 @@ tests:
             exp_annotations:
               summary: "Postgres accounts/accounts-db-1 is down"
               description: "Prometheus cannot scrape Postgres on accounts-db-1 for >5m — the instance is down, crashlooping, or unreachable. Check `kubectl get cluster -n accounts`: a CNPG cluster parked in phase `Not enough disk space` will NOT self-heal or fail over, by design — it waits for the PVC to be enlarged."
+
+  # 4. THE SPLIT: accounts/accounts-db is unscraped exactly as in case 1, and this time its
+  #    NAMESPACE does not exist -- no kube_namespace_created{namespace="accounts"}.
+  #    Nothing is deployed, so the PodMonitor remedy would name a Cluster object that
+  #    was never created. It must page as DECLARED-NOT-DEPLOYED and NOT as unscraped.
+  - interval: 1m
+    name: "a declared cluster whose namespace does not exist is not a monitoring gap"
+    input_series:
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PostgresClusterDeclaredNotDeployed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: accounts
+              cluster: accounts-db
+              origin: manifest
+            exp_annotations:
+              summary: "CNPG cluster accounts/accounts-db is declared in gitops but its namespace does not exist"
+              description: "This cluster is declared in gitops and its NAMESPACE does not exist in the cluster, so nothing was ever deployed for it to scrape. Do NOT enable a PodMonitor -- there is no Cluster object to set it on. The subject is the Argo Application that should have created the namespace: check `kubectl get application -A` for one OutOfSync/Missing, or with no Application at all. Either deploy it, or delete the declaration so the expected set describes the fleet that exists rather than one that was planned."
+      - eval_time: 40m
+        alertname: PostgresClusterUnscraped
+        exp_alerts: []
+
+  # 5. BOTH DIRECTIONS AT ONCE. Two clusters, identically unscraped, in namespaces
+  #    that differ only in existence. The unscraped set is the same for both alerts,
+  #    so this is the case that fails if the kube_namespace_created join is dropped
+  #    from either expression -- one alert would then claim both clusters.
+  - interval: 1m
+    name: "the unscraped set partitions by namespace existence, with nothing lost"
+    input_series:
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PostgresClusterUnscraped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: ai-platform
+              cluster: langfuse-db
+              origin: manifest
+            exp_annotations:
+              summary: "CNPG cluster ai-platform/langfuse-db is deployed but NOT scraped"
+              description: "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, so every Postgres alert -- PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and even PostgresInstanceDown -- is structurally incapable of firing for it. Its backup state is unknown, not healthy. Set spec.monitoring.enablePodMonitor: true on the Cluster, or declare it in NOT_SCRAPED in .github/scripts/check-cnpg-scrape-coverage.py with a reason."
+      - eval_time: 40m
+        alertname: PostgresClusterDeclaredNotDeployed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: accounts
+              cluster: accounts-db
+              origin: manifest
+            exp_annotations:
+              summary: "CNPG cluster accounts/accounts-db is declared in gitops but its namespace does not exist"
+              description: "This cluster is declared in gitops and its NAMESPACE does not exist in the cluster, so nothing was ever deployed for it to scrape. Do NOT enable a PodMonitor -- there is no Cluster object to set it on. The subject is the Argo Application that should have created the namespace: check `kubectl get application -A` for one OutOfSync/Missing, or with no Application at all. Either deploy it, or delete the declaration so the expected set describes the fleet that exists rather than one that was planned."

@@ -67,6 +67,7 @@ import {
   Waypoints,
   Workflow,
   Zap,
+  Building2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -105,6 +106,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
   { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
+  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
 ]
 
@@ -114,7 +116,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view' },
   { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view' },
   { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view' },
-  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },
+  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view' },
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view' },
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },

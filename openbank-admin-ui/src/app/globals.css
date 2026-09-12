@@ -116,6 +116,28 @@
   --info-border:          #93c5fd;
   --info-text:            #1d4ed8;
 
+  /* Service topology palette. Domain meaning lives here so the SVG remains
+   * readable in both themes without embedding presentation colours in data. */
+  --map-core: #2563eb;
+  --map-payment: #7c3aed;
+  --map-compliance: #dc2626;
+  --map-identity: #059669;
+  --map-psd2: #d97706;
+  --map-platform: #64748b;
+  --map-cards: #db2777;
+  --map-infrastructure: #64748b;
+  --map-external: #0284c7;
+  --map-edge-sync: #94a3b8;
+  --map-edge-sync-active: #475569;
+  --map-edge-async: #c4b5fd;
+  --map-edge-async-active: #8b5cf6;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
+
   /* ── Shadows ── */
   --shadow-xs:  0 1px 2px rgba(15,23,42,.03);
   --shadow-sm:  0 1px 3px rgba(15,23,42,.04), 0 1px 2px rgba(15,23,42,.02);
@@ -205,6 +227,25 @@
   --info-bg: #172554;
   --info-border: #1d4ed8;
   --info-text: #bfdbfe;
+  --map-core: #60a5fa;
+  --map-payment: #c4b5fd;
+  --map-compliance: #f87171;
+  --map-identity: #34d399;
+  --map-psd2: #fbbf24;
+  --map-platform: #94a3b8;
+  --map-cards: #f472b6;
+  --map-infrastructure: #94a3b8;
+  --map-external: #38bdf8;
+  --map-edge-sync: #64748b;
+  --map-edge-sync-active: #cbd5e1;
+  --map-edge-async: #8b5cf6;
+  --map-edge-async-active: #c4b5fd;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
   --sidebar-bg: #090e17;
   --sidebar-hover-bg: rgba(255,255,255,0.08);
   --sidebar-active-bg: rgba(165,180,252,0.18);
@@ -1153,11 +1194,53 @@ main {
   background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(248,250,252,.9));
 }
 
+.ui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: var(--space-8);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ui-empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-lg);
+  background: var(--accent-light);
+  color: var(--accent-text);
+}
+.ui-empty-state-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 750;
+  line-height: 1.4;
+}
+.ui-empty-state-description {
+  max-width: 42rem;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.ui-empty-state-action {
+  margin-top: var(--space-4);
+}
+
 @media (max-width: 840px) {
   .page-header { align-items: stretch; padding: 18px; }
   .page-header > :last-child:not(:only-child) { align-self: flex-start; }
   .table,
   .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .incident-filters { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 560px) {

@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a1bc63a76674a4e9"
+        openbank.tech/policy-checksum: "c4f52aeebdd7f913"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -63,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-8353e931
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-58e3bbd9
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own
@@ -124,10 +124,6 @@ spec:
               value: http://sca-service.sca.svc:8110
             - name: PID_SERVICE_URL
               value: http://pid-service.pid.svc:8105
-            # Principal type and active ADR-0284 PartyMandate. This is the authoritative
-            # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
-            - name: PARTY_SERVICE_URL
-              value: https://party-service.party.svc:8443
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit
@@ -186,9 +182,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: party-tls-trust
-              mountPath: /mnt/party-tls
-              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka-keystore
               readOnly: true
@@ -282,10 +275,6 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
-            optional: false
-        - name: party-tls-trust
-          secret:
-            secretName: delegation-internal-tls
             optional: false
         - name: opa-tmp
           emptyDir: {}
