@@ -30,6 +30,6 @@ describe('admin UI semantic colour migration', () => {
   it('does not add raw hexadecimal colours outside the token stylesheet', () => {
     // Baseline captured after migrating approval identity badges to shared semantic tones.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(1782)
+    expect(rawColourCount()).toBeLessThanOrEqual(1599)
   })
 })

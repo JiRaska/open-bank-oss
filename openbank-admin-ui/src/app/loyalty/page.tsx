@@ -14,7 +14,7 @@
 // produces a reviewable draft. The editable surface is deliberately empty, and that is the lesson,
 // not a gap.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight, Bot, CircleAlert, Coins, FileText, Gift, Landmark, Leaf, Scale, Search, ShieldCheck, Sparkles,
@@ -29,11 +29,13 @@ import {
 } from '@/lib/loyalty/lipaContent'
 import type { LoyaltyCatalogueResponse, LoyaltyState } from '@/app/api/loyalty/route'
 import type { LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
+import { parseLoyaltyCatalogue, parseLoyaltyParty } from '@/lib/loyalty/evidenceContract'
 
 const TABS = ['principles', 'catalogues', 'party', 'finance', 'ai'] as const
 type Tab = (typeof TABS)[number]
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const REQUEST_TIMEOUT_MS = 10_000
 
 /** A service state that is not `ok` becomes the shared unavailable panel, never a blank table. */
 function unavailableKind(state: LoyaltyState): UnavailableKind | null {
@@ -52,6 +54,7 @@ export default function LoyaltyPage() {
   const [party, setParty] = useState<LoyaltyPartyResponse | null>(null)
   const [partyLoading, setPartyLoading] = useState(false)
   const [partyError, setPartyError] = useState<string | null>(null)
+  const partyRequestId = useRef(0)
 
   const say = useCallback((text: Bilingual) => t(text.cs, text.en), [t])
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -59,8 +62,11 @@ export default function LoyaltyPage() {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/loyalty', { cache: 'no-store' })
-      .then(r => r.json() as Promise<LoyaltyCatalogueResponse>)
+    fetch('/api/loyalty', { cache: 'no-store', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      .then(async r => {
+        if (!r.ok) throw new Error('Loyalty catalogue request failed')
+        return parseLoyaltyCatalogue(await r.json() as unknown)
+      })
       .then(body => { if (!cancelled) setCatalogue(body) })
       .catch(() => { if (!cancelled) setCatalogue({ state: 'unreachable', benefits: [], earnSources: [], provisioning: null }) })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -68,21 +74,31 @@ export default function LoyaltyPage() {
   }, [])
 
   const lookUpParty = useCallback(async () => {
+    const requestId = ++partyRequestId.current
     const id = partyId.trim()
     if (!UUID_RE.test(id)) {
       setPartyError(t('Zadejte platné UUID klienta.', 'Enter a valid customer UUID.'))
       setParty(null)
+      setPartyLoading(false)
       return
     }
     setPartyError(null)
+    setParty(null)
     setPartyLoading(true)
     try {
-      const response = await fetch(`/api/loyalty/party/${id}`, { cache: 'no-store' })
-      setParty(await response.json() as LoyaltyPartyResponse)
+      const response = await fetch(`/api/loyalty/party/${id}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
+      if (!response.ok) throw new Error('Loyalty customer request failed')
+      const evidence = parseLoyaltyParty(await response.json() as unknown, id)
+      if (partyRequestId.current === requestId) setParty(evidence)
     } catch {
-      setParty({ state: 'unreachable', partyId: id, balance: 0, earnedThisYear: 0, earnedTotal: 0, nextExpiry: null, history: [] })
+      if (partyRequestId.current === requestId) {
+        setParty({ state: 'unreachable', partyId: id, balance: 0, earnedThisYear: 0, earnedTotal: 0, nextExpiry: null, history: [] })
+      }
     } finally {
-      setPartyLoading(false)
+      if (partyRequestId.current === requestId) setPartyLoading(false)
     }
   }, [partyId, t])
 
@@ -315,13 +331,15 @@ export default function LoyaltyPage() {
                   id="lipa-party"
                   value={partyId}
                   onChange={e => setPartyId(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') void lookUpParty() }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !partyLoading) void lookUpParty() }}
                   placeholder={t('UUID klienta', 'Customer UUID')}
                   className="w-96 max-w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => void lookUpParty()}
+                  disabled={partyLoading}
+                  aria-busy={partyLoading}
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700"
                 >
                   <Search className="h-4 w-4" />

@@ -9,6 +9,7 @@ import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
@@ -59,10 +60,22 @@ class AuthorizeInterceptorTest {
                 every { get() } returns this@AuthorizeInterceptorTest.registry
             }
         }
+        // The same real registry, so the security counter is asserted as a scrape would see it.
+        val securityTelemetryBean = SecurityTelemetry().apply {
+            registryInstance = mockk {
+                every { isResolvable } returns true
+                every { get() } returns this@AuthorizeInterceptorTest.registry
+            }
+            serviceName = "openbank-test-service"
+        }
         interceptor = AuthorizeInterceptor().apply {
             metrics = mockk {
                 every { isResolvable } returns true
                 every { get() } returns domainMetrics
+            }
+            securityTelemetry = mockk {
+                every { isResolvable } returns true
+                every { get() } returns securityTelemetryBean
             }
             // securityContext / identity are now Instance<> (lazy) so libs doesn't force a
             // SecurityIdentity bean on non-security services — mirror the pdp wrapping.
@@ -369,6 +382,100 @@ class AuthorizeInterceptorTest {
 
         assertThat(counter("openbank.authz.decisions", "outcome", "pdp_unconfigured"))
             .isEqualTo(1.0)
+    }
+
+    // ── openbank.security.authz.decisions (ADR-0279 WS2 security signal) ────
+    //
+    // Every one of these fails on the interceptor as it stood between #8554 and this change:
+    // SecurityTelemetry existed, its metric-name constant existed, the alert naming that constant
+    // existed, and NOTHING CALLED IT — so the counter was never registered in any registry and
+    // AuthzDenyRatioElevated watched an empty vector. `check-alert-metric-emitted` was green
+    // throughout, because it asks whether the name appears in Kotlin, not whether anything runs it.
+    // A test that only asserted "the metric name is a constant" would have been green too; these
+    // assert the counter's VALUE after a real interception, which is the thing that was missing.
+
+    @Test
+    fun `an enforced deny reaches the security counter, tagged with its reason`() {
+        every { identity.roles } returns emptySet()
+        wirePdp(denyingPdp())
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(ForbiddenException::class.java)
+
+        assertThat(
+            counter(
+                SecurityTelemetry.AUTHZ_DECISIONS,
+                "service", "openbank-test-service", "decision", "deny",
+                "reason", "insufficient role", "enforced", "true",
+            ),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an allow reaches the security counter too, so the alert has a denominator`() {
+        // The alert is a RATIO. With allows uncounted the denominator would be the deny count
+        // itself, every deny would read as a 100% deny share, and the first legitimate refusal
+        // anywhere would page.
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        wirePdp(allowingPdp())
+
+        interceptor.authorize(makeCtx(annotatedMethod))
+
+        assertThat(
+            counter(
+                SecurityTelemetry.AUTHZ_DECISIONS,
+                "decision",
+                "allow",
+                "reason",
+                "ok",
+                "enforced",
+                "true",
+            ),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an advisory deny is tagged enforced=false, so it cannot page`() {
+        interceptor.enforce = false
+        every { identity.roles } returns emptySet()
+        wirePdp(denyingPdp())
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+
+        assertThat(counter(SecurityTelemetry.AUTHZ_DECISIONS, "decision", "deny", "enforced", "false"))
+            .isEqualTo(1.0)
+        // The series the alert actually reads must stay empty for an advisory service.
+        assertThat(counter(SecurityTelemetry.AUTHZ_DECISIONS, "decision", "deny", "enforced", "true"))
+            .isZero()
+    }
+
+    @Test
+    fun `a missing PDP is NOT a deny on the security counter`() {
+        // A service with no PolicyDecisionPoint is misconfigured, not under attack. Folding this
+        // into decision=deny would give it a 100% deny ratio and make AuthzDenyRatioElevated
+        // report enumeration against a deployment mistake — a live case when this was written
+        // (product-catalog's catalog.read / catalog.list on the sandbox).
+        every { identity.roles } returns emptySet()
+        interceptor.pdp = mockk { every { isResolvable } returns false }
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+
+        // The rollout signal still records it (asserted above); the security signal must not.
+        assertThat(counter(SecurityTelemetry.AUTHZ_DECISIONS, "decision", "deny")).isZero()
+        assertThat(counter(SecurityTelemetry.AUTHZ_DECISIONS, "decision", "allow")).isZero()
+    }
+
+    @Test
+    fun `a service without SecurityTelemetry resolvable still serves the request`() {
+        // The Instance<> guard: libs ships this bean, but the interceptor must not depend on it
+        // resolving -- an unresolvable telemetry bean is a lost metric, never a failed request.
+        interceptor.securityTelemetry = mockk { every { isResolvable } returns false }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        wirePdp(allowingPdp())
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+        assertThat(counter(SecurityTelemetry.AUTHZ_DECISIONS, "decision", "allow")).isZero()
     }
 
     @Test

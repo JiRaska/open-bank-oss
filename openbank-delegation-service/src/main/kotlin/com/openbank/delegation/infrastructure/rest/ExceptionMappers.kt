@@ -14,6 +14,9 @@ import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalNo
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
+import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
+import com.openbank.delegation.application.usecase.DelegationPortfolioNotFound
+import com.openbank.delegation.application.usecase.DelegationPortfolioOwnershipUnavailable
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
@@ -69,6 +72,31 @@ class DelegationRolePresetNotFoundMapper : ExceptionMapper<DelegationRolePresetN
     override fun toResponse(exception: DelegationRolePresetNotFound): Response =
         Response.status(Response.Status.NOT_FOUND)
             .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioNotFoundMapper : ExceptionMapper<DelegationPortfolioNotFound> {
+    override fun toResponse(exception: DelegationPortfolioNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioAccessDeniedMapper : ExceptionMapper<DelegationPortfolioAccessDenied> {
+    override fun toResponse(exception: DelegationPortfolioAccessDenied): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioOwnershipUnavailableMapper : ExceptionMapper<DelegationPortfolioOwnershipUnavailable> {
+    override fun toResponse(exception: DelegationPortfolioOwnershipUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message))
             .build()
 }
 
@@ -134,7 +162,8 @@ class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCaller
  * 400, not 422: the field is not merely unacceptable in this instance, it is not a field this
  * version of the API supports at all — no value of it would be accepted, so there is nothing for
  * the caller to retry with different content. Carries a machine-readable `code` so a client can
- * distinguish "you sent a ceiling we do not enforce" from every other 400 on this route.
+ * distinguish an unsupported constraint (including an unenforceable exposure request) from every
+ * other 400 on this route.
  */
 @Provider
 class DelegationUnsupportedConstraintExceptionMapper : ExceptionMapper<DelegationUnsupportedConstraintException> {

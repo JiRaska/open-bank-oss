@@ -26,6 +26,7 @@ import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
@@ -229,6 +230,43 @@ class DelegationServiceTest {
 
         assertThatThrownBy { runBlocking { service.preview(previewCommand()) } }
             .isInstanceOf(DelegationResourceOwnershipException::class.java)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `legacy exposure offer cannot be accepted or spend SCA`() {
+        val legacy = offeredGrant().copy(
+            resourceType = DelegationResourceType.DOCUMENT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.OBJECT_READ),
+            exposure = Exposure(maxViews = 1),
+        )
+        coEvery { repository.findById(legacy.id) } returns legacy
+
+        assertThatThrownBy {
+            runBlocking { service.accept(legacy.id, grantee, UUID.randomUUID(), grantee) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .extracting("code")
+            .isEqualTo(DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer refuses exposure before ownership eligibility or SCA`() {
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(exposure = Exposure(maxViews = 1))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .extracting("code")
+            .isEqualTo(DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED)
+
+        coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
+        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
+        coVerify(exactly = 0) { scaClient.getChallenge(any()) }
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
@@ -671,6 +709,42 @@ class DelegationServiceTest {
         )
         assertThat(denied).isInstanceOf(DelegationCheckResult.Denied::class.java)
     }
+
+    @Test
+    fun `check denies a legacy active grant carrying exposure while allowing an unconstrained duplicate`(): Unit =
+        runBlocking {
+            val documentId = UUID.randomUUID()
+            val legacy = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                    exposure = Exposure(maxViews = 1),
+                )
+                .accept(UUID.randomUUID(), now)
+            val safe = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                )
+                .accept(UUID.randomUUID(), now)
+            coEvery {
+                repository.findActiveByGranteeAndResource(grantee, DelegationResourceType.DOCUMENT, documentId)
+            } returns listOf(legacy, safe)
+
+            val result = service.check(
+                CheckDelegationCommand(
+                    grantee,
+                    DelegationResourceType.DOCUMENT,
+                    documentId,
+                    DelegationCapability.OBJECT_READ,
+                ),
+            )
+
+            assertThat(result).isInstanceOf(DelegationCheckResult.Allowed::class.java)
+            assertThat((result as DelegationCheckResult.Allowed).grant.id).isEqualTo(safe.id)
+        }
 
     @Test
     fun `check denies when the grant exists but is not active`(): Unit = runBlocking {

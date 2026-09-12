@@ -160,6 +160,9 @@ spec:
             - name: scripts
               configMap:
                 name: langfuse-retention-sweep
-                defaultMode: 0o555
+                # 0555 and not 0o555: this is parsed by YAML 1.1 (Kubernetes, SnakeYAML, Trivy's
+                # scanner), which has no `0o` prefix — it reads that as the STRING "0o555" against
+                # an int32 field. The seven sibling manifests in this tree all spell it 0555.
+                defaultMode: 0555
             - name: home
               emptyDir: {}
