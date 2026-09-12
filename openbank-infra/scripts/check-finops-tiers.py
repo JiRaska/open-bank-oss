@@ -75,6 +75,10 @@ def parse_money_path_services(text: str) -> set[str]:
     return out
 
 
+# rules.yaml spells "this blocks" two ways; both are accepted and both are enforcing.
+BLOCKING = frozenset({"enforce", "block"})
+
+
 def parse_finops_tiers(text: str) -> tuple[set[str], dict[str, str], str]:
     """Return (tier_names, declared{service: tier}, enforced)."""
     block = _top_level_block(text, "finops_tiers")
@@ -119,14 +123,23 @@ def service_dirs() -> set[str]:
     }
 
 
+def count_subjects(declared, money_path_services) -> int:
+    """How many services this check actually reasons about.
+
+    Union, not sum: a service that is both explicitly declared and money-path is one subject.
+    Extracted so the self-test drives the SHIPPED counter rather than a copy of it.
+    """
+    return len(set(declared) | set(money_path_services))
+
+
 def evaluate() -> tuple[list[str], list[str]]:
     """Return (errors, info). Kept for callers that do not care which kind a finding is."""
-    config, policy, info = evaluate_split()
+    config, policy, info, _ = evaluate_split()
     return config + policy, info
 
 
-def evaluate_split() -> tuple[list[str], list[str], list[str]]:
-    """Return (config_errors, policy_findings, info).
+def evaluate_split() -> tuple[list[str], list[str], list[str], int]:
+    """Return (config_errors, policy_findings, info, declared_subject_count).
 
     The split is the point. `finops_tiers.enforced: advisory` is a statement about the DRIFT
     gate — declared-versus-observed, which needs the classifier that has not shipped. It was
@@ -160,12 +173,17 @@ def evaluate_split() -> tuple[list[str], list[str], list[str]]:
                 f"service requires an ADR-0030 threat model + 2 approvals — it must not be set here."
             )
 
-    if enforced not in ("advisory", "block"):
-        config.append(f"finops_tiers.enforced is '{enforced or '(missing)'}' — expected advisory|block.")
+    # `enforce` and `block` both mean "this blocks". Only `enforce` is the fleet spelling —
+    # 15 rules use it against 3 for `block` — and check-advisory-gate-registration.py demands
+    # it, so refusing it here made the two governance gates contradict each other.
+    if enforced not in BLOCKING | {"advisory"}:
+        config.append(
+            f"finops_tiers.enforced is '{enforced or '(missing)'}' — expected advisory|enforce|block."
+        )
 
     # money-path inherits T0 via the baseline; union (not sum) so a service that is
     # both explicitly declared and money-path is counted once.
-    classified = len(set(declared) | (money_path & services))
+    classified = count_subjects(declared, money_path & services)
     total = len(services)
     info.append(
         f"tier coverage: {classified}/{total} services classified "
@@ -174,7 +192,11 @@ def evaluate_split() -> tuple[list[str], list[str], list[str]]:
     )
     info.append(f"declared: {declared or '{}'}")
     info.append(f"gate enforced: {enforced}")
-    return config, policy, info
+    # The FLOORED subject count is the DECLARED side, not the union: 23 of the 26 union members
+    # come from money_path_services, which `journey-money-path-accountability` already floors at
+    # 20. A union floor is therefore green straight through a `declared: {}` wipe — the exact
+    # collapse this gate was written about. Floor the half nothing else watches.
+    return config, policy, info, len(declared)
 
 
 EXIT_OK = 0
@@ -206,7 +228,7 @@ def self_test() -> int:
             f.write_text(yaml_text, encoding="utf-8")
             globals()["RULES"] = f
             try:
-                config, policy, _ = evaluate_split()
+                config, policy, _, _ = evaluate_split()
             finally:
                 globals()["RULES"] = original
         ok = bool(config) == want_config and bool(policy) == want_policy
@@ -252,6 +274,12 @@ def self_test() -> int:
         enforce=False, want_config=True, want_policy=False)
     run("an invalid enforced value is a config error", doc(f"    {svc}: T0", enforced="maybe"),
         enforce=False, want_config=True, want_policy=False)
+    # …and both spellings of "this blocks" are VALID, which is the half that regressed: the
+    # validator knew only advisory|block while rules.yaml and check-advisory-gate-registration.py
+    # use `enforce`, so graduating the rule made this script call the graduation a config bug.
+    for spelling in sorted(BLOCKING):
+        run(f"`enforced: {spelling}` is a valid declaration", doc(f"    {svc}: T0", enforced=spelling),
+            enforce=False, want_config=False, want_policy=False)
 
     # must be a POLICY finding — blocking only when enforcing
     run("a money-path service below T0 is a policy finding", doc(f"    {svc}: T1"),
@@ -259,13 +287,71 @@ def self_test() -> int:
     run("…and the same input blocks under --enforce", doc(f"    {svc}: T1"),
         enforce=True, want_config=False, want_policy=True)
 
+    # ── the SUBJECT COUNT is a second, independent output, and it fails differently ──────────
+    #
+    # Everything above falsifies the FINDINGS. The count is what `gates.yaml: min_subjects`
+    # floors, and it can collapse while every case above still passes — a check reasoning about
+    # zero services reports no findings, which reads as health. Measured 2026-09-05: 3 of 68
+    # services carry an explicit tier, and before #9678 the script exited 0 whether that was 3
+    # or 0. So drive count_subjects() over fixtures with a known answer, the empty one included.
+    # ── does a blocking DECLARATION actually block? ─────────────────────────────────────────
+    #
+    # Distinct from the cases above, which all drive the --enforce FLAG. In CI there is no flag:
+    # the rules.yaml value is the only thing that decides, and it reaches the decision as a
+    # rendered info line. A run() case cannot see that, so probe the derivation itself — with an
+    # advisory control in the same loop, or the assertion cannot tell enforcing from always-true.
+    for spelling, want in [("advisory", False), ("enforce", True), ("block", True)]:
+        got = any(line.removeprefix("gate enforced: ") in BLOCKING
+                  for line in [f"gate enforced: {spelling}"])
+        ok = got == want
+        print(f"  [{'ok ' if ok else 'FAIL'}] `enforced: {spelling}` is enforcing={want}: got {got}")
+        if not ok:
+            failures.append(f"enforcing derivation for {spelling}")
+
+    count_cases = [
+        ("three declared, none money-path", {"a": "T2", "b": "T1", "c": "T0"}, set(), 3),
+        ("declared and money-path union, not sum", {"a": "T0", "b": "T1"}, {"a", "z"}, 3),
+        ("nothing declared, money-path only", {}, {"x", "y"}, 2),
+        ("the collapse case: nothing at all", {}, set(), 0),
+    ]
+    for label, declared, money_path, want in count_cases:
+        got = count_subjects(declared, money_path)
+        ok = got == want
+        print(f"  [{'ok ' if ok else 'FAIL'}] count: {label}: want {want}, got {got}")
+        if not ok:
+            failures.append(f"count: {label}")
+    # A counter that ignored its input would pass every case above by returning a constant, so
+    # the fixtures deliberately span 0..3 and disagree with each other.
+    if len({c[3] for c in count_cases}) < 3:
+        failures.append("the count fixtures no longer span enough distinct values to catch a constant")
+
+    # count_subjects() is a one-line union and cannot plausibly drift; the real collapse mechanism
+    # is the line-scanning parser upstream of it. Hold that to a fixture too, or a tightened regex
+    # silently empties the count while every case above still passes (measured: `[A-Za-z0-9_-]+`
+    # -> `[A-Za-z0-9]+` gives SUBJECTS=3 with the self-test green).
+    snippet = (
+        "money_path_services:\n"
+        "  - openbank-ledger-service\n"
+        "  - openbank-sepa-payment  # inline comment\n"
+        "unrelated_key:\n"
+        "  - openbank-not-money-path\n"
+    )
+    got_mp = parse_money_path_services(snippet)
+    want_mp = {"openbank-ledger-service", "openbank-sepa-payment"}
+    ok = got_mp == want_mp
+    print(f"  [{'ok ' if ok else 'FAIL'}] parser: money_path_services from a fixture: "
+          f"want {sorted(want_mp)}, got {sorted(got_mp)}")
+    if not ok:
+        failures.append("parse_money_path_services no longer reads a known-good block")
+
     print()
     if failures:
         print(f"SELF-TEST FAILED: {len(failures)} case(s): {', '.join(failures)}")
         return EXIT_FINDINGS
     print("self-test ok: the check can fail — config bugs block under any policy, a money-path")
     print("              demotion blocks under --enforce or `enforced: block`, and a healthy")
-    print("              declaration still passes.")
+    print("              declaration still passes. The SUBJECT COUNT is falsifiable too —")
+    print("              four fixtures spanning 0..3, plus the parser it is computed from.")
     return EXIT_OK
 
 
@@ -283,7 +369,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    config, policy, info = evaluate_split()
+    config, policy, info, subject_count = evaluate_split()
     errors = config + policy
 
     if args.report:
@@ -303,11 +389,18 @@ def main() -> int:
     # `enforced: block` in rules.yaml means what it says. Before #9678 this value was read,
     # printed, and then ignored — the check exited 0 under `block` exactly as under `advisory`,
     # so flipping the policy would have changed nothing and everyone would have believed it had.
-    enforcing = args.enforce or any(line == "gate enforced: block" for line in info)
+    enforcing = args.enforce or any(
+        line.removeprefix("gate enforced: ") in BLOCKING for line in info
+    )
 
     print("FinOps workload-tier validator (ADR-0057, declared side)\n")
     for line in info:
         print(f"  {line}")
+    # The floor's only input. POLICY findings still return 0 while rules.yaml says `advisory`,
+    # so for the drift half of this gate `min_subjects` is the one way it can go red — and the
+    # floor can only read this line. (CONFIG errors block on their own since #9678; that is a
+    # different half of the check and does not make the floor redundant.)
+    print(f"SUBJECTS={subject_count}  # services with an EXPLICIT finops_tiers.declared entry")
 
     if config:
         print("\nCONFIG ERRORS (always blocking — these are bugs in rules.yaml, not policy):")

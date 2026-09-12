@@ -332,9 +332,10 @@ not change any existing request's outcome until explicitly flipped.
   - **Replay (fixed).** The challenge was READ and never consumed, so one approved ceremony
     authorised unlimited proposals. RTS Art. 5 single-use was not met. `consume` is atomic on
     `consumedAt`, so two concurrent approvals cannot both win.
-  - **Availability (fixed).** `verifyOwnerSca` pre-checked `status == "COMPLETED"` before consuming
-    — the same defect as #3537 in delegation-service, in a second service. Nothing a customer can
-    reach promotes a decoupled challenge (customer-edge exposes create/read/decision only;
+  - **Availability (fixed).** `verifyDecisionSca` no longer pre-checks `status == "COMPLETED"`
+    before consuming — the same defect as #3537 in delegation-service, in a second service.
+    Nothing a customer can reach promotes a decoupled challenge (customer-edge exposes
+    create/read/decision only;
     `decision` records the signed device decision without promoting), so every owner approval
     failed. Party and purpose are checked here; promotion and approval enforcement belong to
     `consume`, which owns them.
@@ -628,6 +629,25 @@ resolver. This slice does not count approvals and therefore does not remove dele
 fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. Rollout is
 consumer-first (account-service migration and consumer before delegation-service producer);
 rollback removes the producer fields first and may retain the additive projection columns.
+
+## SCA-derived representative identity
+
+An entity-owned savings proposal is still addressed under the entity subject, but the human
+decision actor is derived only from sca-service's challenge `partyId`; no client or edge-provided
+actor header is trusted. Account-service independently authorizes that actor against its local
+projection of party-service mandates. The existing one-decision approval path admits only an
+exact, active `SOLE` mandate with `requiredSignatures=1`. `JOINT`, unknown, inactive and legacy
+incomplete facts fail closed before the one-shot challenge is consumed. This preserves the human
+evidence in `WithdrawalProposal.decidedBy` and `ApprovalStore` without falsely claiming that one
+signature satisfies a statutory quorum.
+
+Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
+`party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
+partial projections. Projection failures retain the channel's bounded retry/DLQ behavior.
+Rollout is account consumer/schema first, then the party producer from ADR-0284 D3, followed by a
+source-of-truth replay or reissue for existing active mandates; until that reconciliation,
+corporate decisions remain unavailable rather than over-authorized. Rollback disables the
+decision use first; the additive projection table may remain until its consumer is removed.
 
 - **2026-09-06** — **Owner-only transparency view over both authorization stores** (ADR-0232,
   `GET /api/v1/accounts/{accountId}/authorizations/effective`). Read-only projection of the same
