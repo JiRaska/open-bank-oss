@@ -6,7 +6,12 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
   # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
   # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
-  version: 1.23.0
+  # 1.23.0 -> 1.24.0 (#9391): additive only — mandates expose the exact statutory
+  # requiredSignatures quorum; an omitted SOLE mandate stays compatible as 1. This branch's
+  # comment still described a 1.19 -> 1.20 bump it never got to take: main moved to 1.23.0 while
+  # it was open, so the reserved number was spent three releases ago. Read off live origin/main,
+  # confirmed free with `git log -S 'version: 1.24.0'` on this file (no hits).
+  version: 1.24.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -842,6 +847,10 @@ components:
           type: string
           enum: [SOLE, JOINT]
           default: SOLE
+        requiredSignatures:
+          type: integer
+          minimum: 1
+          description: Exact legal-representation quorum. Defaults to 1 for SOLE; required and at least 2 for JOINT.
         source:
           type: string
           enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
@@ -865,6 +874,11 @@ components:
         authority:
           type: string
           enum: [SOLE, JOINT]
+        requiredSignatures:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Exact register quorum; null only for legacy mandates whose value was not preserved.
         source:
           type: string
           enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
