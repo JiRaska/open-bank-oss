@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [architecture, analytics, privacy-gdpr]
-summary: "wealth-service splits DeclaredHolding into an Asset and a per-party Interest at the first cross-party aggregation, not before; that split also makes company look-through a graph walk, and until it fires a segment may use counts but not totals."
+summary: "wealth-service splits DeclaredHolding into an Asset and a per-party Interest at the first cross-party aggregation, not before; the split also makes look-through a graph walk, and until it fires a segment may use counts but not totals."
 ---
 
 # ADR-0302 — Asset and Interest: separating the object from the claim on it
