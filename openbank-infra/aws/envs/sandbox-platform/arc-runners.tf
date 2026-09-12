@@ -87,7 +87,19 @@ locals {
   # the FIRST runner-image.yml run to complete after PR #963 — its "Verify
   # signature + attestation actually landed" step (no continue-on-error)
   # passed for this exact digest, confirmed live before this bump.
-  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972"
+  #
+  # 2026-09-12: re-pinned to sha256:9f227805… — the first build from the FIXED
+  # runner-image.yml (#9793, run 34693338577), whose log carries the line this workflow
+  # had never produced before: "attested + verified SLSA provenance". The 45c0408d… pin
+  # above was signed and SBOM-attested and still denied at admission, because #8847 made
+  # SLSA provenance an admission input on 2026-09-05 and this image had none.
+  #
+  # Verified against the PUBLIC KEY THE POLICIES PIN, not the KMS alias — the 2026-09-04
+  # build verified fine against the alias and was rejected anyway, so the alias is not the
+  # thing that answers the question:
+  #   signature OK · cyclonedx OK · slsaprovenance OK
+  #
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:9f227805610d42bb0f3ace66248c7aba271c78fe6f0e8c5e26fc5d9ca53a32f9"
   runner_command = ["/home/runner/run.sh"]
 
   # -------------------------------------------------------------------------
