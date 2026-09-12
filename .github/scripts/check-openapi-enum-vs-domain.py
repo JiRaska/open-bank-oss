@@ -178,8 +178,15 @@ BASELINE: dict[str, str] = {
     "openbank-sepa-payment:CANCELLED,COMPLETED,PROCESSING,REJECTED,RETURNED,VALIDATED":
         "#5962 — targetStatus: deliberate subset of SepaPaymentStatus; RECEIVED is unreachable "
         "as a transition target (SepaPayment.canTransitionTo).",
+    # NOT drift — a DELIBERATE SUBSET, reason corrected (#5962). `CloseFailure.reason` can never
+    # be NOT_VIABLE: a debris account is SKIPPED, never FAILED (#862), on BOTH orchestrator paths
+    # since the per-pocket read gained the same guard the account-level read already had. So
+    # publishing NOT_VIABLE would advertise a value this schema cannot carry, which is the
+    # opposite of the fix the old reason ("undeclared NOT_VIABLE") invited. The gate pairs a
+    # failure-record enum with the full reason enum and cannot see the restriction.
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
-        "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
+        "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
+        "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
