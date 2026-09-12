@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "778aa4d189af34b7"
+    openbank.tech/policy-checksum: "b9d5d350cc39639f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -999,6 +999,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:

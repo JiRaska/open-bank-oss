@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "629062d89ce2f0b8"
+    openbank.tech/policy-checksum: "4981a7db723f9785"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1067,6 +1067,22 @@ data:
         - gh.pr.*
         - '*.write'
         - secrets.read.raw
+    - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:

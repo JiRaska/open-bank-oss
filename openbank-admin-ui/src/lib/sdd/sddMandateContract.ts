@@ -30,7 +30,7 @@ export interface SddMandate {
 const SCHEMES = new Set<string>(SDD_SCHEMES)
 const SEQUENCES = new Set<string>(SDD_SEQUENCE_TYPES)
 const STATUSES = new Set<string>(SDD_MANDATE_STATUSES)
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const IBAN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/
 const CREDITOR_ID = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,31}$/
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
