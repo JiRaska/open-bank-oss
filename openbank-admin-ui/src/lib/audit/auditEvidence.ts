@@ -52,6 +52,11 @@ function instant(record: JsonRecord, key: string): string {
 
 export function parseAuditEvidenceList(value: unknown, requestedAggregateId: string): AuditEvidence[] {
   if (!Array.isArray(value)) throw new Error('audit response is not a list')
+  // More rows than the window we asked for means the service ignored `limit`, and the page's
+  // "newest N of AUDIT_EVIDENCE_WINDOW" disclosure would then be describing a bound that did not
+  // apply. Reject rather than render a count the operator cannot act on. (Re-landed from #9432,
+  // whose parser carried this check and was lost with the branch it merged into — #9713.)
+  if (value.length > AUDIT_EVIDENCE_WINDOW) throw new Error('audit response exceeds the evidence window')
   return value.map(item => {
     if (!isRecord(item)) throw new Error('invalid audit entry')
     const aggregateId = requiredString(item, 'aggregateId')

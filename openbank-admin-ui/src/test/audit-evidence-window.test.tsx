@@ -73,6 +73,17 @@ describe('audit trail evidence window', () => {
     expect(disclosure.textContent).toContain('older events may exist and are not shown')
   })
 
+  it('rejects a response larger than the window instead of disclosing a bound that did not apply', async () => {
+    // The service clamps, so this should not happen — but if it ever stops clamping, the page
+    // would render "newest N of 500" over N > 500 rows, which is a false statement about the
+    // evidence rather than a rendering glitch. Re-landed from #9432 (lost with #9713's branch).
+    respondWith(AUDIT_EVIDENCE_WINDOW + 1)
+    await screen.findByText(/An unexpected error occurred while processing the request/)
+
+    expect(screen.queryByText(new RegExp(`${AUDIT_EVIDENCE_WINDOW + 1} events`))).toBeNull()
+    expect(screen.queryByText(/the window is full/)).toBeNull()
+  })
+
   it('does not promise a full trail in the search hint', async () => {
     respondWith(1)
     await screen.findByText(AGGREGATE)
