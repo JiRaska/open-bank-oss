@@ -44,6 +44,12 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.documents.disclosure-snapshot.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # ADR-0162 D7: consume account.created to issue onboarding documents.
       - resource:
           type: topic
@@ -55,6 +61,14 @@ spec:
       - resource:
           type: topic
           name: openbank.billing.fee.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0232 D7: delegation-service is the sole producer principal; document-service consumes
+      # snapshot commands here instead of exposing a write endpoint behind the shared OIDC client.
+      - resource:
+          type: topic
+          name: openbank.delegation.events
           patternType: literal
         operations: [Read, Describe]
         host: "*"
@@ -81,6 +95,12 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.document.billing-outbox-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.document.delegation-disclosure-commands-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

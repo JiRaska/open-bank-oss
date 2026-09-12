@@ -49,7 +49,11 @@ data class DocumentGenerated(
     val sha256: String,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
-)
+) {
+    companion object {
+        const val EVENT_TYPE = "document.generated.v1"
+    }
+}
 
 data class DocumentSigned(
     val documentId: UUID,
@@ -63,4 +67,8 @@ data class SignatureCeremonyCompleted(
     val documentId: UUID,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
-)
+) {
+    companion object {
+        const val EVENT_TYPE = "signature-ceremony.completed.v1"
+    }
+}

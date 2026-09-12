@@ -180,7 +180,7 @@ class SignatureCeremonyService(
     }
 
     companion object {
-        const val EVENT_CEREMONY_COMPLETED = "signature-ceremony.completed.v1"
+        const val EVENT_CEREMONY_COMPLETED = SignatureCeremonyCompleted.EVENT_TYPE
         private const val SHA_PREFIX_LENGTH = 16
     }
 }

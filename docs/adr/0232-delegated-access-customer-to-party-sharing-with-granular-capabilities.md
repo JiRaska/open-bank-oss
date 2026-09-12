@@ -182,6 +182,22 @@ or external OTP redemption exists yet. `PAYMENT` and `STATEMENT` remain delibera
 until their owning services expose an equivalent authoritative party binding. The next D7 slice is
 the sealed-artifact issuance/redemption lifecycle, not a public proxy to document content.
 
+**D7 snapshot boundary (2026-09-09).** Document-service now accepts
+`DisclosureSnapshotRequested` only through `openbank.delegation.events`: the producing KafkaUser is
+unique to delegation-service, unlike the fleet's shared `openbank-services` OIDC identity. It
+copies only an owned `SIGNED` PDF whose stored bytes still match the source digest into a separate,
+content-addressed key and an insert-only `disclosure_snapshots` evidence row. The request id is
+idempotent across process/object-store/database crash windows; a conflicting concurrent binding is
+refused. Ready/rejected outcomes use the dedicated, versioned
+`openbank.documents.disclosure-snapshot.event` contract. This deliberately creates no REST content
+surface and performs no post-signature watermarking: changing signed bytes would invalidate their
+PAdES signatures. Redaction/watermark must precede a distinct disclosure seal in the next rendering
+slice; OTP redemption may expose only that resulting snapshot, never the mutable source document.
+
+Migration V12 is additive. Rollback stops the disclosure command producer and drains its consumer
+before reverting the image; the table, trigger and blobs remain as evidence. Dropping or mutating
+them is not an application rollback and requires the retention/erasure process.
+
 **D8 — Propose-only flows and group sharing.** Capability
 `account.propose-payment` (and `savings.propose-withdraw`) gives the
 delegate a maker role with NO execution right: the proposal lands in the

@@ -27,6 +27,10 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - document-service → seal adapter (phase-1 no-op; phase-2 EU DSS PAdES with a QSeal/HSM key,
   ADR-0007/0162) — introduces an HSM/key-custody trust boundary in phase-2.
 - Outbox → Kafka (`openbank.documents.document.event`) → downstream consumers (lending, account).
+- **delegation-service KafkaUser → `openbank.delegation.events` → snapshot consumer:** the broker
+  authenticates the service-specific mTLS identity and ACL; this is intentionally not a REST write
+  because the shared backend OIDC identity cannot distinguish delegation-service from other
+  workloads. Results leave on the dedicated `openbank.documents.disclosure-snapshot.event` topic.
 - **Kafka → document-service (new, ADR-0248):** `billing-service`'s billing-outbox
   (`openbank.billing.fee.event`, `AnnualFeeSummaryReadyConsumer`) — the annual statement of
   fees is a PAD Art. 5 push duty, so this is the one template family document-service renders on an
@@ -51,9 +55,11 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 | --- | --- |
 | **Spoofing the caller** | Every REST endpoint requires a valid OIDC bearer with `ROLE_SERVICE`/`ROLE_OPERATOR`/`ROLE_ADMIN`; unauthenticated calls are 401. Reflection guard test asserts no endpoint is `@PermitAll`/unannotated. The `AnnualFeeSummaryReadyConsumer` Kafka ingress has no per-message caller identity (mTLS at the broker is the only authentication layer, ADR-0056) — mitigated by `eventType` + required-field validation and by the consumer being a pure read of `billing-service`'s own outbox topic, never a write path back into billing. |
 | **Tampering — document forgery** | Documents render only from a `PUBLISHED` template (`findPublished`); the rendered bytes are content-addressed by SHA-256 and stored under a derived key; phase-2 adds S3 Object Lock (WORM) so stored bytes are immutable. |
+| **Tampering — disclosure source substitution or retry race** | Snapshot issuance requires the command's expected party to equal the immutable source `partyRef`, status `SIGNED`, media type PDF, and source bytes to match the persisted SHA-256. `request_id` is unique; the blob key includes deterministic request identity plus content digest, and the service validates the row returned after `ON CONFLICT`, so two conflicting requests cannot overwrite or substitute the winner. A database trigger rejects UPDATE/DELETE of evidence rows. |
 | **Tampering — SSTI / XSS via template + data** | The phase-1 renderer is logic-less `{{token}}` substitution (regex only, no engine), and substituted values are HTML-escaped. Production Handlebars/Qute adapter (ADR-0162) must stay logic-less and sandboxed behind the same port. |
 | **Repudiation** | Lifecycle transitions emit domain events to the outbox → audit pipeline; phase-2 PAdES sealing makes the signed artifact independently verifiable (non-repudiation). Ceremony records each signer's decision + timestamp. |
 | **Information disclosure** | Content is `restricted`-class; access is role-gated; no PII in logs (JSON console, no body logging). Content bytes are served only via an authenticated `/{id}/content` endpoint. Phase-2 pre-signed URLs must be short-lived and scoped. |
+| **Disclosure command forgery** | Only delegation-service's KafkaUser may write `openbank.delegation.events`; document-service has Read/Describe and a dedicated consumer group. Malformed commands are ignored/rejected with bounded reason codes and no source detail. No snapshot-creation REST endpoint exists behind the fleet-shared OIDC client. |
 | **Denial of service** | Rendering is bounded and event-driven, off the money path; platform rate-limit (`openbank.rate-limit`, 200 concurrent). The PDF/seal sidecars (phase-2) need their own timeouts + bulkheads at the port. |
 | **Elevation / cluster pivot** | Restricted PSS, non-root, OPA authz (`@Authorize`, advisory→enforce, ADR-0034); egress NetworkPolicy allowlists only Postgres, Kafka, OIDC, OPA (and, in phase-2, the render sidecar + KMS/HSM). |
 
@@ -70,6 +76,12 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   retention/erasure job — a tracked follow-up.
 
 ## Change log
+
+- **2026-09-09** — External disclosure snapshot boundary added (ADR-0232 D7): immutable metadata,
+  digest verification, idempotent command handling, service-specific Kafka authentication, explicit
+  DLQ/topic ACLs and a dedicated result schema. No public download or OTP endpoint exists in this
+  slice; watermark/redaction after an existing signature remains prohibited because it would
+  invalidate PAdES.
 
 - **2026-09-03** — Doc correction, no behavior change: §2 named the billing ingress topic
   `openbank.billing.billing.event`. No such topic exists — the string occurs nowhere in the
