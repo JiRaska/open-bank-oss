@@ -72,15 +72,21 @@ class ProvisioningCycleScheduler(
                     outcome.loansAssessed,
                     outcome.journalsPosted,
                 )
-                // The batch scan (LoanRepository.findActive) has no continuation cursor: if the active
-                // book is exactly at (or over) the batch size, this tick may have silently left loans
-                // unprovisioned for the period. Flag it — the next tick's idempotency check means a
-                // truncated tail self-heals eventually, but an operator should know it's happening.
+                // A full batch means MORE REMAIN for this period, not that work was lost: the scan
+                // excludes loans already provisioned for the period, so the next tick starts where
+                // this one stopped and the cycle completes over as many ticks as the book needs.
+                //
+                // It said something else until #9901, and the something else was false. The scan was
+                // LoanRepository.findActive — `ORDER BY disbursedAt, id` with a fixed maxResults and
+                // no cursor — so every tick returned the SAME first `batch-size` loans. The comment
+                // claimed a truncated tail "self-heals eventually" via the idempotency check; it does
+                // not. The head is skipped as already-provisioned but still fills the window, so past
+                // that position a loan was never assessed for the period at all.
                 if (outcome.loansAssessed >= batchSize) {
-                    log.warnf(
-                        "IFRS 9 provisioning cycle %s assessed %d loans, at or above the batch size " +
-                            "(%d) — the active loan book may exceed one pass and some loans could be " +
-                            "left unprovisioned for this period until a later tick catches up",
+                    log.infof(
+                        "IFRS 9 provisioning cycle %s assessed %d loans, filling the batch size " +
+                            "(%d) — more loans remain unprovisioned for this period and the next tick " +
+                            "will continue from there",
                         outcome.period,
                         outcome.loansAssessed,
                         batchSize,

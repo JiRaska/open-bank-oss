@@ -98,8 +98,24 @@ interface LoanRepository {
     fun findByParty(partyId: UUID): Uni<List<Loan>>
     fun update(loan: Loan): Uni<Loan>
 
-    /** ACTIVE loans still on the books, ordered deterministically — drives the provisioning cycle scan. */
+    /** ACTIVE loans still on the books, ordered deterministically. */
     fun findActive(limit: Int): Uni<List<Loan>>
+
+    /**
+     * ACTIVE loans with **no `loan_provisioning` row for [period]** — the provisioning cycle's scan.
+     *
+     * The cycle used to read [findActive], which is a fixed window: `ORDER BY disbursedAt, id` with
+     * a `setMaxResults(limit)` and no cursor, so every tick returned the SAME first `limit` loans.
+     * Past that position a loan was never assessed for the period, and the scheduler's warning that
+     * "a truncated tail self-heals eventually" was false — the head is idempotently skipped, but it
+     * still occupies the window, so the tail is never reached (issue #9901).
+     *
+     * Excluding what is already provisioned is what makes each tick ADVANCE: the window slides as
+     * rows are written, the cycle completes over as many ticks as the book needs, and
+     * `loansAssessed >= limit` becomes a true statement that more remain rather than a warning
+     * about work that will never happen.
+     */
+    fun findActiveWithoutProvisioning(period: String, limit: Int): Uni<List<Loan>>
 
     /** Per-status totals across the whole loan book (issue #3294). See the note on
      *  [LoanApplicationRepository.summariseByState]. */

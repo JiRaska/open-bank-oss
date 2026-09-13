@@ -278,6 +278,23 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             .resultList
     }.map { it.map(mapper::toDomain) }
 
+    // NOT EXISTS against loan_provisioning for the period, so the scan window SLIDES as rows are
+    // written instead of returning the same head every tick (#9901). The ordering is the same
+    // deterministic one findActive uses, which keeps the oldest disbursements first.
+    @WithSession
+    override fun findActiveWithoutProvisioning(period: String, limit: Int): Uni<List<Loan>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanEntity l WHERE l.status = :active AND NOT EXISTS (" +
+                "SELECT 1 FROM LoanProvisioningEntity p WHERE p.loanId = l.id AND p.period = :period" +
+                ") ORDER BY l.disbursedAt ASC, l.id ASC",
+            LoanEntity::class.java,
+        )
+            .setParameter("active", com.openbank.lending.domain.model.LoanStatus.ACTIVE)
+            .setParameter("period", period)
+            .setMaxResults(limit)
+            .resultList
+    }.map { it.map(mapper::toDomain) }
+
     @WithSession override fun findActive(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
             "FROM LoanEntity WHERE status = :active ORDER BY disbursedAt ASC, id ASC",
