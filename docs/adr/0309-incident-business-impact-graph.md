@@ -67,6 +67,17 @@ counts, revoked assignment, unavailable policy/audit and high-cardinality incide
 Benchmark concurrent P1 response and payment/control load. Pilot in aggregate summary
 mode on synthetic incident replays before enabling case drill-down.
 
+## Delivery status
+
+### Delivered P1 slice
+
+The context projector consumes the existing durable DORA incident stream from security-scanner,
+validates its source/schema/version and maintains the current incident-to-service impact edges.
+Updates replace stale service impact only when their source version is newer. The protected admin UI
+returns aggregate counts by affected type and never returns service or customer identifiers. Workflow
+and business-case observations need explicit source correlation contracts and remain follow-up work,
+so this ADR stays `partial`.
+
 ## Alternatives considered
 
 - **Use the service map as observed impact:** rejected; dependency is possibility, not evidence.

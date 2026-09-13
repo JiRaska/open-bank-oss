@@ -64,6 +64,17 @@ paths; partial source outage; late/out-of-order events; identifier collision; wr
 account/case; revoked assignment; missing audit/OPA; and concurrent payment control-load
 benchmarks. Compare the trace to authoritative source fixtures and measure time-to-answer.
 
+## Delivery status
+
+### Delivered P1 slice
+
+Complaint events now carry a versioned contract and stable account, transaction and dispute
+references. The context projector consumes them with idempotency and monotonic version guards into
+an isolated generation-scoped store. An assigned investigator can open the bounded graph from the
+disputes admin page; the server verifies assignment and OPA, commits the audit decision and returns
+source-backed evidence. Full instruction, rail, booking and return producers remain follow-up work,
+so this ADR stays `partial`.
+
 ## Alternatives considered
 
 - **Live service fan-out:** rejected; it adds money-path load and cannot guarantee one snapshot.

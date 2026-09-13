@@ -77,6 +77,18 @@ unauthorized disclosure is the release threshold; performance targets cannot wea
 The production lens cannot run while its context authorization is advisory/shadow or
 configured fail-open; an enforced decision and durable denial evidence are release gates.
 
+## Delivery status
+
+### Delivered P0 controls
+
+The shared service now has durable, bank-scoped, effective-time assignments; admin-only proposal,
+independent checker approval and immediate revocation; append-only assignment-change audit; current
+assignment verification; mandatory OPA; and durable allow/deny/unavailable read audit before graph
+disclosure. The admin UI exposes the controlled lifecycle and hides it from non-admin users. OPA
+denies service accounts from assignment administration even if a broad operational role is present.
+Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
+so this ADR stays `partial`.
+
 ## Alternatives considered
 
 - **Role-only RBAC:** rejected; it cannot express purpose, assignment, object or field scope.

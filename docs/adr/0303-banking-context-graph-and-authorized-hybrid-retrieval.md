@@ -5,10 +5,10 @@ delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
 tags: [admin-ui, database, authz, ai-agents]
 summary: "Build a banking relationship graph on an isolated PostgreSQL read model, add permission-scoped pgvector/full-text retrieval, and protect payment workloads with bounded queries and measured resource isolation."
-followup: "#9945 — investigative projection, case-scoped authorization, durable read audit, workload benchmarks and hybrid retrieval remain to be implemented"
+followup: "#9945 — P2/P3 lenses, hybrid retrieval, bitemporal history rows and production workload evidence remain"
 ---
 
 # ADR-0303 — Banking context graph and authorized hybrid retrieval
@@ -226,11 +226,18 @@ the limiting dimension and a recovery/security exercise proves the new boundary.
 
 ## Delivery evidence and rollback
 
-Implementation starts in `CustomerContextGraph.tsx`, the existing Customer 360 page,
-and their component/BFF/browser regression tests. The first slice has no new API
-contract, dependency, database schema or permission grant. Its rollback removes the
-component and page wiring. Remaining deliveries and their acceptance gates are tracked
-in [#9945](https://github.com/JiRaska/open-bank-oss/issues/9945).
+The delivered P0/P1 slice includes `openbank-context-service`, isolated PostgreSQL/Flyway
+storage, OPA, durable read and assignment-change audit, maker-checker assignment APIs and
+admin UI, generation-scoped idempotent Kafka projectors for complaint and ICT-incident
+events, bounded complaint and aggregate incident APIs, GitOps resources, DLQs, metrics,
+alerts and real-PostgreSQL HTTP integration tests. The repeatable 100 RPS workload profile
+is in `openbank-context-service/e2e`; production-sized benchmark evidence is still required
+before replicas are raised from the staged zero deployment.
+
+P0/P1 keeps the latest source version in each rebuild generation. Full bitemporal version-row
+history, pgvector/full-text retrieval, P2/P3 lenses and production capacity evidence remain in
+[#9945](https://github.com/JiRaska/open-bank-oss/issues/9945). Rollback scales the deployment
+to zero and stops its consumers without affecting source or money-path services.
 
 For D2–D6, deliver a threat model, API contract and contract tests, Flyway migrations
 with rollback notes, source-event compatibility tests, authorization/audit negative
