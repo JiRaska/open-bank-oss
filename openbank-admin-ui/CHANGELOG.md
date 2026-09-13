@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.243.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.1...admin-ui-v0.243.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead bindings and preserve theme contrast ([#9972](https://github.com/JiRaska/open-bank-oss/issues/9972)) ([25c544d](https://github.com/JiRaska/open-bank-oss/commit/25c544dbe9ec74bba94672a1e18d9afec282876e))
+
 ## [0.243.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.0...admin-ui-v0.243.1) (2026-09-13)
 
 
