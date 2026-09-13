@@ -34,13 +34,17 @@ kind: ClusterPolicy
 metadata:
   name: verify-openbank-image-sbom-attestation
   annotations:
-    policies.kyverno.io/title: Verify OpenBank image SBOM attestations (ADR-0030 D4 step 4)
+    policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4)
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      Enforces that every openbank-* container image carries a cosign-signed
-      CycloneDX SBOM attestation (predicateType https://cyclonedx.org/bom,
-      KMS public key). Graduated from Audit to Enforce 2026-07-12 (ADR-0144
+      Enforces that every openbank-* container image carries a valid Cosign
+      signature AND a cosign-signed CycloneDX SBOM attestation (predicateType
+      https://cyclonedx.org/bom), both against the KMS public key. The signature
+      check was a separate policy (verify-openbank-image-signatures) until
+      2026-09-13; it moved into this policy's single verifyImages entry because
+      Kyverno v1.12.5 lets separate verify policies overwrite each other's
+      verdict per image (#9805 item 4). Graduated from Audit to Enforce 2026-07-12 (ADR-0144
       graduation, rules.yaml provenance.enforce_criteria) after the running
       fleet was fully redeployed with attested images.
 spec:
@@ -75,6 +79,24 @@ spec:
           # way, but a poisoned PolicyReport entry defeats the whole point of step 1
           # (surfacing real violations) and would silently pass step 2's redeploy check.
           useCache: false
+          # The image SIGNATURE, folded in from verify-openbank-image-signatures (#9805 item 4).
+          # It lives in THIS entry on purpose. Kyverno v1.12.5 records one verification status
+          # per image, and each verifyImages entry of each policy overwrites it, so two
+          # separate policies (or two entries) let the last-evaluated one decide for both: an
+          # image failing its signature could be admitted whenever the SBOM check ran last.
+          # Within one entry Kyverno verifies the attestors first and returns on failure, then
+          # the attestations — one verdict per image, deterministic. Do not split this back
+          # into two policies before Kyverno scopes verdicts per policy (>= v1.19.0).
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEASBZ76uZt2fJEJp0RiQx1hnJgbGV
+                      M2Uw+35xUGfcZpBvpA+4nTW5zy2VVZ2JxT++6Gt0wPuUyL7aJpOAvqDvJw==
+                      -----END PUBLIC KEY-----
+                    signatureAlgorithm: sha256
           attestations:
             - predicateType: https://cyclonedx.org/bom
               attestors:
