@@ -2,6 +2,13 @@
 
 All notable changes to this service are documented here.
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.3.0...referral-service-v0.4.0) (2026-09-13)
+
+
+### Features
+
+* **referral:** list a referrer's own invites and classify conflicts ([#9964](https://github.com/JiRaska/open-bank-oss/issues/9964)) ([5651ac8](https://github.com/JiRaska/open-bank-oss/commit/5651ac8b0fc912c6179a91c67fa4af805262f212))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.2.0...referral-service-v0.3.0) (2026-09-13)
 
 
