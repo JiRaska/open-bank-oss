@@ -481,7 +481,9 @@ main {
   border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   background: var(--surface); color: var(--text-primary);
   font-size: 13px; font-family: inherit;
-  transition: all 0.2s ease;
+  /* Keep text and surface colours atomic across theme changes. Interpolating them independently
+     creates a short low-contrast state even when both theme endpoints meet WCAG AA. */
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   outline: none;
   box-shadow: var(--shadow-xs);
 }
