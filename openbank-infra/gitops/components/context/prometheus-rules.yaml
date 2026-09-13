@@ -14,7 +14,7 @@ spec:
           labels: { severity: critical, service: context-service }
           annotations:
             subject_period: continuous
-            summary: Context graph projection is rejecting complaint events
+            summary: Context graph projection is rejecting source events
             description: Inspect the context-service consumer and its dedicated DLQ before replaying records.
         - alert: ContextProjectionStale
           expr: max(openbank_context_projection_lag_seconds) > 60

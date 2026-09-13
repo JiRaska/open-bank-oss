@@ -14,3 +14,5 @@ data:
     mp.messaging.incoming.dispute-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.ict-incident-events-in.group.id=openbank-context-service
     mp.messaging.incoming.ict-incident-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.domestic-payment-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.domestic-payment-events-in.auto.offset.reset=earliest

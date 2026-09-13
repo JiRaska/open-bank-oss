@@ -16,10 +16,16 @@ spec:
       - resource: { type: topic, name: openbank.security.ict.incident, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      - resource: { type: topic, name: openbank.domestic.payment.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.dispute-events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.ict-incident-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.domestic-payment-events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }

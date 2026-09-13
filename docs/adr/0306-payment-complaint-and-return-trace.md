@@ -71,19 +71,22 @@ benchmarks. Compare the trace to authoritative source fixtures and measure time-
 
 Complaint events now carry a versioned contract and stable account, transaction and dispute
 references. Complaint lifecycle mutations increment a database-backed aggregate revision under a
-row lock and commit the revision plus event in the existing transactional outbox. The context
-projector consumes them idempotently and rejects duplicate or older revisions into an isolated
-generation-scoped store; its temporary compatibility path for retained legacy events is measured
-and can be disabled after the replay boundary is proven clean. An assigned investigator can open the bounded graph from the
-disputes admin page; the server verifies assignment and OPA, commits the audit decision and returns
-source-backed evidence. Full instruction, rail, booking and return producers remain follow-up work,
-so this ADR stays `partial`.
+row lock and commit the revision plus event in the existing transactional outbox. Domestic-payment
+events now also carry a database-backed aggregate revision. A dedicated projector consumes the
+created and status-changed records idempotently, preserving one immutable evidence node per revision.
+The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
+second hop, so it cannot pivot from a shared transaction into another complaint. The admin UI renders
+the same authorized payload as both graph and ordered payment timeline. Retained legacy records use a
+measured timestamp fallback until the replay boundary enables strict-only revisions. Ledger booking,
+clearing acknowledgement and an explicit return aggregate remain follow-up work, so this ADR stays
+`partial`.
 
 ## Alternatives considered
 
 - **Live service fan-out:** rejected; it adds money-path load and cannot guarantee one snapshot.
 - **Derive correlation from amount/time:** rejected; common values create false links.
-- **Copy authoritative payment state into context-service:** rejected; projection remains evidence.
+- **Copy authoritative payment state into context-service:** rejected; each lifecycle node remains
+  source-versioned evidence and domestic-payment remains authoritative.
 - **Build this inside dispute-service:** rejected; shared rail/ledger lineage serves other lenses.
 
 ## Consequences

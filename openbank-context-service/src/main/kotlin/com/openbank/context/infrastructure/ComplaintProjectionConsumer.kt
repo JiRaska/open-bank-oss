@@ -126,6 +126,7 @@ class ComplaintProjectionConsumer(
               recorded_at = EXCLUDED.recorded_at,
               source_version = EXCLUDED.source_version
             WHERE context_nodes.source_version < EXCLUDED.source_version
+              AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system = 'domestic-payment')
         """.trimIndent(),
         mapOf(
             "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),

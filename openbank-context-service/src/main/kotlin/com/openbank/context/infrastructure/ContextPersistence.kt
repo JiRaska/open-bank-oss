@@ -196,45 +196,106 @@ class ContextGraphRepository(
         maxNodes: Int,
         maxEdges: Int,
     ): ContextNeighborhood? {
-        val rootNode = sessions.withSession { session ->
-            session.createQuery(
-                "from ContextNodeEntity where key = :root and bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
-                ContextNodeEntity::class.java,
-            ).setParameter(
-                "root",
-                root,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("namespace", namespace.name).setParameter("asOf", asOf).singleResultOrNull
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() ?: return null
-        val edges = sessions.withSession { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and (validTo is null or validTo > :asOf) order by recordedAt desc",
-                ContextEdgeEntity::class.java,
-            ).setParameter(
-                "namespace",
-                namespace.name,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("root", root).setParameter("asOf", asOf).setMaxResults(
-                    maxEdges + 1,
-                ).resultList
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+        val rootNode = findRoot(namespace, root, asOf) ?: return null
+        val firstHop = findRootEdges(namespace, root, asOf, maxEdges + 1)
+        val secondHop = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
+            val transactionKeys = firstHop.filter {
+                it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
+            }.map(ContextEdgeEntity::toKey)
+            findComplaintLifecycleEdges(transactionKeys, asOf, maxEdges - firstHop.size + 1)
+        } else {
+            emptyList()
+        }
+        val edges = firstHop + secondHop
         val boundedEdges = edges.take(maxEdges)
         val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
-        val nodes = sessions.withSession { session ->
-            session.createQuery(
-                "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and key in (:keys) and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
-                ContextNodeEntity::class.java,
-            ).setParameter(
-                "namespace",
-                namespace.name,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("keys", keys).setParameter("asOf", asOf).resultList
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+        val nodes = findNodes(namespace, keys, asOf)
         return ContextNeighborhood(
             root,
             nodes.map { it.domain() },
             boundedEdges.filter { it.fromKey in keys && it.toKey in keys }.map { it.domain() },
             edges.size > maxEdges || nodes.size >= maxNodes,
+        )
+    }
+
+    private suspend fun findRoot(namespace: ContextNamespace, root: String, asOf: Instant): ContextNodeEntity? =
+        sessions.withSession { session ->
+            session.createQuery(
+                "from ContextNodeEntity where key = :root and bankScope = :bankScope and " +
+                    "projectionGeneration = :generation and namespace = :namespace and validFrom <= :asOf and " +
+                    "(validTo is null or validTo > :asOf)",
+                ContextNodeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
+                .setParameter("root", root).singleResultOrNull
+        }.bounded().awaitSuspending()
+
+    private suspend fun findRootEdges(
+        namespace: ContextNamespace,
+        root: String,
+        asOf: Instant,
+        limit: Int,
+    ): List<ContextEdgeEntity> = sessions.withSession { session ->
+        session.createQuery(
+            "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                "namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and " +
+                "(validTo is null or validTo > :asOf) order by recordedAt desc",
+            ContextEdgeEntity::class.java,
+        ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+            .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
+            .setParameter("root", root).setMaxResults(limit).resultList
+    }.bounded().awaitSuspending()
+
+    private suspend fun findComplaintLifecycleEdges(
+        transactionKeys: List<String>,
+        asOf: Instant,
+        limit: Int,
+    ): List<ContextEdgeEntity> {
+        if (transactionKeys.isEmpty() || limit <= 0) return emptyList()
+        return sessions.withSession { session ->
+            session.createQuery(
+                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
+                    "toKey like :stagePrefix and relationType in (:relations) and " +
+                    "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
+                ContextEdgeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("source", DOMESTIC_PAYMENT_SOURCE).setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
+                .setParameter("keys", transactionKeys).setParameter("relations", COMPLAINT_LIFECYCLE_RELATIONS)
+                .setParameter("asOf", asOf).setMaxResults(limit).resultList
+        }.bounded().awaitSuspending()
+    }
+
+    private suspend fun findNodes(
+        namespace: ContextNamespace,
+        keys: List<String>,
+        asOf: Instant,
+    ): List<ContextNodeEntity> = sessions.withSession { session ->
+        session.createQuery(
+            "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
+                "(validTo is null or validTo > :asOf)",
+            ContextNodeEntity::class.java,
+        ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+            .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
+            .setParameter("keys", keys).resultList
+    }.bounded().awaitSuspending()
+
+    private fun <T> io.smallrye.mutiny.Uni<T>.bounded(): io.smallrye.mutiny.Uni<T> =
+        ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail()
+
+    private companion object {
+        const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
+        const val DOMESTIC_PAYMENT_SOURCE = "domestic-payment"
+        const val PAYMENT_STAGE_PREFIX = "payment-stage:domestic:%"
+        val COMPLAINT_LIFECYCLE_RELATIONS = setOf(
+            "CREATED",
+            "VALIDATED",
+            "SUBMITTED_TO",
+            "SETTLED",
+            "REJECTED",
+            "RETURNED_BY",
+            "CANCELLED",
         )
     }
 

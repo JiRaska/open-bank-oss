@@ -83,25 +83,41 @@ class ContextApiIT {
         val version = NOW.epochSecond * 1_000_000_000 + NOW.nano
         val payload = complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version)
         val source = connector.source<String>("dispute-events-in")
+        val payments = connector.source<String>("domestic-payment-events-in")
         source.runOnVertxContext(true)
+        payments.runOnVertxContext(true)
 
         source.send(payload)
         source.send(payload)
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
         source.send("""{"eventType":"dispute.opened","disputeId":"${UUID.randomUUID()}"}""")
+        payments.send(domesticPaymentEvent(transactionId, 1, "RECEIVED"))
+        payments.send(domesticPaymentEvent(transactionId, 2, "SENT_TO_CLEARING"))
+        payments.send(domesticPaymentEvent(transactionId, 3, "RETURNED"))
+        payments.send(domesticPaymentEvent(transactionId, 3, "RETURNED"))
         awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
+        awaitCount("context_projection_events", "aggregate_ref", "transaction:$transactionId", 3)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
         assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
         assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
+        assertThat(stringValue("context_nodes", "source_system", "node_key", "transaction:$transactionId"))
+            .isEqualTo("domestic-payment")
+        val unrelatedComplaint = "complaint:CMP-OTHER-${UUID.randomUUID()}"
+        seedNode(unrelatedComplaint, "COMPLAINT", "Unrelated complaint")
+        seedEdge(unrelatedComplaint, "transaction:$transactionId", "CONCERNS_TRANSACTION")
+        seedEdge("transaction:$transactionId", unrelatedComplaint, "CREATED")
 
         seedAssignment(CASE, PURPOSE)
-        given()
+        val response = given()
             .header("X-Investigation-Case-Id", CASE)
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(4))
-            .body("edges.size()", equalTo(3))
+            .body("nodes.size()", equalTo(7))
+            .body("edges.size()", equalTo(6))
+            .body("edges.relation", org.hamcrest.Matchers.hasItems("CREATED", "SUBMITTED_TO", "RETURNED_BY"))
+            .extract().asString()
+        assertThat(response).doesNotContain(unrelatedComplaint)
     }
 
     @Test
@@ -296,6 +312,17 @@ class ContextApiIT {
         }
     }
 
+    private fun stringValue(table: String, column: String, keyColumn: String, key: Any): String =
+        connection().use { connection ->
+            connection.prepareStatement("SELECT $column FROM $table WHERE $keyColumn = ?").use { statement ->
+                statement.setObject(1, key)
+                statement.executeQuery().use { rows ->
+                    check(rows.next()) { "No $table row for $keyColumn=$key" }
+                    rows.getString(1)
+                }
+            }
+        }
+
     private fun awaitCount(table: String, column: String, value: Any, expected: Int) {
         val deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos()
         while (System.nanoTime() < deadline) {
@@ -333,6 +360,14 @@ class ContextApiIT {
             """"detectedAt":"$NOW","updatedAt":"$NOW"}}"""
     }
 
+    private fun domesticPaymentEvent(paymentId: UUID, revision: Long, status: String): String {
+        val eventType = if (revision == 1L) "DOMESTIC_PAYMENT_CREATED" else "DOMESTIC_PAYMENT_STATUS_CHANGED"
+        val statusField = if (revision == 1L) "\"status\":\"$status\"" else "\"newStatus\":\"$status\""
+        return """{"eventType":"$eventType","sourceService":"domestic-payment",""" +
+            """"paymentId":"$paymentId","aggregateRevision":$revision,$statusField,""" +
+            """"occurredAt":"${NOW.plusSeconds(revision)}"}"""
+    }
+
     private fun execute(sql: String, vararg values: Any) = connection().use { connection ->
         connection.prepareStatement(sql).use { statement ->
             values.forEachIndexed { index, value ->
@@ -360,6 +395,7 @@ class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
         "dispute-events-in",
         "ict-incident-events-in",
+        "domestic-payment-events-in",
     ) + mapOf("openbank.context.require-strict-revisions" to "true")
 
     override fun stop() = InMemoryConnector.clear()
