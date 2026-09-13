@@ -30,6 +30,13 @@ class ApprovalResource(private val approvals: ApprovalStore, private val identit
     suspend fun listPending(@QueryParam("limit") @DefaultValue("50") limit: Int): List<ApprovalResponse> =
         approvals.findPending(limit.coerceIn(1, MAX_PENDING_LIMIT)).map { it.toResponse() }
 
+    @GET
+    @Path("/{id}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "scaChallenge.approval.read", resource = "#id")
+    suspend fun get(@PathParam("id") id: String): ApprovalResponse = approvals.find(id)?.toResponse()
+        ?: throw NotFoundException("no approval with id=$id")
+
     @PATCH
     @Path("/{id}")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)

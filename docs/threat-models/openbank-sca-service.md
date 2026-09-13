@@ -224,8 +224,10 @@ external notification. Those remain separate launch controls. See the consumptio
 ### Operator approval binding
 
 The service wires the shared atomic approval store and exposes a checker queue and decision
-endpoint. With four-eyes enforcement enabled, revocation binds both party and device id;
-enrollment binds the party and a SHA-256 fingerprint covering every credential field.
+endpoint. The per-id read endpoint has the same operator/admin and OPA checks as the pending
+queue; it exposes only the authorization record and stops resolving it after expiry.
+With four-eyes enforcement enabled, revocation binds both party and device id; enrollment
+binds the party and a SHA-256 fingerprint covering every credential field.
 This prevents a maker replacing the target or public key after another operator approved it.
 OPA's customer grant parses the composite target and checks the party component. The checker
 uses the same principal name as the maker path; self-approval remains forbidden.

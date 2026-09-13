@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -41,6 +41,29 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
   /api/v1/sca/approvals/{id}:
+    get:
+      tags: [SCA]
+      summary: Read an SCA authorization approval by id
+      operationId: getScaApproval
+      description: >-
+        Includes decided and consumed approvals until their TTL expires. EXECUTED records
+        an authorization claim, not business completion. Access is operator or administrator only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Authorization approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Approval is missing or expired
     patch:
       tags: [SCA]
       summary: Approve or reject a pending SCA operator action

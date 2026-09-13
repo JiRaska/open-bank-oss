@@ -178,6 +178,18 @@ class ScaFourEyesFlowIT {
         given().delete(path(secondDevice)).then().statusCode(403)
     }
 
+    @Test
+    @Order(14)
+    @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    fun `checker can inspect the authorization after it leaves the pending queue`() {
+        assertThat(enrollmentApprovalId).isNotBlank()
+        given().get("/api/v1/sca/approvals/$enrollmentApprovalId").then().statusCode(200)
+            .body("status", equalTo("EXECUTED"))
+            .body("makerId", equalTo("sca-test-maker"))
+            .body("decidedBy", equalTo("sca-test-checker"))
+        given().get("/api/v1/sca/approvals/${UUID.randomUUID()}").then().statusCode(404)
+    }
+
     private fun enrolled(): Boolean = dataSource.connection.use { connection ->
         connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM sca_enrolled_devices WHERE credential_id = ?)")
             .use { query ->

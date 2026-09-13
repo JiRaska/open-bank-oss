@@ -2,6 +2,8 @@
 
 SCA exposes `GET /api/v1/sca/approvals` and `PATCH /api/v1/sca/approvals/{id}` to operators
 and administrators. The list returns pending entries, oldest first, with a bounded `limit`.
+`GET /api/v1/sca/approvals/{id}` reads one record even after a decision or authorization claim,
+until its TTL expires. A missing record does not prove the associated operation never happened.
 The checker sends `{"approve": true}` or `{"approve": false}`. The maker cannot decide
 their own request; the same identity representation is used in both checks.
 
