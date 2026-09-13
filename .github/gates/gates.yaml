@@ -1349,8 +1349,27 @@ gates:
     selftest_inputs: ["openbank-infra/scripts/check-release-registration.py"]
     selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
     selftest_expect: pass
+    needs_base: optional
     run: |
-      python3 openbank-infra/scripts/check-release-registration.py
+      # `--pr-base` defers ONE thing: a module whose `version.txt` this PR adds may be
+      # unregistered yet, because the registry is derived from the version.txt set
+      # (gen-release-registry.py) and written on main by derived-artefact-autoheal — so a feature
+      # branch no longer edits the two shared JSON maps. That editing is what made five sibling
+      # PRs conflict on them on 2026-09-13 and what silently dropped a registered component from
+      # two of those branches.
+      #
+      # Everything else stays exactly as strict, and the self-test holds all four: an orphan
+      # still fails, a HALF registration still fails, a module unregistered on the BASE still
+      # fails, and an empty/unreadable base falls back to strict rather than widening.
+      #
+      # On a push to main there is no PR base and none is passed, so main is checked strictly —
+      # which is what closes the deferral: `main-red-watch` escalates this gate going red there.
+      # The base is passed ALWAYS, empty included: run-gates.py derives `needs_base` from the
+      # command text, and a bare `$PR_DIFF_BASE` is classified `required` — which would refuse
+      # to run this gate on a push to main, where it is the strict reading that closes the
+      # deferral. `--pr-base ""` is read as "no base" by the script, with its own self-test case.
+      python3 openbank-infra/scripts/check-release-registration.py \
+        --pr-base "${PR_DIFF_BASE:-}"
 
   # rules.yaml change_requirements.release_scope_mismatch / CLAUDE.md rule 2: release-please
   # attributes a commit to a component by the FILES IT TOUCHES under that component's
@@ -3042,6 +3061,25 @@ gates:
   # inside the build and the pact stays unverified, which looks identical to the
   # strand the reconciler was built to remove. Reads the committed pacts, so no
   # broker and no credentials.
+  # End-of-support is DERIVED from SECURITY.md's policy and carried in every release's evidence
+  # bundle (#9881). The derivation has two ways to be quietly wrong — taking the build time instead
+  # of the release date, and inventing the "90 days after supersession" bound for a beta release
+  # that has no successor yet — and nothing else would ever notice either; this runs its table.
+  - id: release-support-period-derivation
+    selftest_exempt: "is-a-test-suite"
+    name: "release end-of-support is derived from the policy, not invented (#9881, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 10   # pure date arithmetic over a fixture table
+    rationale: >-
+      The end-of-support date in a release's evidence bundle is a public CRA commitment computed
+      by a script no other check reads; a wrong rule would publish wrong dates on every release
+      while every release still verified green.
+    review_after: 2027-03-13
+    min_subjects: 6   # 8 derivation cases today (2026-09-13)
+    run: |
+      python3 .github/scripts/release_support_period.py --self-test
+
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
@@ -3064,6 +3102,28 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
+
+  # The verification reconciler's decision table (pact-reconcile-verifications.py) had a
+  # --self-test that NOTHING ran: the workflow invokes the script for real every ~30 minutes and
+  # never with --self-test, so its classification of owed / failing / never-published / broker
+  # error could regress with every run still green. #9776 is the case that made it matter — the
+  # broker's "Pacticipant X not found" was counted as an error for days, leaving an edge
+  # permanently unevaluated. The self-test pins that classification narrowly (exact sentence,
+  # exact edge side, 4xx only); falsified three ways before wiring in. No broker, no credentials.
+  - id: pact-reconcile-decision-table
+    selftest_exempt: "is-a-test-suite"
+    name: "pact verification reconciler classifies every broker answer (#9776, enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # pure classification over fixtures + a pacts/*.json scan, measured 0.1s
+    rationale: >-
+      The reconciler is the only control that finds a stranded pact, and its decision table ran
+      in no CI at all; a regression in how it classifies a broker answer would leave edges
+      silently unevaluated while every scheduled run stays green, which is how #9776 hid.
+    review_after: 2027-03-13
+    min_subjects: 25   # 27 decision cases today (2026-09-13); a floor just below the count, far above an emptied table
+    run: |
+      python3 .github/scripts/pact-reconcile-verifications.py --self-test
 
   # The other half of every other gate in this file. Every other gate here reads committed text,
   # because that is what CI can see; this one compares that text to what the cluster actually
@@ -4149,6 +4209,26 @@ gates:
       LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
       python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
 
+  # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
+  # `gh pr create --body-file`, which never applies the template — so the section is absent by
+  # construction. append-security-checklist.py is the missing third step; this gate keeps it
+  # honest against the REAL template (a renamed or dropped section reddens here, instead of the
+  # helper silently appending nothing and every money-path PR failing the gate above again).
+  - id: security-checklist-append-helper
+    name: "append-security-checklist copies the template's section, unticked and idempotent (#8757, enforced)"
+    group: security
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It asserts the copy stops at the next
+      heading, leaves boxes unticked, keeps the attribution last, is idempotent, and reads the real
+      PULL_REQUEST_TEMPLATE.md; falsified by removing the idempotency guard (self-test FAIL).
+    budget_seconds: 5   # pure text, one temp file
+    min_subjects: 6
+    rationale: "Following the mandated --body-file flag guaranteed the Security checklist was missing, and 50 of 67 open PRs lacked it on 2026-09-05; a tracked helper tested against the real template removes the manual step that kept failing money-path PRs."
+    review_after: "2027-03-13"
+    run: |
+      python3 .github/scripts/append-security-checklist.py --self-test
+
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
   # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
@@ -4892,7 +4972,10 @@ gates:
 
       files=()
       while IFS= read -r f; do files+=("$f"); done < <(
-        find .github/scripts openbank-infra/scripts docs -name '*.py' -type f | sort
+        # openbank-infra/aws and openbank-document-renderer are DEPLOYED Python (the
+        # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
+        # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
+        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \

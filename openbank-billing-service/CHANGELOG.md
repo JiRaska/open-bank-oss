@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.0...billing-service-v0.13.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **billing:** guard billing_outbox created_at plausibility at INSERT ([#9300](https://github.com/JiRaska/open-bank-oss/issues/9300)) ([fa44aa2](https://github.com/JiRaska/open-bank-oss/commit/fa44aa2ad8483db20cf4dc68b7a4c54207332857))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.12.0...billing-service-v0.13.0) (2026-09-01)
 
 

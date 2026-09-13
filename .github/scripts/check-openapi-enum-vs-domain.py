@@ -168,8 +168,17 @@ BASELINE: dict[str, str] = {
     # with the libs scan merged in, that quartet EXACTLY matches libs-domain's ApprovalStatus
     # (the ADR-0155 four-eyes vocabulary it was always meant to publish), so it no longer drifts.
     # The stale-entry check below enforces the removal.
+    # NOT drift — a DELIBERATE SUBSET, reason measured 2026-09-13 (#5962; it used to say only
+    # "ambiguous"). The values are `PackActivationView.state`, typed as libs ProposalState
+    # (PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED). CompliancePackActivationService persists
+    # PROPOSED on propose and, in decide, either `approve(...).markExecuted(...)` (EXECUTED) or
+    # `reject(...)` (REJECTED); no path anywhere in the service sets WITHDRAWN, so the spec is
+    # right not to publish it. APPROVED is only ever transient in memory, so publishing it is a
+    # harmless superset on a response, not a value a client can be refused for.
     "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
-        "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
+        "#5962 — PackActivationView.state: NOT drift. A deliberate subset of libs ProposalState; "
+        "no compliance-pack activation path sets WITHDRAWN (propose/decide persist PROPOSED, "
+        "EXECUTED or REJECTED only).",
     # NOT drift, and the earlier reason here was WRONG in the dangerous direction (#5962). It said
     # APPROVED/PROPOSED/REJECTED "have never existed in the code" and asked for a spec correction
     # dropping them — which would have removed working API vocabulary from a money-path contract.
@@ -196,15 +205,11 @@ BASELINE: dict[str, str] = {
         "#5962 — listRecentApplications `status`: NOT drift. A deliberate superset of "
         "OriginationState; PROPOSED/APPROVED/REJECTED are retired names the repository still "
         "translates via LegacyOriginationMigration.mapLegacyStatus, so they return rows.",
-    # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
-    # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
-    # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
-    # match none of the Kotlin DTO's (givenName, familyName, birthdate, nationalities,
-    # verificationSource, bankIdSub, birthNumberRaw, initialRole, onboardingChannel). Same
-    # reason as above: fix the schema, then the enum.
-    "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
-        "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
-        "whose properties do not match the DTO at all; needs a schema fix first.",
+    # REMOVED 2026-09-13 (#5962): `openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER`. Its
+    # precondition ("fix the schema first") had already been met — CreatePartyRequest's properties
+    # now match the Kotlin DTO — so only the enum was left, and it is corrected to the domain's
+    # NATURAL_PERSON (PartyType, the DTO default, and the DB CHECK). The stale-entry check enforces
+    # the removal.
     # NOT drift — a DELIBERATE SUBSET (#5962). TransitionStatusRequest.targetStatus publishes
     # every status `SepaPayment.canTransitionTo` can reach; RECEIVED is the entry state and is
     # the target of no transition, so it is absent here while present on the read filter, which

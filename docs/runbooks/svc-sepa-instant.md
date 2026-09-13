@@ -3,7 +3,7 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-sepa-instant-service
+# Runbook — openbank-sepa-instant
 
 > Operational runbook for the `sepa-instant` service. Data domain **payments**,
 > classification **confidential**, datastore **PostgreSQL**.
@@ -32,13 +32,13 @@ triaging an incident that starts on `sepa-instant`.
 
 - Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
-- Logs: `kubectl logs -n payments -l app.kubernetes.io/name=sepa-instant-service -f`, or Loki
+- Logs: `kubectl logs -n payments -l app.kubernetes.io/name=sepa-instant -f`, or Loki
   `{namespace="payments"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl argo rollouts restart sepa-instant-service -n payments` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout sepa-instant-service -n payments --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
-- **Scale:** `kubectl scale rollout/sepa-instant-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
+- **Restart:** `kubectl argo rollouts restart sepa-instant -n payments` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout sepa-instant -n payments --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/sepa-instant -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

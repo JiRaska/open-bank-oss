@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.2...sepa-payment-v0.13.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sepa-payment:** guard sepa_payment_outbox created_at plausibility at INSERT ([#9292](https://github.com/JiRaska/open-bank-oss/issues/9292)) ([be2c03d](https://github.com/JiRaska/open-bank-oss/commit/be2c03d10f87cf6c44ae4f3c9b158ab52b209096))
+* **sepa-payment:** publish the real SepaPaymentStatus vocabulary ([#9670](https://github.com/JiRaska/open-bank-oss/issues/9670)) ([5a47064](https://github.com/JiRaska/open-bank-oss/commit/5a4706490198461fb8b3f6ee907d6b3d85cadd29))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.1...sepa-payment-v0.13.2) (2026-09-08)
 
 
