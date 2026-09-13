@@ -86,11 +86,26 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
             stubLedgerHasNoJournal()
         }
 
-        /** Both movement verbs succeed, echoing a balance back. */
+        /**
+         * Both movement verbs succeed, echoing a balance back.
+         *
+         * The body is balance-service's REAL wire shape, not this service's idea of it (#8673).
+         * `BalanceResource.credit/debit` returns the domain `Balance` straight to Jackson, so the
+         * payload carries that class's property names. The previous body was copied from
+         * settlement's own `BalanceResponse` — `availableBalance`/`currentBalance`, names that have
+         * never been emitted — so the stub agreed with the client about a shape the real service
+         * does not produce, and every test passed against a payload that fails in production.
+         *
+         * Keep this body in step with `openbank-balance-service/.../domain/model/Balance.kt`. A
+         * stub written from the consumer's expectation cannot fail the way the consumer does.
+         */
         fun stubMovementsAccepted() {
             val body = """
-                {"accountId":"00000000-0000-0000-0000-000000000001","currency":"CZK",
-                 "availableBalance":0.00,"currentBalance":0.00}
+                {"id":"22222222-2222-2222-2222-222222222222",
+                 "accountId":"00000000-0000-0000-0000-000000000001","currency":"CZK",
+                 "bookedAmount":0.00,"availableAmount":0.00,"reservedAmount":0.00,
+                 "pendingAmount":0.00,"updatedAt":"2026-09-12T00:00:00Z","version":1,
+                 "arrangedOverdraftLimit":0.00,"notYetEffectiveCredit":0.00}
             """.trimIndent()
             server.stubFor(post(urlPathMatching(CREDIT_PATH)).willReturn(okJson(body)))
             server.stubFor(post(urlPathMatching(DEBIT_PATH)).willReturn(okJson(body)))
