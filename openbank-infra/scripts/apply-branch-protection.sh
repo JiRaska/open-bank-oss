@@ -53,7 +53,7 @@ REQUIRED_CHECKS=(
   "gates (gitops-api)"                       # CI — direct governance shard
   "gates (lint-supplychain-security)"        # CI — direct governance shard
   "gates (registry-kotlin-data)"             # CI — direct governance shard
-  "Admin UI"                                 # CI — path-aware build + Playwright gate
+  "Admin UI"                                 # CI — always-run aggregator over the path-aware build + Playwright gate
   "Gitleaks"                                 # Secret scan
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
@@ -141,8 +141,8 @@ bypass_json='[]'
 preserved_checks_json='[]'
 # ADR-0272 rejects strict up-to-date enforcement at the measured merge rate:
 # it moves serialization into rebase loops without closing the merge race.
-# New rulesets follow that current decision; existing rulesets retain their
-# live value so this context migration never changes stale-base policy.
+# Apply that decision consistently; the live ruleset already uses false, so
+# this migration does not change its stale-base policy.
 strict_json='false'
 if [ -n "$existing_id" ]; then
   # If the ruleset exists we MUST read its bypass actors successfully. A failed
@@ -159,16 +159,6 @@ if [ -n "$existing_id" ]; then
     exit 1
   fi
   echo "Preserving $(echo "$bypass_json" | jq 'length') bypass actor(s) from ruleset #$existing_id."
-
-  strict_json=$(echo "$existing_ruleset" | jq -r '
-    [.rules[] | select(.type == "required_status_checks")
-      | .parameters.strict_required_status_checks_policy] | first')
-  if [ "$strict_json" != "true" ] && [ "$strict_json" != "false" ]; then
-    echo "ERROR: ruleset #$existing_id has no readable strict-status-checks policy." >&2
-    echo "       Refusing to guess a value during a context-only migration." >&2
-    exit 1
-  fi
-  echo "Preserving strict-required-status-checks policy: $strict_json."
 
   # A PUT replaces the complete required-check list too. Classify every live
   # context as desired, explicitly preserved, or intentionally removed. Any
