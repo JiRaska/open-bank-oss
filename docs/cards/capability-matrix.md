@@ -22,7 +22,7 @@ call succeeds before a commercial agreement is signed.
 
 | Capability | Port | Visa | Mastercard | Bindings here |
 |---|---|---|---|---|
-| BIN and card-product attributes | `BinLookupPort` | BIN Attributes Sharing (sandbox) | BIN Lookup (sandbox) | simulator |
+| BIN and card-product attributes | `BinLookupPort` | BIN Attributes Sharing (sandbox) | BIN Lookup (sandbox) | simulator, visa, mastercard |
 | Merchant identification and location | `MerchantDataPort` | Merchant Search / Merchant Locator (sandbox) | Merchant Identifier / Places (sandbox) | simulator |
 | Network tokenisation (wallets, card-on-file) | `TokenisationPort` | Visa Token Service (VTS) (contract required) | MDES (contract required) | simulator |
 | Push payment to a card | `PushPaymentPort` | Visa Direct (contract required) | Mastercard Send (contract required) | simulator |

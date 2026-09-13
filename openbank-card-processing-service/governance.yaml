@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: payments
+primaryDatastore: PostgreSQL
+databaseName: openbank_card_processing
+dataLineageRole: both
+dataClassification: confidential
+# An authorisation and its clearing are accounting records for card spend, so the 7-year
+# accounting retention applies (ADR-0118) — unlike a VoP record, which is evidence a control ran.
+# No PAN is stored here at all: the card is referenced by its card-issuance id (ADR-0283 D2).
+retentionPolicy: 7 years
+evidenceExported: false
+databaseLineage:
+  ownedDatabases:
+    - openbank_card_processing

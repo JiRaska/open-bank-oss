@@ -50,7 +50,11 @@ capabilities:
       Answers what a card number's issuer range is: brand, product type, country, funding source.
       First because it is read-only, needs no cardholder data, and is the missing WRITER for the
       merchant/BIN reference data the transaction categoriser is starved of (#8573).
-    bindings: [simulator]
+    # `visa` and `mastercard` name adapters that EXIST in card-processing-service. Neither can
+    # call anything without a developer-portal credential, and with none configured each reports
+    # NOT_BOUND — a state distinct from a failure. Listing them is the honest reading of "what this
+    # repository implements"; the credential is a deployment fact, not a code one.
+    bindings: [simulator, visa, mastercard]
     networks:
       visa: { product: BIN Attributes Sharing, availability: sandbox }
       mastercard: { product: BIN Lookup, availability: sandbox }
@@ -61,6 +65,9 @@ capabilities:
     why: >-
       Turns an acquirer's merchant descriptor into a named, located merchant. Drives the customer's
       "where was this" and the categorisation the card controls act on.
+    # Simulator only: the vendor merchant services need a contract-tier account even in sandbox,
+    # and the descriptor cleaning the simulator does is genuinely useful on its own — it is what
+    # the authorisation path calls today.
     bindings: [simulator]
     networks:
       visa: { product: Merchant Search / Merchant Locator, availability: sandbox }
