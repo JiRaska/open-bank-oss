@@ -4,9 +4,8 @@
 
 Vlastní PostgreSQL schema `openbank_security` v databázi `openbank` (sdílený cluster, izolace schema-per-service).
 
-**Služba persistuje jednu tabulku: `ict_incidents`.** Po migraci `V5` obsahuje schema
-`flyway_schema_history` a `ict_incidents`. Pro cokoli jiného ve službě neexistuje žádná entita,
-repozitář ani JPA mapování — výsledky skenů zůstávají pouze in-memory.
+**Služba persistuje `ict_incidents` a `ict_incident_outbox`.** Migrace `V6` přidává monotónní
+`aggregate_revision` a transakční předávací tabulku. Výsledky skenů zůstávají pouze in-memory.
 
 Z toho plyne:
 
@@ -40,11 +39,12 @@ ict_incidents
 ├── regulatory_report_id    TEXT
 ├── assigned_to             TEXT
 ├── created_at              TIMESTAMPTZ NOT NULL
-└── updated_at              TIMESTAMPTZ NOT NULL
+├── updated_at              TIMESTAMPTZ NOT NULL
+└── aggregate_revision      BIGINT NOT NULL
 ```
 
-Žádná jiná tabulka na ni neodkazuje a ona neodkazuje na nic jiného — jednouzlový diagram, není proč
-kreslit jako graf.
+`ict_incident_outbox` ukládá jeden event pro `(aggregate_id, aggregate_revision)` se sdílenými poli
+pro stav, počet pokusů, claim, chybu a časové značky.
 
 > Do #4709 tato stránka popisovala tabulku `security_outbox` a tabulku `ict_incidents` a obě
 > označovala za fiktivní. Outbox sice existoval, ale nikdy do něj nikdo nezapsal (0 řádků za celou
@@ -59,7 +59,8 @@ kreslit jako graf.
 | `V2__create_security_outbox.sql` | Vytvořila `security_outbox` s indexy na `(status, created_at)` a `aggregate_id` | Aplikována na živé DB; nahrazena V4 |
 | `V3__hibernate_sequences.sql` | Vytvořila Hibernate/Panache sekvenci pro surrogate klíč outboxu | Aplikována; sekvenci ruší V4 |
 | `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — outbox neměl producenta (#4709) | Aplikována mimo pořadí (#5628) |
-| `V5__create_ict_incidents.sql` | Vytvořila `ict_incidents` (sloupce výše) + indexy na `created_at`, `status`, `severity` — přesouvá registr ICT incidentů dle DORA z in-memory mapy do DB (#4728) | Aktuální hlava |
+| `V5__create_ict_incidents.sql` | Vytvořila `ict_incidents` (sloupce výše) + indexy na `created_at`, `status`, `severity` — přesouvá registr ICT incidentů dle DORA z in-memory mapy do DB (#4728) | Aplikovaný předchůdce V6 |
+| `V6__ict_incident_transactional_outbox.sql` | Přidává striktní revize incidentu a dedikovaný claim-safe transakční outbox | Aktuální hlava; produkční relay se aktivuje samostatně |
 
 > V1 chybí — scanner byl v první iteraci bezestavový a V2 je první migrací, která vznikla. V2 a V3
 > jsou záměrně ponechány jako soubory a nesmazány: obě jsou zaznamenány jako aplikované v živé
@@ -69,7 +70,7 @@ kreslit jako graf.
 > `ict_incidents` nemá Hibernate sekvenci: její id přiděluje aplikace (`UUID.randomUUID()` v
 > `IctIncidentService.reportIncident`), ne `@GeneratedValue` — entita je proto
 > `PanacheEntityBase` s explicitním `@Id`, ne `PanacheEntity`. Update jde přes
-> `Panache.getSession().flatMap { it.merge(entity) }` — `persist()` na přiděleném id by u každého
+> zamčenou aktualizaci spravované entity — `persist()` na přiděleném id by u každého
 > uložení naplánoval INSERT a každý přechod stavu po prvním by selhal na duplicitním klíči (viz
 > `IctIncidentEntity`, `IctIncidentRepositoryImpl.save`).
 

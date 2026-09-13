@@ -124,7 +124,7 @@ mp:
       # its outbox and its topic existed for the whole life of this service with nothing ever
       # constructing a message: 0 rows in security_outbox and end offset 0 on the topic. Scan
       # results are served from GET /api/v1/security/report, not published.
-      ict-incident-events-out:
+      ict-incident-outbox-out:
         connector: smallrye-kafka
         bootstrap.servers: kafka:9092
         client.id: security-scanner-ict-${quarkus.uuid}

@@ -2,12 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openbank.dev/schemas/openbank-security-scanner/ict-incident-event.schema.json",
   "title": "ICT incident event v1",
+  "description": "aggregateRevision is the strict database-backed ordering token; sourceVersion remains for mixed-version readers during migration.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "sourceVersion", "eventType", "incident", "occurredAt", "sourceService"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "sourceVersion": { "type": "integer", "minimum": 1 },
+    "aggregateRevision": { "type": "integer", "minimum": 1 },
     "eventType": {
       "enum": ["ICT_INCIDENT_REPORTED", "ICT_INCIDENT_STATUS_CHANGED", "ICT_INCIDENT_REPORTED_TO_REGULATOR"]
     },

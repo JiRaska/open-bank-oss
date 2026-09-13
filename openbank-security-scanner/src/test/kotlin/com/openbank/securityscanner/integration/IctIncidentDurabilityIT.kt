@@ -13,13 +13,13 @@ import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
-import io.smallrye.reactive.messaging.kafka.Record
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.ResultSet
+import java.time.Duration
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -44,7 +44,7 @@ import javax.sql.DataSource
  * second time. With `persist()` that is an unconditional INSERT and the transition 500s on
  * `duplicate key value violates "ict_incidents_pkey"` — invisible to any mocked-repo test, and the
  * exact failure the consent service shipped (#1521). Asserting a 200 plus the changed column is
- * what proves `merge` is doing the upsert.
+ * what proves the locked managed-row update path.
  */
 @QuarkusTest
 @QuarkusTestResource(IctIncidentDurabilityIT.InMemoryKafkaResource::class)
@@ -53,7 +53,11 @@ class IctIncidentDurabilityIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("ict-incident-events-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("ict-incident-outbox-out") + mapOf(
+                "openbank.outbox.dispatch-enabled" to "true",
+                "openbank.outbox.poll-interval" to "1s",
+                "openbank.outbox.initial-delay" to "1s",
+            )
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -101,7 +105,29 @@ class IctIncidentDurabilityIT {
         "reportedToRegulator" to rs.getBoolean("reported_to_regulator"),
         "regulatoryReportId" to rs.getString("regulatory_report_id"),
         "containedAt" to rs.getTimestamp("contained_at"),
+        "aggregateRevision" to rs.getLong("aggregate_revision"),
     )
+
+    private fun selectOutbox(id: UUID): Map<String, Any?>? = dataSource.connection.use { conn ->
+        conn.prepareStatement(
+            "SELECT aggregate_revision, event_type, status, payload FROM ict_incident_outbox " +
+                "WHERE aggregate_id = ? ORDER BY aggregate_revision DESC LIMIT 1",
+        ).use { stmt ->
+            stmt.setObject(1, id)
+            stmt.executeQuery().use { rs ->
+                if (!rs.next()) {
+                    null
+                } else {
+                    mapOf(
+                        "aggregateRevision" to rs.getLong("aggregate_revision"),
+                        "eventType" to rs.getString("event_type"),
+                        "status" to rs.getString("status"),
+                        "payload" to rs.getString("payload"),
+                    )
+                }
+            }
+        }
+    }
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
@@ -116,6 +142,13 @@ class IctIncidentDurabilityIT {
         assertThat(row["severity"]).isEqualTo("P2_HIGH")
         assertThat(row["affectedServices"]).isEqualTo("ledger,transaction")
         assertThat(row["reportedToRegulator"]).isEqualTo(false)
+        assertThat(row["aggregateRevision"]).isEqualTo(1L)
+
+        val outbox = selectOutbox(id)
+        assertThat(outbox).describedAs("incident and event must commit atomically").isNotNull
+        assertThat(outbox!!["aggregateRevision"]).isEqualTo(1L)
+        assertThat(outbox["eventType"]).isEqualTo("ICT_INCIDENT_REPORTED")
+        assertThat(outbox["payload"].toString()).contains("\"aggregateRevision\":1")
     }
 
     @Test
@@ -132,14 +165,17 @@ class IctIncidentDurabilityIT {
             patch("/api/v1/ict-incidents/$id/status")
         } Then {
             // 500 here is the assigned-id `persist()` trap: an unconditional INSERT on an id that
-            // already exists. A 200 means the repository merged.
+            // already exists. A 200 means the repository updated the managed row.
             statusCode(200)
+            body("aggregateRevision", org.hamcrest.Matchers.equalTo(2))
         }
 
         val row = selectIncident(id)
         assertThat(row).isNotNull
         assertThat(row!!["status"]).isEqualTo("CONTAINED")
         assertThat(row["containedAt"]).isNotNull
+        assertThat(row["aggregateRevision"]).isEqualTo(2L)
+        assertThat(selectOutbox(id)!!["aggregateRevision"]).isEqualTo(2L)
     }
 
     @Test
@@ -201,33 +237,34 @@ class IctIncidentDurabilityIT {
      * [InMemoryKafkaResource] but only ever asserted the JDBC row, never the sink. That leaves
      * "the producer fires" and "nobody has ever called the endpoint" indistinguishable from the
      * test suite alone — exactly the ambiguity #4942 asks to resolve. This test closes that gap:
-     * it reports an incident through the real REST endpoint and asserts a corresponding record
-     * landed on the (in-memory) outgoing channel, with the eventType and incident id `emitter.send`
-     * actually put on the wire in [IctIncidentService.publishEvent]. It cannot prove a human has
+     * it reports an incident through the real REST endpoint and asserts the scheduled outbox relay
+     * eventually lands a corresponding record on the in-memory outgoing channel. It cannot prove a human has
      * ever exercised the path in production — only a live topic read could — but it does prove
      * the producer is not dead code: reachable REST endpoint -> service -> emitter -> channel,
      * exercised end to end exactly the way a real call would drive it.
      */
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `reporting an incident actually publishes to the ict-incident-events-out channel`() {
+    fun `the durable outbox eventually publishes an incident event`() {
         val id = reportIncident("kafka broker unreachable ${UUID.randomUUID()}")
 
-        // The emitter is Emitter<Record<String, String>> (IctIncidentService.publishEvent), so the
-        // in-memory sink's payload type is io.smallrye.reactive.messaging.kafka.Record, not String
-        // directly -- the JSON body lives in Record.value(), the incident id in Record.key().
-        val sink = connector.sink<Record<String, String>>("ict-incident-events-out")
-        val mine = sink.received().filter { it.payload.key() == id.toString() }
+        val sink = connector.sink<String>("ict-incident-outbox-out")
+        val deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos()
+        var mine = sink.received().filter { it.payload.contains(id.toString()) }
+        while (mine.isEmpty() && System.nanoTime() < deadline) {
+            Thread.sleep(100)
+            mine = sink.received().filter { it.payload.contains(id.toString()) }
+        }
 
         assertThat(mine)
-            .describedAs("reportIncident must publish an ICT_INCIDENT_REPORTED record, not just persist the row")
+            .describedAs("the durable incident outbox must relay its PENDING row")
             .isNotEmpty
-        assertThat(mine.last().payload.value()).contains("\"eventType\":\"ICT_INCIDENT_REPORTED\"")
+        assertThat(mine.last().payload).contains("\"eventType\":\"ICT_INCIDENT_REPORTED\"")
     }
 
     private companion object {
         const val SELECT_SQL =
             "SELECT status, severity, affected_services, reported_to_regulator, " +
-                "regulatory_report_id, contained_at FROM ict_incidents WHERE id = ?"
+                "regulatory_report_id, contained_at, aggregate_revision FROM ict_incidents WHERE id = ?"
     }
 }

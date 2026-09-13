@@ -74,13 +74,15 @@ mode on synthetic incident replays before enabling case drill-down.
 
 The context projector consumes the existing DORA incident topic from security-scanner, validates its
 source/schema/version and maintains the current incident-to-service impact edges. Updates replace
-stale service impact only when their source-issued ordering token is newer. The producer currently
-persists the incident and emits directly in separate steps, and derives the token from `updatedAt`;
-delivery can therefore be missed and equal or regressed timestamps do not establish causal order.
+stale service impact only when their source-issued ordering token is newer. Security-scanner now
+persists each incident transition and its event atomically, increments a database-backed aggregate
+revision under a row lock, and relays the event from a claim-safe transactional outbox. The projector
+accepts old timestamp tokens during migration, measures that compatibility path and can reject it
+after the topic boundary has been proven clean.
 The protected admin UI returns aggregate counts by affected type and never returns service or
-customer identifiers. A transactional outbox (or equivalent replayable change log), a strict
-per-aggregate revision, workflow and business-case correlation remain activation prerequisites, so
-this ADR stays `partial` and the deployment stays at zero replicas.
+customer identifiers. Production relay activation, replay-boundary evidence, workflow and
+business-case correlation remain activation prerequisites, so this ADR stays `partial` and the
+deployment stays at zero replicas.
 
 ## Alternatives considered
 
@@ -99,8 +101,8 @@ this ADR stays `partial` and the deployment stays at zero replicas.
 **Negative**
 - Accurate impact depends on correlation coverage and explicit unknown states.
 - Case drill-down needs cross-team assignment and privacy controls.
-- Direct post-persistence emission is not atomic, and timestamp-derived ordering cannot prove causal
-  order; production activation requires durable replay and strict aggregate revisions.
+- The migration temporarily accepts legacy timestamp ordering; strict mode is enabled only after
+  deployed producers and retained topic offsets prove every replayed event carries an aggregate revision.
 
 **Neutral**
 - Incident declaration, severity and source observability systems remain authoritative.
