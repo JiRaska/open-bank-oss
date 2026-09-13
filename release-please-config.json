@@ -429,6 +429,12 @@
       "exclude-paths": [
         "openbank-loyalty-service/src/test"
       ]
+    },
+    "openbank-wealth-service": {
+      "component": "wealth-service",
+      "exclude-paths": [
+        "openbank-wealth-service/src/test"
+      ]
     }
   }
 }

@@ -416,6 +416,155 @@ agents:
       - sca: dynamic_linking
     limits: { tokens_per_run: 80000, runs_per_day: 1000 }
 
+  # Card scheme release-bulletin watcher (ADR-0283 phase 4, issue #8812).
+  #
+  # WHY IT EXISTS: the card networks publish mandates twice a year with hard effective dates, and
+  # working out which of them touch this platform is a manual read of two long PDFs that nobody's
+  # job covers. Missing one is not a defect anybody can see until the date passes.
+  #
+  # WHY IT IS PROPOSAL-ONLY: a mandate has to be INTERPRETED against our capability ports, and a
+  # wrong interpretation applied automatically would change a control nobody reviewed. It files an
+  # issue citing the bulletin and the capability it mapped to, so a human checks the mapping rather
+  # than trusting it.
+  #
+  # `enabled: false` ON PURPOSE: no bulletin feed is wired yet (there is no public machine-readable
+  # source, and the portal feeds need a developer account). A charter that claims to run while its
+  # input does not exist is the shape this repo has been burnt by — an agent reporting nothing is
+  # indistinguishable from an agent finding nothing. Flip this on in the PR that wires the feed.
+  - id: card-scheme-bulletin-agent
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0283
+    description: >
+      Reads the card networks' periodic release bulletins and maps each mandate onto this platform's
+      capability ports, filing one governance issue per mandate with its effective date. Read-only:
+      it proposes an issue and never edits a port, a policy or a manifest.
+    enabled: false
+    enforcement: block
+    schedule:
+      weekly: Monday 07:00 UTC
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - any_mandate_interpretation
+      - any_port_or_adapter_change
+    limits:
+      tokens_per_run: 40000
+      runs_per_day: 1
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - bulletin_reference
+        - mandate_effective_date
+        - mapped_capability_id
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: every filed issue cites the bulletin it came from and the capability
+        it was mapped to, so a reader can check the mapping rather than trust it.
+      dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
+  # Card dispute evidence drafter (ADR-0283 phase 4, issue #8869).
+  #
+  # WHY IT EXISTS: a chargeback is won or lost on what was filed before the network's respond-by
+  # date, and that deadline does not pause while somebody hunts for the paperwork. A bundle joins
+  # the authorisation row, its clearings, the merchant descriptor as the scheme resolves it and
+  # whatever the customer sent in — four sources, none of them where anyone is already looking.
+  # The failure mode is not a wrong bundle; it is an empty one filed late, which loses the money
+  # silently and looks like nothing happened.
+  #
+  # WHY IT IS PROPOSAL-ONLY: `POST /api/v1/card-disputes/{id}/evidence` reaches the scheme and a
+  # submission cannot be withdrawn. The write and execute tiers are denied EXPLICITLY rather than
+  # by omission, so the charter states the prohibition instead of relying on an absence.
+  #
+  # NO CARDHOLDER DATA BY CONSTRUCTION: the card is referenced by its card-issuance id and the
+  # party by id. No PAN, CVV or token credential exists inside card-processing to read — keeping
+  # them out of that service is what ADR-0283 decided — so this agent sits outside the CDE by
+  # design, not by policy.
+  #
+  # `enabled: false` ON PURPOSE, and this is the part to read before turning it on: the evidence
+  # is not reachable yet. There is no document store it can read, the 3-D Secure result is not
+  # persisted anywhere it could reach, and openbank-dispute-service is not wired to the scheme
+  # case at all (#8869). Switched on against those gaps it would assemble a bundle out of an
+  # authorisation row and call it evidence — well-formed, plausible and about nothing — which is
+  # worse than silence, because a reviewer sees a filled-in draft next to a deadline and the
+  # cheapest action is to file it. Flip this in the PR that gives it something to read, and author
+  # its prompt in the same change (openbank-libs/governance/prompts/registry.yaml).
+  - id: card-dispute-evidence-agent
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0283
+    description: >
+      Drafts the evidence bundle for an open card chargeback — the authorisation, the clearings
+      that followed it, the merchant as the network identifies it, and what the customer sent in —
+      and puts it in front of a human before the network's respond-by date. It drafts; a person
+      files.
+    enabled: false
+    enforcement: block
+    schedule:
+      daily: "06:00 UTC"
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - any_evidence_submission
+      - any_dispute_status_change
+    limits:
+      tokens_per_run: 40000
+      runs_per_day: 4
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - network_case_id
+        - respond_by_date
+        - evidence_source_records
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: the draft names every record it drew on, and the case's
+        networkCaseId and respondByDate are in the audit capture, so a reviewer checks the
+        assembly rather than trusting it.
+      dora: ICT incident evidence — a scheme deadline is a supplier-imposed operational constraint
+
+
   - id: finops-agent
     plane: control
     model: deepseek-ai/DeepSeek-V3.2

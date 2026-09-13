@@ -127,6 +127,16 @@ export const PERMISSIONS = {
   // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
   "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Business onboarding (ADR-0284). BOTH lines mirror kyb-service's own
+  // @RolesAllowed(OPERATOR, ADMIN, KYC) — on the representation routes AND on `GET /cases`, which
+  // additionally calls requireOperator(). COMPLIANCE is deliberately absent from `view` as well as
+  // from `attest`: it appears on neither side, nor in rules.yaml's role_action_matrix for any
+  // kyb.* action, nor in kyb_rest_ext.rego's operator-kyb-review reason. Granting it `view` would
+  // render a nav item whose FIRST fetch 403s, i.e. a whole page of DataUnavailable — the exact
+  // "a link that 403s on click is worse than a hidden one" trap this file warns about above.
+  // Nav/route gating only: the BFF relays the operator's own bearer and kyb-service + OPA decide.
+  "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -265,6 +275,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],
   ['identity-cases:view', ['/identity-cases']],
+  ['business-onboarding:view', ['/business-onboarding']],
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
@@ -331,14 +342,18 @@ export function hasAnyRole(roles: string[], ...required: Role[]): boolean {
   return required.some(r => roles.includes(r))
 }
 
+// These badges carry text, so each `color` has to clear AA 4.5:1 on its own `bg`. Four of the seven
+// did not — Admin 4.41:1, Payments 3.60:1, Auditor 3.07:1, API 3.54:1 — and the values below are the
+// measured minimum plus headroom. API is the one worth noting: no axe sweep could have found it,
+// because that role never rendered in a test session, so the table had to be measured directly (#9749).
 export const ROLE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  ROLE_ADMIN:      { label: "Admin",      color: "#dc2626", bg: "#fef2f2" },
+  ROLE_ADMIN:      { label: "Admin",      color: "#d52424", bg: "#fef2f2" },
   ROLE_OPERATOR:   { label: "Operator",   color: "#2563eb", bg: "#eff6ff" },
   ROLE_VIEWER:     { label: "Viewer",     color: "#6b7280", bg: "#f9fafb" },
   ROLE_COMPLIANCE: { label: "Compliance", color: "#7c3aed", bg: "#faf5ff" },
-  ROLE_PAYMENTS:   { label: "Payments",   color: "#059669", bg: "#f0fdf4" },
-  ROLE_AUDITOR:    { label: "Auditor",    color: "#d97706", bg: "#fffbeb" },
-  ROLE_API:        { label: "API",        color: "#0891b2", bg: "#ecfeff" },
+  ROLE_PAYMENTS:   { label: "Payments",   color: "#04815a", bg: "#f0fdf4" },
+  ROLE_AUDITOR:    { label: "Auditor",    color: "#ab5e04", bg: "#fffbeb" },
+  ROLE_API:        { label: "API",        color: "#067b98", bg: "#ecfeff" },
   ROLE_SUPERVISOR: { label: "Supervisor", color: "#be185d", bg: "#fdf2f8" },
   ROLE_KYC:        { label: "KYC",        color: "#0d9488", bg: "#f0fdfa" },
   ROLE_KYC_OPENER: { label: "KYC Opener", color: "#0d9488", bg: "#f0fdfa" },

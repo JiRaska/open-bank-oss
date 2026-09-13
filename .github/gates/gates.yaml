@@ -130,6 +130,26 @@ gates:
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
+  - id: finops-tier-drift
+    name: "FinOps workload tiers: the declared set has not collapsed (ADR-0057, enforced floor)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20
+    # 3 declared observed 2026-09-05; 2 after #9790 removed card-issuance's wrong T1, so the
+    # floor is met exactly and the next removal fails here — which is what the floor is for.
+    min_subjects: 2
+    review_after: "2027-03-05"
+    rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returned 0 for every finding (advisory until finops_tiers.enforced flips; #9678 has since made CONFIG errors block, but the DRIFT half this gate is named for is still advisory and still returns 0). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure. The floored count is the DECLARED side alone, not the 26-service union: 23 of that union are money_path_services, already floored at 20 by journey-money-path-accountability, so a union floor would stay green through the `declared: {}` wipe this gate exists to catch."
+    selftest: python3 openbank-infra/scripts/check-finops-tiers.py --self-test
+    selftest_expect: pass
+    run: |
+      # `mode: enforced` here is about the FLOOR, not about findings. The script honours
+      # rules.yaml's `finops_tiers.enforced: advisory` and returns 0 for every finding, so the
+      # only red path is run-gates failing the SUBJECTS= line below min_subjects. That is the
+      # deliberate split: we do not yet enforce that tiers are right, we do enforce that the
+      # checker can still see them.
+      python3 openbank-infra/scripts/check-finops-tiers.py
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
@@ -2540,12 +2560,60 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-matrix-write-grants.py"]
 
+  # The sibling above asks whether an M2M-reachable matrix WRITE grant was declared. This one
+  # asks a different question the same data can answer: does the action's own rest.rego rule
+  # already carry `not startswith(input.principal.id, "service-account-")`? Where it does and the
+  # matrix grants it anyway, the two artifacts contradict each other — the rule keeps machines out,
+  # `matrix-allows` lets them in on type+role alone, and `allow` is a disjunction. Neither existing
+  # gate can see it: check-matrix-write-grants never reads the exclusions, and the rego has no view
+  # of the matrix. Subject derived from rest.rego, today's two contradictions baselined in
+  # rules.yaml: matrix_sa_excluded_action_grants, ratchet both ways.
+  - id: matrix-sa-excluded-actions
+    name: "an SA-excluded action is not matrix-reachable (rest.rego vs role_action_matrix, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A rule's `not startswith(input.principal.id, \"service-account-\")` is the only thing separating staff from the platform's own services, because a client_credentials JWT is classified HUMAN; `matrix-allows` grants on type plus role alone and cannot express that exclusion, so a matrix entry over such an action silently defeats it and no policy layer can veto a base-layer reason."
+    review_after: "2027-09-12"
+    budget_seconds: 10                   # two file reads and a set intersection; measured 0.2s
+    min_subjects: 3                      # SA-excluded actions in rest.rego, 4 today. A floor because
+                                         # this gate's whole value is the derived subject: if the
+                                         # exclusion pattern is ever reworded, the parser matches
+                                         # nothing and the gate goes green about an empty set. The
+                                         # script also refuses a subject of exactly zero on its own.
+    run: |
+      python3 .github/scripts/check-matrix-excluded-actions.py --enforce
+    selftest: python3 .github/scripts/check-matrix-excluded-actions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-matrix-excluded-actions.py"]
+
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
   # plus machine-checkable repo facts (agents.yaml, prompt-registry coverage, evals
   # baselines, and which services actually package registry prompts). The route must read
   # the generated artifact only; a stale snapshot would reintroduce the exact hand-edited
   # drift this refactor removes.
+  # The card capability matrix is DERIVED from openbank-libs/governance/card-capabilities.yaml
+  # (ADR-0283 phase 2, #8810). Without this gate the registry and the published matrix are free to
+  # disagree, and the disagreement is invisible: both files are plausible on their own, and the one
+  # a reader trusts is the rendered table. The registry is also what the Card Center screen renders
+  # from (phase 3), so a drifted matrix means the docs and the operator console tell a bank
+  # different things about which network offers what.
+  - id: card-capability-matrix-drift
+    name: "card capability matrix matches its registry (ADR-0283, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.2s locally; the ceiling covers a cold interpreter on a busy runner
+    # 9 capabilities today. The floor is what stops a renamed registry key turning the drift
+    # check into a green no-op: a matrix rendered from zero capabilities matches a committed file
+    # rendered from zero capabilities, and both are wrong in the same way.
+    min_subjects: 5
+    review_after: "2027-09-05"
+    rationale: "The matrix is the artifact a bank reads to choose a network per product; the registry is what the code and the Card Center bind to. A hand-editable copy of derived data drifts silently and the reader cannot tell which one is current."
+    selftest: python3 .github/scripts/gen-card-capability-matrix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-card-capability-matrix.py"]
+    run: python3 .github/scripts/gen-card-capability-matrix.py --check
+
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry

@@ -107,8 +107,6 @@ BASELINE: dict[str, str] = {
     "openbank-campaign-service:BANNER,PUSH":
         "#5962 — attribution response `channel`: NOT drift. A deliberate subset of Channel; the "
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
-    "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
-        "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
     # NOT drift — a DELIBERATE SUBSET (#5962). Delegation lifecycle approvals persist ONLY
     # PROPOSED/REJECTED/EXECUTED: decide is atomic (DelegationLifecycleApprovalService
     # PERSISTED_STATES), so the shared ProposalState's transient APPROVED would claim a decision
@@ -116,13 +114,28 @@ BASELINE: dict[str, str] = {
     "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
         "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
-    "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
-        "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
     # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
     # lifecycle vs ApprovalStatus) and PENDING/SENT/FAILED (a payment status vs OutboxStatus) are
     # overlaps of vocabulary, not identity — the same shape as the pid-service entries below.
+    # MIS-PAIRINGS from the card scheme ports (ADR-0283 phase 2, #8810). Same class as the three
+    # below: shared libs enums clearing the overlap threshold against customer-edge spec enums that
+    # model a different concept. `CardScheme` is which network ADAPTER answered a capability call
+    # (VISA | MASTERCARD | SIMULATOR); the spec enum is which brand a card CARRIES, so it has no
+    # SIMULATOR and never will — publishing one would advertise a card brand that does not exist.
+    # `NetworkTokenStatus` pairs twice on ACTIVE/SUSPENDED alone, against a card-token lifecycle and
+    # a party lifecycle. Neither is drift, and reconciling either would mean changing a customer
+    # spec to match an enum it does not serve.
+    "openbank-customer-edge:MASTERCARD,VISA":
+        "#8810 — mis-pairing: card BRAND on the card resource vs libs CardScheme, which names the "
+        "answering ADAPTER and carries SIMULATOR by design.",
+    "openbank-customer-edge:ACTIVE,CANCELLED,EXPIRED,PENDING_CONFIRMATION,SUSPENDED":
+        "#8810 — mis-pairing: a card-token lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
+    "openbank-customer-edge:ACTIVE,CLOSED,MERGED,PENDING_KYC,SUSPENDED":
+        "#8810 — mis-pairing: a party lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
     "openbank-customer-edge:FAILED,MANUAL_REVIEW,PASSED,PENDING":
         "#7984 — mis-pairing: screening verdict shares FAILED/PENDING with libs OutboxStatus.",
     "openbank-customer-edge:APPROVED,EXPIRED,IN_PROGRESS,NOT_STARTED,REJECTED":
@@ -157,13 +170,32 @@ BASELINE: dict[str, str] = {
     # The stale-entry check below enforces the removal.
     "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
         "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
-    # Surfaced by the libs scan (#7984): the spec's origination-state list is exactly
-    # libs-domain's OriginationState PLUS three invented values (APPROVED/PROPOSED/REJECTED) —
-    # the #5895 shape, invisible until the shared enum could pair. Lending is money-path, so the
-    # spec correction (dropping the three phantom values) goes through its own reviewed change.
+    # NOT drift, and the earlier reason here was WRONG in the dangerous direction (#5962). It said
+    # APPROVED/PROPOSED/REJECTED "have never existed in the code" and asked for a spec correction
+    # dropping them — which would have removed working API vocabulary from a money-path contract.
+    #
+    # They are accepted filter inputs, and they are TRANSLATED rather than ignored. The parameter is
+    # the `status` query filter of listRecentApplications, whose repository does:
+    #     mapStatusFilter(status) = OriginationState.entries.firstOrNull { it.name == status }
+    #         ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+    #         ?: throw IllegalArgumentException("Unknown application status: $status")
+    # and `mapLegacyStatus` maps PROPOSED -> SUBMITTED, APPROVED -> OFFERED, REJECTED -> DECLINED
+    # (MAPPABLE_LEGACY_STATUSES, libs-domain). So a client sending APPROVED gets the OFFERED rows,
+    # not an empty list and not a 400 — the spec's own description says the legacy names "remain
+    # accepted ... for compatibility; retired rows were migrated by V9", and the code agrees.
+    #
+    # The gate pairs a FILTER vocabulary (canonical states + the retired names still honoured) with
+    # the canonical enum alone, and cannot see the translation layer. Deliberate superset, same
+    # class as the campaign/document/ledger entries above.
+    #
+    # What IS still open, and is not this gate's question: whether the legacy vocabulary should be
+    # retired from the filter now that V9 has migrated the rows. That is an API-deprecation decision
+    # for the lending owner, and until it is made the spec is correct to publish what the endpoint
+    # accepts.
     "openbank-lending-service:APPROVED,ASSESSMENT,AWAITING_SIGNATURE,DECISION_PENDING,DECLINED,DISBURSED,DOCS_REQUIRED,DRAFT,EXPIRED,FOUR_EYES,KYC_PENDING,OFFERED,PROPOSED,READY_TO_DISBURSE,REFLECTION_PERIOD,REJECTED,SIGNED,SUBMITTED,WITHDRAWN":
-        "#7984 — OriginationState: spec advertises APPROVED/PROPOSED/REJECTED, which have never "
-        "existed in the code; real drift, needs a reviewed lending spec fix (money-path).",
+        "#5962 — listRecentApplications `status`: NOT drift. A deliberate superset of "
+        "OriginationState; PROPOSED/APPROVED/REJECTED are retired names the repository still "
+        "translates via LegacyOriginationMigration.mapLegacyStatus, so they return rows.",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
     # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
     # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
@@ -180,12 +212,27 @@ BASELINE: dict[str, str] = {
     "openbank-sepa-payment:CANCELLED,COMPLETED,PROCESSING,REJECTED,RETURNED,VALIDATED":
         "#5962 — targetStatus: deliberate subset of SepaPaymentStatus; RECEIVED is unreachable "
         "as a transition target (SepaPayment.canTransitionTo).",
+    # NOT drift — a DELIBERATE SUBSET, reason corrected (#5962). `CloseFailure.reason` can never
+    # be NOT_VIABLE: a debris account is SKIPPED, never FAILED (#862), on BOTH orchestrator paths
+    # since the per-pocket read gained the same guard the account-level read already had. So
+    # publishing NOT_VIABLE would advertise a value this schema cannot carry, which is the
+    # opposite of the fix the old reason ("undeclared NOT_VIABLE") invited. The gate pairs a
+    # failure-record enum with the full reason enum and cannot see the restriction.
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
-        "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
+        "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
+        "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
-SPEC_ENUM_BLOCK = re.compile(r"enum:[ \t]*\n((?:[ \t]*-[ \t]*\S+[ \t]*\n)+)")
+# A block enum runs until a line that is neither an item nor a COMMENT. The comment clause is
+# load-bearing: without it the run ends at the first `#` inside the block, the parser reports
+# only the values above it, and the gate invents drift that does not exist — openbank-campaign
+# SendOutcome declares all ten values with three explanatory comments between them, and was
+# read as five and baselined as real drift (#5962). It is also a false-NEGATIVE generator:
+# a genuinely undeclared value sitting below a comment is simply not seen.
+SPEC_ENUM_BLOCK = re.compile(
+    r"enum:[ \t]*\n((?:[ \t]*(?:-[ \t]*\S+|#[^\n]*)[ \t]*\n)+)"
+)
 KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
@@ -428,6 +475,24 @@ def self_test() -> int:
         failures += 1
     else:
         print("  ok    a block-style spec enum")
+
+    # A COMMENT INSIDE THE BLOCK must not end it. This is the case that was wrong in production:
+    # the campaign spec declares ten SendOutcome values with explanatory comments between them,
+    # the parser stopped at the first `#`, saw five, and the gate reported drift that did not
+    # exist — which was then baselined as real (#5962). The truncation cuts both ways: a value
+    # genuinely missing from the spec, sitting below a comment, would not be seen at all.
+    commented = spec_enums(
+        "        enum:\n"
+        "          - OPEN\n"
+        "          # why the next one exists\n"
+        "          - CLOSED\n"
+        "          - PENDING\n"
+    )
+    if commented != {frozenset({"OPEN", "CLOSED", "PENDING"})}:
+        print(f"  FAIL  a block enum interrupted by a comment: {commented}")
+        failures += 1
+    else:
+        print("  ok    a block enum interrupted by a comment")
 
     print("self-test: " + ("FAILED" if failures else "passed"))
     return 1 if failures else 0

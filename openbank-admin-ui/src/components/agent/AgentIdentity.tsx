@@ -8,6 +8,7 @@ import {
   ChartNoAxesCombined, ClipboardCheck, GitPullRequest, KeyRound,
   LifeBuoy, MessageCircleQuestion, Network, Radar, Scale, SearchCheck,
   ShieldCheck, TestTubeDiagonal,
+  CreditCard,
 } from 'lucide-react'
 import styles from './AgentIdentity.module.css'
 
@@ -147,6 +148,23 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     value: { cs: 'Vrací týmům důvěru v CI a šetří čas ztracený falešnými poplachy.', en: 'Restores trust in CI and saves time lost to false alarms.' },
     talents: [{ cs: 'Hledání vzorců selhání', en: 'Failure patterning' }, { cs: 'Ověření opakováním', en: 'Reproduction checks' }, { cs: 'Návrh stabilizace', en: 'Stabilisation proposals' }],
     accent: '#be123c', glow: '#fecdd3', shell: '#fff1f2', variant: 'lens', icon: TestTubeDiagonal,
+  },
+  'card-scheme-bulletin-agent': {
+    name: { cs: 'Karel', en: 'Karel' }, role: { cs: 'Čtenář karetních bulletinů', en: 'Card bulletin reader' },
+    purpose: { cs: 'Sleduje mandatorní oznámení Visy a Mastercardu a hlásí, co se banky skutečně týká.', en: 'Tracks Visa and Mastercard mandate bulletins and reports what actually concerns this bank.' },
+    value: { cs: 'Zkracuje cestu od zveřejněného mandátu k rozhodnutí, místo aby ho někdo objevil až po termínu.', en: 'Shortens the path from a published mandate to a decision, instead of it being noticed after the deadline.' },
+    talents: [{ cs: 'Čtení bulletinů', en: 'Bulletin reading' }, { cs: 'Posouzení dopadu', en: 'Impact assessment' }, { cs: 'Návrh termínu', en: 'Deadline proposals' }],
+    accent: '#1d4ed8', glow: '#bfdbfe', shell: '#eff6ff', variant: 'guide', icon: CreditCard,
+  },
+  // ADR-0283 phase 4. The charter ships enabled:false — no dispute feed is wired yet — but the
+  // console renders every governed agent, so a chartered agent with no persona shows up as
+  // "Nový kolega", which reads as an oversight rather than as a deliberate pre-registration.
+  'card-dispute-evidence-agent': {
+    name: { cs: 'Vera', en: 'Vera' }, role: { cs: 'Sběratelka důkazů ke sporům', en: 'Dispute evidence gatherer' },
+    purpose: { cs: 'Skládá podklady ke karetnímu sporu — transakci, autorizaci, doručení a komunikaci — do jednoho spisu ve lhůtě schématu.', en: 'Assembles a card dispute file — the transaction, its authorisation, delivery and correspondence — within the scheme deadline.' },
+    value: { cs: 'Banka odpovídá na spor úplným spisem; o samotném sporu rozhoduje člověk.', en: 'The bank answers a dispute with a complete file; a human decides the dispute itself.' },
+    talents: [{ cs: 'Sběr podkladů', en: 'Evidence collection' }, { cs: 'Hlídání lhůty schématu', en: 'Scheme deadline tracking' }, { cs: 'Příprava spisu', en: 'Case-file preparation' }],
+    accent: '#15803d', glow: '#bbf7d0', shell: '#f0fdf4', variant: 'lens', icon: SearchCheck,
   },
   'case-coordinator': {
     name: { cs: 'Kord', en: 'Chord' }, role: { cs: 'Koordinátor případu', en: 'Case coordinator' },

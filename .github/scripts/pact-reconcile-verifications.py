@@ -86,6 +86,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gatelib  # noqa: E402  — the shared gh-transient vocabulary lives here
+
 PACTS = "pacts/*.json"
 DEFAULT_BRANCH = "main"
 # A cap exists so a broker outage answering `unknown` for everything cannot dispatch
@@ -94,6 +97,33 @@ DEFAULT_BRANCH = "main"
 # it must never be mistaken for.
 DEFAULT_MAX_DISPATCH = 8
 
+# Enough of a broker error body to name the rejected selector; not enough to paste a page of HTML.
+HTTP_ERROR_DETAIL_CHARS = 400
+
+
+def redact_origin(url: str) -> str:
+    """Path plus query, never the host.
+
+    PACT_BROKER_URL is a secret here (the broker has no public ingress), and CI logs on a public
+    repository are readable by anyone. The host is also the one part of the URL that a selector
+    rejection is never about: a broker 400 on /matrix is about the q[] terms, which live in the
+    query. So the diagnosable half is safe to print and the unsafe half carries no information.
+    """
+    split = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(("", "", split.path, split.query, ""))
+
+
+def broker_error_message(reason, url: str, detail: str) -> str:
+    """What the caller's ::warning:: line says when the broker rejects a query.
+
+    Must name the SUBJECT (the path and the selectors) and must not name the HOST. The self-test
+    exercises this function rather than re-deriving the string, so a change to either half is
+    caught here instead of in a CI log two days later.
+    """
+    if len(detail) > HTTP_ERROR_DETAIL_CHARS:
+        detail = detail[:HTTP_ERROR_DETAIL_CHARS] + "\u2026"
+    return f"{reason} for {redact_origin(url)}" + (f" \u2014 {detail}" if detail else "")
+
 
 def http_json(url, user, password, timeout=30):
     req = urllib.request.Request(url)
@@ -101,8 +131,21 @@ def http_json(url, user, password, timeout=30):
         token = base64.b64encode(f"{user}:{password}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")
     req.add_header("Accept", "application/hal+json")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # `HTTPError.__str__` renders as "HTTP Error 400: Bad Request" and nothing else, so the
+        # caller's warning named a status and no subject — which is why #9776 sat unactionable for
+        # two days. The broker DOES say which selector it rejected, in the response body; re-raise
+        # with the body and the redacted path/query attached so the warning identifies the edge.
+        try:
+            detail = e.read().decode("utf-8", "replace").strip()
+        except OSError:
+            detail = ""
+        raise urllib.error.HTTPError(
+            e.url, e.code, broker_error_message(e.reason, url, detail), e.headers, None,
+        ) from None
 
 
 def integrations(root: pathlib.Path):
@@ -180,6 +223,33 @@ def dispatch(repo, workflow, ref, service, token):
     req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.status
+
+
+def _defer(provider: str, message: str, deferred: list) -> bool:
+    """Is this dispatch failure a TRANSIENT GitHub answer rather than a real one?
+
+    A rate-limited or transport-failed dispatch is a **debt**, not a defect: the
+    provider still owes the verification, the next scheduled run re-derives the same
+    `todo` set from the broker, and nothing about the repo needs changing. Failing the
+    run for it turns a quota window into a red reconcile — measured 2026-09-11/12,
+    **11 of the last 60 scheduled runs** failed and EVERY one was
+    `API rate limit exceeded for installation ... (HTTP 403)` on the dispatch POST,
+    while the reconcile logic itself was correct in all 11. That red is worse than
+    noise: this workflow is one of the few things watching for a stranded pact, so a
+    failure nobody can act on is how a real strand stops being visible.
+
+    The distinction is NOT re-derived here. `gatelib.is_gh_transient` compiles the
+    shared vocabulary in `gh-transient-patterns.txt`, whose whole point is that four
+    independent copies of this question drifted apart; its measured property is zero
+    over-retries across 11 terminal messages (404/422/401/`Resource not accessible by
+    integration`), so a genuinely broken dispatch — missing workflow, bad ref, token
+    without `actions: write` — still fails this run, loudly.
+    """
+    if gatelib.is_gh_transient(message):
+        sys.stderr.write(f"::warning::dispatch for {provider} deferred (transient): {message}\n")
+        deferred.append(provider)
+        return True
+    return False
 
 
 def main() -> int:
@@ -294,16 +364,30 @@ def main() -> int:
         return 2
 
     bad = 0
+    deferred = []
     for p in todo:
         try:
             status = dispatch(args.repo, args.workflow, args.branch, p, token)
             print(f"  dispatched {args.workflow} for {p} (HTTP {status})")
         except urllib.error.HTTPError as e:
-            sys.stderr.write(f"::error::dispatch for {p} failed: HTTP {e.code} {e.read()[:200]!r}\n")
+            msg = f"HTTP {e.code} {e.read()[:200]!r}"
+            if _defer(p, msg, deferred):
+                continue
+            sys.stderr.write(f"::error::dispatch for {p} failed: {msg}\n")
             bad += 1
         except (urllib.error.URLError, TimeoutError) as e:
+            if _defer(p, str(e), deferred):
+                continue
             sys.stderr.write(f"::error::dispatch for {p} failed: {e}\n")
             bad += 1
+    if deferred:
+        # Named, never silent: an unnamed deferral reads as "nothing else needed doing",
+        # the same mistake the --max-dispatch cap is written to avoid.
+        print(
+            f"::warning::dispatch deferred for {len(deferred)} provider(s) on a transient "
+            f"GitHub answer; still owed and picked up next run (~30 min): "
+            f"{', '.join(deferred)}"
+        )
     return 1 if bad else 0
 
 
@@ -381,6 +465,66 @@ def self_test() -> int:
     print(f"  {'ok ' if pub else 'BAD'} providers in this repo that can publish: {len(pub)}/{len(providers)}")
     if not pub:
         bad.append("no provider in the repo can publish — the check answers False for everything")
+
+    # ---- The dispatch-failure classification (#9750).
+    # The load-bearing asymmetry: a quota answer must DEFER (the debt survives to the next
+    # run), a real answer must FAIL THIS RUN. Both directions are asserted, because a
+    # classifier that defers everything makes this workflow green about a dispatch that can
+    # never succeed — a token without `actions: write` would then strand pacts silently,
+    # which is the exact failure this reconciler exists to make visible.
+    print("\nself-test: dispatch-failure classification")
+    dispatch_cases = [
+        ("HTTP 403 b'{\"message\": \"API rate limit exceeded for installation ID 1.\"}'", True,
+         "installation rate limit DEFERS — this was 11 of the last 60 scheduled runs"),
+        ("You have exceeded a secondary rate limit. Please wait a few minutes.", True,
+         "secondary rate limit DEFERS"),
+        ("HTTP 502 b'Bad gateway'", True, "a 5xx DEFERS"),
+        ("<urlopen error [Errno 104] Connection reset by peer>", True, "a transport failure DEFERS"),
+        ("HTTP 404 b'{\"message\": \"Not Found\"}'", False,
+         "a missing workflow FAILS — retrying cannot create verify-provider.yml"),
+        ("HTTP 422 b'{\"message\": \"Reference does not exist\"}'", False,
+         "a bad ref FAILS"),
+        ("HTTP 403 b'{\"message\": \"Resource not accessible by integration\"}'", False,
+         "a permission denial FAILS — the one message that must not read as quota"),
+        ("HTTP 401 b'{\"message\": \"Bad credentials\"}'", False, "bad credentials FAIL"),
+    ]
+    for msg, want_defer, why in dispatch_cases:
+        seen = []
+        got = _defer("prov", msg, seen)
+        okmark = "ok " if (got == want_defer and bool(seen) == want_defer) else "BAD"
+        print(f"  {okmark} {why}")
+        if okmark == "BAD":
+            bad.append(why)
+
+    # A broker rejection must NAME the edge it rejected. The old warning rendered
+    # `HTTPError` directly, which is "HTTP Error 400: Bad Request" and nothing else — a status
+    # with no subject, which is why #9776 could not be acted on for two days. Equally, the
+    # message must not carry the broker HOST: PACT_BROKER_URL is a secret and these logs are
+    # public. Both halves are asserted here, and the second is the one that regresses quietly.
+    print("\nself-test: broker-error message is diagnosable and host-free")
+    probe_url = "https://broker.internal.example/matrix?q[][pacticipant]=consumer-x&latestby=cvpv"
+    rendered = broker_error_message(
+        "Bad Request", probe_url, '{"error":"unknown pacticipant consumer-x"}',
+    )
+    checks = [
+        ("names the path", "/matrix" in rendered),
+        ("keeps the selector that was rejected", "q[][pacticipant]=consumer-x" in rendered),
+        ("carries the broker's own reason", "unknown pacticipant" in rendered),
+        ("does NOT leak the broker host", "broker.internal.example" not in rendered),
+        ("does NOT leak the scheme", "https://" not in rendered),
+    ]
+    for why, okay in checks:
+        print(f"  {'ok ' if okay else 'BAD'} {why}")
+        if not okay:
+            bad.append(why)
+
+    # Truncation must be a bound, not a silent drop: a huge body still has to say it was cut.
+    long_detail = "x" * (HTTP_ERROR_DETAIL_CHARS + 50)
+    truncated = broker_error_message("Bad Request", probe_url, long_detail)
+    trunc_ok = truncated.endswith("\u2026") and long_detail not in truncated
+    print(f"  {'ok ' if trunc_ok else 'BAD'} a long body is truncated and marked as truncated")
+    if not trunc_ok:
+        bad.append("truncation")
 
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))

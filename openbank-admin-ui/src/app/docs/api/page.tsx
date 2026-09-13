@@ -12,7 +12,12 @@ import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 // UI short-id → Kubernetes Deployment/Service name (the BFF's canonical key).
 // All but `catalog` carry a `specId` of the form `openbank-<k8s-name>`, so we
 // derive the key from it and special-case the catalog (port 8104). See ADR-0056.
-function k8sName(svc: { specId: string | null }): string {
+// `k8sName` overrides that derivation for the one service where it does not
+// hold — `specId` names the repo module directory (so the code-derived catalog
+// lookup below can find it), and `security-scanner` deploys under a different
+// k8s workload name than its directory (see src/lib/services/registry.ts).
+function k8sName(svc: { specId: string | null; k8sName?: string }): string {
+  if (svc.k8sName) return svc.k8sName
   return svc.specId ? svc.specId.replace(/^openbank-/, '') : 'product-catalog'
 }
 
@@ -28,6 +33,7 @@ interface Service {
   version: string
   desc: string
   specId: string | null
+  k8sName?: string
   derived?: boolean
 }
 
@@ -72,7 +78,7 @@ const SERVICES: Service[] = [
   { id: 'aml',          name: 'AML Service',            port: 8117, group: 'Compliance',      version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)',            specId: 'openbank-aml-service' },
   { id: 'card-issuance',name: 'Card Issuance Service',  port: 8118, group: 'Cards',           version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)',            specId: 'openbank-card-issuance-service' },
   { id: 'fx',           name: 'FX Service',             port: 8119, group: 'Core Banking',    version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)',                 specId: 'openbank-fx-service' },
-  { id: 'security-scanner',name: 'Security Scanner',    port: 8120, group: 'Platform',        version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)',                    specId: 'openbank-security-scanner-service' },
+  { id: 'security-scanner',name: 'Security Scanner',    port: 8120, group: 'Platform',        version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)',                    specId: 'openbank-security-scanner', k8sName: 'security-scanner-service' },
   { id: 'standing-order',name:'Standing Order Service', port: 8121, group: 'Payments',        version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)',                specId: 'openbank-standing-order-service' },
   { id: 'swift',        name: 'SWIFT Service',          port: 8122, group: 'Payments',        version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)',                           specId: 'openbank-swift-service' },
   { id: 'sanctions',    name: 'Sanctions Service',      port: 8123, group: 'Compliance',      version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)',                specId: 'openbank-sanctions-service' },
@@ -138,7 +144,7 @@ const GROUP_COLORS: Record<string, string> = {
   'Payments':     '#7c3aed',
   'PSD2':         '#d97706',
   'Platform':     '#6b7280',
-  'Cards':        '#db2777',
+  'Cards':        '#d02571',
   'Other':        '#64748b',
 }
 
@@ -615,8 +621,8 @@ export default function ApiCatalogPage() {
           <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--surface)',
+              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
+              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
               color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
@@ -749,7 +755,7 @@ export default function ApiCatalogPage() {
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
                     background: '#fdf4ff', border: '1px solid #fbcfe8',
-                    borderRadius: '6px', color: '#db2777', textDecoration: 'none',
+                    borderRadius: '6px', color: '#d02571', textDecoration: 'none',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />

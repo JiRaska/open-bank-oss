@@ -116,6 +116,27 @@ charters:
       `skills:` list in agents.yaml, executed in an operator's coding-agent session — there is no
       service in this repo that sends a system prompt on its behalf.
 
+  - id: card-scheme-bulletin-agent
+    status: pending
+    reason: >-
+      ADR-0283 phase 4 (#8812). The charter is registered and ships DISABLED because no bulletin
+      feed exists yet, so no prompt has been written: authoring one now would register text that
+      nothing sends, which is the same class of claim as a charter that says it runs while its
+      input does not exist. The prompt is authored in the PR that wires the feed and flips
+      `enabled`, so "it runs" and "there is a prompt" become true in the same change.
+
+  - id: card-dispute-evidence-agent
+    status: pending
+    reason: >-
+      ADR-0283 phase 4 (#8869). The charter is registered and ships DISABLED because the evidence
+      it would assemble is not reachable — no document store it can read, the 3-D Secure result
+      not persisted anywhere in range, and openbank-dispute-service not wired to the scheme case
+      at all. Authoring a prompt now would register text that nothing sends, and worse, a prompt
+      that would draft a bundle out of an authorisation row and call it evidence. The prompt is
+      authored in the PR that gives the agent something to read and flips `enabled`, so "it runs"
+      and "there is a prompt" become true in the same change — the same shape as
+      card-scheme-bulletin-agent above.
+
   - id: mcp-anonymous
     status: not-applicable
     reason: >-

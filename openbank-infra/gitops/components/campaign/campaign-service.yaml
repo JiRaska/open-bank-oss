@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-campaign-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5153aca88402cb3d"
+        openbank.tech/policy-checksum: "762f33f9d4e9436f"
       labels:
         app.kubernetes.io/name: campaign-service
         app.kubernetes.io/part-of: campaign
@@ -145,6 +145,12 @@ spec:
             # an omitted one is a call that is both unconfigured AND dropped in-cluster.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # Incentive lookup for enrolment/send decisions. Same reason for the explicit
+            # svc URL as the edges above — application.yaml's ${INCENTIVE_SERVICE_URL:...}
+            # had no Deployment entry, so it silently fell back to localhost:8156 in
+            # every environment (#9096).
+            - name: INCENTIVE_SERVICE_URL
+              value: http://incentive-service.incentive.svc:8156
             # ADR-0210: read-only segment evaluation against the silver layer.
             # ClickHouse requires auth: the `analytics` user, password from the
             # Vault-backed clickhouse-auth Secret projected into this namespace

@@ -206,7 +206,7 @@ function CreditRiskConsole() {
       />
 
       {unavailable.length > 0 && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
+        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger-text)', fontSize: 13 }}>
           {t('lending-service neodpověděl na:', 'lending-service did not answer:')} {unavailable.join(', ')}
         </div>
       )}

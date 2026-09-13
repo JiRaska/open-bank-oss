@@ -684,6 +684,28 @@ fire from *outside* it, so they stay here:
   Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
   a competing PR squash-merges it still lists the overlap as a diff even when the content already
   agrees. Read the content, not the diff.
+- **`git checkout <ref> -- <file>` is a WHOLE-FILE take, and it reads in the diff exactly like an
+  ordinary conflict resolution.** Resolving a conflict that way took `main`'s version of one page
+  entire and dropped 112 lines — including the feature the branch existed for. The PR stayed titled
+  "protect document template drafts" while protecting nothing, and nothing in the diff said so: the
+  file simply equalled main's. Same class three times in one queue (#9685); the other two were
+  smaller but identical in shape — one side's implementation taken wholesale, the other side's
+  tests left asserting behaviour that no longer exists.
+  **Two rules, and the second is the one that actually caught them.** Prefer a union merge to a
+  whole-file take when both sides changed the file; where the whole-file take really is right
+  (main carries an equivalent implementation), *say so in the commit message*, because that
+  sentence is the only thing distinguishing a considered decision from an accident. Then, after
+  resolving ANY merge, run the WHOLE module suite — not the tests you touched. In the worst of the
+  three, the single edited test was green while the suite was already red on a file never opened;
+  in another the assertion was e2e, so a local green proved nothing at all.
+  **Deliberately NOT a gate, and the measurement is why.** The mechanical signature is exact (a
+  file where the merge's blob equals main's while the branch had changed it), but across 69 open
+  PRs it fired 577 times over 21 PRs — mostly lockfiles and migrations legitimately superseded.
+  Narrowed to "a symbol the branch declared that exists nowhere in the merged tree" it gives 3 rows,
+  of which **1 is real**: symbol-level detection cannot tell a deletion from a rename, which is
+  inherent rather than a tuning problem. Same conclusion as `entity-column-names`: a gate that
+  cries wolf about correct code is worth less than nothing. Run it as a one-off audit after a bulk
+  conflict-resolution session instead.
 - **A merge git calls CLEAN can still DELETE content — it reports no conflict when two sides add
   neighbouring entries to the same list, and keeps only one.** Not a conflict resolved badly:
   nothing to resolve, nothing printed, exit 0. Twice on 2026-08-02, both while merging `main` into
@@ -749,9 +771,24 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
   `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
   `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
-  linter's output hides the failures that are not findings), and `probe_zombie_runs`.
+  linter's output hides the failures that are not findings), `probe_commit_touches_path` (below),
+  and `probe_zombie_runs`.
   Each is held to a known-positive **and** a known-negative by the enforced
   `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`git show <sha> -- <path>` exits 0 and prints NOTHING in three different situations, and in a
+  monorepo the likeliest one is that you were standing in the wrong directory.** Pathspec arguments
+  resolve against `$PWD`, while `git status` / `--name-only` PRINT repo-root-relative paths — so
+  copying a path out of one command's output into another's argument is wrong exactly when you are
+  not at the root. Measured from inside `openbank-admin-ui/`: the root-relative path answered
+  `exit=0, 0 bytes`, the same as a path that has never existed, and the same as a genuine
+  "unchanged" — three states, one indistinguishable answer, and the two failures read as the
+  negative finding you were testing for. Use `probe_commit_touches_path <sha> <repo-root-path>`,
+  which anchors the pathspec with git's `:/` magic prefix (CWD-independent) and separates exit 1
+  ("looked; it does not") from exit 2 ("that path names no file — could not look"). The `:/` prefix
+  alone is NOT the whole fix: it cures the CWD dependence and still answers `exit 0`, empty, for a
+  misspelled path. Same family as the `--before=<bare date>` and `date -j -f` traps above; caught
+  twice within one session on #9736, the second time by `git add` erroring loudly where `git show`
+  had not.
 - **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
   record never transitioned while every one of its jobs is `completed`, the oldest from
   2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`

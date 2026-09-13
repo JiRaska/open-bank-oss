@@ -186,8 +186,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "564374d7b1d9a782",
-      "count": 18,
+      "sha256": "096f490854700e6a",
+      "count": 20,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -196,6 +196,8 @@
         "customer-copilot",
         "mcp-anonymous",
         "ap2-anonymous",
+        "card-scheme-bulletin-agent",
+        "card-dispute-evidence-agent",
         "finops-agent",
         "devops-agent",
         "control-liveness-sentinel",
@@ -209,7 +211,7 @@
         "business-copilot"
       ],
       "byPlane": {
-        "control": 11,
+        "control": 13,
         "development": 2,
         "customer": 3,
         "business": 2
@@ -221,11 +223,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "6372285504647940",
+      "sha256": "a3e89e8ca8fb050f",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 2,
+        "pending": 4,
         "registered": 12
       },
       "idsByStatus": {
@@ -238,6 +240,8 @@
           "ap2-anonymous"
         ],
         "pending": [
+          "card-scheme-bulletin-agent",
+          "card-dispute-evidence-agent",
           "kyb-analyst",
           "business-copilot"
         ],
@@ -282,6 +286,8 @@
         ],
         "rca-investigator": [],
         "ledger-domain-engineer": [],
+        "card-scheme-bulletin-agent": [],
+        "card-dispute-evidence-agent": [],
         "mcp-anonymous": [],
         "ap2-anonymous": [],
         "finops-agent": [
@@ -374,6 +380,13 @@
           "buildFile": "openbank-control-liveness-sentinel/build.gradle.kts"
         },
         {
+          "module": "openbank-copilot-service",
+          "charters": [
+            "customer-copilot"
+          ],
+          "buildFile": "openbank-copilot-service/build.gradle.kts"
+        },
+        {
           "module": "openbank-devops-agent",
           "charters": [
             "devops-agent"
@@ -416,12 +429,13 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 10,
+      "serviceCount": 11,
       "registeredChartersLoadedFromRegistry": [
         "authz-policy-auditor",
         "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",
+        "customer-copilot",
         "devops-agent",
         "docs-truth-agent",
         "finops-agent",
@@ -430,9 +444,7 @@
         "release-steward",
         "ui-assistant"
       ],
-      "registeredChartersStillInline": [
-        "customer-copilot"
-      ]
+      "registeredChartersStillInline": []
     },
     "governanceDefaults": {
       "enforcement": "block",
