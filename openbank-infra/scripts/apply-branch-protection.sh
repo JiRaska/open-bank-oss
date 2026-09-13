@@ -70,12 +70,8 @@ MIGRATION_CHECKS=(
   "gates (lint-supplychain-security)"
   "gates (registry-kotlin-data)"
   "Admin UI"
+  "OPA policy gate"
 )
-
-# OPA policy gate is deliberately absent from MIGRATION_CHECKS: it is already
-# required by the live ruleset. The live-check preservation guard below proves
-# it cannot be removed accidentally; MIGRATION_CHECKS covers only contexts this
-# phase is newly adding.
 
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
 # >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
@@ -135,6 +131,7 @@ existing_id=$(gh api "repos/$REPO/rulesets" --jq \
 # there is no existing ruleset (first-time create). The list endpoint omits
 # bypass_actors, so fetch the individual ruleset.
 bypass_json='[]'
+strict_json='false'
 if [ -n "$existing_id" ]; then
   # If the ruleset exists we MUST read its bypass actors successfully. A failed
   # fetch must ABORT, never fall back to empty — coercing a transient API error
@@ -150,6 +147,16 @@ if [ -n "$existing_id" ]; then
     exit 1
   fi
   echo "Preserving $(echo "$bypass_json" | jq 'length') bypass actor(s) from ruleset #$existing_id."
+
+  strict_json=$(echo "$existing_ruleset" | jq -r '
+    [.rules[] | select(.type == "required_status_checks")
+      | .parameters.strict_required_status_checks_policy] | first')
+  if [ "$strict_json" != "true" ] && [ "$strict_json" != "false" ]; then
+    echo "ERROR: ruleset #$existing_id has no readable strict-status-checks policy." >&2
+    echo "       Refusing to guess a value during a context-only migration." >&2
+    exit 1
+  fi
+  echo "Preserving strict-required-status-checks policy: $strict_json."
 
   # A PUT replaces the complete required-check list too. Refuse an accidental
   # removal caused by desired-state drift; deleting a live gate must be an
@@ -176,6 +183,7 @@ payload=$(jq -n \
   --argjson approvals "$REQUIRED_APPROVALS" \
   --argjson checks "$checks_json" \
   --argjson bypass "$bypass_json" \
+  --argjson strict "$strict_json" \
   '{
     name: $name,
     target: "branch",
@@ -196,9 +204,7 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
-          # Preserve the current live non-strict policy. Changing
-          # stale-base enforcement is outside this context-only migration.
-          strict_required_status_checks_policy: false,
+          strict_required_status_checks_policy: $strict,
           required_status_checks: $checks
         } }
     ],
