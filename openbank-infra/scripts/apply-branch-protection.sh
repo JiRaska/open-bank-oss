@@ -33,21 +33,30 @@ RULESET_NAME="main-protection"
 # stands in for the whole per-service matrix (see services-ci.yml), so we do
 # not have to enumerate all 29 services here.
 #
+# CI GATE MIGRATION — PHASE 1 OF 2:
+# `Validate manifests` used to be the only required context for the three gate
+# shards and the Admin UI gate. That adds one serial hosted-runner allocation
+# after all substantive work is complete; in #9986 the no-op aggregator waited
+# almost seven minutes and then ran for seconds. Require the four direct
+# contexts now, while retaining the aggregator during the transition. Only
+# after this desired state has been applied and observed live may a follow-up
+# remove `Validate manifests` from both this list and ci.yml. The overlap is
+# intentional: ruleset and workflow changes must never create a protection gap.
+#
 # NOTE on matrix checks: a job with a matrix produces one check PER cell named
 # "Job (cell)" — e.g. CodeQL becomes "CodeQL (java-kotlin)" and
 # "CodeQL (javascript-typescript)". Add those explicit names if you want CodeQL
 # to gate merges; the bare "CodeQL" context will never match.
 REQUIRED_CHECKS=(
-  "all-green"            # Services CI — aggregates the per-service build matrix
-  "Validate manifests"   # CI — yamllint + shellcheck
-  "Gitleaks"             # Secret scan
-  "issue-hygiene"        # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
+  "all-green"                                # Services CI — aggregates the per-service build matrix
+  "Validate manifests"                       # CI — transitional aggregator; remove only in phase 2
+  "gates (gitops-api)"                       # CI — direct governance shard
+  "gates (lint-supplychain-security)"        # CI — direct governance shard
+  "gates (registry-kotlin-data)"             # CI — direct governance shard
+  "Admin UI"                                 # CI — path-aware build + Playwright gate
+  "Gitleaks"                                 # Secret scan
+  "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
-# NOTE: "Admin UI" (CI) is deliberately NOT gated yet. The committed
-# openbank-admin-ui currently fails type-check (real WIP TypeScript errors +
-# missing committed eslint config), so requiring it would deadlock every merge.
-# Re-add it here once the admin-ui build is green:
-#   "Admin UI"           # CI — Next.js lint + type-check + build
 
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
 # >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
