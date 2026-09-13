@@ -24,7 +24,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gitops_facts  # noqa: E402  (path must be set before the import)
@@ -139,6 +143,57 @@ def management_port(short: str) -> str:
             if match:
                 return match.group(1)
     return "8085"
+
+
+@lru_cache(maxsize=None)
+def probe_containers(gitops: Path) -> dict[str, list[dict]]:
+    """Index declared workload containers once per generator invocation."""
+    result: dict[str, list[dict]] = {}
+    for path in sorted(gitops.rglob("*.yaml")):
+        text = read(path)
+        if "openbank-" not in text or not any(kind in text for kind in ("Deployment", "Rollout")):
+            continue
+        for doc in yaml.load_all(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+            if not isinstance(doc, dict) or doc.get("kind") not in {"Deployment", "Rollout"}:
+                continue
+            containers = doc.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+            result.setdefault(doc.get("metadata", {}).get("name", ""), []).extend(containers)
+    return result
+
+
+def declared_probes(short: str, gitops: Path = GITOPS) -> tuple[str, str]:
+    """Read probes from the module's container, never from a sidecar or a framework default."""
+    module_images = {f"openbank-{short}", f"openbank-{short}-service"}
+    matches: set[tuple[str, str]] = set()
+    index = probe_containers(gitops)
+    for name in gitops_facts.module_names(short):
+        for container in index.get(name, []):
+            image = container.get("image", "").rsplit("/", 1)[-1].split("@", 1)[0].split(":", 1)[0]
+            if image in module_images:
+                matches.add(tuple(describe_probe(container, kind) for kind in ("readinessProbe", "livenessProbe")))
+    if len(matches) == 1:
+        return next(iter(matches))
+    explanation = "not declared in a matching workload" if not matches else "multiple workload declarations; inspect GitOps"
+    return explanation, explanation
+
+
+def describe_probe(container: dict, kind: str) -> str:
+    probe = container.get(kind) or {}
+    for protocol, field in (("GET", "httpGet"), ("TCP", "tcpSocket"), ("gRPC", "grpc")):
+        if field not in probe:
+            continue
+        settings = probe[field]
+        port = settings.get("port", "?")
+        if isinstance(port, str):
+            declared = [p.get("containerPort") for p in container.get("ports", []) if p.get("name") == port]
+            port = declared[0] if len(declared) == 1 else f"{port} (unresolved named port)"
+        if field == "httpGet":
+            scheme = "HTTPS " if settings.get("scheme", "HTTP") == "HTTPS" else ""
+            return f"`{scheme}GET :{port}{settings.get('path', '/')}`"
+        return f"`{protocol} :{port}`"
+    if "exec" in probe:
+        return "exec probe; inspect the container's command in the GitOps manifest"
+    return "not declared"
 
 
 def application_automated(short: str) -> bool | None:
@@ -436,15 +491,15 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
 
 def runtime_sections(short: str, ns: str) -> str:
     """Render operational commands only for a workload that is intended to run."""
+    readiness, liveness = declared_probes(short)
     if zero_replica_workload(short):
         return (
             "## Runtime operations — DEFERRED\n"
             "\n"
             "Do not increase replicas, restart, or use log/metrics commands to activate this staged\n"
             "workload. The reviewed activation procedure must first establish the signed image,\n"
-            "GitOps sync, and actual cluster health. It will then use management health endpoints\n"
-            f"`GET :{management_port(short)}/q/health/ready` and\n"
-            f"`GET :{management_port(short)}/q/health/live`.\n"
+            "GitOps sync, and actual cluster health. The declared probes are:\n\n"
+            f"- Readiness: {readiness} · Liveness: {liveness}\n"
         )
     commands = ops_commands(short, ns)
     live_unverified = workload_live_unverified(short)
@@ -462,8 +517,7 @@ def runtime_sections(short: str, ns: str) -> str:
     return (
         "## Health & probes\n"
         "\n"
-        f"- Readiness: `GET :{management_port(short)}/q/health/ready` · Liveness: "
-        f"`GET :{management_port(short)}/q/health/live`\n"
+        f"- Readiness: {readiness} · Liveness: {liveness}\n"
         f"- Metrics: {metrics}\n"
         f"- Logs: {commands['logs_cmd']}, or Loki\n"
         f"  `{{namespace=\"{ns}\"}}`.\n"
@@ -592,13 +646,45 @@ def self_test() -> int:
     service with no backup.
     """
     fails: list[str] = []
+    cases = 0
 
     def says(text: str, *needles: str) -> bool:
         return all(n in text for n in needles)
 
     def case(label: str, ok: bool) -> None:
+        nonlocal cases
+        cases += 1
         if not ok:
             fails.append(label)
+
+    tcp = {"ports": [{"name": "http", "containerPort": 3000}],
+           "readinessProbe": {"tcpSocket": {"port": "http"}},
+           "livenessProbe": {"exec": {"command": ["/check-health"]}}}
+    case("TCP probe stays TCP and resolves the container's named port",
+         describe_probe(tcp, "readinessProbe") == "`TCP :3000`")
+    case("exec probe is not represented as an HTTP endpoint",
+         describe_probe(tcp, "livenessProbe").startswith("exec probe"))
+    case("an absent probe does not invent a framework endpoint",
+         describe_probe({}, "readinessProbe") == "not declared")
+    case("HTTP path and named management port come from the container",
+         describe_probe({"ports": [{"name": "management", "containerPort": 8087}],
+                         "readinessProbe": {"httpGet": {"port": "management", "path": "/ready"}}},
+                        "readinessProbe") == "`GET :8087/ready`")
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp)
+        container = {**tcp, "name": "app", "image": "registry.example/openbank-example:v1"}
+        sidecar = {"name": "sidecar", "image": "registry.example/opa:v1",
+                   "readinessProbe": {"httpGet": {"port": 8181, "path": "/health"}}}
+        doc = {"kind": "Deployment", "metadata": {"name": "example"},
+               "spec": {"template": {"spec": {"containers": [sidecar, container]}}}}
+        (fixture / "workload.yaml").write_text(yaml.safe_dump(doc).replace("kind: Deployment", 'kind: "Deployment"'))
+        case("matching workload selects the app container even when a sidecar is first",
+             declared_probes("example", fixture) == ("`TCP :3000`", describe_probe(tcp, "livenessProbe")))
+        case("an unrelated workload does not supply fallback probes",
+             declared_probes("unrelated", fixture) == ("not declared in a matching workload",) * 2)
+    admin = runtime_sections("admin-ui", "admin-ui")
+    case("the deployed admin-ui TCP probes never render Quarkus health URLs",
+         "TCP :3000" in admin and "/q/health" not in admin)
 
     # STATELESS: no datastore at all. Recovery is a redeploy, and the text must say so without
     # ever mentioning a backup.
@@ -723,7 +809,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook deployment/DR classifier is falsifiable (22 cases)")
+    print(f"self-test ok: runbook deployment/DR classifier is falsifiable ({cases} cases)")
     return 0
 
 

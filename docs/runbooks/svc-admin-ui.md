@@ -30,7 +30,7 @@ triaging an incident that starts on `admin-ui`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :3000` · Liveness: `TCP :3000`
 - Metrics: scraped by the fleet PodMonitor (namespace `admin-ui`); dashboards in Grafana.
 - Logs: `kubectl logs -n admin-ui deploy/admin-ui -f`, or Loki
   `{namespace="admin-ui"}`.

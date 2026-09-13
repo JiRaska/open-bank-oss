@@ -30,7 +30,7 @@ triaging an incident that starts on `security-scanner`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8120` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `security-scanner`); dashboards in Grafana.
 - Logs: `kubectl logs -n security-scanner deploy/security-scanner-service -f`, or Loki
   `{namespace="security-scanner"}`.

@@ -30,7 +30,7 @@ triaging an incident that starts on `case-coordinator-agent`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8146` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `platform`); dashboards in Grafana.
 - Logs: `kubectl logs -n platform deploy/case-coordinator-agent -f`, or Loki
   `{namespace="platform"}`.
