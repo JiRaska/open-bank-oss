@@ -57,6 +57,9 @@ interface LeafLedgerRepository {
 /** Grants are read back by idempotency key so a retry resolves to the grant it already made. */
 interface BenefitGrantRepository {
     suspend fun findByIdempotencyKey(partyId: UUID, key: String): BenefitGrant?
+
+    /** Every grant this party holds, any status, newest reservation first. */
+    suspend fun listFor(partyId: UUID): List<BenefitGrant>
 }
 
 /** Marker interface so the dispatcher binds this service's outbox, not another's. */

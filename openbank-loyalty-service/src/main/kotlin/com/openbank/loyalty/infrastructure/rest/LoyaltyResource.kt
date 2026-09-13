@@ -5,6 +5,7 @@
 package com.openbank.loyalty.infrastructure.rest
 
 import com.openbank.loyalty.application.usecase.EarnLeavesUseCase
+import com.openbank.loyalty.application.usecase.ListBenefitGrantsUseCase
 import com.openbank.loyalty.application.usecase.ProvisioningSummaryUseCase
 import com.openbank.loyalty.application.usecase.ReadLeafSummaryUseCase
 import com.openbank.loyalty.application.usecase.RedeemBenefitUseCase
@@ -48,7 +49,30 @@ class LoyaltyResource(
     private val redeem: RedeemBenefitUseCase,
     private val summary: ReadLeafSummaryUseCase,
     private val provisioning: ProvisioningSummaryUseCase,
+    private val grantList: ListBenefitGrantsUseCase,
 ) {
+
+    /**
+     * The party's benefit grants, newest first. `idempotencyKey` is deliberately not returned: it
+     * is the caller's retry handle for one redemption, not a property of the grant.
+     */
+    @GET
+    @Path("/parties/{partyId}/grants")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
+    suspend fun grants(@PathParam("partyId") partyId: UUID): Response = Response.ok(
+        grantList.list(partyId).map {
+            mapOf(
+                "grantId" to it.id.toString(),
+                "benefitId" to it.benefitId,
+                // Stored status verbatim — GRANTED is owed, not applied (Benefit.kt).
+                "grantStatus" to it.status.name,
+                "priceLeaves" to it.price.value,
+                "reservedAt" to it.reservedAt.toString(),
+                "grantedAt" to it.grantedAt?.toString(),
+                "expiresAt" to it.expiresAt?.toString(),
+            )
+        },
+    ).build()
 
     @GET
     @Path("/parties/{partyId}")
