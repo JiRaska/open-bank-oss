@@ -15,6 +15,7 @@ import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
+import { OperationalEvidence } from '@/components/observability/OperationalEvidence'
 
 const POLL = 15_000
 
@@ -100,6 +101,8 @@ export default function SystemHealthPage() {
           </button>
         </div>}
       />
+
+      <OperationalEvidence />
 
       <ContextualInsights dashboardUid="openbank-slo" panels={HEALTH_INSIGHTS}
         titleCs="Dopad na zákazníky" titleEn="Customer impact"
