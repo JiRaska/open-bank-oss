@@ -1865,6 +1865,32 @@ temporal_worker_switch_naming:
   # the allowlist mechanism stays (and fails stale in either direction) for the next exception
   # that genuinely cannot be renamed.
 
+ci_watches:
+  lane_scoped_population: true
+  # A watch that asserts a verdict about ONE lane of a workflow (one trigger event, one
+  # subject) must draw its population from that lane only. Drawn from every lane, it is green
+  # about a different subject and reads the thing it exists to catch as background noise.
+  #
+  # Measured 2026-09-13 on auto-deploy-red-watch.yml (#9130): ten consecutive SCHEDULED
+  # auto-deploy failures over 27 hours, no fleet-health issue, the watch green throughout. Its
+  # population was the three newest completed runs of any event, and auto-deploy's `push` lane
+  # (the services one merge touched) lands green between scheduled ticks —
+  # `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` was `stuck = false`. Worse, the not-stuck
+  # branch closed an open issue on ANY green run, so a lucky escalation would have been tidied
+  # away by the next merge while money-path services stayed pinned. The watch's own issue text
+  # describes exactly that trap.
+  #
+  # Rule: filter the population to the lane (server-side where the API allows it), bound the
+  # query (a watch that paginates history to look at three runs is the rate-limit outage it
+  # reports on — this one was failing on the installation limit the same morning), close only
+  # on the same lane's green, and keep the decision in a script with a --self-test whose
+  # known-positive is the interleaved fixture.
+  #
+  # Whether the other watches (main-red-watch, service-build-stall-watch,
+  # merged-past-red-check-watch) share this class is a thing to MEASURE, not assert: each has
+  # a different trigger shape and main-red-watch already filters on head_branch + event.
+  ci_producer: .github/scripts/detect-auto-deploy-stuck.py   # gate auto-deploy-red-watch-declaration
+
 scheduled_methods:
   no_runblocking_in_scheduled_body: true
   # Quarkus invokes a plain (non-`suspend`) @Scheduled method on a bare `executor-thread`,
