@@ -4,9 +4,11 @@
 
 package com.openbank.settlement.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
+import java.util.UUID
 
 /**
  * CI infra sweep (issue #578). Isolated PostgreSQL per test JVM via Testcontainers,
@@ -21,10 +23,11 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> {
         val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
             .withUsername("openbank")
-            .withPassword("openbank_secret")
+            .withPassword(UUID.randomUUID().toString())
             .withDatabaseName("openbank_settlement_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", pg.dockerImageName, "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -33,13 +36,17 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.jdbc.url" to
                 "jdbc:postgresql://$host:$port/openbank_settlement_it",
             "quarkus.datasource.username" to "openbank",
-            "quarkus.datasource.password" to "openbank_secret",
+            "quarkus.datasource.password" to pg.password,
             "quarkus.devservices.enabled" to "false",
             "mp.messaging.outgoing.settlement-events-out.connector" to "smallrye-in-memory",
         )
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", it.dockerImageName, "stopped")
+        }
+        postgres = null
     }
 }

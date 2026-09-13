@@ -5,18 +5,18 @@
 package com.openbank.settlement.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.settlement.application.port.out.SettlementOutboxRepository
 import com.openbank.settlement.infrastructure.persistence.entity.SettlementEntity
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
-import java.util.UUID
 
 /** Serializes a committed state fact; callers must own the settlement transaction. */
 @ApplicationScoped
 class SettlementAuditWriter(private val outbox: SettlementOutboxRepository, private val objectMapper: ObjectMapper) {
     fun append(entity: SettlementEntity, previousStatus: String?): Uni<Void> {
-        val eventId = UUID.randomUUID()
+        val eventId = Ids.newId()
         val occurredAt = entity.updatedAt
         val payload = objectMapper.writeValueAsString(
             mapOf(

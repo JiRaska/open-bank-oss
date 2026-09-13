@@ -37,3 +37,21 @@ all `LEDGER_PROJECTION` histories have completed or been reconciled. Retain the 
 column and its stored values. An older worker cannot execute the new workflow type; an older balance
 projector cannot provide the atomic cover guarantee. Binary rollback before draining these histories
 is not safe. Rollback does not undo already posted journals or repair historic balance drift.
+
+## Legacy direct movement uncertainty
+
+A legacy workflow's `BALANCE_STATE_UNKNOWN` means a debit or credit exhausted its attempts
+without a reliable completion result. The movement may already have committed. The REST response
+uses `PENDING`, `recoveryRequired=true` and `recoveryReason=BALANCE_STATE_UNKNOWN`.
+The workflow stops further money movements, journal booking and rejection; the
+`SettlementBalanceStateUnknown` alert identifies outstanding cases.
+
+Reconcile the original movement references and establish that no original activity or request can
+still commit before applying an approved correction. An absent row during an in-flight request
+is not proof of non-execution. Retain the evidence and reconcile customer balances with the ledger.
+Do not apply direct balance corrections to a ledger-projection settlement: its journal events
+already own both balance movements.
+
+The legacy uncertainty guard uses a Temporal version marker. Existing histories replay their
+previous command sequence; the guard cannot repair already completed settlements. Keep compatible
+workers while old executions remain and reconcile pre-existing ambiguous cases separately.

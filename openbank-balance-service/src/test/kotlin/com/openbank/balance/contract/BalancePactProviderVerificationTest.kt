@@ -166,6 +166,16 @@ class BalancePactProviderVerificationTest {
         }
     }
 
+    @State("no balance exists for the settlement cover account")
+    fun stateSettlementCoverAccountMissing() = runOnVertxContext {
+        check(
+            balanceRepo.findByAccountIdAndCurrency(
+                UUID.fromString("88888888-8888-4888-8888-888888888820"),
+                "CZK",
+            ) == null,
+        ) { "Missing-account contract fixture must not have a balance" }
+    }
+
     @State("a CZK balance exists for the holds account with sufficient funds")
     fun stateBalanceExists() = runOnVertxContext {
         seedBalance(

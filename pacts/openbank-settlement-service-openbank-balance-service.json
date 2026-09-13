@@ -59,6 +59,37 @@
         },
         "status": 201
       }
+    },
+    {
+      "description": "settlement cannot reserve cover for a missing payer",
+      "providerStates": [
+        {
+          "name": "no balance exists for the settlement cover account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 125.50,
+          "currency": "CZK",
+          "reason": "Settlement cover",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "ttlSeconds": null
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/88888888-8888-4888-8888-888888888820/holds"
+      },
+      "response": {
+        "body": {
+          "error": "NOT_FOUND"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 404
+      }
     }
   ],
   "metadata": {
