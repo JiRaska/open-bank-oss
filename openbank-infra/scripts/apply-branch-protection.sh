@@ -131,7 +131,7 @@ existing_id=$(gh api "repos/$REPO/rulesets" --jq \
 # there is no existing ruleset (first-time create). The list endpoint omits
 # bypass_actors, so fetch the individual ruleset.
 bypass_json='[]'
-strict_json='false'
+strict_json='true'
 if [ -n "$existing_id" ]; then
   # If the ruleset exists we MUST read its bypass actors successfully. A failed
   # fetch must ABORT, never fall back to empty — coercing a transient API error
