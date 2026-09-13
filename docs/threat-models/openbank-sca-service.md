@@ -235,8 +235,8 @@ uses the same principal name as the maker path; self-approval remains forbidden.
 `ScaFourEyesFlowIT` exercises the generated deployment OPA policy with real HTTP, Redis and
 PostgreSQL, including substitution, replay and existing M2M exemptions. This proves the local
 flow only. Four-eyes remains a separate deployment opt-in; the admin flow and real identity
-provider must be verified before activation. Redis approval TTLs are not durable checker audit
-evidence, and an authorization claim is not a business commit. See
+provider must be verified before activation. PostgreSQL retains checker audit evidence with
+transactional outbox records; an authorization claim is not a business commit. See
 [the rollout procedure](../runbooks/sca-operator-approvals.md).
 
 `DELETE /api/v1/sca/parties/{partyId}/devices/{deviceId}` checks customer ownership before
@@ -257,3 +257,17 @@ binary ignoring revocation is unsafe after the first revocation. See
 [the rollout and rollback procedure](../runbooks/sca-device-revocation.md).
 This change does not establish hardware attestation, identity recovery, customer-edge
 passkey revocation or a live end-to-end four-eyes approval proof.
+
+### Durable operator authorization evidence
+
+SCA operator approvals and each accepted maker/checker transition are stored with their audit
+outbox record in the same PostgreSQL transaction. A row lock serializes decision and claim;
+self-approval, repeat transitions and expired authorization are refused. Expiry does not delete
+evidence or renew authorization. The record and event bind the exact original action, target,
+maker and checker. `EXECUTED` establishes only an authorization claim, not a committed business
+operation. Database/outbox availability is required before acknowledging a transition.
+
+Mixed Redis/PostgreSQL approval writers and restored Redis snapshots are unsafe: cutover and
+rollback require paused mutations and a verified drain of every live approval. Evidence tables
+remain intact on rollback. Production four-eyes activation still requires a reviewed rollout
+and real identity-provider validation; this storage change does not enable it.

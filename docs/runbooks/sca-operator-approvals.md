@@ -3,7 +3,7 @@
 SCA exposes `GET /api/v1/sca/approvals` and `PATCH /api/v1/sca/approvals/{id}` to operators
 and administrators. The list returns pending entries, oldest first, with a bounded `limit`.
 `GET /api/v1/sca/approvals/{id}` reads one record even after a decision or authorization claim,
-until its TTL expires. A missing record does not prove the associated operation never happened.
+until its original authorization deadline expires. A missing record does not prove the associated operation never happened.
 The checker sends `{"approve": true}` or `{"approve": false}`. The maker cannot decide
 their own request; the same identity representation is used in both checks.
 
@@ -30,7 +30,7 @@ The service has no blanket exemption for operator identities.
 
 `AUTHZ_FOUR_EYES_ENFORCE` defaults to false. This change prepares the API and binding;
 it does not turn on the production manifest. Before enabling it, exercise the admin review
-flow with the real identity provider and Redis permissions, and run an enforced
+flow with the real identity provider and database permissions, and run an enforced
 maker/checker drill. Review both successful service-account ceremonies and refused human
 requests. All writers must have the atomic approval-store implementation; see
 [the shared upgrade precautions](atomic-four-eyes-approvals.md).
@@ -45,8 +45,11 @@ and drain approvals; retain credential revocation and decision evidence migratio
 An approval marked EXECUTED means its one-use authorization was claimed, not that the
 database operation committed. If a response is lost, inspect the device or challenge and
 its outbox evidence before obtaining a fresh approval. Never replay an authorization by
-editing Redis. The TTL-bounded approval queue is not a durable audit of the checker;
-durable authorization evidence is a separate production requirement.
+editing its stored state. SCA stores the maker/checker record in PostgreSQL and appends
+`SCA_OPERATOR_APPROVAL_CHANGED` to the transactional outbox for every accepted transition.
+Expiry hides a record from authorization APIs; it does not delete the retained evidence.
+A failed audit insert rolls back the transition. Decision and claim do not extend the
+original deadline. No automatic evidence-retention or deletion policy is implied.
 
 `ScaFourEyesFlowIT` uses real HTTP, PostgreSQL, Redis and the generated deployment OPA
 bundle. Its policy image and bundle are declared Gradle inputs. It proves local enforcement,
@@ -54,3 +57,21 @@ ownership parsing, maker/checker separation, field binding and existing service 
 The admin component and BFF tests cover review, bearer relay, redacted errors, duplicate clicks
 and uncertain responses. Playwright checks the signed-in mobile review and confirmation using
 a mocked service response. These checks do not prove production identity wiring or live rollout.
+
+## PostgreSQL approval-store cutover
+
+Pause governed operator mutations and let every live Redis approval finish or expire before
+replacing the writers. Apply V14, deploy every SCA writer using the PostgreSQL store, then
+exercise the enforced maker/checker flow before reopening traffic. Do not mix store versions:
+a Redis approval has no PostgreSQL row and must not silently authorize a request there.
+If a prior record must be investigated, retain its available audit evidence separately; do not
+convert an unverified Redis snapshot into new valid authorization.
+
+For rollback, pause traffic and drain all live PostgreSQL approvals first. Retain the approval
+table and outbox rows. An older Redis-backed binary cannot read them, and restoring old Redis
+records can resurrect a consumed authorization. Prefer a forward fix when the drain cannot
+be established. Expired rows remain evidence even though the authorization API returns 404.
+
+`ScaOperatorApprovalDurabilityIT` covers retained expiry evidence, concurrent checker/claim
+races and transaction rollback on audit failure. `EXECUTED` is still a claim made before the
+protected method runs; reconcile the business row and its own event to determine its outcome.

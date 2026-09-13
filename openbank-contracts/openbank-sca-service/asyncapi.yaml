@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 asyncapi: 3.0.0
 info:
-  title: OpenBank SCA device events
-  version: 1.1.0
-  description: Enrollment, revocation and signed decision facts from the SCA transactional outbox.
+  title: OpenBank SCA authorization events
+  version: 1.2.0
+  description: Device and operator authorization facts from the SCA transactional outbox.
 channels:
   scaEvents:
     address: openbank.sca.events
     messages:
+      operatorApprovalChanged:
+        $ref: '#/components/messages/OperatorApprovalChanged'
       enrolled:
         $ref: '#/components/messages/DeviceEnrolled'
       revoked:
@@ -114,3 +116,35 @@ components:
           credentialId: {type: string}
           occurredAt: {type: string, format: date-time}
           cancelledChallenges: {type: integer, minimum: 0}
+    OperatorApprovalChanged:
+      name: SCA_OPERATOR_APPROVAL_CHANGED
+      contentType: application/json
+      description: |
+        Each maker/checker transition and this event commit together. Deduplicate by eventId.
+        EXECUTED means the maker claimed authorization once; it is not evidence that the
+        protected business operation committed. Authorization expires at expiresAt and cannot
+        be extended by deciding or claiming it. The database retains expired evidence.
+        Consumers must tolerate other event types on this shared topic.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, sourceService, aggregateType, aggregateId,
+                   actorId, actorType, action, makerId, status, createdAt, expiresAt, occurredAt]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: SCA_OPERATOR_APPROVAL_CHANGED}
+          schemaVersion: {type: integer, const: 1}
+          sourceService: {type: string, const: sca-service}
+          aggregateType: {type: string, const: SCA_OPERATOR_APPROVAL}
+          aggregateId: {type: string, format: uuid}
+          actorId: {type: string}
+          actorType: {type: string, const: AUTHENTICATED_PRINCIPAL}
+          action: {type: string}
+          resourceId: {type: [string, 'null']}
+          makerId: {type: string}
+          status: {type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED]}
+          createdAt: {type: string, format: date-time}
+          expiresAt: {type: string, format: date-time}
+          decidedBy: {type: [string, 'null']}
+          decidedAt: {type: [string, 'null'], format: date-time}
+          claimedAt: {type: [string, 'null'], format: date-time}
+          occurredAt: {type: string, format: date-time}
