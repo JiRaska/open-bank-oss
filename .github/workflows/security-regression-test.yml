@@ -78,11 +78,10 @@ jobs:
             // never issues — matches the closing-keyword regex above and reddens this check on a
             // PR that closes nothing. Measured 2026-09-12 on #9861.
             //
-            // The error carries PARTIAL data: every alias that did resolve is present. Use it, and
-            // let the per-issue handling below decide. An unresolvable number is not a security
-            // issue and cannot be closed by this PR either, so it is genuinely not this rule's
-            // business — whereas throwing turns quoted text into a failed security check, which is
-            // the shape that teaches people to ignore a red security check.
+            // Recover only requested issue aliases explicitly reported as NOT_FOUND.
+            // Permission, rate-limit and nested resolver failures can ALSO carry partial data;
+            // they must fail the check rather than silently removing an issue from its scope.
+            const missingAliases = new Set();
             let data;
             try {
               data = await github.graphql(
@@ -100,20 +99,27 @@ jobs:
               { owner: context.repo.owner, repo: context.repo.repo, pr: pr.number },
               );
             } catch (err) {
-              // Only a partial-data response is tolerable. A transport failure, a permission
-              // denial or a rate limit carries no `data`, and swallowing those would make this
-              // check pass by not running — the one outcome a security gate must never have.
-              if (!err.data || !err.data.repository) throw err;
-              core.info(`GraphQL returned partial data (${err.errors?.length ?? 0} error(s)); using it.`);
+              const aliases = new Set(closing.map((n, i) => `issue${i}`));
+              if (!err.data?.repository || !Array.isArray(err.errors) || err.errors.length === 0 ||
+                  !err.errors.every(error => error.type === "NOT_FOUND" &&
+                    Array.isArray(error.path) && error.path.length === 2 &&
+                    error.path[0] === "repository" && aliases.has(error.path[1]) &&
+                    err.data.repository[error.path[1]] === null)) throw err;
+              for (const error of err.errors) missingAliases.add(error.path[1]);
+              core.info(`Ignoring ${missingAliases.size} explicitly unresolved issue reference(s).`);
               data = err.data;
             }
             const repository = data.repository;
             const securityIssues = closing.filter((n, i) => {
               const issue = repository[`issue${i}`];
-              if (!issue) {
-                // Not a failure: `#N` that resolves to nothing is not an issue this PR can close.
+              if (issue === null && missingAliases.has(`issue${i}`)) {
+                // This requested alias was explicitly reported as NOT_FOUND.
                 core.info(`#${n} does not resolve to an issue — a quoted reference, not a closure.`);
                 return false;
+              }
+              if (!Array.isArray(issue?.labels?.nodes) ||
+                  !issue.labels.nodes.every(label => typeof label?.name === "string")) {
+                throw new Error(`Incomplete labels for issue #${n}`);
               }
               return issue.labels.nodes.some(label => label.name === "security");
             });
