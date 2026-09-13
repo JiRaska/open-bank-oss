@@ -153,6 +153,7 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
             )
@@ -193,6 +194,7 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
             )

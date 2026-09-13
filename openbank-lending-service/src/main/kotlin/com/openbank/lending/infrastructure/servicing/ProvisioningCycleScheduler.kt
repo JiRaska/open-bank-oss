@@ -40,6 +40,10 @@ class ProvisioningCycleScheduler(
     private val cycle: RunProvisioningCycleUseCase,
     @ConfigProperty(name = "lending.provisioning.cycle.batch-size", defaultValue = "500")
     private val batchSize: Int,
+    // The cap on batches per tick, NOT on loans per period. It exists so one pass cannot run
+    // unbounded against a runaway book; it is not how the period gets covered. See the drain below.
+    @ConfigProperty(name = "lending.provisioning.cycle.max-batches", defaultValue = "40")
+    private val maxBatches: Int,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
 ) {
@@ -64,41 +68,75 @@ class ProvisioningCycleScheduler(
     fun runProvisioningPass(): Uni<Void> = Panache.withSession {
         val asOf = LocalDate.now(clock)
         val period = asOf.format(periodFormat)
-        cycle.runProvisioningCycle(period, asOf, batchSize)
-            .invoke { outcome ->
+        drain(period, asOf, batchesRun = 0, loansAssessed = 0, journalsPosted = 0)
+            .invoke { total ->
                 log.infof(
-                    "IFRS 9 provisioning cycle %s: %d loans assessed, %d provisioning journals posted",
-                    outcome.period,
-                    outcome.loansAssessed,
-                    outcome.journalsPosted,
+                    "IFRS 9 provisioning cycle %s: %d loans assessed in %d batch(es), %d journals posted",
+                    period,
+                    total.loansAssessed,
+                    total.batchesRun,
+                    total.journalsPosted,
                 )
-                // A full batch means MORE REMAIN for this period, not that work was lost: the scan
-                // excludes loans already provisioned for the period, so the next tick starts where
-                // this one stopped and the cycle completes over as many ticks as the book needs.
-                //
-                // It said something else until #9901, and the something else was false. The scan was
-                // LoanRepository.findActive — `ORDER BY disbursedAt, id` with a fixed maxResults and
-                // no cursor — so every tick returned the SAME first `batch-size` loans. The comment
-                // claimed a truncated tail "self-heals eventually" via the idempotency check; it does
-                // not. The head is skipped as already-provisioned but still fills the window, so past
-                // that position a loan was never assessed for the period at all.
-                if (outcome.loansAssessed >= batchSize) {
-                    log.infof(
-                        "IFRS 9 provisioning cycle %s assessed %d loans, filling the batch size " +
-                            "(%d) — more loans remain unprovisioned for this period and the next tick " +
-                            "will continue from there",
-                        outcome.period,
-                        outcome.loansAssessed,
-                        batchSize,
+                if (total.batchesRun >= maxBatches) {
+                    // The one case that is NOT covered: the drain stopped on its own cap, so loans
+                    // remain unprovisioned for this period and the next tick is 720h away by default.
+                    log.warnf(
+                        "IFRS 9 provisioning cycle %s stopped at the %d-batch cap after %d loans — " +
+                            "loans remain UNPROVISIONED for this period and the next tick is one " +
+                            "cycle interval away. Raise lending.provisioning.cycle.max-batches " +
+                            "against the active book's actual size (%d batches covers %d loans).",
+                        period,
+                        maxBatches,
+                        total.loansAssessed,
+                        maxBatches,
+                        maxBatches.toLong() * batchSize,
                     )
                 }
-                // ADR-0160 mechanism 3: record after the success path — a truncated pass that logs a
-                // warning is still a successful run of the control; never record in the failure path.
                 liveness?.recordSuccess()
             }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
             .replaceWithVoid()
     }
+
+    /**
+     * Provision the WHOLE period in this tick, one batch at a time, stopping when a batch comes back
+     * short (the book is exhausted) or at [maxBatches].
+     *
+     * The loop is the point, not a nicety. The scan excludes loans already provisioned for the
+     * period, so a batch-at-a-time cycle does advance — but the schedule is
+     * `lending.provisioning.cycle.every`, **720h by default**. One batch per tick would cover 500
+     * loans a month: a 5,000-loan book would take ten months to finish a single period's
+     * provisioning, which is indistinguishable from the #9901 defect at any horizon a regulator
+     * cares about. Sliding the window fixes the direction; draining it fixes the rate.
+     *
+     * Recursion rather than a Multi: each pass must observe the rows the previous one wrote, so the
+     * batches are strictly sequential. They share this tick's session (Panache.withSession above).
+     */
+    private fun drain(
+        period: String,
+        asOf: LocalDate,
+        batchesRun: Int,
+        loansAssessed: Int,
+        journalsPosted: Int,
+    ): Uni<DrainOutcome> {
+        if (batchesRun >= maxBatches) {
+            return Uni.createFrom().item(DrainOutcome(batchesRun, loansAssessed, journalsPosted))
+        }
+        return cycle.runProvisioningCycle(period, asOf, batchSize).flatMap { outcome ->
+            val batches = batchesRun + 1
+            val assessed = loansAssessed + outcome.loansAssessed
+            val posted = journalsPosted + outcome.journalsPosted
+            if (outcome.loansAssessed < batchSize) {
+                // Short batch: nothing unprovisioned is left for this period.
+                Uni.createFrom().item(DrainOutcome(batches, assessed, posted))
+            } else {
+                drain(period, asOf, batches, assessed, posted)
+            }
+        }
+    }
+
+    /** What one tick did in total, across however many batches it took. */
+    private data class DrainOutcome(val batchesRun: Int, val loansAssessed: Int, val journalsPosted: Int)
 
     private companion object {
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
