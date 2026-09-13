@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.14.0...delegation-service-v0.15.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add managed account portfolios ([#9286](https://github.com/JiRaska/open-bank-oss/issues/9286)) ([7e92be5](https://github.com/JiRaska/open-bank-oss/commit/7e92be54bf327573ad0b5229faa20f646c17dc51))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+* **delegation:** project approval policy to account ([#9401](https://github.com/JiRaska/open-bank-oss/issues/9401)) ([58e3bbd](https://github.com/JiRaska/open-bank-oss/commit/58e3bbd91b1691ad05a150b53e02a4f0f6fb4df4))
+
+
+### Bug Fixes
+
+* **delegation:** guard delegation_outbox created_at plausibility at INSERT ([#9399](https://github.com/JiRaska/open-bank-oss/issues/9399)) ([b32ca68](https://github.com/JiRaska/open-bank-oss/commit/b32ca6806cd558c28922b052b4350b4900170f03))
+* **delegation:** replay-safe role-preset creation + ADR-0289 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9049](https://github.com/JiRaska/open-bank-oss/issues/9049)) ([4ee3ed2](https://github.com/JiRaska/open-bank-oss/commit/4ee3ed286a74e4aad7c4b0a70a9e5267a90f6b59))
+
+
+### Security
+
+* **delegation:** fail closed unsupported exposure ([#9171](https://github.com/JiRaska/open-bank-oss/issues/9171)) ([312cb9f](https://github.com/JiRaska/open-bank-oss/commit/312cb9fdf80e99d0b56bb25e4d342f167debcb46))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.3...delegation-service-v0.14.0) (2026-09-08)
 
 

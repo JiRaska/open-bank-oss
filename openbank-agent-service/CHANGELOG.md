@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.1...agent-service-v1.26.0) (2026-09-13)
+
+
+### Features
+
+* **agent-service:** ADR-0285 D5 ui-assistant published-style client (infra only, not wired) ([#9731](https://github.com/JiRaska/open-bank-oss/issues/9731)) ([2668e46](https://github.com/JiRaska/open-bank-oss/commit/2668e466f5aa6721304fda584018bae760c534a3))
+
+
+### Bug Fixes
+
+* **agent:** guard agent_audit_outbox created_at plausibility at INSERT ([#9298](https://github.com/JiRaska/open-bank-oss/issues/9298)) ([d32cacb](https://github.com/JiRaska/open-bank-oss/commit/d32cacb6bc6fdce7d07a46b16519ded41f6480df))
+
 ## [1.25.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.0...agent-service-v1.25.1) (2026-09-01)
 
 

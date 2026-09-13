@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.0...consent-service-v0.24.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **consent:** guard consent_outbox created_at plausibility at INSERT ([#9304](https://github.com/JiRaska/open-bank-oss/issues/9304)) ([e33b426](https://github.com/JiRaska/open-bank-oss/commit/e33b426aad46f0f86cbd15362a1cabb3b55a0bea))
+* **consent:** replay-safe suppression creation + ADR-0288 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9011](https://github.com/JiRaska/open-bank-oss/issues/9011)) ([3ad41c6](https://github.com/JiRaska/open-bank-oss/commit/3ad41c643d14f8760ffd2eabe7f93a8d2ece8469))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.23.0...consent-service-v0.24.0) (2026-09-08)
 
 

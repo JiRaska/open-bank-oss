@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.2...interest-service-v0.20.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **interest:** guard interest_outbox created_at plausibility at INSERT ([#9311](https://github.com/JiRaska/open-bank-oss/issues/9311)) ([a26ab85](https://github.com/JiRaska/open-bank-oss/commit/a26ab851e708102c61f7568b6c6c2d14e2511fa6))
+* **interest:** replay-safe accrue + rate-config creation + ADR-0291 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9055](https://github.com/JiRaska/open-bank-oss/issues/9055)) ([98db7a5](https://github.com/JiRaska/open-bank-oss/commit/98db7a5702a186ccb8a13ab0168ce48eaca913c6))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.1...interest-service-v0.20.2) (2026-09-03)
 
 

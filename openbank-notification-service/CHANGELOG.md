@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.0...notification-service-v0.31.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **notification:** dead-letter delegation-events-in, which would wedge on any dispatch failure ([#8457](https://github.com/JiRaska/open-bank-oss/issues/8457)) ([e8e8ed9](https://github.com/JiRaska/open-bank-oss/commit/e8e8ed93a789d1056e310b18d8c672dd566a9273))
+* **notification:** guard notification_outbox created_at plausibility at INSERT ([#9315](https://github.com/JiRaska/open-bank-oss/issues/9315)) ([dc09c39](https://github.com/JiRaska/open-bank-oss/commit/dc09c397d62215ef78a63e41c728f6af5c78a79e))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.1...notification-service-v0.31.0) (2026-09-08)
 
 

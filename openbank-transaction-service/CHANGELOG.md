@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.22.0...transaction-service-v1.23.0) (2026-09-13)
+
+
+### Features
+
+* **transaction:** say what a merchant coordinate can actually answer ([#9115](https://github.com/JiRaska/open-bank-oss/issues/9115)) ([6c01167](https://github.com/JiRaska/open-bank-oss/commit/6c01167cbd64ec75c77738457cecd667f2840a0b))
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **transaction:** guard transaction_outbox created_at plausibility at INSERT ([#9289](https://github.com/JiRaska/open-bank-oss/issues/9289)) ([e4c6e7c](https://github.com/JiRaska/open-bank-oss/commit/e4c6e7c05143073ac2a1a902310c86c4d1113f58))
+
 ## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.1...transaction-service-v1.22.0) (2026-09-08)
 
 

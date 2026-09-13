@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.2...psd2-service-v0.11.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **psd2:** declare the default datasource so the api-fuzz harness can provision its DB ([#9260](https://github.com/JiRaska/open-bank-oss/issues/9260)) ([1dbfd8e](https://github.com/JiRaska/open-bank-oss/commit/1dbfd8e04c0508ef3a8c01d60d08df1ffc0a9484)), closes [#9257](https://github.com/JiRaska/open-bank-oss/issues/9257)
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.1...psd2-service-v0.11.2) (2026-09-08)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.1...statement-service-v0.12.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **statement:** guard statement_outbox created_at plausibility at INSERT ([#9322](https://github.com/JiRaska/open-bank-oss/issues/9322)) ([b97e903](https://github.com/JiRaska/open-bank-oss/commit/b97e90377d4ca9083d5b8e6cc47afaf1cbb27841))
+* **statement:** skip a debris account on the per-pocket read too, not only the account read ([#9837](https://github.com/JiRaska/open-bank-oss/issues/9837)) ([24bd8eb](https://github.com/JiRaska/open-bank-oss/commit/24bd8eb35a192a835d0e3c3c71ddc92c0cf25eab))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.0...statement-service-v0.12.1) (2026-09-08)
 
 
