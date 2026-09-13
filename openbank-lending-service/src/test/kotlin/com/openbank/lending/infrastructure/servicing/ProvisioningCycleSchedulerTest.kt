@@ -33,7 +33,16 @@ class ProvisioningCycleSchedulerTest {
     private val cycle = mockk<RunProvisioningCycleUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
     private val scheduler =
-        ProvisioningCycleScheduler(cycle, batchSize = 500, clock = clock, domainMetrics = mockk(relaxed = true))
+        ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            maxBatches = 40,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            loans = mockk(relaxed = true),
+            provisioning = mockk(relaxed = true),
+            registry = null,
+        )
 
     @BeforeEach
     fun stubPanacheSession() {
@@ -72,17 +81,18 @@ class ProvisioningCycleSchedulerTest {
     }
 
     @Test
-    fun `warns when the assessed count reaches the batch size (possible truncation)`() {
+    fun `a full batch no longer ends the pass — it keeps draining`() {
+        // This test asserted `exactly = 1` until #9901, which was the defect stated as an
+        // expectation: a full batch used to END the tick, leaving the rest of the book for a
+        // schedule 720h away. The pass now drains, so a book that never runs short is bounded by
+        // the batch cap (40 here) rather than by the first batch.
         every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
             Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 500, journalsPosted = 12))
 
-        // No assertion on the log line itself (no log-capture harness here) — this test's purpose is
-        // coverage of the `loansAssessed >= batchSize` branch and confirming it doesn't affect the
-        // pass's outcome (still completes normally, no exception).
         val result = scheduler.runProvisioningPass().await().indefinitely()
 
         assertThat(result).isNull()
-        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06", any(), 500) }
+        verify(exactly = 40) { cycle.runProvisioningCycle("2026-06", any(), 500) }
     }
 
     @Test
@@ -93,5 +103,51 @@ class ProvisioningCycleSchedulerTest {
         assertThatThrownBy { scheduler.runProvisioningPass().await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("ledger down")
+    }
+
+    @Test
+    fun `one tick drains the period rather than doing a single batch`() {
+        // The schedule is 720h. A batch-per-tick cycle would cover 500 loans a month, so a book of
+        // a few thousand would take most of a year to finish ONE period's provisioning — which is
+        // the #9901 defect again at a different rate. Three full batches then a short one: the tick
+        // must keep going until the short batch says the book is exhausted, and then stop.
+        val batches = mutableListOf<ProvisioningRunOutcome>()
+        every { cycle.runProvisioningCycle("2026-06", any(), 500) } answers {
+            val n = batches.size
+            val assessed = if (n < 3) 500 else 120
+            val outcome =
+                ProvisioningRunOutcome(period = "2026-06", loansAssessed = assessed, journalsPosted = assessed)
+            batches += outcome
+            Uni.createFrom().item(outcome)
+        }
+
+        scheduler.runProvisioningPass().await().indefinitely()
+
+        verify(exactly = 4) { cycle.runProvisioningCycle("2026-06", any(), 500) }
+        assertThat(batches.map { it.loansAssessed })
+            .describedAs("drains until a batch comes back short, then stops — 4 calls, not 1 and not 5")
+            .containsExactly(500, 500, 500, 120)
+    }
+
+    @Test
+    fun `the drain stops at the batch cap rather than running unbounded`() {
+        // Every batch full: the book never says it is exhausted. The cap is what ends the tick, and
+        // the remainder waits a whole cycle interval — which is why this path warns.
+        val capped = ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            maxBatches = 3,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            loans = mockk(relaxed = true),
+            provisioning = mockk(relaxed = true),
+            registry = null,
+        )
+        every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 500, journalsPosted = 500))
+
+        capped.runProvisioningPass().await().indefinitely()
+
+        verify(exactly = 3) { cycle.runProvisioningCycle("2026-06", any(), 500) }
     }
 }

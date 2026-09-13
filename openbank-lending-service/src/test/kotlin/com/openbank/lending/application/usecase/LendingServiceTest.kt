@@ -1570,7 +1570,7 @@ class LendingServiceTest {
         val (loan, schedule) = currentLoanWithSchedule(loanId)
         val postings = mutableListOf<LedgerPosting>()
         val savedRecords = mutableListOf<LoanProvisioningRecord>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
@@ -1610,7 +1610,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         // Deteriorated: higher 12m PD this cycle, so the ECL (and thus the delta) increases.
         mockRiskParameters(loan, "0.04")
@@ -1646,7 +1646,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
@@ -1680,7 +1680,7 @@ class LendingServiceTest {
             createdAt = fixedNow,
             modelVersion = "test-model-v1",
         )
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
@@ -1739,7 +1739,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
@@ -1781,7 +1781,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         // Same PD as the prior period's baseline: Stage 1 -> Stage 1, zero ECL delta.
         mockRiskParameters(loan, "0.02")
@@ -1800,7 +1800,7 @@ class LendingServiceTest {
         val loanId = LoanId.random()
         val (loan, schedule) = currentLoanWithSchedule(loanId)
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().nullItem()
@@ -1831,7 +1831,7 @@ class LendingServiceTest {
             createdAt = fixedNow,
             modelVersion = "test-model-v1",
         )
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().item(already)
 
         val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 500)
@@ -1984,7 +1984,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
@@ -2169,7 +2169,7 @@ class LendingServiceTest {
             modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
-        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findActiveWithoutProvisioning(any(), any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         mockRiskParameters(loan, "0.02")
         every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()

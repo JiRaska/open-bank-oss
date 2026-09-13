@@ -153,8 +153,12 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                loans = mockk(relaxed = true),
+                provisioning = mockk(relaxed = true),
+                registry = null,
             )
 
         scheduler.onStart(StartupEvent())
@@ -193,8 +197,12 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                loans = mockk(relaxed = true),
+                provisioning = mockk(relaxed = true),
+                registry = null,
             )
         scheduler.onStart(StartupEvent())
 

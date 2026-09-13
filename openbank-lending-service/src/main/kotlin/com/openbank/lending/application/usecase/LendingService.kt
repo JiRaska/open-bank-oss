@@ -1301,7 +1301,7 @@ class LendingService @Inject constructor(
      * per `(loanId, period)` — a loan already provisioned for [period] is left untouched.
      */
     override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int): Uni<ProvisioningRunOutcome> =
-        loans.findActive(limit).flatMap { active ->
+        loans.findActiveWithoutProvisioning(period, limit).flatMap { active ->
             Multi.createFrom().iterable(active)
                 .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
                 .collect().asList()
