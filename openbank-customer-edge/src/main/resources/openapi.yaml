@@ -26,7 +26,8 @@ info:
   # 1.62.0 -> 1.65.0: additive — Lístky (/loyalty, /loyalty/benefits, /loyalty/earn-sources,
   # /loyalty/redemptions, /loyalty/grants) and member-get-member (/referrals/program,
   # /referrals/invites GET+POST, /referrals/attributions). NOT 1.63.0/1.64.0: claimed by open PRs
-  # #9417/#9237 against this file (and 1.59.0 by #9215).
+  # #9417/#9237 against this file (and 1.59.0 by #9215). The 503 LOYALTY_UNAVAILABLE on the
+  # /loyalty routes is part of the same unreleased additive bump (main is still 1.62.0).
   version: 1.65.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
@@ -3977,6 +3978,10 @@ paths:
               schema: {$ref: '#/components/schemas/LoyaltySummary'}
         '401': {description: Unauthenticated}
         '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
 
   /loyalty/benefits:
     get:
@@ -3995,6 +4000,10 @@ paths:
                 items: {$ref: '#/components/schemas/LoyaltyBenefit'}
         '401': {description: Unauthenticated}
         '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
 
   /loyalty/earn-sources:
     get:
@@ -4014,6 +4023,10 @@ paths:
                 items: {$ref: '#/components/schemas/LoyaltyEarnSource'}
         '401': {description: Unauthenticated}
         '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
 
   /loyalty/redemptions:
     post:
@@ -4055,6 +4068,10 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/LoyaltyInsufficientLeaves'}
         '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
 
   /loyalty/grants:
     get:
@@ -4076,6 +4093,10 @@ paths:
                 items: {$ref: '#/components/schemas/LoyaltyGrant'}
         '401': {description: Unauthenticated}
         '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
 
   /referrals/program:
     get:

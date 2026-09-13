@@ -16,6 +16,7 @@ import io.mockk.verify
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.util.Optional
 import java.util.UUID
 
 /**
@@ -26,12 +27,39 @@ import java.util.UUID
 class CustomerLoyaltyResourceTest {
 
     private val caller: UUID = UUID.randomUUID()
-    private val svc = "http://loyalty-service.loyalty.svc:8157"
+    private val svc = "https://loyalty.test"
     private val mapper = ObjectMapper()
 
-    private fun resource(upstream: UpstreamClient) =
+    private fun resource(upstream: UpstreamClient, url: Optional<String> = Optional.of(svc)) =
         CustomerLoyaltyResource(upstream, mockk<CustomerPartyResolver> { every { resolve(any()) } returns caller })
-            .apply { loyaltyServiceUrl = svc }
+            .apply { loyaltyServiceUrl = url }
+
+    /**
+     * loyalty-service is not deployed (#8793), so the edge ships with no loyalty URL. Every route
+     * must then say so explicitly — 503 LOYALTY_UNAVAILABLE — before any upstream call, rather than
+     * a 502 from a failed lookup or a zero balance that reads as "you have no Lístky".
+     */
+    @Test
+    fun `an unconfigured loyalty URL is an explicit 503 on every route with no upstream call`() {
+        listOf(Optional.empty(), Optional.of(""), Optional.of("  ")).forEach { url ->
+            val upstream = mockk<UpstreamClient>()
+            val r = resource(upstream, url)
+            val responses = listOf(
+                r.summary(),
+                r.benefits(),
+                r.earnSources(),
+                r.redeem("""{"benefitId":"SAVINGS_RATE_BONUS_90D"}""", "k"),
+                r.grants(),
+            )
+            responses.forEach { response ->
+                assertThat(response.status).isEqualTo(503)
+                assertThat(json(response)["code"].asText()).isEqualTo("LOYALTY_UNAVAILABLE")
+                assertThat(response.entity as String).doesNotContain("balance")
+            }
+            verify(exactly = 0) { upstream.get(any(), any()) }
+            verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        }
+    }
 
     private fun json(response: Response): JsonNode = mapper.readTree(response.entity as String)
 

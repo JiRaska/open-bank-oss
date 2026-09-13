@@ -22,6 +22,7 @@ import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.util.Optional
 import java.util.UUID
 
 /**
@@ -41,8 +42,14 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_CUSTOMER")
 class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val parties: CustomerPartyResolver) {
+    /**
+     * Optional on purpose (same shape as `openbank.upstream.tls-trust-certificate-file`):
+     * loyalty-service has no deployment yet (#8793). Unset or blank means every route answers an
+     * explicit 503 `LOYALTY_UNAVAILABLE` — never a 502 from a failed DNS lookup, and never a
+     * zero balance that would read as "you have no Lístky".
+     */
     @ConfigProperty(name = "openbank.edge.loyalty-service-url")
-    lateinit var loyaltyServiceUrl: String
+    lateinit var loyaltyServiceUrl: Optional<String>
 
     @Context
     lateinit var requestHeaders: HttpHeaders
@@ -52,8 +59,9 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
     @Authorize(action = "customer.loyalty.read")
     @Blocking
     fun summary(): Response {
+        val base = baseUrl() ?: return unavailable()
         val party = party()
-        val response = upstream.get("$loyaltyServiceUrl$API/parties/$party", party.toString())
+        val response = upstream.get("$base$API/parties/$party", party.toString())
         if (response.status != Response.Status.OK.statusCode) return EdgeJson.upstreamFailure(response, SERVICE)
         val node = EdgeJson.parse(response)?.takeIf { it.isObject } ?: return badUpstream()
         return EdgeJson.ok(
@@ -115,6 +123,7 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
     @Authorize(action = "customer.loyalty.redeem")
     @Blocking
     fun redeem(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val base = baseUrl() ?: return unavailable()
         val key = idempotencyKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: return EdgeJson.error(BAD_REQUEST, "Idempotency-Key header is required")
         if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) return EdgeJson.error(BAD_REQUEST, "Idempotency-Key is too long")
@@ -124,7 +133,7 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
 
         val party = party()
         val response = upstream.post(
-            "$loyaltyServiceUrl$API/parties/$party/redeem",
+            "$base$API/parties/$party/redeem",
             party.toString(),
             EdgeJson.mapper.writeValueAsString(mapOf("benefitId" to benefitId)),
             key,
@@ -162,8 +171,9 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
     @Authorize(action = "customer.loyalty.read")
     @Blocking
     fun grants(): Response {
+        val base = baseUrl() ?: return unavailable()
         val party = party()
-        val response = upstream.get("$loyaltyServiceUrl$API/parties/$party/grants", party.toString())
+        val response = upstream.get("$base$API/parties/$party/grants", party.toString())
         if (response.status != Response.Status.OK.statusCode) return EdgeJson.upstreamFailure(response, SERVICE)
         val node = EdgeJson.parse(response)?.takeIf { it.isArray } ?: return badUpstream()
         return EdgeJson.ok(
@@ -180,8 +190,9 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
     }
 
     private fun catalogue(path: String, project: (JsonNode) -> Map<String, Any?>): Response {
+        val base = baseUrl() ?: return unavailable()
         val party = party()
-        val response = upstream.get("$loyaltyServiceUrl$API$path", party.toString())
+        val response = upstream.get("$base$API$path", party.toString())
         if (response.status != Response.Status.OK.statusCode) return EdgeJson.upstreamFailure(response, SERVICE)
         val node = EdgeJson.parse(response)?.takeIf { it.isArray } ?: return badUpstream()
         return EdgeJson.ok(node.map(project))
@@ -194,6 +205,8 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
             null
         },
     )
+
+    private fun baseUrl(): String? = loyaltyServiceUrl.map { it.trim() }.filter { it.isNotEmpty() }.orElse(null)
 
     private fun unknownBenefit() = EdgeJson.error(Response.Status.NOT_FOUND.statusCode, "unknown benefit")
 
@@ -209,3 +222,14 @@ class CustomerLoyaltyResource(private val upstream: UpstreamClient, private val 
         val BENEFIT_ID = Regex("^[A-Z0-9_]{1,64}$")
     }
 }
+
+/**
+ * Answered before anything else when no loyalty URL is configured (loyalty-service not deployed,
+ * #8793), so an unconfigured edge can never answer with a fabricated state. File-level to keep the
+ * resource one thin method per route.
+ */
+private fun unavailable() = EdgeJson.error(
+    Response.Status.SERVICE_UNAVAILABLE.statusCode,
+    "Lístky are not available yet",
+    mapOf("code" to "LOYALTY_UNAVAILABLE"),
+)
