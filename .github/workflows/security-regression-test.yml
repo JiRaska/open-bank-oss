@@ -71,7 +71,21 @@ jobs:
             const issueFields = closing
               .map((n, i) => `issue${i}: issue(number: ${n}) { labels(first: 100) { nodes { name } } }`)
               .join("\n");
-            const data = await github.graphql(
+            // A number that resolves to NO issue makes the whole query answer with an error, and
+            // octokit throws before any of the logic below runs. That is not a hypothetical: a PR
+            // body quoting text like `would close #6225` — which is literally the output of this
+            // repo's own supersede-deploy-prs self-test, whose fixtures use PR numbers that were
+            // never issues — matches the closing-keyword regex above and reddens this check on a
+            // PR that closes nothing. Measured 2026-09-12 on #9861.
+            //
+            // The error carries PARTIAL data: every alias that did resolve is present. Use it, and
+            // let the per-issue handling below decide. An unresolvable number is not a security
+            // issue and cannot be closed by this PR either, so it is genuinely not this rule's
+            // business — whereas throwing turns quoted text into a failed security check, which is
+            // the shape that teaches people to ignore a red security check.
+            let data;
+            try {
+              data = await github.graphql(
               `query($owner: String!, $repo: String!, $pr: Int!) {
                 repository(owner: $owner, name: $repo) {
                   ${issueFields}
@@ -84,11 +98,23 @@ jobs:
                 }
               }`,
               { owner: context.repo.owner, repo: context.repo.repo, pr: pr.number },
-            );
+              );
+            } catch (err) {
+              // Only a partial-data response is tolerable. A transport failure, a permission
+              // denial or a rate limit carries no `data`, and swallowing those would make this
+              // check pass by not running — the one outcome a security gate must never have.
+              if (!err.data || !err.data.repository) throw err;
+              core.info(`GraphQL returned partial data (${err.errors?.length ?? 0} error(s)); using it.`);
+              data = err.data;
+            }
             const repository = data.repository;
             const securityIssues = closing.filter((n, i) => {
               const issue = repository[`issue${i}`];
-              if (!issue) throw new Error(`Closing issue #${n} was not found`);
+              if (!issue) {
+                // Not a failure: `#N` that resolves to nothing is not an issue this PR can close.
+                core.info(`#${n} does not resolve to an issue — a quoted reference, not a closure.`);
+                return false;
+              }
               return issue.labels.nodes.some(label => label.name === "security");
             });
             if (securityIssues.length === 0) {
