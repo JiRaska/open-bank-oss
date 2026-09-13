@@ -4,6 +4,30 @@
   },
   "interactions": [
     {
+      "description": "POST a settlement debit leg with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.0,
+          "currency": "CZK",
+          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
+          "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/debit"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST the payee credit leg of a settlement",
       "providerStates": [
         {
@@ -12,7 +36,7 @@
       ],
       "request": {
         "body": {
-          "amount": 250.00,
+          "amount": 250.0,
           "currency": "CZK",
           "description": "Settlement 5e77e000-0000-4000-8000-000000000001 credit leg",
           "referenceId": "settlement-credit-5e77e000-0000-4000-8000-000000000001"
@@ -43,7 +67,7 @@
       ],
       "request": {
         "body": {
-          "amount": 250.00,
+          "amount": 250.0,
           "currency": "CZK",
           "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
           "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
@@ -66,27 +90,60 @@
       }
     },
     {
-      "description": "POST a settlement debit leg with no M2M identity is refused",
+      "description": "settlement reserves payer cover until ledger projection consumes it",
       "providerStates": [
         {
-          "name": "no valid M2M identity is presented"
+          "name": "a CZK balance exists for the holds account with sufficient funds"
         }
       ],
       "request": {
         "body": {
-          "amount": 250.00,
+          "amount": 125.5,
           "currency": "CZK",
-          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
-          "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
+          "reason": "Settlement cover",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "ttlSeconds": null
         },
         "headers": {
           "Content-Type": "application/json"
         },
         "method": "POST",
-        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/debit"
+        "path": "/api/v1/balances/a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1/holds"
       },
       "response": {
-        "status": 401
+        "body": {
+          "accountId": "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1",
+          "amount": 125.5,
+          "currency": "CZK",
+          "expiresAt": null,
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "releasedAt": null
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
       }
     }
   ],

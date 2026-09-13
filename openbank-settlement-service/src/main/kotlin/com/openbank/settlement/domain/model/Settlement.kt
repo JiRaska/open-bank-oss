@@ -88,6 +88,8 @@ enum class SettlementStatus {
     LEDGER_REVERSED,
 }
 
+enum class SettlementProtocol { LEGACY, LEDGER_PROJECTION }
+
 data class Settlement(
     val id: UUID,
     val payerAccountId: UUID,
@@ -97,4 +99,5 @@ data class Settlement(
     val status: SettlementStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val protocol: SettlementProtocol = SettlementProtocol.LEGACY,
 )
