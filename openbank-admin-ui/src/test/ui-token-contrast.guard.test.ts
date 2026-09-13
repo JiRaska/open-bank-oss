@@ -159,22 +159,9 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--accent', '--surface-1'], // 4.47:1
 ]
 
-const UNOBSERVED_DARK: ReadonlyArray<readonly [string, string]> = [
-  ['--danger', '--success-bg'], // 3.51:1
-  ['--danger', '--surface-4'], // 3.74:1
-  ['--text-tertiary', '--success-bg'], // 3.79:1
-  ['--text-muted', '--success-bg'], // 3.79:1
-  ['--sidebar-text-muted', '--success-bg'], // 3.79:1
-  ['--info', '--success-bg'], // 3.82:1
-  ['--text-tertiary', '--surface-4'], // 4.04:1
-  ['--text-muted', '--surface-4'], // 4.04:1
-  ['--sidebar-text-muted', '--surface-4'], // 4.04:1
-  ['--info', '--surface-4'], // 4.07:1
-]
-
 const BELOW_AA = {
   light: [...OBSERVED_LIGHT, ...UNOBSERVED_LIGHT],
-  dark: [...UNOBSERVED_DARK],
+  dark: [],
 } as const
 
 const AA = 4.5
@@ -252,6 +239,12 @@ describe('admin UI token contrast', () => {
 
   it.each(themes)('%s sidebar navigation text remains legible', (_name, tokens) => {
     expect(contrast(resolve(tokens, '--sidebar-text-muted'), resolve(tokens, '--sidebar-bg'))).toBeGreaterThanOrEqual(AA)
+  })
+
+  it.each(themes)('%s link text remains AA on primary content surfaces', (_name, tokens) => {
+    for (const surface of ['--surface', '--surface-2', '--accent-bg']) {
+      expect(contrast(resolve(tokens, '--link'), resolve(tokens, surface))).toBeGreaterThanOrEqual(AA)
+    }
   })
 
   it('declares a complete dark token surface and the shared foundation scales', () => {

@@ -76,7 +76,7 @@ export function EntityChip({ type, id, label, sublabel }: Props) {
     display: 'inline-flex', alignItems: 'center', gap: '6px',
     padding: '3px 8px', borderRadius: '8px', textDecoration: 'none',
     background: 'var(--surface-3)', border: '1px solid var(--border)',
-    color: 'var(--accent)', fontSize: '12px', fontWeight: 600,
+    color: 'var(--link)', fontSize: '12px', fontWeight: 600,
     maxWidth: '280px',
   }
   return canOpenParty ? (

@@ -177,7 +177,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
           {releaseNotesUrl && (
             <a href={releaseNotesUrl} target="_blank" rel="noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--link)', textDecoration: 'none' }}>
               <ExternalLink size={12} /> {data.upgrade.target ? `${t('Co je nového v', "What's new in")} ${data.upgrade.target}` : t('Release notes', 'Release notes')}
             </a>
           )}

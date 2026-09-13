@@ -18,6 +18,11 @@ describe('service map semantic theme contract', () => {
     expect(page).toContain('color-mix(in srgb')
   })
 
+  it('uses the AA text token for the documentation action on its tinted surface', () => {
+    expect(page).toContain("background: 'var(--accent-bg)', color: 'var(--accent-text)'")
+    expect(page).not.toContain("background: 'var(--accent-bg)', color: 'var(--accent)',")
+  })
+
   it('defines every map token for both light and dark themes', () => {
     const darkTheme = globals.slice(globals.indexOf('.dark {'))
     for (const token of mapTokens) {
