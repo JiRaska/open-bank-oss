@@ -13,6 +13,7 @@ interface SettlementRepository {
     suspend fun create(settlement: Settlement): Settlement
     suspend fun findById(id: UUID): Settlement?
     suspend fun updateStatus(id: UUID, status: SettlementStatus): Settlement
+    suspend fun recordProjectionUncertainty(id: UUID, status: SettlementStatus): Settlement
 
     /**
      * Atomically transition PENDING → DEBITED for [id], returning true only for the single caller

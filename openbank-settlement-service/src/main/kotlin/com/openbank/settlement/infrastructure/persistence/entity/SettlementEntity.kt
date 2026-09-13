@@ -37,6 +37,9 @@ class SettlementEntity : io.quarkus.hibernate.reactive.panache.PanacheEntityBase
     @Column(name = "currency", nullable = false, length = 3, updatable = false)
     lateinit var currency: String
 
+    @Column(name = "settlement_protocol", nullable = false, length = 24, updatable = false)
+    var settlementProtocol: String = "LEGACY"
+
     // status + updated_at are the only mutable columns (the settlement lifecycle).
     @Column(name = "status", nullable = false, length = 32)
     lateinit var status: String

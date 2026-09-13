@@ -397,3 +397,25 @@ The status remains non-terminal, is exported by the stranded gauge and has a cri
 Residual risk: recovery requires reconciliation and an approved correction; there is no atomic
 cancel-or-reverse API yet. Old workflow histories retain their original command sequence for
 replay compatibility. A caller must not interpret the creation response as completed settlement.
+
+## Ledger-only settlement protocol
+
+A settlement must not directly debit/credit balance and then post the same sub-account journal:
+`AccountBookedChanged` projects that journal into balance and would apply the transfer again.
+New `LEDGER_PROJECTION` rows use a distinct Temporal workflow type: reserve the complete payer
+amount with the settlement ID as reference, then post the ledger journal. Balance projection owns
+the booked movement and atomic consumption of that cover. The ledger response must confirm both
+`POSTED` and the expected transaction ID. A transport success alone is insufficient.
+
+The protocol is immutable per row. The origination flag defaults off; toggling it does not migrate
+existing rows or change old Temporal histories. A lost reservation reply records
+`BALANCE_STATE_UNKNOWN`; a lost journal reply records `LEDGER_STATE_UNKNOWN`. Neither releases
+cover or issues an automatic counter-movement. A late uncertainty write cannot overwrite a
+confirmed `BOOKED` row. A confirmed journal may still await asynchronous balance projection.
+
+Residual risks: unknown outcomes require reconciliation, existing legacy histories retain their
+old behavior, and historic double application is not repaired automatically. Production activation
+requires the hold and journal calls to work with enforced authorization and required four-eyes
+approval; this change grants no exemption and does not prove that approval workflow. General audit
+publisher durability is a separate release requirement. See the rollout note in
+`docs/runbooks/settlement-ledger-projection.md`.

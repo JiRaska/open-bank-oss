@@ -6,6 +6,7 @@ package com.openbank.settlement.infrastructure.persistence
 
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -101,6 +102,19 @@ class SettlementRepositoryImplIT {
         assertThat(found.amount).isEqualByComparingTo(settlement.amount)
         assertThat(found.currency).isEqualTo("CZK")
         assertThat(found.status).isEqualTo(SettlementStatus.PENDING)
+    }
+
+    @Test
+    fun `stored protocol survives updates and late uncertainty cannot erase a booking`() {
+        val settlement = newSettlement().copy(protocol = SettlementProtocol.LEDGER_PROJECTION)
+        onVertxContext { repository.create(settlement) }
+        onVertxContext { repository.updateStatus(settlement.id, SettlementStatus.BOOKED) }
+        val read = onVertxContext { repository.findById(settlement.id) }!!
+        assertThat(read.protocol).isEqualTo(SettlementProtocol.LEDGER_PROJECTION)
+        for (status in listOf(SettlementStatus.BALANCE_STATE_UNKNOWN, SettlementStatus.LEDGER_STATE_UNKNOWN)) {
+            assertThat(onVertxContext { repository.recordProjectionUncertainty(settlement.id, status) }.status)
+                .isEqualTo(SettlementStatus.BOOKED)
+        }
     }
 
     @Test

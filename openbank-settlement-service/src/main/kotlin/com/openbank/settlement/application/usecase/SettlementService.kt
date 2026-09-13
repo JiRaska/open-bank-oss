@@ -10,8 +10,10 @@ import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.application.port.out.OriginationOutcome
 import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.workflow.LedgerSettlementWorkflow
 import com.openbank.settlement.application.workflow.SettlementWorkflow
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
@@ -19,6 +21,7 @@ import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -31,6 +34,7 @@ class SettlementService(
     private val workflowClient: WorkflowClient,
     private val metrics: SettlementMetricsPort,
     private val clock: Clock,
+    private val ledgerProjectionEnabled: Boolean = false,
 ) : SettlementUseCase {
 
     @Inject
@@ -39,12 +43,15 @@ class SettlementService(
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
         metrics: SettlementMetricsPort,
+        @ConfigProperty(name = "openbank.settlement.ledger-projection-enabled", defaultValue = "false")
+        ledgerProjectionEnabled: Boolean = false,
     ) : this(
         settlementRepository,
         temporalConfig,
         workflowClient,
         metrics,
         Clock.systemUTC(),
+        ledgerProjectionEnabled,
     )
 
     private val log = Logger.getLogger(SettlementService::class.java)
@@ -89,6 +96,11 @@ class SettlementService(
             amount = command.amount,
             currency = command.currency,
             status = SettlementStatus.PENDING,
+            protocol = if (ledgerProjectionEnabled) {
+                SettlementProtocol.LEDGER_PROJECTION
+            } else {
+                SettlementProtocol.LEGACY
+            },
             createdAt = now,
             updatedAt = now,
         )
@@ -113,27 +125,23 @@ class SettlementService(
         val settlement = settlementRepository.findById(settlementId)
             ?: error("Settlement $settlementId not found")
 
-        // ADR-0120 Phase 6 (issue #1917): Temporal is the sole settlement orchestrator — the legacy
-        // hand-rolled saga (which never reversed an already-moved debit/credit on a mid-flight
-        // failure) is retired. The Temporal SettlementWorkflow compensates in reverse before
-        // rejecting, so a partial failure can no longer leave funds moved against a REJECTED row.
-        val stub = workflowClient.newWorkflowStub(
-            SettlementWorkflow::class.java,
-            WorkflowOptions.newBuilder()
-                .setTaskQueue(temporalConfig.taskQueue())
-                .setWorkflowId("settlement-$settlementId")
-                // Money-path double-settle guard: a COMPLETED settlement workflow must NOT be
-                // restarted (the default ALLOW_DUPLICATE would, on a status-read/start race,
-                // run a second debit+credit+ledger cycle). FAILED_ONLY rejects a re-start of a
-                // closed-completed run (→ WorkflowExecutionAlreadyStarted, caught below) while
-                // still allowing a genuinely failed run to be retried.
-                .setWorkflowIdReusePolicy(
-                    WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
-                )
-                .build(),
-        )
+        // Persisted at origination: changing the rollout flag cannot change a retry's protocol.
+        val options = WorkflowOptions.newBuilder()
+            .setTaskQueue(temporalConfig.taskQueue())
+            .setWorkflowId("settlement-$settlementId")
+            .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY)
+            .build()
         try {
-            WorkflowClient.start(stub::settle, settlementId)
+            when (settlement.protocol) {
+                SettlementProtocol.LEGACY -> {
+                    val stub = workflowClient.newWorkflowStub(SettlementWorkflow::class.java, options)
+                    WorkflowClient.start(stub::settle, settlementId)
+                }
+                SettlementProtocol.LEDGER_PROJECTION -> {
+                    val stub = workflowClient.newWorkflowStub(LedgerSettlementWorkflow::class.java, options)
+                    WorkflowClient.start(stub::settleViaLedger, settlementId)
+                }
+            }
         } catch (alreadyRunning: WorkflowExecutionAlreadyStarted) {
             // Idempotent: the settlement workflow for this id is already in flight (a retry of
             // an orphaned PENDING). Nothing to do — Temporal owns its lifecycle from here.

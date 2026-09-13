@@ -6,6 +6,7 @@ package com.openbank.settlement.infrastructure.persistence
 
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.settlement.infrastructure.persistence.entity.SettlementEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -71,6 +72,22 @@ class SettlementRepositoryImpl(private val repo: SettlementPanacheRepo, private 
         }
     }.awaitSuspending()
 
+    override suspend fun recordProjectionUncertainty(id: UUID, status: SettlementStatus): Settlement =
+        Panache.withTransaction {
+            require(status == SettlementStatus.BALANCE_STATE_UNKNOWN || status == SettlementStatus.LEDGER_STATE_UNKNOWN)
+            repo.update(
+                "status = ?1, updatedAt = ?2 where id = ?3 and settlementProtocol = ?4 and status not in (?5, ?6)",
+                status.name,
+                clock.instant(),
+                id,
+                SettlementProtocol.LEDGER_PROJECTION.name,
+                SettlementStatus.BOOKED.name,
+                SettlementStatus.REJECTED.name,
+            ).flatMap { repo.findById(id) }.map { entity ->
+                entity?.toDomain() ?: throw IllegalArgumentException("Settlement $id not found")
+            }
+        }.awaitSuspending()
+
     // Both queries are served by idx_settlements_status_created_at (V2). They run every 30s from
     // SettlementStrandedGauge.refresh(), so they must not be sequential scans.
     override suspend fun countByStatus(status: SettlementStatus): Long =
@@ -87,6 +104,7 @@ class SettlementRepositoryImpl(private val repo: SettlementPanacheRepo, private 
         amount = amount,
         currency = currency,
         status = SettlementStatus.valueOf(status),
+        protocol = SettlementProtocol.valueOf(settlementProtocol),
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
@@ -98,6 +116,7 @@ class SettlementRepositoryImpl(private val repo: SettlementPanacheRepo, private 
         amount = this@toEntity.amount
         currency = this@toEntity.currency
         status = this@toEntity.status.name
+        settlementProtocol = this@toEntity.protocol.name
         createdAt = this@toEntity.createdAt
         updatedAt = this@toEntity.updatedAt
     }

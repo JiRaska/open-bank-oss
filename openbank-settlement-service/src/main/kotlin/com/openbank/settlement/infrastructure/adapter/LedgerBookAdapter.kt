@@ -43,7 +43,7 @@ class LedgerBookAdapter(
         }
         val today = LocalDate.now(clock).toString()
         log.infof("Booking settlement %s to ledger", settlementId)
-        ledgerClient.postJournal(
+        val posted = ledgerClient.postJournal(
             SettlementJournalFactory.build(
                 posting = SettlementJournalFactory.Posting(
                     settlementId = settlementId,
@@ -58,5 +58,8 @@ class LedgerBookAdapter(
                 createdBy = SYSTEM_USER,
             ),
         ).subscribeAsCompletionStage().await()
+        check(posted.transactionId == settlementId && posted.status == "POSTED") {
+            "Ledger did not confirm a posted journal for settlement $settlementId"
+        }
     }
 }

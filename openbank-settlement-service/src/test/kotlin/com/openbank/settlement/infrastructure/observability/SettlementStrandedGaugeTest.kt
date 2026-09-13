@@ -43,6 +43,7 @@ class SettlementStrandedGaugeTest {
         override suspend fun create(settlement: com.openbank.settlement.domain.model.Settlement) = error("unused")
         override suspend fun findById(id: UUID) = error("unused")
         override suspend fun updateStatus(id: UUID, status: SettlementStatus) = error("unused")
+        override suspend fun recordProjectionUncertainty(id: UUID, status: SettlementStatus) = error("unused")
         override suspend fun claimForProcessing(id: UUID): Boolean = error("unused")
     }
 

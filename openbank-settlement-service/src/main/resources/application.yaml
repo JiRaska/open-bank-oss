@@ -73,6 +73,8 @@ openbank:
   build:
     time: "${BUILD_TIME:unknown}"
   settlement:
+    # Upgrade every originator/worker and verify balance projection before new originations opt in.
+    ledger-projection-enabled: "${SETTLEMENT_LEDGER_PROJECTION_ENABLED:false}"
     gl:
       debit-account-id: "${SETTLEMENT_GL_DEBIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
       credit-account-id: "${SETTLEMENT_GL_CREDIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"

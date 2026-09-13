@@ -7,9 +7,12 @@ package com.openbank.settlement.application.usecase
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.workflow.LedgerSettlementActivities
+import com.openbank.settlement.application.workflow.LedgerSettlementWorkflowImpl
 import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.settlement.infrastructure.observability.SettlementMetricsAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -62,8 +65,14 @@ class SettlementServiceOriginateTest {
     fun setUp() {
         env = TestWorkflowEnvironment.newInstance()
         worker = env.newWorker(TASK_QUEUE)
-        worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(RelaxedActivities())
+        worker.registerWorkflowImplementationTypes(
+            SettlementWorkflowImpl::class.java,
+            LedgerSettlementWorkflowImpl::class.java,
+        )
+        worker.registerActivitiesImplementations(
+            RelaxedActivities(),
+            mockk<LedgerSettlementActivities>(relaxed = true),
+        )
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
         service = SettlementService(repo, temporalConfig, env.workflowClient, metrics)
@@ -95,6 +104,7 @@ class SettlementServiceOriginateTest {
         assertThat(created.captured.amount).isEqualByComparingTo(BigDecimal("250.00"))
         assertThat(created.captured.currency).isEqualTo("CZK")
         assertThat(created.captured.status).isEqualTo(SettlementStatus.PENDING)
+        assertThat(created.captured.protocol).isEqualTo(SettlementProtocol.LEGACY)
         assertThat(result.id).isEqualTo(created.captured.id)
         coVerify { repo.create(any()) }
         // A new row is `created`, and specifically NOT `replayed` — the pair is what makes the
@@ -128,6 +138,29 @@ class SettlementServiceOriginateTest {
         coVerify(exactly = 0) { repo.create(any()) }
         assertThat(originatedCount("replayed")).isEqualTo(1.0)
         assertThat(originatedCount("created")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `enabled rollout persists the protocol before workflow dispatch`() {
+        val created = slot<Settlement>()
+        coEvery { repo.findById(any()) } answers { if (created.isCaptured) created.captured else null }
+        coEvery { repo.create(capture(created)) } answers { created.captured }
+        val enabled = SettlementService(repo, temporalConfig, env.workflowClient, metrics, true)
+        val result = runBlocking {
+            enabled.originate(
+                OriginateSettlementCommand(
+                    "projection-origination",
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    BigDecimal.TEN,
+                    "CZK",
+                ),
+            )
+        }
+        assertThat(created.captured.protocol).isEqualTo(SettlementProtocol.LEDGER_PROJECTION)
+        assertThat(result.protocol).isEqualTo(SettlementProtocol.LEDGER_PROJECTION)
+        val workflow = env.workflowClient.newUntypedWorkflowStub("settlement-${result.id}")
+        assertThat(workflow.getResult(SettlementStatus::class.java)).isEqualTo(SettlementStatus.BOOKED)
     }
 
     /** Activities stub that never throws — originate coverage only exercises settle() dispatch. */
