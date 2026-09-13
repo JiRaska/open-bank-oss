@@ -21,7 +21,7 @@ data:
     {
       "id": null,
       "uid": "openbank-ledger-int",
-      "title": "OpenBank \u2014 Ledger & Money-Movement Integrity",
+      "title": "OpenBank — Ledger & Money-Movement Integrity",
       "tags": [
         "openbank",
         "ledger",
@@ -271,8 +271,8 @@ data:
         },
         {
           "type": "stat",
-          "title": "Reconciliation gap (submitted\u2212completed)",
-          "description": "openbank_* contract",
+          "title": "Subledger tie-out breaks",
+          "description": "Recorded reconciliation breaks across subledgers.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -289,7 +289,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "(sum(openbank_payments_submitted_total) - sum(openbank_payments_completed_total))",
+              "expr": "sum(openbank_subledger_tieout_break_total) or vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -425,7 +425,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(openbank_outbox_dead_total[5m]))",
+              "expr": "sum(rate(openbank_outbox_dead_total[5m])) or vector(0)",
               "legendFormat": "dead/s",
               "refId": "B",
               "instant": false,
@@ -601,8 +601,8 @@ data:
         },
         {
           "type": "timeseries",
-          "title": "Ledger postings rate",
-          "description": "openbank_* contract",
+          "title": "Journal events published",
+          "description": "Ledger journal publication spans over the selected range.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -619,8 +619,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(openbank_ledger_postings_total[5m]))",
-              "legendFormat": "postings/s",
+              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_name=\"openbank.ledger.journal.posted publish\"}[1h])) or vector(0)",
+              "legendFormat": "journal events",
               "refId": "A",
               "instant": false,
               "range": true
@@ -659,8 +659,8 @@ data:
         {
           "id": 11,
           "type": "timeseries",
-          "title": "Payments submitted vs completed",
-          "description": "openbank_* contract",
+          "title": "Ledger API vs Journal Events",
+          "description": "Observed ledger server traffic alongside journal-event publication.",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -677,8 +677,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(openbank_payments_submitted_total[5m]))",
-              "legendFormat": "submitted/s",
+              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))",
+              "legendFormat": "API requests",
               "refId": "A",
               "instant": false,
               "range": true
@@ -688,8 +688,8 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(openbank_payments_completed_total[5m]))",
-              "legendFormat": "completed/s",
+              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_name=\"openbank.ledger.journal.posted publish\"}[1h])) or vector(0)",
+              "legendFormat": "journal events",
               "refId": "B",
               "instant": false,
               "range": true
