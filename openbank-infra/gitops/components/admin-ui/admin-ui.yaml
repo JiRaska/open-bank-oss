@@ -172,6 +172,11 @@ spec:
             # degrades calmly to "Tempo unreachable" (graceful-state rule).
             - name: TEMPO_URL
               value: http://tempo.observability.svc:3200
+            # Native reliability brief (/system/health): the BFF reads Pyrra's
+            # Connect API and returns only the six governed customer-journey SLOs.
+            # The browser never receives the cluster-internal service address.
+            - name: PYRRA_URL
+              value: http://pyrra-api.observability.svc:9099/tools/pyrra
             # Onboarding funnel analytics (/onboarding/analytics): the BFF queries the ClickHouse
             # gold views over the HTTP interface. Absent → defaults to localhost:8123 and the board
             # degrades calmly to the "unavailable" state (graceful-state rule). Auth is the
