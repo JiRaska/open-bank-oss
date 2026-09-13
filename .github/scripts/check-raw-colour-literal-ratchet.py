@@ -41,7 +41,8 @@ SOURCE_EXTENSIONS = {".tsx", ".css"}
 
 # Lowering this is always safe; raising it needs an intentional token decision, same rule as the
 # Vitest test's own comment. Keep this number equal to that test's ceiling.
-MAX_RAW_COLOUR_LITERALS = 1599
+# Measured on the current merged tree: a higher value is regression headroom, not a ratchet.
+MAX_RAW_COLOUR_LITERALS = 703
 
 
 def source_files(root: pathlib.Path):
