@@ -103,3 +103,9 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.sca.domain.*Kt")
 }
+
+// The complete suite boots several Quarkus profiles; the default 512m fork exhausted its heap
+// during the trace-contract IT. Match the existing balance/account test budget, scoped here.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -99,8 +99,69 @@ paths:
           description: Invalid or expired code
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Challenge expired or concurrently modified
         '429':
           description: Max attempts exceeded
+
+  /api/v1/sca/challenges/{id}/consume:
+    post:
+      tags: [SCA]
+      summary: Consume an approved challenge once for its bound operation
+      operationId: consumeScaChallenge
+      description: >-
+        Requires the expected party and matching dynamic-linking fields. The challenge must
+        be completed, unexpired and unconsumed at the database update. A concurrent lifecycle
+        update is rejected; the caller must re-read the challenge before retrying.
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeScaRequest'
+      responses:
+        '200':
+          description: Challenge consumed; consumedAt is populated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '400':
+          description: Invalid request or challenge not approved
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Challenge already consumed, no longer eligible, or dynamic linking does not match
+        '422':
+          description: Challenge expired or concurrently modified
+
+  /api/v1/sca/parties/{partyId}/challenges/pending:
+    get:
+      tags: [SCA]
+      summary: List a party's pending unexpired approvals
+      operationId: listPendingScaChallenges
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Pending challenges with the operation to display before signing
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PendingScaResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/sca/parties/{partyId}/devices:
     get:
@@ -189,7 +250,9 @@ paths:
         '404':
           description: Challenge or device not found
         '409':
-          description: Challenge is not awaiting a decision
+          description: Challenge is not awaiting a decision or another signed decision won the atomic claim
+        '422':
+          description: Challenge expired
 
 components:
   parameters:
@@ -258,14 +321,98 @@ components:
           format: uuid
         challengeType:
           type: string
+          deprecated: true
+          description: Legacy documentation field; the current response uses purpose and method.
+        purpose:
+          type: string
+        method:
+          type: string
+          enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC]
         status:
           type: string
           enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
         attemptsRemaining:
           type: integer
+          deprecated: true
+          description: Legacy documentation field; the current response uses attemptCount and maxAttempts.
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
         expiresAt:
           type: string
           format: date-time
+
+    PendingScaResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        purpose:
+          type: string
+        method:
+          type: string
+          enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC]
+        amount:
+          type: string
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        creditorIban:
+          type: string
+          nullable: true
+        creditorName:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    ConsumeScaRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        creditor:
+          type: string
+          nullable: true
+          description: The creditor IBAN or domestic account displayed in the signed operation.
+        documentSha256:
+          type: string
+          nullable: true
+        ceremonyId:
+          type: string
+          nullable: true
+        cardId:
+          type: string
+          nullable: true
+        cardAction:
+          type: string
+          nullable: true
 
     EnrollDeviceRequest:
       type: object

@@ -143,6 +143,7 @@ class ScaPactFolderProviderVerificationTest {
         challengeRepo.save(
             ScaChallenge(
                 id = CHALLENGE_ID,
+                version = challengeRepo.findById(CHALLENGE_ID)?.version ?: 0,
                 partyId = PARTY_ID,
                 purpose = ScaPurpose.CONSENT_GRANT,
                 method = ScaMethod.PUSH_NOTIFICATION,
@@ -160,7 +161,7 @@ class ScaPactFolderProviderVerificationTest {
      * consent or payment challenge can never be spent to mint a grant) and status `COMPLETED`
      * (delegation-service refuses anything else), with `consumedAt` null so the pact's second
      * interaction — the compare-and-consume that makes the ceremony single-use — has something
-     * left to spend. `save` is a `merge`, so re-running this handler per interaction resets
+     * left to spend. The fixture reads the current version before `save`, so re-running it resets
      * `consumedAt` and the two interactions do not have to care which order they run in.
      *
      * `dynamicLinkingData` is deliberately null: a delegation challenge links to no operation, and
@@ -172,6 +173,7 @@ class ScaPactFolderProviderVerificationTest {
         challengeRepo.save(
             ScaChallenge(
                 id = DELEGATION_CHALLENGE_ID,
+                version = challengeRepo.findById(DELEGATION_CHALLENGE_ID)?.version ?: 0,
                 partyId = DELEGATION_PARTY_ID,
                 purpose = ScaPurpose.DELEGATION_GRANT,
                 method = ScaMethod.PUSH_NOTIFICATION,

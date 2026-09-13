@@ -331,9 +331,8 @@ class ScaService(
         if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         if (challenge.status != ScaStatus.PENDING) throw ScaChallengeNotAwaitingException(command.challengeId)
 
-        // P2 idempotency: a decision is write-once. Reject any second call so a DENIED cannot
-        // be overwritten with APPROVED by re-sending a valid signature (even though that would
-        // require a valid signed assertion, it is a better design principle to be immutable).
+        // Fast rejection of an existing decision. The atomic store claim below also handles
+        // two valid decisions racing after both callers observe this key as absent.
         if (decisionStore.find(command.challengeId) != null) throw ScaChallengeNotAwaitingException(command.challengeId)
 
         val device = enrolledDeviceRepository.findByCredentialId(command.credentialId)
@@ -351,7 +350,7 @@ class ScaService(
         if (!signatureValid) throw InvalidDeviceAssertionException(command.challengeId)
 
         val ttl = maxOf(1L, java.time.Duration.between(now, challenge.expiresAt).seconds)
-        decisionStore.record(
+        val recorded = decisionStore.record(
             DeviceApprovalDecision(
                 challengeId = command.challengeId,
                 credentialId = command.credentialId,
@@ -361,6 +360,7 @@ class ScaService(
             ),
             ttlSeconds = ttl,
         )
+        if (!recorded) throw ScaChallengeNotAwaitingException(command.challengeId)
         return challenge
     }
 
@@ -383,12 +383,12 @@ class ScaService(
             throw ScaChallengePartyMismatchException(command.challengeId)
         }
         if (challenge.consumedAt != null) throw ScaChallengeAlreadyConsumedException(command.challengeId)
+        if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         // A decoupled challenge may hold a signature-verified device decision that nobody has
         // promoted yet (verify() is a separate call) — resolve it now rather than refusing.
         if (challenge.status == ScaStatus.PENDING &&
             (challenge.method == ScaMethod.PUSH_NOTIFICATION || challenge.method == ScaMethod.BIOMETRIC)
         ) {
-            if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)

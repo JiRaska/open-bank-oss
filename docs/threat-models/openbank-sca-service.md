@@ -164,3 +164,27 @@ is the **authentication assurance gate** for payments and consent — defeating 
   path, not its integrity. No new trust boundary: the check runs before a challenge exists, on the
   same authenticated `initiate` call, against a caller-supplied enum the service already validated.
   Rollback: revert the commit; TOTP goes back to silently minting a dead challenge.
+
+## Lifecycle concurrency hardening
+
+A completed challenge is still subject to expiry, including the exact deadline. The database
+compare-and-consume requires COMPLETED, an expiry strictly in the future and no consumption marker.
+It increments the same optimistic version carried from the original read through lifecycle writes;
+a stale verification cannot erase consumption or overwrite a newer attempt count. Concurrent-update
+conflicts fail closed through the shared 422 business-rule mapper.
+
+A device decision is claimed once with an atomic Redis SET NX EX GET. A losing claimant receives a
+conflict even if it passed the earlier existence check and has a valid signature. The first decision
+and its expiry remain authoritative. These controls are covered by ScaLifecycleSafetyIT with real
+PostgreSQL and Redis, plus service tests for the expiry boundary and the losing decision claim.
+
+Rollout requires all lifecycle writers to adopt optimistic versions. The additive version column
+supports deploying the schema first, but an old writer does not participate in the new guard: drain
+old instances before relying on it. Keeping the column during binary rollback is safe for the
+schema; restoring old writers is not safe for actionable challenges. Do not reset consumedAt or
+reissue a consumed challenge as a recovery shortcut.
+
+These tests use the local authorization test profile. They do not prove an enforced production OPA
+policy, device attestation, credential revocation, durable decision evidence or the delivery of an
+external notification. Those remain separate launch controls. See the consumption contract in
+`openbank-sca-service/src/main/resources/openapi.yaml`.
