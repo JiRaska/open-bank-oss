@@ -3042,6 +3042,28 @@ gates:
   # inside the build and the pact stays unverified, which looks identical to the
   # strand the reconciler was built to remove. Reads the committed pacts, so no
   # broker and no credentials.
+  # Every published security.txt must send a reporter to a policy they can read (#9880). On
+  # 2026-09-13 the file open-bank.tech actually served, and the admin-ui copy, both pointed Policy
+  # at a PRIVATE repository (404 for every external researcher); the developer-portal copy pointed
+  # Policy at itself. The public SECURITY.md existed the whole time. Offline and decidable: Policy
+  # must name a file in this public repo, not the file itself; Expires must be in the future.
+  - id: security-txt-policy-reachable
+    name: "security.txt points reporters at a public policy that exists (#9880, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 20   # three small files plus an rglob, measured well under 1s
+    rationale: >-
+      A disclosure policy link that answers 404 to the people it is for is invisible to every
+      scanner and every reviewer, and it shipped on all three hosts; only a check that resolves the
+      link against this repository can notice it.
+    review_after: 2027-03-13
+    min_subjects: 3   # landing, admin-ui, developer-portal today
+    selftest: python3 .github/scripts/check-security-txt.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-txt.py"]
+    run: |
+      python3 .github/scripts/check-security-txt.py
+
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
