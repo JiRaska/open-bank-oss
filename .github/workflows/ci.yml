@@ -274,10 +274,11 @@ jobs:
   # 187s for the slowest single gate.
   #
   # `Validate manifests` (below) remains during phase 1 of the required-context migration.
-  # main-protection first gains the three direct shard contexts plus `Admin UI`, while this
-  # old context overlaps them. A follow-up may remove the aggregator only after those four
-  # contexts are observed as required and green on a real PR. This two-phase order prevents
-  # a GitHub-side ruleset edit and its protecting workflow change from opening a gap.
+  # main-protection first gains the three direct shard contexts while this old context
+  # overlaps those shards. `Admin UI` is added separately after its always-run aggregator
+  # succeeds on the exact default-branch SHA. A follow-up may remove `Validate manifests`
+  # only after all four new contexts are required and green on a real PR. This order keeps
+  # shard coverage intact across the GitHub-side ruleset and workflow changes.
   #
   # Shards are WALL-TIME buckets, not a taxonomy — rebalance `group:` in the manifest when
   # one gets slow. Adding a group here without one in the manifest fails loudly: run-gates.py

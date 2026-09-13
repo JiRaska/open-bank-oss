@@ -34,14 +34,14 @@ RULESET_NAME="main-protection"
 # not have to enumerate all 29 services here.
 #
 # CI GATE MIGRATION — PHASE 1 OF 2:
-# `Validate manifests` used to be the only required context for the three gate
-# shards and the Admin UI gate. That adds one serial hosted-runner allocation
-# after all substantive work is complete; in #9986 the no-op aggregator waited
-# almost seven minutes and then ran for seconds. Require the four direct
-# contexts now, while retaining the aggregator during the transition. Only
-# after this desired state has been applied and observed live may a follow-up
-# remove `Validate manifests` from both this list and ci.yml. The overlap is
-# intentional: ruleset and workflow changes must never create a protection gap.
+# `Validate manifests` used to be the required context for the three gate
+# shards. That adds one serial hosted-runner allocation after all substantive
+# work is complete; in #9986 the no-op aggregator waited almost seven minutes
+# and then ran for seconds. Require those shards directly while retaining the
+# aggregator during the transition. `Admin UI` joins the required set only
+# after its separate exact-SHA preflight succeeds. A follow-up may remove
+# `Validate manifests` from both this list and ci.yml after the new contexts
+# are observed live; the overlap intentionally preserves shard coverage.
 #
 # NOTE on matrix checks: a job with a matrix produces one check PER cell named
 # "Job (cell)" — e.g. CodeQL becomes "CodeQL (java-kotlin)" and
