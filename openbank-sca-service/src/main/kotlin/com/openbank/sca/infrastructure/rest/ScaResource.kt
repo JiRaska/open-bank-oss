@@ -4,6 +4,7 @@
 
 package com.openbank.sca.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
@@ -64,7 +65,10 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 data class InitiateScaRequest(
@@ -82,7 +86,20 @@ data class EnrollDeviceRequest(
     /** Base64 X.509 SubjectPublicKeyInfo of the device public key. */
     val publicKey: String,
     val algorithm: SignatureAlgorithm,
-)
+) {
+    /** Bind the authorization to every credential field without exposing the key in the queue. */
+    @get:JsonIgnore
+    val approvalFingerprint: String
+        get() {
+            val digest = MessageDigest.getInstance("SHA-256")
+            for (value in listOf(credentialId, publicKey, algorithm.name)) {
+                val bytes = value.toByteArray(Charsets.UTF_8)
+                digest.update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+            return HexFormat.of().formatHex(digest.digest())
+        }
+}
 
 data class EnrolledDeviceResponse(
     val id: UUID,
@@ -307,7 +324,7 @@ class ScaResource(
     @POST
     @Path("/parties/{partyId}/devices")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
-    @Authorize(action = "device.enroll", resource = "#partyId")
+    @Authorize(action = "device.enroll", resource = "#partyId@#request.approvalFingerprint")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
         identity.requirePartyOwnership(partyId)
         val device = enrollDevice.enroll(
@@ -324,7 +341,7 @@ class ScaResource(
     @DELETE
     @Path("/parties/{partyId}/devices/{deviceId}")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
-    @Authorize(action = "device.revoke", resource = "#partyId")
+    @Authorize(action = "device.revoke", resource = "#partyId@#deviceId")
     suspend fun revoke(@PathParam("partyId") partyId: UUID, @PathParam("deviceId") deviceId: UUID): Response {
         identity.requirePartyOwnership(partyId)
         revokeDevice.revoke(RevokeDeviceCommand(partyId, deviceId, identity.principal.name))

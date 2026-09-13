@@ -221,6 +221,22 @@ external notification. Those remain separate launch controls. See the consumptio
 
 ## Credential revocation and outstanding approvals
 
+### Operator approval binding
+
+The service wires the shared atomic approval store and exposes a checker queue and decision
+endpoint. With four-eyes enforcement enabled, revocation binds both party and device id;
+enrollment binds the party and a SHA-256 fingerprint covering every credential field.
+This prevents a maker replacing the target or public key after another operator approved it.
+OPA's customer grant parses the composite target and checks the party component. The checker
+uses the same principal name as the maker path; self-approval remains forbidden.
+
+`ScaFourEyesFlowIT` exercises the generated deployment OPA policy with real HTTP, Redis and
+PostgreSQL, including substitution, replay and existing M2M exemptions. This proves the local
+flow only. Four-eyes remains a separate deployment opt-in; the admin flow and real identity
+provider must be verified before activation. Redis approval TTLs are not durable checker audit
+evidence, and an authorization claim is not a business commit. See
+[the rollout procedure](../runbooks/sca-operator-approvals.md).
+
 `DELETE /api/v1/sca/parties/{partyId}/devices/{deviceId}` checks customer ownership before
 accessing the credential and authorizes `device.revoke`. OPA permits a customer's request
 only for their own party; the money-path four-eyes obligation remains in force.

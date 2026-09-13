@@ -9,9 +9,9 @@
 #   scaChallenge.verify   — OTP fallback verification (no in-repo M2M caller today)
 #   scaChallenge.decide   — record device-signed approval/denial
 #   scaChallenge.consume  — spend an approved challenge (ADR-0021 settlement gate)
-#   device.enroll         — enrol a device credential (#partyId)
+#   device.enroll         — enrol a device credential (#partyId@#request.approvalFingerprint)
 #   device.list           — list a party's device credentials (#partyId)
-#   device.revoke         — revoke a credential and cancel its unconsumed approvals (#partyId)
+#   device.revoke         — revoke a credential and cancel its unconsumed approvals (#partyId@#deviceId)
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for
 # *.read + *.list, party-self-service for device.list when the JWT sub equals
@@ -28,7 +28,10 @@ allowed_reasons contains "device-self-revocation" if {
 	input.principal.type == "HUMAN"
 	"ROLE_CUSTOMER" in input.principal.roles
 	input.action == "device.revoke"
-	input.principal.id == input.resource.id
+	parts := split(input.resource.id, "@")
+	count(parts) == 2
+	parts[1] != ""
+	input.principal.id == parts[0]
 }
 
 # Operators and admins may perform ANY SCA challenge lifecycle operation — the ops

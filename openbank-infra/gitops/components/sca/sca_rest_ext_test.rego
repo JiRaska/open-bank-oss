@@ -131,7 +131,7 @@ test_customer_can_request_own_device_revocation if {
 	decision := rest.allow with input as {
 		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
-		"resource": {"id": "party-owner"},
+		"resource": {"id": "party-owner@device-id"},
 	}
 		with data.rules as revocation_rules with data.openbank.bundle as {"version": "test"}
 	decision.allow == true
@@ -141,7 +141,7 @@ test_customer_cannot_request_foreign_device_revocation if {
 	not rest.allow with input as {
 		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
-		"resource": {"id": "party-other"},
+		"resource": {"id": "party-other@device-id"},
 	}
 		with data.rules as revocation_rules
 }
@@ -150,7 +150,17 @@ test_customer_device_revocation_requires_four_eyes if {
 	rest.four_eyes_required with input as {
 		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
-		"resource": {"id": "party-owner"},
+		"resource": {"id": "party-owner@device-id"},
 	}
 		with data.rules as revocation_rules
+}
+
+test_customer_cannot_use_incomplete_or_ambiguous_revocation_target if {
+	every target in ["party-owner", "party-owner@", "party-owner@device@extra"] {
+		not rest.allow with input as {
+			"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+			"action": "device.revoke",
+			"resource": {"id": target},
+		} with data.rules as revocation_rules
+	}
 }

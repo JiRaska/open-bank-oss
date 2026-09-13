@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -18,6 +18,67 @@ tags:
   - name: SCA
 
 paths:
+  /api/v1/sca/approvals:
+    get:
+      tags: [SCA]
+      summary: List pending operator approvals, oldest first
+      operationId: listScaApprovals
+      parameters:
+        - name: limit
+          in: query
+          description: Clamped to 1 through 200.
+          schema: {type: integer, default: 50}
+      responses:
+        '200':
+          description: Pending approvals accessible to operators and administrators
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/sca/approvals/{id}:
+    patch:
+      tags: [SCA]
+      summary: Approve or reject a pending SCA operator action
+      operationId: decideScaApproval
+      description: >-
+        The checker must differ from the maker. An approval can be decided once.
+        The maker then retries the identical operation with X-Approval-Id.
+        This authorization record is TTL-bounded and does not assert business completion.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: {type: boolean}
+      responses:
+        '200':
+          description: Checker decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '400':
+          description: Request body is required and must contain a decision
+        '403':
+          description: Self-approval or unauthorized checker
+        '404':
+          description: Approval is missing or expired
+        '409':
+          description: Approval has already been decided or consumed
+
   /api/v1/sca/challenges:
     post:
       tags: [SCA]
@@ -114,6 +175,7 @@ paths:
         be completed, unexpired and unconsumed at the database update. A concurrent lifecycle
         update is rejected; the caller must re-read the challenge before retrying.
       parameters:
+        - $ref: '#/components/parameters/approvalId'
         - $ref: '#/components/parameters/challengeId'
       requestBody:
         required: true
@@ -122,6 +184,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ConsumeScaRequest'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
+        '503':
+          description: Authorization service or required approval infrastructure unavailable
         '200':
           description: Challenge consumed; consumedAt is populated
           content:
@@ -175,6 +241,7 @@ paths:
         must own the party; the money-path four-eyes policy also applies in enforced mode.
       operationId: revokeScaDevice
       parameters:
+        - $ref: '#/components/parameters/approvalId'
         - name: partyId
           in: path
           required: true
@@ -184,6 +251,10 @@ paths:
           required: true
           schema: {type: string, format: uuid}
       responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
+        '503':
+          description: Authorization service or required approval infrastructure unavailable
         '204':
           description: Credential revoked or already revoked
         '401':
@@ -230,6 +301,7 @@ paths:
         DIFFERENT party is refused (409) — a credential belongs to exactly one party.
       operationId: enrollScaDevice
       parameters:
+        - $ref: '#/components/parameters/approvalId'
         - name: partyId
           in: path
           required: true
@@ -243,6 +315,10 @@ paths:
             schema:
               $ref: '#/components/schemas/EnrollDeviceRequest'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingApproval'
+        '503':
+          description: Authorization service or required approval infrastructure unavailable
         '201':
           description: Device enrolled
           content:
@@ -292,6 +368,16 @@ paths:
 
 components:
   parameters:
+    approvalId:
+      name: X-Approval-Id
+      in: header
+      required: false
+      description: >-
+        One-use approval for this action, maker and exact resource. Device revocation binds
+        party and device id; enrollment binds party and a SHA-256 fingerprint of credentialId,
+        publicKey and algorithm. Missing or mismatched approval returns 202 when required by policy
+        and four-eyes enforcement is enabled. Existing service-account exemptions remain applicable.
+      schema: {type: string}
     challengeId:
       name: id
       in: path
@@ -301,6 +387,16 @@ components:
         format: uuid
 
   responses:
+    PendingApproval:
+      description: Operation parked until a distinct checker approves it; no business write occurred
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [status, approvalId]
+            properties:
+              status: {type: string, enum: [PENDING_APPROVAL]}
+              approvalId: {type: string}
     Forbidden:
       description: Authenticated but denied by the OPA authorization policy (ADR-0034)
       content:
@@ -315,6 +411,17 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      required: [id, action, status, makerId, createdAt]
+      properties:
+        id: {type: string}
+        action: {type: string}
+        resourceId: {type: [string, 'null']}
+        status: {type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED]}
+        makerId: {type: string}
+        createdAt: {type: string, format: date-time}
+        decidedBy: {type: [string, 'null']}
     InitiateScaRequest:
       type: object
       required: [partyId, purpose]

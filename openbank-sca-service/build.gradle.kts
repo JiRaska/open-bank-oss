@@ -108,4 +108,10 @@ pitest {
 // during the trace-contract IT. Match the existing balance/account test budget, scoped here.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/sca/sca-opa-bundle.yaml")
+    val scaDeployment = rootProject.file("openbank-infra/gitops/components/sca/sca-service.yaml")
+    inputs.file(opaBundle).withPropertyName("scaOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(scaDeployment).withPropertyName("scaDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.sca-deployment", scaDeployment.absolutePath)
 }
