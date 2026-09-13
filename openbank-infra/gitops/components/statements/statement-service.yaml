@@ -35,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-statement-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "454bcfb1c54b13b5"
+        openbank.tech/policy-checksum: "fb7ae8f89e0ef8c1"
       labels:
         app.kubernetes.io/name: statement-service
         app.kubernetes.io/part-of: statements
@@ -54,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-f328ebdf
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-24bd8eb3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -293,29 +293,16 @@ spec:
       port: 8136
       targetPort: http
     # Quarkus management interface (health + Prometheus /q/metrics). Exposed so the
-    # ServiceMonitor (below) can scrape the close-cadence counters (ADR-0069 D3 / #470).
+    # fleet PodMonitor can scrape the close-cadence counters (ADR-0069 D3 / #470).
     - name: management
       port: 8085
       targetPort: management
----
-# ADR-0069 D3 / issue #470 — scrape the close-cadence metrics. kube-prometheus-stack runs with
-# serviceMonitorSelectorNilUsesHelmValues=false, so this ServiceMonitor is discovered regardless
-# of labels. (This is the first ServiceMonitor in the fleet; others can follow the same shape.)
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: statement-service
-  namespace: statements
-  labels:
-    app.kubernetes.io/name: statement-service
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: statement-service
-  endpoints:
-    - port: management
-      path: /q/metrics
-      interval: 60s
+# Scraped by the fleet-wide PodMonitor observability/openbank-services (it selects any pod
+# with an app.kubernetes.io/name label, in this namespace, on the port named `management` at
+# /q/metrics). A per-service PodMonitor/ServiceMonitor here would be a SECOND scrape pool over
+# the identical URL: Prometheus then stores every series twice under two `job` labels, and an
+# alert over them fires once per pool. Measured 2026-09-07 on the sandbox --
+# BillingOutboxDeadLettered held two instances differing only by job= -- so do not re-add one.
 ---
 # Close-cadence alerts (ADR-0069 D3 / issue #470). Loaded by Prometheus
 # (ruleSelectorNilUsesHelmValues=false). NOTE: end-to-end NOTIFICATION is gated on sandbox

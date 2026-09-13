@@ -8,7 +8,12 @@ import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchHit
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.RepresentationDecision
+import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Signer
+import com.openbank.kyb.domain.model.UboFinding
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -58,9 +63,138 @@ data class ClaimInvitationRequest(val partyId: UUID?)
 
 data class SignRequest(val signatureRef: String?)
 
-data class ResolveReviewRequest(val requiredSignatures: Int?)
+data class ResolveReviewRequest(val requiredSignatures: Int?, val requiredSignerRoles: List<String>? = null)
+
+/** An operator confirms how one entity is represented (#9711). */
+data class AttestRepresentationRequest(
+    val confirmedSigners: Int?,
+    /**
+     * The offices that must sign, when the register names them. Empty or absent means a plain count
+     * — any listed representatives may sign.
+     */
+    val confirmedRoles: List<String>? = null,
+    /**
+     * Hash of the rule text the operator actually read, taken from the decision response. Rejected
+     * when it no longer matches the register, so a rule that changed while the form was open cannot
+     * be confirmed unseen.
+     */
+    val ruleTextHash: String?,
+    val note: String? = null,
+)
+
+data class AttestationResponse(
+    val id: UUID,
+    val scheme: String,
+    val identifier: String,
+    val ruleTextHash: String,
+    val ruleText: String?,
+    val parsedMode: String,
+    val parsedSigners: Int?,
+    val confirmedSigners: Int,
+    val confirmedRoles: List<String>,
+    val attestedBy: String,
+    val attestedAt: Instant,
+    val supersededAt: Instant?,
+    val note: String?,
+) {
+    companion object {
+        fun from(a: RepresentationAttestation) = AttestationResponse(
+            id = a.id,
+            scheme = a.identifier.scheme.name,
+            identifier = a.identifier.value,
+            ruleTextHash = a.ruleTextHash,
+            ruleText = a.ruleText,
+            parsedMode = a.parsedMode.name,
+            parsedSigners = a.parsedSigners,
+            confirmedSigners = a.confirmedSigners,
+            confirmedRoles = a.confirmedRoles,
+            attestedBy = a.attestedBy,
+            attestedAt = a.attestedAt,
+            supersededAt = a.supersededAt,
+            note = a.note,
+        )
+    }
+}
+
+/**
+ * What the review form renders. [state] is `ATTESTED` | `UNATTESTED` | `SUPERSEDED`; a SUPERSEDED
+ * decision carries [previous] so the operator is told the rule CHANGED rather than shown a blank
+ * form for a company they may recognise.
+ */
+data class RepresentationDecisionResponse(
+    val state: String,
+    val ruleText: String?,
+    val ruleTextHash: String,
+    val parserSuggestsSigners: Int?,
+    val parserSuggestsRoles: List<String>,
+    val parserMode: String,
+    val attestation: AttestationResponse?,
+    val previous: AttestationResponse?,
+) {
+    companion object {
+        fun from(d: RepresentationDecision): RepresentationDecisionResponse = when (d) {
+            is RepresentationDecision.Attested -> RepresentationDecisionResponse(
+                state = "ATTESTED",
+                ruleText = d.attestation.ruleText,
+                ruleTextHash = d.attestation.ruleTextHash,
+                parserSuggestsSigners = d.attestation.parsedSigners,
+                parserSuggestsRoles = emptyList(),
+                parserMode = d.attestation.parsedMode.name,
+                attestation = AttestationResponse.from(d.attestation),
+                previous = null,
+            )
+
+            is RepresentationDecision.Unattested -> ruleOnly("UNATTESTED", d.rule, null)
+            is RepresentationDecision.Superseded -> ruleOnly("SUPERSEDED", d.rule, d.previous)
+        }
+
+        private fun ruleOnly(state: String, rule: RepresentationRule, previous: RepresentationAttestation?) =
+            RepresentationDecisionResponse(
+                state = state,
+                ruleText = rule.sourceText,
+                ruleTextHash = RepresentationAttestation.hashOf(rule.sourceText),
+                parserSuggestsSigners = rule.requiredSigners,
+                parserSuggestsRoles = rule.requiredRoles,
+                parserMode = rule.mode.name,
+                attestation = null,
+                previous = previous?.let { AttestationResponse.from(it) },
+            )
+    }
+}
 
 data class RejectRequest(val reason: String?)
+
+/**
+ * One row of a name search (issue #9707). Carries what tells two companies apart and nothing that
+ * could pass for a verified extract — no representatives, no rule, no status — so a client cannot
+ * bind a case from a search hit without going through `/lookup`.
+ */
+data class SearchHitResponse(
+    val scheme: String,
+    val identifier: String,
+    val name: String,
+    val legalFormCode: String?,
+    val legalForm: String?,
+    val registeredAddress: String?,
+) {
+    companion object {
+        fun from(h: RegistrySearchHit, legalForm: String?) = SearchHitResponse(
+            scheme = h.identifier.scheme.name,
+            identifier = h.identifier.value,
+            name = h.name,
+            legalFormCode = h.legalFormCode,
+            legalForm = legalForm,
+            registeredAddress = h.registeredAddress,
+        )
+    }
+}
+
+/**
+ * [totalMatches] can exceed `hits.size`; [tooManyMatches] means the register refused to answer at
+ * all (ARES caps at 1 000 matches and returns an error, not a page) and the customer should add a
+ * town or more of the name. Both are for the UI to say, not to hide.
+ */
+data class SearchResponse(val hits: List<SearchHitResponse>, val totalMatches: Int, val tooManyMatches: Boolean)
 
 data class SchemeResponse(
     val scheme: String,
@@ -123,6 +257,11 @@ data class ExtractResponse(
                 "mode" to e.representationRule.mode.name,
                 "requiredSigners" to e.representationRule.signaturesRequired(e.representatives.size),
                 "sourceText" to e.representationRule.sourceText,
+                // The offices the rule names, when it names them (#9709). Null for `requiredSigners`
+                // beside a non-empty list is not a gap: a role-constrained rule has no answer
+                // expressible as a count, and a console that showed only the number would invite the
+                // reader to check it and stop.
+                "requiredRoles" to e.representationRule.requiredRoles,
             ),
             source = e.source,
             sourceRef = e.sourceRef,
@@ -170,6 +309,8 @@ data class CaseResponse(
     val initiatorPartyId: UUID,
     val entityPartyId: UUID?,
     val requiredSignatures: Int?,
+    /** The offices the attested rule names; empty means any listed representatives may sign (#9711). */
+    val requiredSignerRoles: List<String>,
     val signedCount: Int,
     val extract: ExtractResponse?,
     val signers: List<SignerResponse>,
@@ -187,12 +328,79 @@ data class CaseResponse(
             initiatorPartyId = c.initiatorPartyId,
             entityPartyId = c.entityPartyId,
             requiredSignatures = c.requiredSignatures,
+            requiredSignerRoles = c.requiredSignerRoles,
             signedCount = c.signedCount,
             extract = c.extract?.let { ExtractResponse.from(it) },
             signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
             reviewReason = c.reviewReason,
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
+        )
+    }
+}
+
+/**
+ * One beneficial owner as the register states them (ADR-0284 D5).
+ *
+ * `band` is a band and not a percentage on purpose — see [com.openbank.kyb.domain.model.OwnershipBand].
+ * `natureOfControl` carries the register's own vocabulary verbatim: an analyst deciding whether a
+ * control is ownership or influence needs the words that were filed, not our paraphrase of them.
+ */
+data class BeneficialOwnerResponse(
+    val fullName: String,
+    val dateOfBirth: LocalDate?,
+    val nationality: String?,
+    val countryOfResidence: String?,
+    val band: String,
+    val natureOfControl: List<String>,
+    val notifiedOn: LocalDate?,
+    val corporate: Boolean,
+)
+
+/**
+ * What is known about an entity's beneficial owners right now.
+ *
+ * `source` is the field to read first: REGISTER means a register answered, SELF_DECLARATION means
+ * this jurisdiction has no queryable register and the customer must declare, UNAVAILABLE means a
+ * register exists and could not be reached. An empty `owners` list means something different under
+ * each — which is why `registerStatements` (a filed "no PSC identified") is carried separately
+ * rather than collapsed into the absence.
+ */
+data class UboResponse(
+    val scheme: String,
+    val identifier: String,
+    val source: String,
+    val owners: List<BeneficialOwnerResponse>,
+    val registerStatements: List<String>,
+    val threshold: Double,
+    val registerName: String?,
+    val sourceRef: String?,
+    val requiresDeclaration: Boolean,
+    val fetchedAt: Instant,
+) {
+    companion object {
+        fun from(f: UboFinding) = UboResponse(
+            scheme = f.identifier.scheme.name,
+            identifier = f.identifier.value,
+            source = f.source.name,
+            owners = f.owners.map {
+                BeneficialOwnerResponse(
+                    fullName = it.fullName,
+                    dateOfBirth = it.dateOfBirth,
+                    nationality = it.nationality,
+                    countryOfResidence = it.countryOfResidence,
+                    band = it.band.name,
+                    natureOfControl = it.natureOfControl,
+                    notifiedOn = it.notifiedOn,
+                    corporate = it.corporate,
+                )
+            },
+            registerStatements = f.registerStatements,
+            threshold = f.threshold,
+            registerName = f.registerName,
+            sourceRef = f.sourceRef,
+            requiresDeclaration = f.requiresDeclaration,
+            fetchedAt = f.fetchedAt,
         )
     }
 }

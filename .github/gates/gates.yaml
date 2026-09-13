@@ -130,6 +130,26 @@ gates:
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
+  - id: finops-tier-drift
+    name: "FinOps workload tiers: the declared set has not collapsed (ADR-0057, enforced floor)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20
+    # 3 declared observed 2026-09-05; 2 after #9790 removed card-issuance's wrong T1, so the
+    # floor is met exactly and the next removal fails here — which is what the floor is for.
+    min_subjects: 2
+    review_after: "2027-03-05"
+    rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returned 0 for every finding (advisory until finops_tiers.enforced flips; #9678 has since made CONFIG errors block, but the DRIFT half this gate is named for is still advisory and still returns 0). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure. The floored count is the DECLARED side alone, not the 26-service union: 23 of that union are money_path_services, already floored at 20 by journey-money-path-accountability, so a union floor would stay green through the `declared: {}` wipe this gate exists to catch."
+    selftest: python3 openbank-infra/scripts/check-finops-tiers.py --self-test
+    selftest_expect: pass
+    run: |
+      # `mode: enforced` here is about the FLOOR, not about findings. The script honours
+      # rules.yaml's `finops_tiers.enforced: advisory` and returns 0 for every finding, so the
+      # only red path is run-gates failing the SUBJECTS= line below min_subjects. That is the
+      # deliberate split: we do not yet enforce that tiers are right, we do enforce that the
+      # checker can still see them.
+      python3 openbank-infra/scripts/check-finops-tiers.py
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
@@ -1495,6 +1515,30 @@ gates:
     run: |
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
+  # A provider's two verification twins must serve the SAME @State handlers, and the folder twin's
+  # KDoc has asserted exactly that in prose ("a deliberate duplicate of the broker twin's body:
+  # same @State handlers") while three of them drifted. The folder twin is the one a PR runs, so the
+  # drift is invisible at PR time; the broker twin runs on main-push and is the only one whose
+  # results reach the broker, so its MissingStateChangeMethod lands as success=false in the broker
+  # and can-i-deploy blocks the consumers as REGRESSIONs — vop, interest, sdd and swift, four
+  # money-path services, stuck five days with main green throughout (#9752).
+  # Asymmetric on purpose: folder-only is fatal (that is the blocked-deploy shape), broker-only is a
+  # warning (verified after the merge, weaker but harmless). Scope is derived from the annotations.
+  - id: pact-twin-state-parity
+    name: "provider twins serve the same @State set (issue #9752, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 8   # 10 twin pairs today; a collapse means the annotation scan broke, not that the fleet did
+    selftest_inputs:
+      - ".github/scripts/check-pact-twin-state-parity.py"
+    rationale: "The claim that the two twins are duplicates lived only in their own KDoc; when it stopped being true nothing went red, and the cost landed on the deploy path days later as a contract REGRESSION no reconcile tick can clear."
+    review_after: "2027-03-15"
+    selftest: |
+      python3 .github/scripts/check-pact-twin-state-parity.py --selftest
+    run: |
+      python3 .github/scripts/check-pact-twin-state-parity.py
+
   # The only exception to publishing a provider verification for the exact checked-out ref.
   # This tests the proof's negative paths too: a runtime/build/resources/root/libs change, a
   # sibling service change, or either revision off main cannot become a broker verification.
@@ -2223,6 +2267,20 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: ci-reconcile-selector-selftest
+    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
+      expired, and duplicate runs and asserts the exact retry and flake matrices.
+    budget_seconds: 10
+    rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
+    review_after: "2027-03-11"
+    min_subjects: 3
+    run: |
+      python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
     group: registry
@@ -2501,6 +2559,32 @@ gates:
     selftest: python3 .github/scripts/check-matrix-write-grants.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-matrix-write-grants.py"]
+
+  # The sibling above asks whether an M2M-reachable matrix WRITE grant was declared. This one
+  # asks a different question the same data can answer: does the action's own rest.rego rule
+  # already carry `not startswith(input.principal.id, "service-account-")`? Where it does and the
+  # matrix grants it anyway, the two artifacts contradict each other — the rule keeps machines out,
+  # `matrix-allows` lets them in on type+role alone, and `allow` is a disjunction. Neither existing
+  # gate can see it: check-matrix-write-grants never reads the exclusions, and the rego has no view
+  # of the matrix. Subject derived from rest.rego, today's two contradictions baselined in
+  # rules.yaml: matrix_sa_excluded_action_grants, ratchet both ways.
+  - id: matrix-sa-excluded-actions
+    name: "an SA-excluded action is not matrix-reachable (rest.rego vs role_action_matrix, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A rule's `not startswith(input.principal.id, \"service-account-\")` is the only thing separating staff from the platform's own services, because a client_credentials JWT is classified HUMAN; `matrix-allows` grants on type plus role alone and cannot express that exclusion, so a matrix entry over such an action silently defeats it and no policy layer can veto a base-layer reason."
+    review_after: "2027-09-12"
+    budget_seconds: 10                   # two file reads and a set intersection; measured 0.2s
+    min_subjects: 3                      # SA-excluded actions in rest.rego, 4 today. A floor because
+                                         # this gate's whole value is the derived subject: if the
+                                         # exclusion pattern is ever reworded, the parser matches
+                                         # nothing and the gate goes green about an empty set. The
+                                         # script also refuses a subject of exactly zero on its own.
+    run: |
+      python3 .github/scripts/check-matrix-excluded-actions.py --enforce
+    selftest: python3 .github/scripts/check-matrix-excluded-actions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-matrix-excluded-actions.py"]
 
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
@@ -5060,7 +5144,13 @@ gates:
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
-    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    # The subject is the SOURCE CORPUS, not the finding count — measured, not assumed:
+    # check-raw-colour-literal-ratchet.py line 151 prints `SUBJECTS={files_scanned}`, and a run
+    # today reports `SUBJECTS=297  # admin-ui source files scanned for raw hex colours`.
+    # So the floor does not fight the ratchet: findings may reach zero while the corpus stays ~297.
+    # `min_subjects: 1` would make this gate green about a run that scanned a single file — the
+    # exact no-op a floor exists to refuse.
+    min_subjects: 200   # 297 source files scanned 2026-09-11; findings may reach zero
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
 
@@ -5137,3 +5227,22 @@ gates:
     min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
+
+  - id: workflow-supply-chain
+    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
+    group: supplychain
+    mode: enforced
+    rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
+    review_after: "2026-12-08"
+    budget_seconds: 15
+    min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-workflow-supply-chain.py"
+      - ".github/scripts/test-workflow-supply-chain.py"
+      - ".github/scripts/agent-admission.py"
+      - ".github/scripts/test-agent-admission.py"
+    selftest: |
+      python3 .github/scripts/test-workflow-supply-chain.py
+      python3 .github/scripts/test-agent-admission.py
+    run: python3 .github/scripts/check-workflow-supply-chain.py

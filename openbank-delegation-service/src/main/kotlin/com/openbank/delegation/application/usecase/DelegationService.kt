@@ -18,6 +18,8 @@ import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
@@ -50,6 +52,8 @@ class DelegationNotGrantorException(id: UUID, partyId: UUID) :
     RuntimeException("Delegation $id is not granted by party $partyId")
 class DelegationScaException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class DelegationEligibilityException(message: String) : RuntimeException(message)
+class DelegationGrantorAuthorityException(message: String) : RuntimeException(message)
+class DelegationGrantorAuthorityUnavailableException(message: String) : RuntimeException(message)
 
 /** The authenticated customer is not the party they claim to be acting as. */
 class DelegationCallerMismatchException(callerPartyId: UUID, claimedPartyId: UUID) :
@@ -68,6 +72,11 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
  * is still a number nothing will ever count.
  *
  * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
+ *
+ * `exposure` remains persisted for audit of historical grants but is refused on new offers until
+ * document delivery can create a transformed artifact and atomically enforce every declared view
+ * constraint. Returning the original object bytes with a redaction, watermark or view-count field
+ * merely echoed would be a confidentiality defect.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
@@ -76,6 +85,9 @@ class DelegationUnsupportedConstraintException(val code: String, message: String
 
         /** ADR-0249 D5 — a spend capability with no cumulative ceiling at all. */
         const val CODE_SPEND_WITHOUT_CEILING = "SPEND_WITHOUT_CEILING"
+
+        /** Exposure needs transformed-artifact and atomic view-count enforcement before it can be offered. */
+        const val CODE_EXPOSURE_UNSUPPORTED = "EXPOSURE_UNSUPPORTED"
     }
 }
 
@@ -88,6 +100,7 @@ class DelegationService(
     private val delegationRepository: DelegationRepository,
     private val scaChallengeClient: ScaChallengeClient,
     private val partyEligibilityClient: PartyEligibilityClient,
+    private val grantorAuthorityClient: GrantorAuthorityClient,
     private val resourceOwnershipClient: ResourceOwnershipClient,
     private val clock: Clock,
 ) : OfferDelegationUseCase,
@@ -102,11 +115,13 @@ class DelegationService(
         delegationRepository: DelegationRepository,
         scaChallengeClient: ScaChallengeClient,
         partyEligibilityClient: PartyEligibilityClient,
+        grantorAuthorityClient: GrantorAuthorityClient,
         resourceOwnershipClient: ResourceOwnershipClient,
     ) : this(
         delegationRepository,
         scaChallengeClient,
         partyEligibilityClient,
+        grantorAuthorityClient,
         resourceOwnershipClient,
         Clock.systemUTC(),
     )
@@ -118,7 +133,7 @@ class DelegationService(
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
             sessionId = command.grantScaSessionId,
-            expectedPartyId = command.grantorPartyId,
+            expectedPartyId = command.actorPartyId ?: command.grantorPartyId,
             expectedPurpose = SCA_PURPOSE_GRANT,
             errorPrefix = "grant SCA",
         )
@@ -156,6 +171,8 @@ class DelegationService(
                 resourceType = grant.resourceType,
                 resourceId = grant.resourceId,
                 capabilities = grant.capabilities,
+                approvalPolicy = grant.approvalPolicy,
+                requiredApprovals = grant.requiredApprovals,
                 validFrom = grant.validFrom,
                 validTo = grant.validTo,
                 perTransactionLimit = EventMoney.from(grant.perTransactionLimit),
@@ -171,11 +188,56 @@ class DelegationService(
     }
 
     private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
+        rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
+        val grantorName = verifyGrantorAuthority(command)
         rejectUnenforcedCeilings(command)
         rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
-        return verifyEligibility(command)
+        return verifyEligibility(command, grantorName)
+    }
+
+    private suspend fun verifyGrantorAuthority(command: DelegationCandidate): String? {
+        val actor = resolveGrantorActor(command)
+        val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
+        return when (authority.verdict) {
+            GrantorAuthorityVerdict.AUTHORIZED -> authority.displayName
+            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
+                "actor $actor has no active authority for grantor ${command.grantorPartyId}",
+            )
+            GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
+                "authority for grantor ${command.grantorPartyId} could not be established",
+            )
+        }
+    }
+
+    private fun resolveGrantorActor(command: DelegationCandidate): UUID = if (command.callerPartyId != null) {
+        command.actorPartyId ?: throw DelegationGrantorAuthorityException(
+            "customer actor identity is required to issue a delegation",
+        )
+    } else {
+        command.actorPartyId ?: command.grantorPartyId
+    }
+
+    private fun rejectUnsupportedExposure(command: DelegationCandidate) {
+        if (command.exposure != null) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
+                message = "exposure is not supported: this platform cannot yet transform the shared object " +
+                    "or atomically enforce redaction, watermark or maxViews. Omit exposure; existing " +
+                    "historical exposure grants remain readable for audit but never authorize access.",
+            )
+        }
+    }
+
+    private fun rejectLegacyExposure(grant: DelegationGrant) {
+        if (grant.exposure != null) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
+                message = "this historical grant carries unsupported exposure metadata and cannot be activated " +
+                    "or reinstated until transformed-artifact enforcement exists",
+            )
+        }
     }
 
     override suspend fun accept(
@@ -186,6 +248,7 @@ class DelegationService(
     ): DelegationGrant {
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
+        rejectLegacyExposure(grant)
         verifyAndConsumeSca(
             sessionId = scaSessionId,
             expectedPartyId = granteePartyId,
@@ -203,6 +266,8 @@ class DelegationService(
                 resourceType = accepted.resourceType,
                 resourceId = accepted.resourceId,
                 capabilities = accepted.capabilities,
+                approvalPolicy = accepted.approvalPolicy,
+                requiredApprovals = accepted.requiredApprovals,
                 validFrom = accepted.validFrom,
                 validTo = accepted.validTo,
                 perTransactionLimit = EventMoney.from(accepted.perTransactionLimit),
@@ -308,6 +373,7 @@ class DelegationService(
     override suspend fun reinstate(delegationId: UUID): DelegationGrant {
         val grant = delegationRepository.findById(delegationId)
             ?: throw DelegationNotFoundException(delegationId)
+        rejectLegacyExposure(grant)
         val reinstated = grant.reinstate(OffsetDateTime.now(clock))
         return delegationRepository.save(
             reinstated,
@@ -319,6 +385,8 @@ class DelegationService(
                 resourceType = reinstated.resourceType,
                 resourceId = reinstated.resourceId,
                 capabilities = reinstated.capabilities,
+                approvalPolicy = reinstated.approvalPolicy,
+                requiredApprovals = reinstated.requiredApprovals,
                 validFrom = reinstated.validFrom,
                 validTo = reinstated.validTo,
                 perTransactionLimit = EventMoney.from(reinstated.perTransactionLimit),
@@ -355,7 +423,9 @@ class DelegationService(
         val now = OffsetDateTime.now(clock)
         val grant = delegationRepository
             .findActiveByGranteeAndResource(command.granteePartyId, command.resourceType, command.resourceId)
-            .firstOrNull { it.isActiveOn(now) && it.covers(command.capability, command.amount) }
+            .firstOrNull {
+                it.exposure == null && it.isActiveOn(now) && it.covers(command.capability, command.amount)
+            }
             ?: return DelegationCheckResult.Denied(
                 "no active delegation covers ${command.capability} on " +
                     "${command.resourceType}/${command.resourceId} for party ${command.granteePartyId}",
@@ -558,17 +628,13 @@ class DelegationService(
      * offers, never wave them through. KYC requirements: FULL for execution
      * capabilities (they move money), BASIC for everything read-only/propose-only.
      */
-    private suspend fun verifyEligibility(command: DelegationCandidate): CounterpartyNames {
-        val grantor = partyEligibilityClient.eligibilityOf(command.grantorPartyId)
-        if (!grantor.active) {
-            throw DelegationEligibilityException("grantor party ${command.grantorPartyId} is not active")
-        }
+    private suspend fun verifyEligibility(command: DelegationCandidate, grantorName: String?): CounterpartyNames {
         val grantee = partyEligibilityClient.eligibilityOf(command.granteePartyId)
         if (!grantee.active) {
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
         requireGranteeKyc(command, grantee)
-        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
+        return CounterpartyNames(grantorName = grantorName, granteeName = grantee.displayName)
     }
 
     /**

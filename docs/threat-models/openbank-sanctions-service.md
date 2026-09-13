@@ -196,6 +196,23 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   interceptor case in #3349 (an approval for resource A must not unlock resource B).
   Risk class = **elevation of privilege** (narrowed). Rollback: revert to `resource = ""`, which
   restores the over-broad grant — the two tests would go red first.
+- **2026-09-08** — **New inbound REST surface: `POST /api/v2/sanctions/lists/refresh-all`** (issue
+  #9048), and the v1 operation's semantics change under its unchanged shape. The old v1 behaviour
+  was itself a D1-class hazard: it ran the entire external-feed fan-out synchronously inside the
+  HTTP request, so any slow feed turned a compliance-data refresh into an opaque proxy 502/504 and
+  the fuzz lane had to exclude the operation outright. Both URL majors now set a
+  `refresh_requested_at` flag (V12, additive column) on every enabled list and return immediately —
+  v2 with 202 + `{requested: N}` and a **required `Idempotency-Key` header** (#8351), v1 with its
+  legacy 200 + array of pre-refresh lists for the deprecation window. The 60s scheduler treats a
+  flagged list as due, runs the real imports one list at a time, and `markUpdated` clears the flag
+  at commit, so a flag cannot cause re-import on every tick. Risk class = **denial of service**
+  (a refreshed-all trigger is an expensive-batch amplifier): mitigated by `ROLE_OPERATOR`/
+  `ROLE_ADMIN` + `@Authorize(sanctions.trigger)` on BOTH URL majors (regression guard extended to
+  the v2 resource class), by the flag being idempotent by construction (repeated triggers converge,
+  no dedup store needed), and by `ConcurrentExecution.SKIP` on the scheduler. No new egress — the
+  same feeds the cron already fetches. Rollback: revert; V12 is a nullable additive column and the
+  v1 path is untouched in shape.
+
 - **2026-09-04** — Issue #8362: first-party EU consolidated-list adapter + import outcomes.
   The EU list import switches its default source from the OpenSanctions-normalised CSV mirror
   (migration V7's workaround for a then-redirecting endpoint) to the official EU FSF XML feed,

@@ -71,6 +71,9 @@ spec:
               kubernetes.io/metadata.name: campaign
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: communication
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
@@ -177,6 +180,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: wealth
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui

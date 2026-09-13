@@ -56,8 +56,7 @@ class ConversationRetentionSweepIT {
     @Test
     fun `the scheduled sweep hard-deletes a past-expiry conversation`() {
         store.append(CUSTOMER, CONVERSATION, listOf(ChatMessage(ChatRole.USER, "placeholder-turn")))
-        expireRow()
-        assertThat(rows())
+        assertThat(expireRow())
             .describedAs("fixture must be present and expired before the sweep, or nothing is proven")
             .isEqualTo(1)
 

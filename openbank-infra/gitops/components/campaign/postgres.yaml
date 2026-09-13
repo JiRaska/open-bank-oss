@@ -2,7 +2,8 @@
 # operator. CNPG generates the `campaign-db-app` secret (username/password for the
 # `openbank` owner) and a `campaign-db-rw` Service — both consumed by the
 # campaign-service Deployment for the reactive datasource and Flyway migrations.
-# One instance for sandbox FinOps; prod should raise to 3 for HA.
+# Two instances even in sandbox: one is not a FinOps saving, it is a drain deadlock
+# (see `instances` below, #9691). Prod should raise to 3 for HA.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -14,7 +15,31 @@ spec:
   # app changes (same as every other single-owner cluster).
   monitoring:
     enablePodMonitor: true
-  instances: 1
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
+  # Two instances, not one (#9691). CNPG puts a `minAvailable: 1` PDB on the
+  # primary; in a single-instance cluster the sole pod IS the primary, so
+  # `disruptionsAllowed` is pinned at 0 permanently and no eviction can ever be
+  # permitted. That is not a tuning choice, it is arithmetic — and it deadlocked
+  # three node drains for 9-15 days while the cluster paid for both those nodes
+  # and the idle replacements Karpenter had already provisioned. The replica is
+  # also the switchover target a single-instance cluster never had.
+  instances: 2
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
     storageClass: gp3

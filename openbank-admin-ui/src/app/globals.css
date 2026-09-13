@@ -32,9 +32,18 @@
   /* ── Text ── */
   --text-primary:         #0f172a;
   --text-secondary:       #475569;
-  /* Used for labels, metadata and empty-state guidance across the operator console. #64748b
-     keeps a clear hierarchy while meeting AA on both white (4.76:1) and surface-2 (4.55:1). */
-  --text-tertiary:        #64748b;
+  /* Used for labels, metadata and empty-state guidance across the operator console.
+     #64748b was chosen against white (4.76:1) and surface-2 (4.55:1) — the two LIGHTEST
+     backgrounds in the palette, and the only two it was ever measured on. It fails AA on
+     five others (#9749):
+         surface-4  3.86:1    surface-3  4.34:1    accent-bg 4.26:1
+         danger-bg  4.35:1    info-bg    4.37:1
+     #586779 is the lightest value that clears 4.5:1 on EVERY light-theme background,
+     worst case surface-4 at 4.69:1, and it stays lighter than --text-secondary so the
+     three-step hierarchy is unchanged. Dark theme has its own value below and is
+     unaffected. Any future change here must be measured against the DARKEST surface,
+     not the brightest. */
+  --text-tertiary:        #586779;
   --text-muted:           var(--text-tertiary);
 
   /* ── Shorthand semantic aliases ── */
@@ -102,11 +111,11 @@
   --success:              #10b981;
   --success-bg:           #ecfdf5;
   --success-border:       #6ee7b7;
-  --success-text:         #047857;
+  --success-text:         #037454;
   --warning:              #f59e0b;
   --warning-bg:           #fffbeb;
   --warning-border:       #fcd34d;
-  --warning-text:         #b45309;
+  --warning-text:         #a64c08;
   --danger:               #ef4444;
   --danger-bg:            #fef2f2;
   --danger-border:        #fca5a5;
@@ -115,6 +124,28 @@
   --info-bg:              #eff6ff;
   --info-border:          #93c5fd;
   --info-text:            #1d4ed8;
+
+  /* Service topology palette. Domain meaning lives here so the SVG remains
+   * readable in both themes without embedding presentation colours in data. */
+  --map-core: #2563eb;
+  --map-payment: #7c3aed;
+  --map-compliance: #dc2626;
+  --map-identity: #059669;
+  --map-psd2: #d97706;
+  --map-platform: #64748b;
+  --map-cards: #db2777;
+  --map-infrastructure: #64748b;
+  --map-external: #0284c7;
+  --map-edge-sync: #94a3b8;
+  --map-edge-sync-active: #475569;
+  --map-edge-async: #c4b5fd;
+  --map-edge-async-active: #8b5cf6;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
 
   /* ── Shadows ── */
   --shadow-xs:  0 1px 2px rgba(15,23,42,.03);
@@ -205,6 +236,25 @@
   --info-bg: #172554;
   --info-border: #1d4ed8;
   --info-text: #bfdbfe;
+  --map-core: #60a5fa;
+  --map-payment: #c4b5fd;
+  --map-compliance: #f87171;
+  --map-identity: #34d399;
+  --map-psd2: #fbbf24;
+  --map-platform: #94a3b8;
+  --map-cards: #f472b6;
+  --map-infrastructure: #94a3b8;
+  --map-external: #38bdf8;
+  --map-edge-sync: #64748b;
+  --map-edge-sync-active: #cbd5e1;
+  --map-edge-async: #8b5cf6;
+  --map-edge-async-active: #c4b5fd;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
   --sidebar-bg: #090e17;
   --sidebar-hover-bg: rgba(255,255,255,0.08);
   --sidebar-active-bg: rgba(165,180,252,0.18);
@@ -1153,11 +1203,53 @@ main {
   background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(248,250,252,.9));
 }
 
+.ui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: var(--space-8);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ui-empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-lg);
+  background: var(--accent-light);
+  color: var(--accent-text);
+}
+.ui-empty-state-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 750;
+  line-height: 1.4;
+}
+.ui-empty-state-description {
+  max-width: 42rem;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.ui-empty-state-action {
+  margin-top: var(--space-4);
+}
+
 @media (max-width: 840px) {
   .page-header { align-items: stretch; padding: 18px; }
   .page-header > :last-child:not(:only-child) { align-self: flex-start; }
   .table,
   .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .incident-filters { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 560px) {

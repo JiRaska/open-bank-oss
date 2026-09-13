@@ -56,6 +56,7 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 # The manifest must repeat BOTH the issue reference and the date (see module docstring); a date
 # living only here would drift from the file a deployer actually reads.
 ADVISORY_ALLOWLIST = {
+    "openbank-card-issuance-service": "2026-10-05",
     "openbank-psd2-service": "2026-10-05",
     "openbank-sanctions-service": "2026-10-05",
     "openbank-standing-order-service": "2026-10-05",
@@ -138,13 +139,44 @@ def manifest_enforce(root: pathlib.Path, service_dir_name: str) -> tuple[bool | 
     return None, found_path
 
 
-def manifest_has_justification(path: pathlib.Path, target_date: str) -> bool:
-    """The manifest must carry the issue reference AND the same target date as the allowlist."""
+# A YAML document boundary: a line that is exactly `---` (a `---` inside a block scalar is
+# indented, so it does not match). These manifests are one workload per document — 30 documents
+# and 30 `kind:` lines in payments-services.yaml — which is what makes per-document scoping exact.
+DOC_BOUNDARY = re.compile(r"^---[ \t]*$", re.MULTILINE)
+
+
+def workload_document_text(path: pathlib.Path, service_dir_name: str) -> str | None:
+    """The raw text of the ONE document in `path` that declares this service's image.
+
+    Raw, not parsed: the justification is a COMMENT, and a YAML loader discards comments. Returns
+    None when no document names the image — the caller then has nothing to honour, which is the
+    correct answer rather than a permissive one.
+    """
     try:
         text = gatelib.read_text(path)
     except OSError:
+        return None
+    image_ref = re.compile(rf"image:[^\n]*(^|[/@:]){re.escape(service_dir_name)}([:@\s]|$)", re.MULTILINE)
+    for chunk in DOC_BOUNDARY.split(text):
+        if image_ref.search(chunk):
+            return chunk
+    return None
+
+
+def manifest_has_justification(path: pathlib.Path, target_date: str, service_dir_name: str) -> bool:
+    """The service's OWN workload document must carry the issue reference AND the target date.
+
+    Scoped to the document, not the file (#8947). `payments-services.yaml` holds a dozen workloads;
+    a file-wide substring test meant one service's dated exception satisfied the check for every
+    other service in the same file — including a service whose justification block had been deleted
+    entirely, which is exactly the shape this gate's docstring calls out as reading like an
+    oversight. Measured before this fix: deleting the whole block, or only the date line, both left
+    the gate green.
+    """
+    scoped = workload_document_text(path, service_dir_name)
+    if scoped is None:
         return False
-    return ISSUE_REF in text and target_date in text
+    return ISSUE_REF in scoped and target_date in scoped
 
 
 def self_test() -> int:
@@ -207,12 +239,42 @@ def self_test() -> int:
         violations, _, missing = run(root)
         case("a service with no manifest is missing", missing, ["openbank-ok-service"])
 
+    # THE #8947 CASE, in its own tree so it cannot perturb the cases above.
+    #
+    # Two ALLOWLISTED workloads in ONE file, only one of them justified. Both must be allowlisted
+    # or the justification path is never consulted at all — the first version of this case used a
+    # non-allowlisted service, passed against the file-scoped code it was written to catch, and was
+    # therefore decoration. `payments-services.yaml` really does hold a dozen workloads, so the
+    # shared-file shape is the live one.
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / RULES.parent).mkdir(parents=True)
+        (root / RULES).write_text(
+            "money_path_services:\n  - openbank-psd2-service\n  - openbank-sanctions-service\n")
+        (root / COMPONENTS / "x").mkdir(parents=True)
+
+        def workload(name: str, comment: str = "") -> str:
+            return (f"{comment}kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
+                    f"        - name: app\n          image: registry/{name}:sandbox-1\n"
+                    '          env:\n          - name: AUTHZ_ENFORCE\n            value: "false"\n')
+
+        (root / COMPONENTS / "x" / "shared-manifest.yaml").write_text(
+            workload("openbank-psd2-service",
+                     "# Advisory while decision logs accumulate (#8470, flip target 2026-10-05).\n")
+            + "---\n" + workload("openbank-sanctions-service"))
+        violations, _, _ = run(root)
+        flagged = sorted(v[0] for v in violations)
+        case("a sibling's justification in the same FILE does not cover an unjustified workload",
+             flagged, ["openbank-sanctions-service"])
+        case("the justified workload in that same file still passes",
+             "openbank-psd2-service" not in flagged, True)
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: authz-enforce money-path gate is falsifiable (6 cases)")
+    print("self-test ok: authz-enforce money-path gate is falsifiable (8 cases)")
     return 0
 
 
@@ -229,7 +291,7 @@ def run(root: pathlib.Path) -> tuple[list[tuple[str, str]], int, list[str]]:
         if effective is True:
             continue
         target = ADVISORY_ALLOWLIST.get(service)
-        if target and manifest_has_justification(path, target):
+        if target and manifest_has_justification(path, target, service):
             continue
         reason = "manifest supplies AUTHZ_ENFORCE=false" if manifest_value is False else \
                  "no manifest value and the code default is advisory"

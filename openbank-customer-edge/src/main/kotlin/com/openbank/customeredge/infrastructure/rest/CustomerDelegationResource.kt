@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -135,6 +136,57 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * Named account portfolios owned by the active customer profile. A portfolio is a reusable
+     * selection for a later delegation journey; it is deliberately not a grant, an account
+     * ownership assertion, or payment/co-signing authority.
+     */
+    @GET
+    @Path("/portfolios")
+    @Blocking
+    fun portfolios(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/owner/$partyId", partyId)
+    }
+
+    /**
+     * Creates a portfolio for the active profile. The public shape intentionally has no
+     * `ownerPartyId`: accepting it, even only to overwrite it, makes a forged owner look valid to
+     * a buggy client. The edge supplies the verified active profile and upstream checks it again.
+     */
+    @POST
+    @Path("/portfolios")
+    @Blocking
+    fun createPortfolio(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val partyId = partyId()
+        val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        if (requested.has(FIELD_PORTFOLIO_OWNER)) {
+            return refuse(Response.Status.FORBIDDEN, "ownerPartyId is derived from the authenticated profile")
+        }
+        val command = json.createObjectNode().apply {
+            requested.get(FIELD_PORTFOLIO_NAME)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_NAME, it)
+            }
+            requested.get(FIELD_PORTFOLIO_ACCOUNTS)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_ACCOUNTS, it)
+            }
+        }
+        command.put(FIELD_PORTFOLIO_OWNER, partyId)
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command), key)
+    }
+
+    /** A guessed id is left to the upstream owner check, which returns 404 without an existence oracle. */
+    @GET
+    @Path("/portfolios/{id}")
+    @Blocking
+    fun portfolio(@PathParam("id") id: UUID): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/$id", partyId)
+    }
+
+    /**
      * One grant the caller is a party to. Upstream answers 404 when the caller is neither grantor
      * nor grantee, so a guessed id yields no existence oracle and the edge adds no check of its own.
      *
@@ -158,7 +210,8 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @Path("/preview")
     @Blocking
     fun preview(body: String?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
@@ -167,7 +220,13 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         }
         node.put(FIELD_GRANTOR, partyId)
         node.remove(FIELD_GRANT_SCA_SESSION)
-        return upstream.post("$delegationServiceUrl$UPSTREAM/preview", partyId, json.writeValueAsString(node))
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/preview",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -200,7 +259,8 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @POST
     @Blocking
     fun offer(body: String?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
@@ -208,7 +268,13 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
         }
         node.put(FIELD_GRANTOR, partyId)
-        return upstream.post("$delegationServiceUrl$UPSTREAM", partyId, json.writeValueAsString(node))
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -272,7 +338,11 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @jakarta.ws.rs.core.Context
     lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
 
-    private fun partyId(): String {
+    private data class PartyContext(val actor: UUID, val principal: UUID)
+
+    private fun partyId(): String = partyContext().principal.toString()
+
+    private fun partyContext(): PartyContext {
         val claimed = CustomerEdgeResource.resolvePartyIdClaim(
             partyIdClaim = jwt.getClaim<String>("party_id"),
             sub = jwt.subject,
@@ -288,7 +358,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             null
         }
         val resolved = if (this::actingForResolver.isInitialized) actingForResolver.resolve(human, actingFor) else human
-        return resolved.toString()
+        return PartyContext(actor = human, principal = resolved)
     }
 
     // One helper rather than a forbidden()/badRequest() pair: detekt's TooManyFunctions fires AT
@@ -300,8 +370,13 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
+        const val PORTFOLIOS = "/api/v1/delegation-portfolios"
         const val FIELD_GRANTOR = "grantorPartyId"
         const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
+        const val FIELD_PORTFOLIO_OWNER = "ownerPartyId"
+        const val FIELD_PORTFOLIO_NAME = "name"
+        const val FIELD_PORTFOLIO_ACCOUNTS = "accountIds"
+        const val ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
         const val DEFAULT_REASON = "Revoked by grantor"
 
         /** Constraints the schema still names but no service enforces. See [offer]. */

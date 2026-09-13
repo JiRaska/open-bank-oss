@@ -6,51 +6,21 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { fetchAllServiceSnapshots } from '@/lib/api'
+import { fetchAllServiceSnapshotsEvidence } from '@/lib/api'
 import type { ServiceSnapshot, ServiceStack } from '@/types'
 import { Package, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldAlert } from 'lucide-react'
 import { SbomViewer } from '@/components/sbom/SbomViewer'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { fetchCves, osvCoordinates, type CveEvidence, type CveSummary } from '@/lib/inventory/cveEvidence'
 
 const POLL = 30_000
-
-interface CveSummary {
-  id: string
-  summary: string | null
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
-  score: number | null
-  references: string[]
-}
 
 /**
  * Map a (display name, version) pair to the Maven coordinates OSV.dev expects.
  * Returns null for components we cannot reliably resolve (JDK, Gradle as a
  * tool, openbank-libs — these need different ecosystems / vendor advisories).
  */
-function osvCoordinates(component: string): { ecosystem: string; pkg: string } | null {
-  switch (component) {
-    case 'Quarkus': return { ecosystem: 'Maven', pkg: 'io.quarkus:quarkus-core' }
-    case 'Kotlin':  return { ecosystem: 'Maven', pkg: 'org.jetbrains.kotlin:kotlin-stdlib' }
-    default: return null
-  }
-}
-
-async function fetchCves(component: string, version: string): Promise<CveSummary[]> {
-  const coord = osvCoordinates(component)
-  if (!coord) return []
-  try {
-    const res = await fetch(
-      `/api/sbom/cve?ecosystem=${coord.ecosystem}&pkg=${encodeURIComponent(coord.pkg)}&version=${encodeURIComponent(version)}`,
-      { cache: 'no-store' },
-    )
-    if (!res.ok) return []
-    const body = await res.json() as { vulns?: CveSummary[] }
-    return body.vulns ?? []
-  } catch {
-    return []
-  }
-}
-
 const SEVERITY_RANK = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 } as const
 function worstSeverity(vulns: CveSummary[]): CveSummary['severity'] {
   return vulns.reduce<CveSummary['severity']>(
@@ -123,26 +93,38 @@ export default function TechInventoryPage() {
   const [snapshots, setSnapshots] = useState<ServiceSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [inventoryFailure, setInventoryFailure] = useState<UnavailableKind | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const inFlight = useRef(false)
   /** CVE lookups keyed by `${component}@${version}`. Lazy, fetched after snapshot refresh. */
-  const [cveByComponent, setCveByComponent] = useState<Record<string, CveSummary[]>>({})
+  const [cveByComponent, setCveByComponent] = useState<Record<string, CveEvidence>>({})
 
   const refresh = useCallback(async (spinner = false) => {
     if (inFlight.current) return
     inFlight.current = true
     if (spinner) setRefreshing(true)
     try {
-      const snaps = await fetchAllServiceSnapshots()
+      const evidence = await fetchAllServiceSnapshotsEvidence()
+      if (!evidence.ok) {
+        setInventoryFailure(evidence.failure)
+        return
+      }
+      const snaps = evidence.snapshots
       setSnapshots(snaps)
       setLastRefreshed(new Date())
+      setInventoryFailure(null)
       // Kick off CVE lookups for the components we know how to map. OSV.dev
       // responses are cached server-side for 24h, so this is cheap.
       const aggs = aggregate(snaps)
-      const lookups = await Promise.all(aggs.map(async agg => {
-        const vulns = await fetchCves(agg.component, agg.primaryVersion)
-        return [`${agg.component}@${agg.primaryVersion}`, vulns] as const
-      }))
+      const lookupTargets = aggs.filter(agg => osvCoordinates(agg.component) && agg.primaryVersion !== 'n/a')
+      setCveByComponent(Object.fromEntries(lookupTargets.map(agg => [
+        `${agg.component}@${agg.primaryVersion}`,
+        { state: 'loading', vulns: [] } satisfies CveEvidence,
+      ])))
+      const lookups = await Promise.all(lookupTargets.map(async agg => [
+        `${agg.component}@${agg.primaryVersion}`,
+        await fetchCves(agg.component, agg.primaryVersion),
+      ] as const))
       setCveByComponent(Object.fromEntries(lookups))
     } finally {
       inFlight.current = false
@@ -152,9 +134,12 @@ export default function TechInventoryPage() {
   }, [])
 
   useEffect(() => {
-    refresh()
-    const id = setInterval(() => refresh(), POLL)
-    return () => clearInterval(id)
+    const initialRefreshId = setTimeout(() => void refresh(), 0)
+    const pollId = setInterval(() => void refresh(), POLL)
+    return () => {
+      clearTimeout(initialRefreshId)
+      clearInterval(pollId)
+    }
   }, [refresh])
 
   const aggregates = aggregate(snapshots)
@@ -162,6 +147,7 @@ export default function TechInventoryPage() {
   const totalServices = snapshots.length
   const aligned = aggregates.filter(a => a.versions.length <= 1).length
   const drifted = aggregates.filter(a => a.versions.length > 1).length
+  const hasVerifiedSnapshot = lastRefreshed !== null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -195,8 +181,30 @@ export default function TechInventoryPage() {
         </div>}
       />
 
+      {inventoryFailure && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--warning-border)', borderRadius: 'var(--r-lg)' }}>
+          <DataUnavailable
+            kind={inventoryFailure}
+            service={t('Agregátor inventáře služeb', 'Service inventory collector')}
+            feature={t('Technologický inventář', 'Technology inventory')}
+            lang={language}
+            dense
+            title={hasVerifiedSnapshot
+              ? t('Zobrazuji poslední ověřený inventář', 'Showing the last verified inventory')
+              : undefined}
+            detail={hasVerifiedSnapshot
+              ? t('Nové načtení selhalo. Hodnoty níže pocházejí z poslední úspěšné obnovy a nejsou vydávány za aktuální stav.', 'The refresh failed. Values below come from the last successful refresh and are not presented as current state.')
+              : undefined}
+          >
+            <button type="button" className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing} aria-busy={refreshing}>
+              <RefreshCw size={13} aria-hidden="true" /> {t('Zkusit znovu', 'Retry')}
+            </button>
+          </DataUnavailable>
+        </div>
+      )}
+
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+      {hasVerifiedSnapshot && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
         <SummaryCard
           label={t('Služby se stackem', 'Services reporting stack')}
           value={`${servicesWithStack} / ${totalServices}`}
@@ -217,12 +225,12 @@ export default function TechInventoryPage() {
           bg={drifted > 0 ? 'var(--warning-bg)' : 'var(--success-bg)'}
           border={drifted > 0 ? 'var(--warning-border)' : 'var(--success-border)'}
         />
-      </div>
+      </div>}
 
       {/* Loading skeleton */}
       {loading ? (
         <div className="skeleton" style={{ height: '320px' }} />
-      ) : (
+      ) : hasVerifiedSnapshot ? (
         <>
           {/* Aggregate table */}
           <div style={{
@@ -256,7 +264,7 @@ export default function TechInventoryPage() {
                     key={agg.component}
                     agg={agg}
                     totalServices={totalServices}
-                    cves={cveByComponent[`${agg.component}@${agg.primaryVersion}`] ?? []}
+                    cveEvidence={cveByComponent[`${agg.component}@${agg.primaryVersion}`]}
                   />
                 ))}
               </tbody>
@@ -275,7 +283,7 @@ export default function TechInventoryPage() {
                 padding: '12px 16px', borderBottom: '1px solid var(--border)',
                 background: 'var(--warning-bg)',
                 fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.06em', color: 'var(--warning)',
+                letterSpacing: '0.06em', color: 'var(--warning-text)',
                 display: 'flex', alignItems: 'center', gap: '6px',
               }}>
                 <AlertTriangle size={14} />
@@ -351,7 +359,7 @@ export default function TechInventoryPage() {
             </div>
           )}
         </>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -385,13 +393,14 @@ function Th({ children, align }: { children: React.ReactNode; align?: 'left' | '
 }
 
 function AggregateRow({
-  agg, totalServices, cves,
+  agg, totalServices, cveEvidence,
 }: {
   agg: ComponentAggregate
   totalServices: number
-  cves: CveSummary[]
+  cveEvidence?: CveEvidence
 }) {
   const { t } = useLanguage()
+  const cves = cveEvidence?.vulns ?? []
   const aligned = agg.versions.length <= 1
   const coverage = totalServices === 0 ? 0 : Math.round((agg.total / totalServices) * 100)
   const worst = worstSeverity(cves)
@@ -408,7 +417,7 @@ function AggregateRow({
       <td style={{ padding: '12px 16px' }}>
         <span className="tag mono">{agg.primaryVersion}</span>
         {agg.lts && agg.component === 'Quarkus' && (
-          <span className="tag" style={{ marginLeft: '6px', background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }}>LTS</span>
+          <span className="tag" style={{ marginLeft: '6px', background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }}>LTS</span>
         )}
       </td>
       <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
@@ -417,17 +426,21 @@ function AggregateRow({
       </td>
       <td style={{ padding: '12px 16px' }}>
         {aligned ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--success)', fontWeight: 500, fontSize: '12px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--success-text)', fontWeight: 500, fontSize: '12px' }}>
             <CheckCircle2 size={12} /> {t('V souladu', 'Aligned')}
           </span>
         ) : (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--warning)', fontWeight: 500, fontSize: '12px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--warning-text)', fontWeight: 500, fontSize: '12px' }}>
             <AlertTriangle size={12} /> {t('Drift', 'Drift')} ({agg.versions.length})
           </span>
         )}
       </td>
       <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-        {cves.length > 0 ? (
+        {cveEvidence?.state === 'unavailable' ? (
+          <span style={{ color: 'var(--warning-text)' }}>{t('CVE stav nedostupný', 'CVE status unavailable')}</span>
+        ) : cveEvidence?.state === 'loading' ? (
+          <span style={{ color: 'var(--text-tertiary)' }}>{t('Ověřuji CVE…', 'Checking CVEs…')}</span>
+        ) : cves.length > 0 ? (
           <span
             title={cves.slice(0, 5).map(c => `${c.id} (${c.severity}${c.score ? ' ' + c.score : ''})`).join('\n')}
             style={{
@@ -440,8 +453,8 @@ function AggregateRow({
           </span>
         ) : agg.supportUntil && agg.component === 'Quarkus' ? (
           <span>{t('Podpora do', 'Support until')} {agg.supportUntil}</span>
-        ) : osvCoordinates(agg.component) ? (
-          <span style={{ color: 'var(--success)' }}>{t('Žádné známé CVE', 'No known CVE')}</span>
+        ) : osvCoordinates(agg.component) && cveEvidence?.state === 'verified' ? (
+          <span style={{ color: 'var(--success-text)' }}>{t('Žádné známé CVE', 'No known CVE')}</span>
         ) : (
           <span style={{ color: 'var(--text-tertiary)' }}>—</span>
         )}

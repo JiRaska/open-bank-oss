@@ -17,7 +17,8 @@
 // The year-end close (EoY) is not wired yet — shown as an honest roadmap card
 // rather than faked status, per the read-only-consumer rule.
 
-import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
+import { Suspense, useEffect, useState, useCallback, useRef, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
@@ -32,7 +33,10 @@ import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
+import {
+  parseCloseFailures, parseCloseRun, parseCloseRuns, parseReconciliationReport,
+  type CloseFailure, type CloseRun, type ReconciliationReport,
+} from '@/lib/closings/evidence'
 
 const POLL = 30_000
 // A healthy daily tie-out (23:30) is at most ~24h old; past 25h the day's close likely
@@ -105,24 +109,6 @@ function ClosingsContent() {
 // EoD — daily ledger ⇄ sub-ledger tie-out (unchanged behaviour)
 // ---------------------------------------------------------------------------
 
-interface CurrencyReconciliation {
-  currency: string
-  ledgerControlBalance: number | string
-  subLedgerBookedSum: number | string
-  difference: number | string
-  withinTolerance: boolean
-  // ADR-0178 Phase 3 — future-value-dated pipeline (posted, not yet effective). Optional: reports
-  // recorded before the field existed omit it, so render 0 rather than NaN.
-  futureValueDatedPipeline?: number | string
-}
-
-interface ReconciliationReport {
-  asOf: string
-  generatedAt: string
-  tolerance: number | string
-  currencies: CurrencyReconciliation[]
-}
-
 function num(v: number | string): number {
   return typeof v === 'number' ? v : Number(v)
 }
@@ -134,6 +120,7 @@ function EodPanel() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [excludedCurrencies, setExcludedCurrencies] = useState(0)
   const busyRef = useRef(false)
 
   const refresh = useCallback(async (spinner = false) => {
@@ -151,20 +138,30 @@ function EodPanel() {
         // service (404 "Unknown service" → not_deployed) via the classifier.
         const kind = await classifyBffFailure(res)
         setReport(null)
+        setExcludedCurrencies(0)
         setUnavailable({ kind: kind === 'not_found' ? 'no_data' : kind })
         return
       }
       if (!res.ok) {
         setReport(null)
+        setExcludedCurrencies(0)
         setUnavailable({ kind: await classifyBffFailure(res) as BffFailure })
         return
       }
-      const data = (await res.json()) as ReconciliationReport
-      setReport(data)
+      const parsed = parseReconciliationReport(await res.json())
+      if (!parsed.value) {
+        setReport(null)
+        setExcludedCurrencies(0)
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setReport(parsed.value)
+      setExcludedCurrencies(parsed.excludedCount)
       setUnavailable(null)
       setLastRefreshed(new Date())
     } catch {
       setReport(null)
+      setExcludedCurrencies(0)
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -174,9 +171,9 @@ function EodPanel() {
   }, [])
 
   useEffect(() => {
-    refresh()
+    const initial = window.setTimeout(() => { void refresh() }, 0)
     const id = setInterval(() => refresh(), POLL)
-    return () => clearInterval(id)
+    return () => { window.clearTimeout(initial); clearInterval(id) }
   }, [refresh])
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -217,11 +214,11 @@ function EodPanel() {
         // not the calm gray no-data panel.
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 18px',
           background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 'var(--r-lg)' }}>
-          <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: 'var(--surface)', color: 'var(--danger)' }}>
+          <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: 'var(--surface)', color: 'var(--danger-text)' }}>
             <AlertTriangle size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--danger)' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--danger-text)' }}>
               {t('Denní tie-out dosud neproběhl', 'The daily tie-out has never run')}
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
@@ -242,6 +239,7 @@ function EodPanel() {
         </div>
       ) : report ? (
         <>
+          {excludedCurrencies > 0 && <EvidenceWarning count={excludedCurrencies} subject={t('měnových řádků', 'currency rows')} />}
           {/* Staleness warning — a report exists but the last tie-out is older than the daily SLA,
               so today's close likely didn't run. The report below is then a stale prior day. */}
           {(() => {
@@ -253,7 +251,7 @@ function EodPanel() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', marginBottom: '16px',
                 background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 'var(--r-lg)' }}>
                 <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-                <span style={{ fontSize: '13px', color: 'var(--warning)' }}>
+                <span style={{ fontSize: '13px', color: 'var(--warning-text)' }}>
                   {t(`Poslední tie-out je ${Math.round(ageHours)} h starý (${fmtDateTime(report.generatedAt)}) — dnešní denní závěrka zřejmě neproběhla.`,
                      `The last tie-out is ${Math.round(ageHours)}h old (${fmtDateTime(report.generatedAt)}) — today's daily close appears not to have run.`)}
                 </span>
@@ -390,32 +388,6 @@ function EodPanel() {
 // EoM — monthly statement close runs (ADR-0069 D3 / issue #470)
 // ---------------------------------------------------------------------------
 
-interface CloseRun {
-  id: string
-  trigger: 'SCHEDULED' | 'MANUAL'
-  status: 'RUNNING' | 'COMPLETED' | 'COMPLETED_WITH_FAILURES'
-  periodFrom: string | null
-  periodTo: string | null
-  accountsEnumerated: number
-  pocketsClosed: number
-  pocketsFailed: number
-  pocketsSkipped: number
-  startedAt: string
-  finishedAt: string | null
-}
-
-interface CloseFailure {
-  id: string
-  runId: string
-  accountId: string
-  pocketCurrency: string
-  periodFrom: string
-  periodTo: string
-  reason: 'RECONCILIATION' | 'UPSTREAM' | 'UNKNOWN'
-  detail: string | null
-  failedAt: string
-}
-
 type FailuresState = 'loading' | 'error' | CloseFailure[]
 
 /**
@@ -432,6 +404,7 @@ function EomPanel() {
   const canTrigger = hasPermission(roles, 'closings:run')
 
   const [runs, setRuns] = useState<CloseRun[]>([])
+  const [excludedRuns, setExcludedRuns] = useState(0)
   const [empty, setEmpty] = useState(false)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -440,9 +413,12 @@ function EomPanel() {
   const [triggering, setTriggering] = useState(false)
   const [triggerReviewOpen, setTriggerReviewOpen] = useState(false)
   const triggerButtonRef = useRef<HTMLButtonElement | null>(null)
+  const triggerCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
+  const workspaceRef = useRef<HTMLDivElement | null>(null)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
+  const [excludedFailures, setExcludedFailures] = useState<Record<string, number>>({})
   const busyRef = useRef(false)
   // Operator-local check trail — survives reloads and (crucially) statement-service
   // outages, so a later operator/agent can see WHEN the close was checked and what
@@ -459,16 +435,24 @@ function EomPanel() {
       })
       if (!res.ok) {
         setRuns([]); setEmpty(false)
+        setExcludedRuns(0)
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const list = (await res.json()) as CloseRun[]
-      setRuns(list)
-      setEmpty(list.length === 0)
+      const parsed = parseCloseRuns(await res.json())
+      if (!parsed.value) {
+        setRuns([]); setEmpty(false); setExcludedRuns(0)
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setRuns(parsed.value)
+      setExcludedRuns(parsed.excludedCount)
+      setEmpty(parsed.value.length === 0)
       setUnavailable(null)
       setLastRefreshed(new Date())
     } catch {
       setRuns([]); setEmpty(false)
+      setExcludedRuns(0)
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -481,9 +465,9 @@ function EomPanel() {
   const latest = runs[0] ?? null
   const running = latest?.status === 'RUNNING'
   useEffect(() => {
-    load()
+    const initial = window.setTimeout(() => { void load() }, 0)
     const id = setInterval(() => load(), running ? RUNNING_POLL : POLL)
-    return () => clearInterval(id)
+    return () => { window.clearTimeout(initial); clearInterval(id) }
   }, [load, running])
 
   // Record each distinct observed state (deduped by signature) so the check trail
@@ -518,7 +502,12 @@ function EomPanel() {
         return
       }
       // Optimistic: show the accepted run immediately, then refresh the history.
-      const acceptedRun = (await res.json()) as CloseRun
+      const acceptedRun = parseCloseRun(await res.json())
+      if (!acceptedRun) {
+        setNotice({ ok: false, text: t('Služba přijala požadavek, ale vrátila neplatné potvrzení běhu. Ověřte historii před dalším spuštěním.', 'The service accepted the request but returned invalid run evidence. Check history before triggering again.') })
+        void load()
+        return
+      }
       setRuns(prev => [acceptedRun, ...prev.filter(r => r.id !== acceptedRun.id)])
       setEmpty(false)
       setNotice({ ok: true, text: t('Catch-up uzávěrka přijata.', 'Catch-up close run accepted.') })
@@ -537,8 +526,8 @@ function EomPanel() {
 
   const closeTriggerReview = () => {
     if (triggering) return
+    triggerCloseFocusOverrideRef.current = null
     setTriggerReviewOpen(false)
-    requestAnimationFrame(() => triggerButtonRef.current?.focus())
   }
 
   const toggleFailures = useCallback(async (run: CloseRun) => {
@@ -554,8 +543,13 @@ function EomPanel() {
         setFailures(prev => ({ ...prev, [run.id]: 'error' }))
         return
       }
-      const data = (await res.json().catch(() => [])) as CloseFailure[]
-      setFailures(prev => ({ ...prev, [run.id]: Array.isArray(data) ? data : [] }))
+      const parsed = parseCloseFailures(await res.json().catch(() => null), run.id)
+      if (!parsed.value) {
+        setFailures(prev => ({ ...prev, [run.id]: 'error' }))
+        return
+      }
+      setFailures(prev => ({ ...prev, [run.id]: parsed.value! }))
+      setExcludedFailures(prev => ({ ...prev, [run.id]: parsed.excludedCount }))
     } catch {
       setFailures(prev => ({ ...prev, [run.id]: 'error' }))
     }
@@ -614,7 +608,7 @@ function EomPanel() {
   }
 
   return (
-    <div>
+    <div ref={workspaceRef} role="region" aria-label={t('Pracovní plocha měsíční uzávěrky', 'Month-end close workspace')} tabIndex={-1}>
       {/* Toolbar: refresh + catch-up trigger */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
         <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
@@ -636,7 +630,7 @@ function EomPanel() {
               type="button"
               aria-label={t('Zkontrolovat catch-up uzávěrku', 'Review catch-up close')}
               className="btn btn-primary"
-              onClick={() => { setNotice(null); setTriggerReviewOpen(true) }}
+              onClick={() => { triggerCloseFocusOverrideRef.current = null; setNotice(null); setTriggerReviewOpen(true) }}
               disabled={triggering || running || unavailable !== null}
               title={t('Spustit dohánějící uzávěrku nyní (idempotentní)', 'Run a catch-up close now (idempotent)')}
             >
@@ -652,9 +646,15 @@ function EomPanel() {
         historyCount={runs.length}
         busy={triggering}
         error={notice?.ok === false ? notice.text : null}
+        triggerRef={triggerButtonRef}
+        closeFocusOverrideRef={triggerCloseFocusOverrideRef}
+        closeFocusFallbackRef={workspaceRef}
         onCancel={closeTriggerReview}
         onConfirm={async () => {
-          if (await trigger()) setTriggerReviewOpen(false)
+          if (await trigger()) {
+            triggerCloseFocusOverrideRef.current = workspaceRef.current
+            setTriggerReviewOpen(false)
+          }
         }}
       />}
 
@@ -668,6 +668,8 @@ function EomPanel() {
           {notice.text}
         </div>
       )}
+
+      {excludedRuns > 0 && <EvidenceWarning count={excludedRuns} subject={t('běhů uzávěrky', 'close runs')} />}
 
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
@@ -761,6 +763,7 @@ function EomPanel() {
                         expandable={expandable}
                         isOpen={isOpen}
                         fState={fState}
+                        excludedCount={excludedFailures[run.id] ?? 0}
                         onToggle={() => void toggleFailures(run)}
                         statusPill={statusPill}
                         reasonLabel={reasonLabel}
@@ -813,47 +816,59 @@ function EomPanel() {
   )
 }
 
-function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCancel, onConfirm }: {
+function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, triggerRef, closeFocusOverrideRef, closeFocusFallbackRef, onCancel, onConfirm }: {
   latest: CloseRun | null
   historyCount: number
   busy: boolean
   error: string | null
+  triggerRef: RefObject<HTMLButtonElement | null>
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  closeFocusFallbackRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const { t, language } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = 'closing-catch-up-review-title'
-  const impactId = 'closing-catch-up-review-impact'
+  const backButtonRef = useRef<HTMLButtonElement>(null)
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const formatDate = (value: string | null) => value ? new Date(value).toLocaleDateString(locale) : '—'
   const period = latest ? `${formatDate(latest.periodFrom)} – ${formatDate(latest.periodTo)}` : t('zatím bez běhu', 'no run yet')
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'grid', placeItems: 'center', padding: 20 }}
-  >
-    <div className="card" style={{ width: 'min(600px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)' }} />
+      <Dialog.Content
+        className="card"
+        role="alertdialog"
+        aria-busy={busy}
+        onOpenAutoFocus={event => { event.preventDefault(); backButtonRef.current?.focus() }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const target = closeFocusOverrideRef.current?.isConnected
+            ? closeFocusOverrideRef.current
+            : triggerRef.current?.isConnected && !triggerRef.current.disabled
+              ? triggerRef.current
+              : closeFocusFallbackRef.current?.isConnected
+                ? closeFocusFallbackRef.current
+                : null
+          closeFocusOverrideRef.current = null
+          target?.focus()
+        }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onPointerDownOutside={event => event.preventDefault()}
+        onInteractOutside={event => event.preventDefault()}
+        style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(600px, calc(100vw - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+      >
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <CalendarCheck2 size={20} aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
         <div>
-          <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{t('Spustit catch-up měsíční uzávěrku', 'Run monthly catch-up close')}</h2>
-          <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{t(
+          <Dialog.Title style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{t('Spustit catch-up měsíční uzávěrku', 'Run monthly catch-up close')}</Dialog.Title>
+          <Dialog.Description style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{t(
             'Statement-service určí chybějící období a přijme idempotentní běh po kapsách. Přijetí pouze potvrzuje zahájení — úspěch, přeskočení a chyby uvidíte až v historii běhu.',
             'Statement-service determines the missing period and accepts an idempotent per-pocket run. Acceptance only confirms the start — completion, skips, and failures appear later in run history.',
-          )}</p>
+          )}</Dialog.Description>
         </div>
       </div>
-      <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning)', fontSize: 12.5, lineHeight: 1.5 }}>
+      <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: 12.5, lineHeight: 1.5 }}>
         {t('Nespouštějte ručně jen proto, že plánovaný běh ještě není vidět. Ověřte plánovač 1. den v měsíci v 02:30 a poslední běh níže.', 'Do not trigger manually only because the scheduled run is not visible yet. Check the 1st-of-month 02:30 schedule and the latest run below.')}
       </div>
       <dl style={{ margin: '14px 0 0', padding: 12, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', display: 'grid', gap: 8, fontSize: 12.5 }}>
@@ -864,18 +879,20 @@ function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCance
       </dl>
       {error && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-        <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button ref={backButtonRef} type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
         <button type="button" className="btn btn-primary" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}><Play size={13} aria-hidden="true" />{busy ? t('Spouštím…', 'Starting…') : t('Potvrdit spuštění', 'Confirm run')}</button>
       </div>
-    </div>
-  </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
 
-function RunRows({ run, expandable, isOpen, fState, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
+function RunRows({ run, expandable, isOpen, fState, excludedCount, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
   run: CloseRun
   expandable: boolean
   isOpen: boolean
   fState: FailuresState | undefined
+  excludedCount: number
   onToggle: () => void
   statusPill: (s: CloseRun['status']) => React.ReactNode
   reasonLabel: (r: CloseFailure['reason']) => string
@@ -913,6 +930,7 @@ function RunRows({ run, expandable, isOpen, fState, onToggle, statusPill, reason
       {expandable && isOpen && (
         <tr style={{ borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
           <td colSpan={9} style={{ padding: '10px 16px 14px 38px' }}>
+            {excludedCount > 0 && <EvidenceWarning count={excludedCount} subject={t('detailů selhání', 'failure details')} compact />}
             {fState === 'loading' || fState === undefined ? (
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítání chyb…', 'Loading failures…')}</span>
             ) : fState === 'error' ? (
@@ -974,11 +992,23 @@ function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; val
   )
 }
 
+function EvidenceWarning({ count, subject, compact = false }: { count: number; subject: string; compact?: boolean }) {
+  const { t } = useLanguage()
+  return (
+    <p role="alert" style={{ margin: compact ? '0 0 10px' : '0 0 16px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>
+      {t(
+        `Vyřazená neplatná data (${subject}): ${count}. Zobrazené souhrny používají pouze ověřená data.`,
+        `Invalid evidence excluded (${subject}): ${count}. Displayed totals use validated evidence only.`,
+      )}
+    </p>
+  )
+}
+
 function CycleCard({ tag, status, title, body }: { tag: string; status: 'live' | 'pending' | 'none'; title: string; body: string }) {
   const { t } = useLanguage()
   const cfg = {
-    live: { label: t('Běží', 'Live'), color: 'var(--success)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
-    pending: { label: t('Připraveno', 'Pending'), color: 'var(--warning)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+    live: { label: t('Běží', 'Live'), color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+    pending: { label: t('Připraveno', 'Pending'), color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
     none: { label: t('Není', 'None'), color: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)' },
   }[status]
   return (

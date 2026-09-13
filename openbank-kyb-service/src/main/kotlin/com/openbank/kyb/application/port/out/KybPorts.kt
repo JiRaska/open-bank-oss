@@ -7,10 +7,15 @@ package com.openbank.kyb.application.port.out
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.CountryPack
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.domain.model.RegistrySearchResult
+import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import io.smallrye.mutiny.Uni
@@ -30,11 +35,22 @@ interface RegistryAdapter {
     val source: String
     fun supports(scheme: IdentifierScheme): Boolean
     suspend fun lookup(identifier: LegalEntityIdentifier, declared: DeclaredEntity?): RegistryExtract?
+
+    /**
+     * Find candidates by name (issue #9707). **Null means this register cannot search**, which is a
+     * different answer from an empty result and has to stay that way: the UI offers the search box
+     * only where a register backs it, and silently showing a box that always finds nothing is worse
+     * than not offering one. Default so a register without the capability needs no code.
+     */
+    suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? = null
 }
 
 /** The router over every [RegistryAdapter]; what the use cases depend on. */
 interface BusinessRegistryPort {
     suspend fun lookup(identifier: LegalEntityIdentifier, declared: DeclaredEntity?): RegistryExtract?
+
+    /** Null when no adapter for [scheme] supports search; see [RegistryAdapter.search]. */
+    suspend fun search(scheme: IdentifierScheme, query: RegistrySearchQuery): RegistrySearchResult? = null
 }
 
 /** Short-lived cache of extracts so a lookup on the entry screen and the case start share one register call. */
@@ -54,6 +70,26 @@ interface BusinessOnboardingCaseRepository {
     /** Cases the party initiated OR is a signer on. */
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
+}
+
+/**
+ * The per-entity store of human confirmations of a representation rule (#9711).
+ *
+ * [findActive] is keyed by identifier AND rule-text hash together, which is the whole point: a
+ * company that amends its způsob jednání keeps its IČO, so a lookup by identifier alone would carry
+ * the old confirmation onto the new rule. [findLatestFor] answers the identifier alone and exists
+ * only to TELL a reviewer that the rule changed — never to make a decision.
+ */
+interface RepresentationAttestationRepository {
+    suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String): RepresentationAttestation?
+
+    /** The most recent active attestation for the entity, whatever rule text it was about. */
+    suspend fun findLatestFor(identifier: LegalEntityIdentifier): RepresentationAttestation?
+
+    /** Persists the new attestation and supersedes every earlier active one for the same identifier. */
+    suspend fun attest(attestation: RepresentationAttestation): RepresentationAttestation
+
+    suspend fun listFor(identifier: LegalEntityIdentifier): List<RepresentationAttestation>
 }
 
 interface KybOutboxRepository : OutboxRepository {
@@ -81,6 +117,7 @@ data class MandateRequest(
     val agentPartyId: UUID,
     val role: String,
     val authority: String,
+    val requiredSignatures: Int,
     val source: String,
     val evidenceRef: String,
 )
@@ -114,4 +151,31 @@ interface KybMetricsPort {
  */
 interface BusinessOnboardingWorkflowPort {
     fun stateEntered(caseId: UUID, state: CaseStatus)
+}
+
+/**
+ * One jurisdiction's beneficial-ownership register (ADR-0284 D5).
+ *
+ * Separate from [RegistryAdapter] rather than another method on it, because the two registers are
+ * genuinely different sources: the UK publishes companies in Companies House and their PSCs through
+ * the same API, while the Czech `Evidence skutečných majitelů` is a different register with no
+ * public API at all. Folding them together would make "the register answered" ambiguous about which
+ * register.
+ */
+interface UboAdapter {
+    val source: String
+
+    fun supports(scheme: IdentifierScheme): Boolean
+
+    /**
+     * The finding, or null when this adapter does not answer for the identifier at all. An adapter
+     * that reaches its register and learns nothing returns a finding with no owners — the caller
+     * cannot tell "no owners" from "did not look" if both are null.
+     */
+    suspend fun lookup(identifier: LegalEntityIdentifier, pack: CountryPack): UboFinding?
+}
+
+/** The router over every [UboAdapter]; what the use cases depend on. */
+interface BeneficialOwnershipPort {
+    suspend fun lookup(identifier: LegalEntityIdentifier): UboFinding
 }

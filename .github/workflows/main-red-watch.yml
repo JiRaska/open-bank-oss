@@ -42,6 +42,8 @@ name: main red watch
 
 on:
   workflow_run:
+    # Reject PR-branch completions before allocating a workflow run (Refs #9031).
+    branches: [main]
     # R1: every workflow that pushes to main with no paths filter. These run on
     # every commit, so their conclusion IS main's health. The list is not
     # hand-maintained scope -- check-main-red-watch.py --check-declaration fails
@@ -65,6 +67,11 @@ on:
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.
+      # Heals a derived artefact stale on main (#9755). Its red is the one state that must
+      # not stay silent: either the regeneration itself broke, or a generator stopped being a
+      # pure projection of its sources — and in both cases the fleet-wide merge freeze this
+      # workflow exists to end is back, with nothing else reporting it.
+      - "Derived artefact autoheal"
       - "ADR registry"
       - "Agent charter registry"
       - "AI governance snapshot"
@@ -166,13 +173,24 @@ jobs:
                echo "::error::'main is green' verdict — see check-main-red-watch.py."
                exit 1 ;;
             2) echo "::warning::main is red — escalating onto a main-red issue." ;;
+            3) echo "::warning::main-red-watch could not REACH the API for run $RUN_ID"
+               echo "::warning::attempt $ATTEMPT — a quota or transport failure, not a verdict"
+               echo "::warning::about main. Not failing this run: 18 red watches in 6 hours, ten"
+               echo "::warning::of ten saying 'could not answer', is how a genuinely red main"
+               echo "::warning::stops being visible (#9697). The next push re-reads main." ;;
             *) echo "::error::Unexpected exit $code."; exit "$code" ;;
           esac
 
       - name: Escalate or stand down
         # A manual dispatch inspects without touching an issue: falsifying the
         # watch must not manufacture the thing it reports.
-        if: ${{ github.event_name == 'workflow_run' }}
+        #
+        # Exit 3 (the API refused to answer) is excluded for TWO independent reasons, either of
+        # which alone would be a defect: `--json` is never written on that path, so this step
+        # would die reading /tmp/main-red.json; and the branch below treats "not red" as a reason
+        # to CLOSE this workflow's open main-red issue — so a rate limit would silently declare a
+        # genuinely red main fixed. Not answering must change nothing (#9697).
+        if: ${{ github.event_name == 'workflow_run' && steps.verdict.outputs.code != '3' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           CODE: ${{ steps.verdict.outputs.code }}

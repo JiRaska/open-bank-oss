@@ -36,14 +36,18 @@ export interface CompLifecycle {
   urgency: Urgency
 }
 
+// These badges carry TEXT, so `color` has to clear AA 4.5:1 on its own `bg`. The hardcoded pairs
+// this replaced did not: #d97706 on #fffbeb measured 3.07:1 and #059669 on #f0fdf4 3.59:1 (axe,
+// /settings and /infrastructure). The `*-text` tokens are the ones tuned against every light
+// surface, and using them also makes dark theme follow — a literal cannot (#9749, ADR-0208 D2).
 const URGENCY: Record<Urgency, { cs: string; en: string; color: string; bg: string }> = {
-  current:           { cs: 'Aktuální',          en: 'Up to date',     color: '#059669', bg: '#ecfdf5' },
-  'patch-available': { cs: 'Dostupná záplata',  en: 'Patch available',color: '#d97706', bg: '#fffbeb' },
-  'major-available': { cs: 'Nový major',        en: 'New major',      color: '#2563eb', bg: '#eff6ff' },
-  vulnerable:        { cs: 'Zranitelnosti',     en: 'Vulnerable',     color: '#dc2626', bg: '#fef2f2' },
-  'eol-soon':        { cs: 'Blíží se EoL',      en: 'EoL approaching',color: '#dc2626', bg: '#fef2f2' },
-  eol:               { cs: 'Po konci podpory',  en: 'Past EoL',       color: '#991b1b', bg: '#fef2f2' },
-  unknown:           { cs: 'Neznámé',           en: 'Unknown',        color: '#6b7280', bg: '#f3f4f6' },
+  current:           { cs: 'Aktuální',          en: 'Up to date',     color: 'var(--success-text)', bg: 'var(--success-bg)' },
+  'patch-available': { cs: 'Dostupná záplata',  en: 'Patch available',color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  'major-available': { cs: 'Nový major',        en: 'New major',      color: 'var(--info-text)',    bg: 'var(--info-bg)' },
+  vulnerable:        { cs: 'Zranitelnosti',     en: 'Vulnerable',     color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  'eol-soon':        { cs: 'Blíží se EoL',      en: 'EoL approaching',color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  eol:               { cs: 'Po konci podpory',  en: 'Past EoL',       color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  unknown:           { cs: 'Neznámé',           en: 'Unknown',        color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
 }
 
 type T = (cs: string, en: string) => string
@@ -52,12 +56,23 @@ function fmtDate(iso: string, locale: string): string {
   return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short' })
 }
 
+function safeReleaseNotesUrl(candidate: string | null): string | null {
+  if (!candidate) return null
+  try {
+    const url = new URL(candidate)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
 export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: CompLifecycle; name: string; t: T; dateLocale?: string }) {
   const [draft, setDraft] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
   const u = URGENCY[data.urgency]
   const lc = data.lifecycle
   const has = lc.available
   const running = data.running.version
+  const releaseNotesUrl = safeReleaseNotesUrl(data.upgrade.releaseNotesUrl)
 
   const planUpgrade = async () => {
     setDraft('busy')
@@ -113,7 +128,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       {has ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)' }}>
           {lc.isLts && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#059669', fontWeight: 700 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--success-text)', fontWeight: 700 }}>
               <ShieldCheck size={12} /> LTS
             </span>
           )}
@@ -144,7 +159,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <ShieldAlert size={12} /> {t('CVE: zatím nesken.', 'CVE: not yet scanned')}
           </span>
         ) : data.cve.total === 0 ? (
-          <span style={{ color: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ color: 'var(--success-text)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <ShieldCheck size={12} /> {t('Žádné známé CVE', 'No known CVEs')}
           </span>
         ) : (
@@ -158,21 +173,26 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       </div>
 
       {/* actions */}
-      {(showUpgrade || data.upgrade.releaseNotesUrl) && (
+      {(showUpgrade || releaseNotesUrl) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
-          {data.upgrade.releaseNotesUrl && (
-            <a href={data.upgrade.releaseNotesUrl} target="_blank" rel="noreferrer"
+          {releaseNotesUrl && (
+            <a href={releaseNotesUrl} target="_blank" rel="noreferrer"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>
               <ExternalLink size={12} /> {data.upgrade.target ? `${t('Co je nového v', "What's new in")} ${data.upgrade.target}` : t('Release notes', 'Release notes')}
             </a>
           )}
           {showUpgrade && (
-            <button onClick={planUpgrade} disabled={draft === 'busy' || draft === 'done'}
-              style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, cursor: draft === 'done' ? 'default' : 'pointer',
-                border: `1px solid ${draft === 'done' ? '#6ee7b7' : 'var(--border)'}`, background: draft === 'done' ? '#ecfdf5' : 'var(--surface)', color: draft === 'done' ? '#059669' : draft === 'err' ? '#dc2626' : 'var(--text-primary)' }}>
-              {draft === 'busy' ? <Loader2 size={12} className="animate-spin" /> : draft === 'done' ? <Check size={12} /> : <ClipboardPlus size={12} />}
-              {draft === 'done' ? t('Návrh ve frontě', 'Queued') : draft === 'err' ? t('Chyba', 'Error') : <><ArrowUpCircle size={12} style={{ display: 'none' }} />{t('Naplánovat upgrade', 'Plan upgrade')}</>}
-            </button>
+            <>
+              <button type="button" onClick={planUpgrade} disabled={draft === 'busy' || draft === 'done'} aria-busy={draft === 'busy'}
+                style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, cursor: draft === 'done' ? 'default' : 'pointer',
+                  border: `1px solid ${draft === 'done' ? '#6ee7b7' : 'var(--border)'}`, background: draft === 'done' ? '#ecfdf5' : 'var(--surface)', color: draft === 'done' ? '#059669' : draft === 'err' ? '#dc2626' : 'var(--text-primary)' }}>
+                {draft === 'busy' ? <Loader2 aria-hidden="true" size={12} className="animate-spin" /> : draft === 'done' ? <Check aria-hidden="true" size={12} /> : <ClipboardPlus aria-hidden="true" size={12} />}
+                {draft === 'busy' ? t('Připravuji…', 'Drafting…') : draft === 'done' ? t('Návrh ve frontě', 'Queued') : draft === 'err' ? t('Zkusit znovu', 'Try again') : <><ArrowUpCircle aria-hidden="true" size={12} style={{ display: 'none' }} />{t('Naplánovat upgrade', 'Plan upgrade')}</>}
+              </button>
+              <span role="status" aria-live="polite" className="sr-only">
+                {draft === 'busy' ? t('Připravuji návrh upgradu.', 'Drafting upgrade proposal.') : draft === 'done' ? t('Návrh upgradu čeká na nezávislé schválení.', 'Upgrade proposal is queued for independent review.') : draft === 'err' ? t('Návrh upgradu se nepodařilo zařadit. Zkuste to znovu.', 'Upgrade proposal could not be queued. Try again.') : ''}
+              </span>
+            </>
           )}
         </div>
       )}

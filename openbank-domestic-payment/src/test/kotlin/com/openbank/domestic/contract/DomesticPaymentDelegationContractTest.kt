@@ -53,8 +53,17 @@ class DomesticPaymentDelegationContractTest {
 
     @Test
     fun `reservation consumer contract matches producer and retains only a domain-separated hash`() {
-        val producerSchema = producerAsyncApi.substringAfter("    spendReservationState:")
-            .substringBefore("\n    DelegationSpendReservationStateChanged:")
+        // Window ends at the NEXT 4-space-indented schema key, not at the messages section:
+        // #8334 inserted the spendReserved/spendSettled audit schemas between
+        // spendReservationState and the DelegationSpendReservationStateChanged message, so a
+        // message-anchored window sweeps in their raw `idempotencyKey:` and fails the very
+        // assertion below that exists to keep the raw key OUT of the reservation-state schema.
+        // Bound the window by the schema block's own indent instead — order-independent.
+        val afterSchemaKey = producerAsyncApi.substringAfter("    spendReservationState:")
+        val producerSchema = afterSchemaKey.substring(
+            0,
+            Regex("\n    \\S").find(afterSchemaKey)?.range?.first ?: afterSchemaKey.length,
+        )
         val producerMessage = producerAsyncApi.substringAfter("    DelegationSpendReservationStateChanged:")
         listOf(
             "reservationId",
@@ -83,6 +92,29 @@ class DomesticPaymentDelegationContractTest {
             "pattern: '^[0-9a-f]{64}$'",
         )
         assertThat(producerSchema).doesNotContain("idempotencyKey:")
+    }
+
+    @Test
+    fun `every published operation keeps the 403 rejection in the contract`() {
+        // Negative case (ADR-0279 #3): a contract that only covers success stays green when the
+        // provider stops enforcing authz. Every operation this service publishes must document
+        // the Forbidden rejection — the shape a wrong or missing identity gets.
+        val forbidden = openApi.substringAfter("    Forbidden:")
+        assertThat(forbidden).contains("application/json")
+        val operations = Regex("operationId: (\\w+)").findAll(openApi).map { it.groupValues[1] }.toList()
+        assertThat(operations).isNotEmpty
+        operations.forEach { opId ->
+            val afterOpId = openApi.substringAfter("operationId: $opId")
+            val operation = afterOpId.substring(
+                0,
+                Regex("\\n  (/api/|\\S)").find(afterOpId)?.range?.first ?: afterOpId.length,
+            )
+            // Either the shared Forbidden ref or an inline '403' (the approvals decide endpoint
+            // carries its own segregation-of-duties wording) — both pin the rejection shape.
+            assertThat(operation)
+                .`as`("operation %s documents the 403 rejection", opId)
+                .contains("'403':")
+        }
     }
 
     @Test

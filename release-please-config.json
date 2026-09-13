@@ -157,6 +157,12 @@
         "openbank-clearing-simulator/src/test"
       ]
     },
+    "openbank-communication-service": {
+      "component": "communication-service",
+      "exclude-paths": [
+        "openbank-communication-service/src/test"
+      ]
+    },
     "openbank-consent-service": {
       "component": "consent-service",
       "exclude-paths": [
@@ -422,6 +428,12 @@
       "component": "loyalty-service",
       "exclude-paths": [
         "openbank-loyalty-service/src/test"
+      ]
+    },
+    "openbank-wealth-service": {
+      "component": "wealth-service",
+      "exclude-paths": [
+        "openbank-wealth-service/src/test"
       ]
     }
   }

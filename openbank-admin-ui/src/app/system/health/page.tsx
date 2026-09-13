@@ -13,6 +13,8 @@ import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { cn } from '@/lib/utils'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
 
 const POLL = 15_000
 
@@ -98,6 +100,12 @@ export default function SystemHealthPage() {
           </button>
         </div>}
       />
+
+      <ContextualInsights dashboardUid="openbank-slo" panels={HEALTH_INSIGHTS}
+        titleCs="Dopad na zákazníky" titleEn="Customer impact"
+        descriptionCs="Dostupnost klíčových platebních cest a tempo čerpání jejich chybového rozpočtu."
+        descriptionEn="Availability of critical payment journeys and the rate at which they consume error budget."
+        />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -358,8 +366,8 @@ function TechStackChips({ stack }: { stack: ServiceStack }) {
             ? `Quarkus ${stack.quarkus.version} LTS, supported until ${stack.quarkus.supportUntil ?? 'unknown'}`
             : `Quarkus ${stack.quarkus.version} (non-LTS)`}
           style={stack.quarkus.lts
-            ? { background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }
-            : { background: 'var(--warning-bg)', color: 'var(--warning)', border: 'none' }}
+            ? { background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }
+            : { background: 'var(--warning-bg)', color: 'var(--warning-text)', border: 'none' }}
         >
           Quarkus {stack.quarkus.version}{stack.quarkus.lts ? ' LTS' : ''}
         </span>

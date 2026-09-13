@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.2...sanctions-service-v0.12.0) (2026-09-08)
+
+
+### Features
+
+* **sanctions:** import EU consolidated list from the first-party FSF feed with named import outcomes ([#8689](https://github.com/JiRaska/open-bank-oss/issues/8689)) ([f24c887](https://github.com/JiRaska/open-bank-oss/commit/f24c887227697e9c94925a53eca030590fd6d233))
+
+
+### Bug Fixes
+
+* **sanctions,party,libs-runtime,ci:** fleet-fuzz findings — null listTypes 500, malformed multipart 500, fuzz-env pepper ([#8942](https://github.com/JiRaska/open-bank-oss/issues/8942)) ([4b9687f](https://github.com/JiRaska/open-bank-oss/commit/4b9687f93cefe73517c9f75b8de41c7d70a9ac60))
+* **sanctions:** publish PEP_GLOBAL, the seeded list the spec omitted ([#6015](https://github.com/JiRaska/open-bank-oss/issues/6015)) ([9736f9d](https://github.com/JiRaska/open-bank-oss/commit/9736f9d5c9e42a2247a107d0d32cb348d333e010))
+* **sanctions:** reject an unrecognised listTypes entry instead of silently narrowing the screen ([#8715](https://github.com/JiRaska/open-bank-oss/issues/8715)) ([de2bb9a](https://github.com/JiRaska/open-bank-oss/commit/de2bb9a0f423554bac11e34b46e40e8c357d5e8d))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.1...sanctions-service-v0.11.2) (2026-09-03)
 
 

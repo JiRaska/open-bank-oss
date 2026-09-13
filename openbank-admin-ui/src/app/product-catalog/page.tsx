@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
+import * as Dialog from '@radix-ui/react-dialog'
 import {
   Package, Search, RefreshCw, Edit, Play, Square, Plus, X,
   Eye, EyeOff, CreditCard, Globe, TrendingDown,
@@ -16,7 +17,7 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { BADGE_CLASS, PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import { BADGE_CLASS, Drawer, PageHeader, StatusBadge, statusTone } from '@/components/ui'
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   SAVINGS:      <Banknote size={13} />,
@@ -111,7 +112,7 @@ function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode
   )
 }
 
-function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { product: Product; onClose: () => void; onEdit: () => void; onToggleStatus: () => void }) {
+function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { product: Product; onClose: () => void; onEdit: (trigger: HTMLElement) => void; onToggleStatus: () => void }) {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<'overview' | 'cards' | 'multicurrency' | 'overdraft' | 'deposit' | 'savings' | 'fees' | 'tac' | 'history'>('overview')
@@ -130,7 +131,13 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
   ].filter(tab => tab.show)
 
   return (
-    <div style={{ position: 'fixed', top: 0, right: 0, width: '520px', height: '100vh', background: 'var(--surface-1)', borderLeft: '1px solid var(--border)', zIndex: 900, display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 32px rgba(0,0,0,0.18)', animation: 'slideInRight 0.2s ease-out' }}>
+    <Drawer
+      title={t(`Detail produktu ${product.name}`, `Product details for ${product.name}`)}
+      description={t('Konfigurace produktu, sazby, poplatky a řízený životní cyklus.', 'Product configuration, rates, fees and governed lifecycle.')}
+      onClose={onClose}
+      width={520}
+    >
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -151,7 +158,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           <Can permission="catalog:author">
           <button
             type="button"
-            onClick={onEdit}
+            onClick={event => onEdit(event.currentTarget)}
             disabled={product.status === 'ACTIVE'}
             title={product.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')}
             aria-label={product.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}
@@ -419,6 +426,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
         )}
       </div>
     </div>
+    </Drawer>
   )
 }
 
@@ -441,6 +449,9 @@ export default function ProductCatalogPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [formData, setFormData] = useState<Partial<Product>>({})
   const [saving, setSaving] = useState(false)
+  const editorTriggerRef = useRef<HTMLElement | null>(null)
+  const editorCloseRef = useRef<HTMLButtonElement>(null)
+  const catalogWorkspaceRef = useRef<HTMLDivElement>(null)
   const [pendingLifecycle, setPendingLifecycle] = useState<Product | null>(null)
   const [lifecycleBusy, setLifecycleBusy] = useState(false)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
@@ -487,19 +498,21 @@ export default function ProductCatalogPage() {
   const uniqueTypes = useMemo(() => Array.from(new Set(products.map(p => p.type).filter(Boolean))), [products])
   const uniqueStatuses = useMemo(() => Array.from(new Set(products.map(p => p.status).filter(Boolean))), [products])
 
-  const openCreateModal = () => {
+  const openCreateModal = (trigger?: HTMLElement) => {
+    editorTriggerRef.current = trigger ?? null
     setEditingProduct(null)
     setFormData({ code: '', name: '', type: 'CURRENT', currency: 'EUR', status: 'DRAFT', isPublic: true, version: '1.0.0', baseRate: 0, fee: 0 })
     setActionError(null)
     setModalOpen(true)
   }
 
-  const openEditModal = (p: Product) => {
+  const openEditModal = (p: Product, trigger?: HTMLElement) => {
     if (p.status === 'ACTIVE') {
       setActionError(t('Aktivní produkt nejprve deaktivujte.', 'Deactivate the active product before editing.'))
       return
     }
     setEditingProduct(p)
+    editorTriggerRef.current = trigger ?? null
     setFormData({ ...p })
     setActionError(null)
     setModalOpen(true)
@@ -556,7 +569,7 @@ export default function ProductCatalogPage() {
 
   return (
     <AuthGuard permission="catalog:read">
-      <div style={{ display: 'flex', height: '100%' }}>
+      <div ref={catalogWorkspaceRef} tabIndex={-1} aria-label={t('Pracovní plocha katalogu produktů', 'Product catalog workspace')} style={{ display: 'flex', height: '100%' }}>
         <div style={{ flex: 1, minWidth: 0, padding: '28px 32px', overflowY: 'auto' }}>
 
           <PageHeader
@@ -569,7 +582,7 @@ export default function ProductCatalogPage() {
                 <CreditCard size={14} aria-hidden="true" /> {t('Založit účet', 'Open Account')}
               </Link></Can>
               <Can permission="catalog:author">
-              <button type="button" className="btn btn-primary" onClick={openCreateModal} disabled={loading} aria-label={t('Vytvořit nový produkt', 'Create new product')}>
+              <button type="button" className="btn btn-primary" onClick={event => openCreateModal(event.currentTarget)} disabled={loading} aria-label={t('Vytvořit nový produkt', 'Create new product')}>
                 <Plus size={14} aria-hidden="true" /> {t('Nový produkt', 'New Product')}
               </button>
               </Can>
@@ -675,6 +688,14 @@ export default function ProductCatalogPage() {
                 {!loading && filtered.map(p => (
                   <tr key={p.id}
                     onClick={() => setSelectedProduct(selectedProduct?.id === p.id ? null : p)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedProduct(selectedProduct?.id === p.id ? null : p)
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={t(`Otevřít detail produktu ${p.name}`, `Open product details for ${p.name}`)}
                     style={{ cursor: 'pointer', background: selectedProduct?.id === p.id ? 'var(--accent)0d' : undefined, borderLeft: selectedProduct?.id === p.id ? '3px solid var(--accent)' : '3px solid transparent' }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px', color: 'var(--text-primary)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -707,7 +728,7 @@ export default function ProductCatalogPage() {
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
                         <Can permission="catalog:author">
-                        <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={event => openEditModal(p, event.currentTarget)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} aria-hidden="true" />
                         </button>
                         <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => requestLifecycleChange(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
@@ -727,21 +748,42 @@ export default function ProductCatalogPage() {
           <ProductDetailPanel
             product={selectedProduct}
             onClose={() => setSelectedProduct(null)}
-            onEdit={() => openEditModal(selectedProduct)}
+            onEdit={trigger => openEditModal(selectedProduct, trigger)}
             onToggleStatus={() => requestLifecycleChange(selectedProduct)}
           />
         )}
       </div>
 
-      {modalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ width: '560px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+      <Dialog.Root open={modalOpen} onOpenChange={open => { if (!open && !saving) setModalOpen(false) }}>
+        {modalOpen && <Dialog.Portal>
+          <Dialog.Overlay style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.65)', zIndex: 1000 }} />
+          <Dialog.Content
+            className="card"
+            aria-describedby="catalog-editor-description"
+            onOpenAutoFocus={event => { event.preventDefault(); editorCloseRef.current?.focus() }}
+            onEscapeKeyDown={event => { if (saving) event.preventDefault() }}
+            onPointerDownOutside={event => { if (saving) event.preventDefault() }}
+            onInteractOutside={event => { if (saving) event.preventDefault() }}
+            onCloseAutoFocus={event => {
+              event.preventDefault()
+              const trigger = editorTriggerRef.current
+              const triggerAvailable = trigger?.isConnected && !(trigger instanceof HTMLButtonElement && trigger.disabled)
+              if (triggerAvailable) trigger.focus()
+              else catalogWorkspaceRef.current?.focus()
+            }}
+            style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1001, width: '560px', maxWidth: 'calc(100vw - 40px)', maxHeight: '90vh', overflowY: 'auto' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 700 }}>
+              <Dialog.Title style={{ fontSize: '15px', fontWeight: 700 }}>
                 {editingProduct ? t('Upravit produkt', 'Edit Product') : t('Nový produkt', 'New Product')}
-              </h2>
-              <button type="button" aria-label={t('Zavřít editor produktu', 'Close product editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              </Dialog.Title>
+              <Dialog.Close asChild>
+                <button ref={editorCloseRef} type="button" aria-label={t('Zavřít editor produktu', 'Close product editor')} disabled={saving} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              </Dialog.Close>
             </div>
+            <Dialog.Description id="catalog-editor-description" style={{ margin: '12px 20px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              {t('Nastavte identitu, měnu, sazbu a dostupnost produktu. Uložení aktualizuje bankovní katalog.', 'Set the product identity, currency, rate and availability. Saving updates the bank catalog.')}
+            </Dialog.Description>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="grid-2">
                 <div>
@@ -796,20 +838,20 @@ export default function ProductCatalogPage() {
                 </label>
               </div>
               {actionError && (
-                <div style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                <div role="alert" style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
                   {actionError}
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zrušit', 'Cancel')}</button>
+                <Dialog.Close asChild><button type="button" className="btn btn-secondary" disabled={saving}>{t('Zrušit', 'Cancel')}</button></Dialog.Close>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? t('Ukládám…', 'Saving…') : t('Uložit produkt', 'Save Product')}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>}
+      </Dialog.Root>
 
       {pendingLifecycle && (
         <div

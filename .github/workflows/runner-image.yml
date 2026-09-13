@@ -100,57 +100,61 @@ jobs:
           cosign version
 
       # Supply-chain provenance for the runner image itself (ADR-0030 D4 step 4, issue #310).
-      # The kyverno attestation policy (verify-openbank-image-sbom-attestation, Audit) matches
-      # openbank-* — the ci-runner image was the last fleet image with neither a signature nor
-      # a CycloneDX SBOM attestation, so the Audit PolicyReport could never reach 0 fail and the
-      # Enforce graduation stayed blocked. Same KMS key + trivy pattern as auto-deploy.yml.
+      # Sources openbank-infra/scripts/lib/cosign-attest.sh instead of hand-rolling trivy +
+      # cosign, which is the repo-wide rule (root CLAUDE.md) and is what this workflow got
+      # wrong: it signed and attested a CycloneDX SBOM and NEVER attested SLSA provenance.
+      # #8847 then added verify-openbank-image-slsa-provenance scoped to `openbank-*`, which
+      # matches openbank-ci-runner, so from 2026-09-05 every runner image failed that policy
+      # and every runner Pod was denied at admission — Kyverno reports "unverified image" on
+      # the two Enforce policies as well, with the missing SLSA predicate as the only logged
+      # error. Measured 2026-09-12: the passing control image (openbank-ledger-service) has
+      # cyclonedx AND slsaprovenance; openbank-ci-runner had cyclonedx only.
       #
-      # continue-on-error stays: a cosign/trivy hiccup must still never block a runner
-      # rebuild. What changes is the silence — the verify step below makes a real failure
-      # loud (job summary + a dedicated, separately-watchable step) instead of a
-      # single easy-to-miss ::warning buried in this step's log.
-      - name: Sign + attest runner image SBOM (cosign + KMS)
+      # cosign_sign_and_attest does all three — sign, CycloneDX SBOM, SLSA provenance — with
+      # the same KMS key, and each step proves its own envelope landed with a
+      # verify-attestation bound to THIS run rather than trusting an append-only .att tag.
+      #
+      # continue-on-error is GONE, deliberately. It was justified as "a cosign/trivy hiccup
+      # must never block a runner rebuild", and that trade was wrong: an unsigned or
+      # unattested runner image is not a degraded image, it is one no Pod can run. A build
+      # that produces it has failed and must say so.
+      - name: Sign + attest runner image (cosign + KMS, shared lib)
         id: attest
-        timeout-minutes: 10
-        continue-on-error: true
+        timeout-minutes: 15
         run: |
           set -uo pipefail
-          COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
-          echo "==> cosign sign ${IMAGE_DIGEST_REF}"
-          COSIGN_YES=true cosign sign --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" \
-            || { echo "::warning::cosign sign failed"; exit 1; }
-          sbom="${RUNNER_TEMP}/ci-runner.cdx.json"
-          # --platform is REQUIRED: this image is built linux/arm64 (see the buildx step) and
-          # trivy defaults to linux/amd64 for REMOTE scans regardless of host arch — without it
-          # the scan fails with "no child with platform linux/amd64 in index" and the image is
-          # left unattested. Same bug that left several fleet images unattested (2026-07-12).
-          trivy image --platform linux/arm64 --format cyclonedx --output "$sbom" "$IMAGE_DIGEST_REF" \
-            || { echo "::warning::trivy SBOM generation failed"; exit 1; }
-          echo "==> cosign attest (cyclonedx) ${IMAGE_DIGEST_REF}"
-          COSIGN_YES=true cosign attest --key "$COSIGN_KEY" --type cyclonedx --predicate "$sbom" "$IMAGE_DIGEST_REF" \
-            || { echo "::warning::cosign attest failed"; exit 1; }
+          # shellcheck source=openbank-infra/scripts/lib/cosign-attest.sh
+          source openbank-infra/scripts/lib/cosign-attest.sh
+          # linux/arm64 is REQUIRED: this image is built arm64 and trivy defaults to amd64
+          # for REMOTE scans regardless of host arch, which silently leaves the image
+          # unattested (the 2026-07-12 fleet bug). The lib takes it as an argument.
+          cosign_sign_and_attest "${IMAGE_DIGEST_REF}" linux/arm64
 
-      # Makes a Sign+attest failure IMPOSSIBLE to miss — the step above can fail silently
-      # from GitHub's UI perspective (continue-on-error), so this step independently
-      # verifies the signature/attestation actually landed and fails LOUDLY (this step has
-      # no continue-on-error) if either is missing, rather than relying on the next Kyverno
-      # Audit pass to eventually notice.
-      - name: Verify signature + attestation actually landed
+      # Independent of the step above: assert from OUTSIDE the producer that all three
+      # artifacts a runner Pod needs are present and verifiable with the key Kyverno pins.
+      # The cyclonedx-only version of this step is exactly why the SLSA gap survived a green
+      # run on 2026-09-04 — it verified what the workflow produced, not what admission
+      # requires. Each predicate here corresponds to one ClusterPolicy.
+      - name: Verify signature + both attestations actually landed
         if: always()
         run: |
           set -uo pipefail
           COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
           FAIL=0
           if ! cosign verify --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
-            echo "::error::openbank-ci-runner image signature verification FAILED — this image will be rejected by verify-openbank-image-signatures once any pod tries to use it."
+            echo "::error::signature verification FAILED — rejected by verify-openbank-image-signatures (Enforce)."
             FAIL=1
           fi
           if ! cosign verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
-            echo "::error::openbank-ci-runner image SBOM attestation verification FAILED — this image will be rejected by verify-openbank-image-sbom-attestation once that policy is Enforce."
+            echo "::error::CycloneDX SBOM attestation verification FAILED — rejected by verify-openbank-image-sbom-attestation (Enforce)."
+            FAIL=1
+          fi
+          if ! cosign verify-attestation --key "$COSIGN_KEY" --type slsaprovenance "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
+            echo "::error::SLSA provenance attestation verification FAILED — verify-openbank-image-slsa-provenance is Audit, but its failure still denies every runner Pod (#9793)."
             FAIL=1
           fi
           if [ "$FAIL" -eq 1 ]; then
-            echo "See the 'Sign + attest runner image SBOM' step's log above for the underlying error." >> "$GITHUB_STEP_SUMMARY"
+            echo "See the 'Sign + attest runner image' step's log above for the underlying error." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "✅ signature + SBOM attestation both verified present on ${IMAGE_DIGEST_REF}"
+          echo "✅ signature + CycloneDX SBOM + SLSA provenance all verified present on ${IMAGE_DIGEST_REF}"

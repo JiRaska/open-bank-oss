@@ -45,6 +45,16 @@ data class Account(
      * authorization decision. Null means "use the account-type default name".
      */
     val nickname: String? = null,
+    /**
+     * Terms version this deposit was opened under (#9044) — the record a complaints/conduct
+     * review asks for first. Non-null for every TERM_DEPOSIT opened after V24 (enforced by
+     * chk_accounts_terms); null means a pre-V24 account, which has no truthful record and was
+     * deliberately NOT backfilled from openedAt (that would manufacture evidence).
+     */
+    val termsVersion: String? = null,
+    /** Snapshot of the terms document reference at opening (URL + effective-from date). */
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }

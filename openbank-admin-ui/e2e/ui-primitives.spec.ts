@@ -43,14 +43,14 @@ const READINESS = {
 
 const CONSENTS = [
   {
-    id: 'c1', partyId: '11111111-1111-1111-1111-111111111111',
+    id: '11111111-1111-4111-8111-111111111111', partyId: '11111111-1111-4111-8111-111111111111',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_EMAIL'], accountIbans: null, status: 'ACTIVE',
     validFrom: '2026-07-01T00:00:00Z', validTo: '2027-06-30T00:00:00Z', createdAt: '2026-07-01T00:00:00Z',
   },
   {
-    id: 'c2', partyId: '22222222-2222-2222-2222-222222222222',
+    id: '22222222-2222-4222-8222-222222222222', partyId: '22222222-2222-4222-8222-222222222222',
     granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
     granteeName: 'Party marketing preferences',
     scopes: ['MARKETING_COMMS_PUSH'], accountIbans: null, status: 'REVOKED',
@@ -63,7 +63,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/governance', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ items: [
+        body: JSON.stringify({ available: true, timestamp: '2026-09-10T03:00:00Z', items: [
           { serviceName: 'account-service', dataDomain: 'core' },
           { serviceName: 'ledger-service', dataDomain: 'core' },
           { serviceName: 'aml-service', dataDomain: 'compliance' },
@@ -232,6 +232,15 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
   })
 
   test('the dark token theme changes shared surfaces without collapsing status distinction', async ({ page }) => {
+    // `.stat-card` carries `transition: all 0.2s ease`, so flipping the theme starts a 200ms
+    // animation and an axe scan issued straight after samples a colour pair that exists in
+    // NEITHER palette — an interpolated background such as #5a5f69, which is simply white on its
+    // way to #111827. That reads as a contrast violation on the shared surfaces while the settled
+    // theme is fine, and it is non-deterministic: the sampled instant, and therefore the reported
+    // ratio, moves with machine speed and with any change to the LIGHT token the animation starts
+    // from. Emulating reduced motion collapses every transition to .01ms via the media query
+    // globals.css already carries, so the scan measures the theme rather than the crossfade.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
@@ -240,6 +249,14 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const body = page.locator('body')
     const lightBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
     await page.locator('html').evaluate(el => el.classList.add('dark'))
+    // The class lands on a later frame, so reading straight away returns the LIGHT colour and
+    // every assertion below compares the old theme with itself. Wait for the repaint instead of
+    // guessing a frame count: if the theme never applies, this times out and the test fails —
+    // the same guarantee the not-equal assertion was there to give.
+    await page.waitForFunction(
+      light => getComputedStyle(document.body).backgroundColor !== light,
+      lightBackground,
+    )
     const darkBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
     expect(darkBackground).not.toBe(lightBackground)
 

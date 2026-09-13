@@ -15,10 +15,19 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.MandateAuthority
+import com.openbank.party.domain.model.MandateRole
+import com.openbank.party.domain.model.MandateSource
+import com.openbank.party.domain.model.MandateStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyActor
+import com.openbank.party.domain.model.PartyEvents
+import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
@@ -91,6 +100,9 @@ class PartyEventPactProviderVerificationTest {
     lateinit var partyRepository: PartyRepository
 
     @Inject
+    lateinit var partyUseCase: PartyUseCase
+
+    @Inject
     lateinit var vertx: Vertx
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -137,9 +149,61 @@ class PartyEventPactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    /**
+     * Serves the NEGATIVE interaction of the VoP pact: a party id the bank does not hold must
+     * answer 404, not an empty party. The absence IS the state — nothing is seeded, and the id in
+     * the pact is one no other state creates — but a handler still has to exist, because pact-jvm
+     * fails on an unknown state string before it issues the request at all (#8889).
+     *
+     * The git-pact twin has had this since #8889; THIS class did not, and this class is the one
+     * whose results reach the broker. So every main push published `success=false` for the
+     * vop→party pact (`MissingStateChangeMethod`), and `can-i-deploy` — which reads the broker and
+     * nothing else — classified vop-service as a contract REGRESSION and blocked its deploy from
+     * 2026-09-07 until this was fixed (issue #9752).
+     */
+    @State("no party exists for the id")
+    fun noPartyForId() {
+        // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
     @State("a party has been created")
     fun partyHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
+    }
+
+    @State("no party exists for the KYB mandate principal")
+    fun noPartyForKybMandatePrincipal() {
+        // The pact uses a dedicated principal id no positive state inserts; POST must answer 404.
+    }
+
+    @State("an active company and natural person exist for a joint KYB mandate")
+    fun partiesExistForJointKybMandate() = runOnVertxContext {
+        seedMandateParty(KYB_MANDATE_PRINCIPAL_ID, PartyType.COMPANY, "Pact Joint Company a.s.")
+        seedMandateParty(KYB_MANDATE_AGENT_ID, PartyType.INDIVIDUAL, "Pact Joint Signatory")
+    }
+
+    private suspend fun seedMandateParty(id: UUID, type: PartyType, name: String) {
+        if (partyRepository.findById(id) != null) return
+        partyRepository.save(
+            Party(
+                id = id,
+                partyType = type,
+                status = PartyStatus.ACTIVE,
+                legalName = name,
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "$id@pact.openbank.invalid",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.CLEARED,
+            ),
+        )
     }
 
     @PactVerifyProvider("a PARTY_CREATED event")
@@ -199,6 +263,52 @@ class PartyEventPactProviderVerificationTest {
         return objectMapper.writeValueAsString(event)
     }
 
+    @State("a sole party mandate has been granted")
+    fun solePartyMandateHasBeenGranted() {
+        // Message produced deterministically below; no database state is required.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_GRANTED event")
+    fun producePartyMandateGrantedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateGranted(
+            pactMandate(MandateStatus.ACTIVE),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    @State("a party mandate has been revoked")
+    fun partyMandateHasBeenRevoked() {
+        // Revocation is the negative authorization fact: after consumption access crosses 403.
+    }
+
+    @PactVerifyProvider("a PARTY_MANDATE_REVOKED event")
+    fun producePartyMandateRevokedEvent(): String = objectMapper.writeValueAsString(
+        PartyEvents.mandateRevoked(
+            pactMandate(MandateStatus.REVOKED),
+            Instant.EPOCH,
+            PartyActor.system("pact"),
+        ).envelope,
+    )
+
+    private fun pactMandate(status: MandateStatus) = PartyMandate(
+        id = UUID.fromString("e1e1e1e1-f2f2-4a4a-8b8b-c1c1c1c1c1c1"),
+        principalPartyId = KYB_MANDATE_PRINCIPAL_ID,
+        agentPartyId = KYB_MANDATE_AGENT_ID,
+        role = MandateRole.LEGAL_REPRESENTATIVE,
+        authority = MandateAuthority.SOLE,
+        requiredSignatures = 1,
+        source = MandateSource.REGISTRY,
+        status = status,
+        evidenceRef = "pact:mandate",
+        validFrom = Instant.EPOCH,
+        validTo = null,
+        revokedAt = if (status == MandateStatus.REVOKED) Instant.EPOCH else null,
+        revokeReason = if (status == MandateStatus.REVOKED) "pact revocation" else null,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+    )
+
     @State("a party has been erased")
     fun partyHasBeenErased() {
         // No setup: produced deterministically by the @PactVerifyProvider method below.
@@ -248,6 +358,11 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    @State("no party exists for the id")
+    fun noPartyExistsForId() {
+        // The pact uses an id no positive provider state seeds; the endpoint must preserve 404.
+    }
+
     /**
      * State for vop-service's `PartyNameLookupPactConsumerTest` (issue #2255): hop 2 of the ADR-0171
      * §4 VoP name resolution reads `legalName`/`tradingName` off `GET /api/v1/parties/{id}`, and the
@@ -284,10 +399,53 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    @State("an active human mandate exists for an active company")
+    fun activeHumanMandateExistsForActiveCompany() {
+        partyExistsWithLegalAndTradingName()
+        runOnVertxContext {
+            if (partyRepository.findById(DELEGATION_ACTOR_ID) == null) {
+                partyRepository.save(
+                    Party(
+                        id = DELEGATION_ACTOR_ID,
+                        partyType = PartyType.INDIVIDUAL,
+                        status = PartyStatus.ACTIVE,
+                        legalName = "Pact Delegation Actor",
+                        tradingName = null,
+                        dateOfBirth = null,
+                        nationality = null,
+                        taxId = null,
+                        registrationNumber = null,
+                        email = "pact-delegation-actor@example.com",
+                        phone = null,
+                        address = null,
+                        kycStatus = KycStatus.APPROVED,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                        amlStatus = AmlStatus.NOT_SCREENED,
+                    ),
+                )
+            }
+            partyUseCase.grantMandate(
+                GrantMandateCommand(
+                    principalPartyId = VOP_NAME_PARTY_ID,
+                    agentPartyId = DELEGATION_ACTOR_ID,
+                    role = MandateRole.LEGAL_REPRESENTATIVE,
+                    authority = MandateAuthority.SOLE,
+                    requiredSignatures = 1,
+                    source = MandateSource.REGISTRY,
+                    evidenceRef = "synthetic-pact-fixture",
+                ),
+            )
+        }
+    }
+
     companion object {
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+        private val DELEGATION_ACTOR_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3")
+        private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
+        private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
     }
 }

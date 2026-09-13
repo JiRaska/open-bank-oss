@@ -61,6 +61,7 @@ spec:
       - balances
       - billing
       - campaign
+      - communication
       - consent
       - control-liveness-sentinel
       - customer-edge
@@ -97,6 +98,7 @@ spec:
       - security-scanner
       - statements
       - tpp-registry
+      - wealth
   podMetricsEndpoints:
     - port: management
       path: /q/metrics

@@ -5,6 +5,7 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.event.SavingsWithdrawalApproved
@@ -50,6 +51,7 @@ class SavingsProposalService(
     private val savingsGuard: SavingsGoalDelegationGuard,
     private val approvalStore: ApprovalStore,
     private val scaChallengeClient: ScaChallengeClient,
+    private val partyMandateRepository: PartyMandateProjectionRepository,
     private val clock: Clock,
 ) {
 
@@ -65,6 +67,24 @@ class SavingsProposalService(
             )
         }
         val now = OffsetDateTime.now(clock)
+        // Idempotent replay (ADR-0295, #8351): a retried propose with the same natural key —
+        // (account, delegate, amount, currency, note) — while the original is still PENDING and
+        // unexpired replays the ORIGINAL proposal (and its approval id) instead of stacking a
+        // duplicate the owner could approve twice. The check runs AFTER the authorization guard on
+        // purpose: a caller with no grant must still get 403, never a replayed proposal. A
+        // genuinely intended second identical proposal is still possible — once the first leaves
+        // PENDING (decided or expired), the key no longer matches and a new row persists. No DB
+        // backstop (see the ADR): a lost true-concurrency race stacks two PENDING proposals, but
+        // each still needs its own owner SCA decision, so nothing executes silently.
+        proposalRepository.findByAccountAndStatus(command.accountId, WithdrawalProposalStatus.PENDING)
+            .firstOrNull { existing ->
+                existing.delegatePartyId == command.delegatePartyId &&
+                    existing.amountMinor == command.amountMinor &&
+                    existing.currency == command.currency &&
+                    existing.note == command.note &&
+                    existing.approvalId != null &&
+                    !existing.isExpiredAt(now)
+            }?.let { return ProposalCreated(it, it.approvalId!!) }
         val proposal = WithdrawalProposal(
             id = Ids.newId(),
             accountId = command.accountId,
@@ -83,20 +103,16 @@ class SavingsProposalService(
         return ProposalCreated(proposalRepository.save(proposal.copy(approvalId = approval.id)), approval.id)
     }
 
+    @Suppress("ThrowsCount") // preserves account/proposal absence, cross-account and expiry semantics
     suspend fun decide(
         accountId: UUID,
         proposalId: UUID,
-        decidedByPartyId: UUID,
+        callerPartyId: UUID,
         approve: Boolean,
         scaSessionId: UUID,
     ): WithdrawalProposal {
         val account = accountRepository.findById(accountId)
             ?: throw ProposalNotFoundException(proposalId)
-        if (account.partyId != decidedByPartyId) {
-            throw ProposalForbiddenException(
-                "only the account owner can decide a withdrawal proposal on account $accountId",
-            )
-        }
         val proposal = proposalRepository.findById(proposalId)
             ?: throw ProposalNotFoundException(proposalId)
         if (proposal.accountId != accountId) {
@@ -108,15 +124,15 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        verifyOwnerSca(decidedByPartyId, scaSessionId)
+        val actorPartyId = verifyDecisionSca(account.partyId, callerPartyId, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
-        approvalStore.decide(approvalId, decidedByPartyId.toString(), approve)
+        approvalStore.decide(approvalId, actorPartyId.toString(), approve)
             ?: error("approval $approvalId not found")
 
         val now = OffsetDateTime.now(clock)
         return if (approve) {
-            val approved = proposal.approve(decidedByPartyId, scaSessionId, now)
+            val approved = proposal.approve(actorPartyId, scaSessionId, now)
             proposalRepository.save(
                 approved,
                 SavingsWithdrawalApproved(
@@ -132,7 +148,7 @@ class SavingsProposalService(
                 ),
             )
         } else {
-            proposalRepository.save(proposal.reject(decidedByPartyId, now))
+            proposalRepository.save(proposal.reject(actorPartyId, now))
         }
     }
 
@@ -173,7 +189,10 @@ class SavingsProposalService(
      * enforces dynamic linking. Approval is still enforced — by the component that owns it.
      * Purpose is checked here because consume is not told the purpose.
      */
-    private suspend fun verifyOwnerSca(ownerPartyId: UUID, scaSessionId: UUID) {
+    // Distinct failures deliberately preserve not-found, unavailable, wrong-purpose and
+    // unauthorized-representative semantics at this security boundary.
+    @Suppress("ThrowsCount")
+    private suspend fun verifyDecisionSca(ownerPartyId: UUID, callerPartyId: UUID, scaSessionId: UUID): UUID {
         val challenge = try {
             scaChallengeClient.getChallenge(scaSessionId)
         } catch (e: NotFoundException) {
@@ -181,15 +200,29 @@ class SavingsProposalService(
         } catch (e: Exception) {
             throw ProposalScaException("SCA challenge $scaSessionId could not be verified", e)
         }
-        if (challenge.partyId != ownerPartyId || challenge.purpose != SCA_PURPOSE) {
-            throw ProposalScaException("SCA challenge $scaSessionId does not match the owner or purpose")
+        if (challenge.purpose != SCA_PURPOSE) {
+            throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
+        }
+        val actorPartyId = challenge.partyId
+        if (actorPartyId != callerPartyId) {
+            throw ProposalForbiddenException("the SCA-authenticated actor does not match the caller identity")
+        }
+        if (actorPartyId != ownerPartyId) {
+            val soleAuthority = partyMandateRepository.findActive(ownerPartyId, actorPartyId)
+                .any { it.permitsSoleDecision() }
+            if (!soleAuthority) {
+                throw ProposalForbiddenException(
+                    "the SCA-authenticated actor holds no exact SOLE mandate for account owner $ownerPartyId",
+                )
+            }
         }
         @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
         try {
-            scaChallengeClient.consumeChallenge(scaSessionId, ownerPartyId)
+            scaChallengeClient.consumeChallenge(scaSessionId, actorPartyId)
         } catch (e: Exception) {
             throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
         }
+        return actorPartyId
     }
 
     /**

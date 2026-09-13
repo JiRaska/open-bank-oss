@@ -42,6 +42,7 @@ import {
   Map,
   Megaphone,
   MessageSquareWarning,
+  MessagesSquare,
   Network,
   Package,
   PiggyBank,
@@ -66,6 +67,7 @@ import {
   Waypoints,
   Workflow,
   Zap,
+  Building2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -104,6 +106,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
   { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
+  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
 ]
 
@@ -113,7 +116,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view' },
   { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view' },
   { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view' },
-  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },
+  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view' },
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view' },
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
@@ -144,6 +147,10 @@ const complianceNav: NavItem[] = [
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
+  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Filed under Ops beside
+  // Notifications (what we send) rather than under the agent cockpit: the audience is the
+  // contact centre and back-office, not agent operators.
+  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]

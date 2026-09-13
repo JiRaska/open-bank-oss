@@ -93,8 +93,6 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
-    "openbank-account-service:APPROVED,CANCELLED,PENDING,REJECTED":
-        "#5962 — WithdrawalProposalStatus: undeclared EXPIRED",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an
@@ -109,8 +107,6 @@ BASELINE: dict[str, str] = {
     "openbank-campaign-service:BANNER,PUSH":
         "#5962 — attribution response `channel`: NOT drift. A deliberate subset of Channel; the "
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
-    "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
-        "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
     # NOT drift — a DELIBERATE SUBSET (#5962). Delegation lifecycle approvals persist ONLY
     # PROPOSED/REJECTED/EXECUTED: decide is atomic (DelegationLifecycleApprovalService
     # PERSISTED_STATES), so the shared ProposalState's transient APPROVED would claim a decision
@@ -118,8 +114,6 @@ BASELINE: dict[str, str] = {
     "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
         "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
-    "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
-        "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
     # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
@@ -175,26 +169,34 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
         "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
         "whose properties do not match the DTO at all; needs a schema fix first.",
-    # This one is a MIS-PAIRING, kept baselined deliberately. The values are
-    # `UpdateKycRequest.kycStatus`, and pid's `UpdateKycRequest` has no `kycStatus` property at
-    # all — it is (kycLevel: KycLevel, amlRiskScore: AmlRiskScore, pepFlag, sanctionsFlag). With
-    # no real counterpart to pair with, the matcher settled on the openid4vp
-    # `PresentationExchangeStore.Status { PENDING, COMPLETED, EXPIRED }` on the strength of two
-    # coincidental values. The defect is a whole fictional request schema, not an enum drift, so
-    # reconciling the enum alone would polish a document that still describes nothing.
-    "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
-        "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
-        "not an enum fix. The `Status` pairing is coincidental.",
-    "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
-    "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
+    # NOT drift — a DELIBERATE SUBSET (#5962). TransitionStatusRequest.targetStatus publishes
+    # every status `SepaPayment.canTransitionTo` can reach; RECEIVED is the entry state and is
+    # the target of no transition, so it is absent here while present on the read filter, which
+    # pairs exactly with the domain enum and is therefore no longer baselined at all.
+    "openbank-sepa-payment:CANCELLED,COMPLETED,PROCESSING,REJECTED,RETURNED,VALIDATED":
+        "#5962 — targetStatus: deliberate subset of SepaPaymentStatus; RECEIVED is unreachable "
+        "as a transition target (SepaPayment.canTransitionTo).",
+    # NOT drift — a DELIBERATE SUBSET, reason corrected (#5962). `CloseFailure.reason` can never
+    # be NOT_VIABLE: a debris account is SKIPPED, never FAILED (#862), on BOTH orchestrator paths
+    # since the per-pocket read gained the same guard the account-level read already had. So
+    # publishing NOT_VIABLE would advertise a value this schema cannot carry, which is the
+    # opposite of the fix the old reason ("undeclared NOT_VIABLE") invited. The gate pairs a
+    # failure-record enum with the full reason enum and cannot see the restriction.
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
-        "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
+        "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
+        "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
-SPEC_ENUM_BLOCK = re.compile(r"enum:[ \t]*\n((?:[ \t]*-[ \t]*\S+[ \t]*\n)+)")
+# A block enum runs until a line that is neither an item nor a COMMENT. The comment clause is
+# load-bearing: without it the run ends at the first `#` inside the block, the parser reports
+# only the values above it, and the gate invents drift that does not exist — openbank-campaign
+# SendOutcome declares all ten values with three explanatory comments between them, and was
+# read as five and baselined as real drift (#5962). It is also a false-NEGATIVE generator:
+# a genuinely undeclared value sitting below a comment is simply not seen.
+SPEC_ENUM_BLOCK = re.compile(
+    r"enum:[ \t]*\n((?:[ \t]*(?:-[ \t]*\S+|#[^\n]*)[ \t]*\n)+)"
+)
 KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
@@ -437,6 +439,24 @@ def self_test() -> int:
         failures += 1
     else:
         print("  ok    a block-style spec enum")
+
+    # A COMMENT INSIDE THE BLOCK must not end it. This is the case that was wrong in production:
+    # the campaign spec declares ten SendOutcome values with explanatory comments between them,
+    # the parser stopped at the first `#`, saw five, and the gate reported drift that did not
+    # exist — which was then baselined as real (#5962). The truncation cuts both ways: a value
+    # genuinely missing from the spec, sitting below a comment, would not be seen at all.
+    commented = spec_enums(
+        "        enum:\n"
+        "          - OPEN\n"
+        "          # why the next one exists\n"
+        "          - CLOSED\n"
+        "          - PENDING\n"
+    )
+    if commented != {frozenset({"OPEN", "CLOSED", "PENDING"})}:
+        print(f"  FAIL  a block enum interrupted by a comment: {commented}")
+        failures += 1
+    else:
+        print("  ok    a block enum interrupted by a comment")
 
     print("self-test: " + ("FAILED" if failures else "passed"))
     return 1 if failures else 0

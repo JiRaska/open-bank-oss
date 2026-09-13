@@ -14,9 +14,12 @@ import java.time.Instant
 /**
  * One merchant in the enrichment catalogue, keyed by its normalised acquirer descriptor.
  *
- * Read-only in this service: rows arrive by migration or by an out-of-band catalogue load, never
- * from a customer request. Holding only public business data (trading name, shop location) is a
- * deliberate boundary — see the table comment in `V10__create_merchant_catalog.sql`.
+ * Maintained by operators through `MerchantCatalogResource`, and never from a customer request
+ * (#8573). Until that resource existed the table was write-never: it held the rows one migration
+ * seeded and had no writer at all, so the enrichment it feeds was absent for most transactions.
+ *
+ * Holding only public business data (trading name, shop location) is a deliberate boundary that
+ * the write path preserves — see the table comment in `V16__create_merchant_catalog.sql`.
  */
 @Entity
 @Table(name = "merchant_catalog")
@@ -46,6 +49,26 @@ class MerchantCatalogEntity : PanacheEntityBase {
 
     @Column(name = "country")
     var country: String? = null
+
+    /**
+     * What [lat]/[lon] on THIS row can answer — [GeoPrecision].
+     *
+     * `CITY` for every seeded row, and that is a correction rather than a default: V16 pinned each
+     * brand at one Prague coordinate, so a Billa purchase in Brno resolved 185 km from where it
+     * happened. A chain has no single location, and the fix is to stop claiming one.
+     */
+    @Column(name = "geo_precision", nullable = false)
+    var geoPrecision: String = GeoPrecision.CITY
+
+    /**
+     * [MerchantLogoEntity.contentHash] when a logo has been ingested for this merchant, else null.
+     *
+     * Denormalised so the per-page enrichment read can decide whether to emit a logo URL without a
+     * join, and doubles as the cache-busting token in that URL — a corrected logo changes the hash,
+     * so clients pick it up immediately instead of after a cache TTL.
+     */
+    @Column(name = "logo_etag")
+    var logoEtag: String? = null
 
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now()

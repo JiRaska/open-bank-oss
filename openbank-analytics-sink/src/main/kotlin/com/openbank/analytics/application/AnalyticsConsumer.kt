@@ -131,6 +131,19 @@ class AnalyticsConsumer {
             return
         }
 
+        // ---- A party-bearing event that carries no party: quarantine, never project.
+        // Keyed on the EVENT TYPE, not the aggregate: see [PARTY_BEARING_EVENT_TYPES].
+        if (PARTY_BEARING_EVENT_TYPES.contains(envelope.eventType) &&
+            envelope.payload[PARTY_ID_FIELD]?.toString().isNullOrBlank()
+        ) {
+            val why = "${envelope.eventType} carries no $PARTY_ID_FIELD"
+            log.errorf("Quarantining %s: aggregateId=%s", why, envelope.aggregateId)
+            deadLetters.quarantine(DeadLetterRecord(sha256(payload), payload, why, Instant.now(clock)))
+            if (::freshness.isInitialized) freshness.recordDeadLetter()
+            settle(message)
+            return
+        }
+
         // ---- Sink write: a dependency failure, NOT a bad event. Retry, then nack.
         try {
             EventRetry.withRetry(log, "analytics bronze write", envelope.eventId) {
@@ -309,16 +322,9 @@ class AnalyticsConsumer {
      * kept adjacent so the two cannot drift. A type added to one without the other yields
      * `aggregate_id = "unknown"`, which is visible in bronze rather than silently wrong.
      */
-    private fun idForType(type: String, node: JsonNode): String? = when (type) {
-        "TRANSACTION" -> node["transactionId"]?.asText()
-        "CONSENT" -> node["consentId"]?.asText()
-        "KYC_CASE" -> node["kycCaseId"]?.asText()
-        "DOCUMENT" -> node["documentId"]?.asText()
-        "PASSKEY" -> node["credentialId"]?.asText()
-        "ACCOUNT" -> node["accountId"]?.asText()
-        "PARTY" -> node["partyId"]?.asText()
-        else -> null
-    } ?: node["accountId"]?.asText() ?: node["partyId"]?.asText()
+    private fun idForType(type: String, node: JsonNode): String? = ID_FIELD_BY_TYPE[type]?.let { node[it]?.asText() }
+        ?: node["accountId"]?.asText()
+        ?: node["partyId"]?.asText()
 
     /**
      * Last-resort domain inference for an event whose envelope omits `aggregateType`.
@@ -343,19 +349,78 @@ class AnalyticsConsumer {
      * still wins, so EVERY new event shape whose keys are not listed above AND whose topic is
      * not in [TopicAttribution] still silently becomes UNKNOWN, and nothing goes red.
      */
-    private fun inferAggregateType(node: JsonNode): String = when {
-        node.has("transactionId") -> "TRANSACTION"
-        node.has("consentId") -> "CONSENT"
-        node.has("kycCaseId") -> "KYC_CASE"
-        node.has("documentId") -> "DOCUMENT"
-        node.has("credentialId") -> "PASSKEY"
-        node.has("accountId") -> "ACCOUNT"
-        node.has("partyId") -> "PARTY"
-        else -> UNKNOWN
-    }
+    private fun inferAggregateType(node: JsonNode): String =
+        ID_FIELD_BY_TYPE.entries.firstOrNull { (_, field) -> node.has(field) }?.key ?: UNKNOWN
 
     companion object {
         private const val UNKNOWN = IngestAttributionMetrics.UNKNOWN
         private const val UNKNOWN_SERVICE = IngestAttributionMetrics.UNKNOWN_SERVICE
+
+        private const val PARTY_ID_FIELD = "partyId"
+
+        /**
+         * Event types whose payload MUST carry [PARTY_ID_FIELD], listed rather than derived.
+         *
+         * #8792 acceptance 2 asked for "an ACCOUNT event published without `partyId`" to be
+         * quarantined, and implementing that literally would have been a serious regression:
+         * `BALANCE_UPDATED`, `HOLD_PLACED`, `HOLD_RELEASED` and `AccountStatusChanged` are
+         * ACCOUNT-LEVEL facts and a party is not part of them, so an aggregate-keyed guard
+         * discards every balance and hold row. Hence a table of event types.
+         *
+         * Why quarantine rather than write a null: `silver_party_accounts` is built from these
+         * rows and `SegmentRule.HasAccount` reads it, so an `AccountCreated` with no party writes
+         * an ownerless account and shrinks every cohort by one with nothing erroring — the shape
+         * #2891 recorded. A dead-letter row is countable; a missing party in silver is not.
+         *
+         * Derivation is what makes this dangerous: "ACCOUNT events carry a party" is false for four
+         * of the five ACCOUNT event types this sink sees, so an aggregate-type rule would quarantine
+         * the balance and hold stream. Measured on the sandbox warehouse 2026-09-10: `AccountCreated`
+         * 19 of 19 carry a party, and 418 of the other 437 ACCOUNT events carry none by design.
+         *
+         * The entry earns its place by being READ downstream: V5 builds `silver_party_accounts`
+         * from `AccountCreated`, and `SegmentRule.HasAccount` resolves cohorts through it. An event
+         * type that nothing party-keyed consumes does not belong here — the guard would then be
+         * rejecting data on a promise no reader depends on.
+         */
+        private val PARTY_BEARING_EVENT_TYPES: Set<String> = setOf("AccountCreated")
+
+        /**
+         * Aggregate type -> the payload field that identifies it. ONE table, read by both
+         * [inferAggregateType] (scanned in order, first match wins) and [idForType] (looked up).
+         *
+         * The two used to be parallel `when` chains, and [idForType]'s KDoc asked for them to be
+         * "kept adjacent so the two cannot drift" — adjacency is a weaker promise than a shared
+         * table, and it was already being tested only by the fact that nobody had broken it. A type
+         * present in one and missing from the other yields `aggregate_id = "unknown"`; here that is
+         * not expressible.
+         *
+         * ORDER IS LOAD-BEARING, most specific first, and a LinkedHashMap is what preserves it.
+         * A transaction event carries BOTH `transactionId` and `accountId`; with `accountId` tested
+         * first — as it once was — every transaction landed in bronze as ACCOUNT. `documentId`
+         * precedes `accountId`/`partyId` for the same reason: signing-ceremony and generated-document
+         * payloads carry it alongside others and were landing as UNKNOWN/UNKNOWN (#2598).
+         *
+         * The four #8792 domains sit ABOVE `accountId`/`partyId` because their payloads carry those
+         * too: a card issuance carries cardId, partyId AND accountId, so placing it below would file
+         * it as ACCOUNT while its sibling CardStatusChanged — carrying only cardId — fell through to
+         * the topic and became CARD. One domain, two aggregate types, split by which fields an event
+         * happens to have. Reordering is safe for these four and only these four, measured rather
+         * than argued: of the 1712 rows in bronze, ZERO carry cardId, loanId, orderId or
+         * conversionId, so no existing event can be rebucketed. That property does not hold for the
+         * entries above them, which is why those stay put.
+         */
+        private val ID_FIELD_BY_TYPE: Map<String, String> = linkedMapOf(
+            "TRANSACTION" to "transactionId",
+            "CONSENT" to "consentId",
+            "KYC_CASE" to "kycCaseId",
+            "DOCUMENT" to "documentId",
+            "PASSKEY" to "credentialId",
+            "CARD" to "cardId",
+            "LENDING" to "loanId",
+            "STANDING_ORDER" to "orderId",
+            "FX" to "conversionId",
+            "ACCOUNT" to "accountId",
+            "PARTY" to "partyId",
+        )
     }
 }

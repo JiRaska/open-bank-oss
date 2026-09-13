@@ -59,7 +59,19 @@ charters:
 
   - id: customer-copilot
     status: registered
-    prompts: [system.v1]
+    prompts: [system.v1, core.v1, style.v1]
+    # system.v1 is what CopilotChatService.systemPrompt() actually returns today (unchanged, kept
+    # as the immutable shipped record per this registry's own rule). core.v1 + style.v1 are the
+    # ADR-0285 D1 split of that SAME text — core.v1 is system.v1 minus its one style-eligible
+    # sentence ("Mluv stručně."), style.v1 is that sentence, registered here as the git-committed
+    # baseline (D5) a future communication-service-backed style layer falls back to. Content is
+    # therefore already correct and immutable; wiring CopilotChatService.systemPrompt() to actually
+    # compose core.v1 + style.v1 (and retiring the system.v1 hardcoded string) is a deliberately
+    # separate, deferred PR — that composition reorders one sentence relative to system.v1 (D1's
+    # fixed core-then-style order can't reproduce the original mid-document position of the sole
+    # style sentence byte-for-byte), and a live customer-facing safety prompt needs the ADR-0148
+    # evals replayed against the reordered text before it becomes the runtime source, not merely
+    # asserted equivalent here.
     source: openbank-copilot-service CopilotChatService.systemPrompt()
     # Concatenated at call time with PromptInjectionGuard.UNTRUSTED_PREAMBLE, which is a shared
     # constant rather than a per-charter prompt; it is not registered separately.
@@ -103,6 +115,27 @@ charters:
       Development-plane coding agent. Its instructions are the repo's own CLAUDE.md + the
       `skills:` list in agents.yaml, executed in an operator's coding-agent session — there is no
       service in this repo that sends a system prompt on its behalf.
+
+  - id: card-scheme-bulletin-agent
+    status: pending
+    reason: >-
+      ADR-0283 phase 4 (#8812). The charter is registered and ships DISABLED because no bulletin
+      feed exists yet, so no prompt has been written: authoring one now would register text that
+      nothing sends, which is the same class of claim as a charter that says it runs while its
+      input does not exist. The prompt is authored in the PR that wires the feed and flips
+      `enabled`, so "it runs" and "there is a prompt" become true in the same change.
+
+  - id: card-dispute-evidence-agent
+    status: pending
+    reason: >-
+      ADR-0283 phase 4 (#8869). The charter is registered and ships DISABLED because the evidence
+      it would assemble is not reachable — no document store it can read, the 3-D Secure result
+      not persisted anywhere in range, and openbank-dispute-service not wired to the scheme case
+      at all. Authoring a prompt now would register text that nothing sends, and worse, a prompt
+      that would draft a bundle out of an authorisation row and call it evidence. The prompt is
+      authored in the PR that gives the agent something to read and flips `enabled`, so "it runs"
+      and "there is a prompt" become true in the same change — the same shape as
+      card-scheme-bulletin-agent above.
 
   - id: mcp-anonymous
     status: not-applicable
@@ -158,3 +191,23 @@ charters:
     prompts: [system.v1]
     source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
     placeholders: []
+
+  # ADR-0284 D9. Both charters land ahead of their runtime on purpose — bounding an agent's powers
+  # is cheap before the loop exists and expensive after — so neither sends a prompt from this repo
+  # yet. `pending` is the honest status: it is the migration backlog, not a settled exemption, and
+  # it stays a ::warning until the wiring lands.
+  - id: kyb-analyst
+    status: pending
+    reason: >-
+      Charter is enabled:false and no service sends a prompt on its behalf. The disposition-proposal
+      and representation-rule loops are designed in ADR-0284 D9 and unbuilt; the prompt is registered
+      here in the PR that wires them, not before, because a prompt with no caller cannot be reviewed
+      against what it actually does.
+    blocked_by: ADR-0284
+  - id: business-copilot
+    status: pending
+    reason: >-
+      Charter is enabled:false. It extends customer-copilot's ADR-0089 regime with the acting-for
+      entity scope; the prompt lands with the copilot-service change that resolves a business
+      profile, so that the scope rule the charter states and the prompt that states it ship together.
+    blocked_by: ADR-0284

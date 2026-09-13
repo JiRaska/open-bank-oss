@@ -23,6 +23,12 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
+  // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
+  // decides the commstyle.publish four-eyes queue) — never the same person on the same
+  // draft, enforced server-side (CommunicationStyleService.publish).
+  COMMS_EDITOR: "ROLE_COMMS_EDITOR",
+  COMMS_APPROVER: "ROLE_COMMS_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -121,6 +127,16 @@ export const PERMISSIONS = {
   // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
   "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Business onboarding (ADR-0284). BOTH lines mirror kyb-service's own
+  // @RolesAllowed(OPERATOR, ADMIN, KYC) — on the representation routes AND on `GET /cases`, which
+  // additionally calls requireOperator(). COMPLIANCE is deliberately absent from `view` as well as
+  // from `attest`: it appears on neither side, nor in rules.yaml's role_action_matrix for any
+  // kyb.* action, nor in kyb_rest_ext.rego's operator-kyb-review reason. Granting it `view` would
+  // render a nav item whose FIRST fetch 403s, i.e. a whole page of DataUnavailable — the exact
+  // "a link that 403s on click is worse than a hidden one" trap this file warns about above.
+  // Nav/route gating only: the BFF relays the operator's own bearer and kyb-service + OPA decide.
+  "business-onboarding:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
+  "business-onboarding:attest": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -202,6 +218,21 @@ export const PERMISSIONS = {
   // MCP agent-service accepts only these human roles; keep demo out of the tool cockpit and
   // expose compliance's authorized read/execute path instead.
   "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Communication Studio (ADR-0285 D6, phase 1). Read-only projection of the ADR-0148 prompt
+  // registry: what each channel says today and which layer is locked. Deliberately WIDER than
+  // agent:view — the audience is the business units that talk to customers (contact centre,
+  // back-office, complaints), not the agent cockpit. The dedicated ROLE_COMMS_EDITOR /
+  // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
+  // put two role vocabularies in the console for a surface that cannot yet be written to.
+  "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
+  // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
+  "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
+  "communication:style:decide":  [ROLES.ADMIN, ROLES.COMMS_APPROVER],
+  // ADR-0285 D4: golden-set entries are CRUD-only, no four-eyes (nothing an editor writes here
+  // reaches a customer without a separate change wiring the replay engine) — same maker-only
+  // grant as style:propose.
+  "communication:golden-set:manage": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
@@ -244,16 +275,17 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],
   ['identity-cases:view', ['/identity-cases']],
+  ['business-onboarding:view', ['/business-onboarding']],
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions', '/merchants']],
-  ['payment-rails:view', ['/swift', '/clearing']],
+  ['payment-rails:view', ['/swift', '/clearing', '/sdd']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],
   ['payments:view', [
-      '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant',
+      '/payments', '/product-catalog', '/standing-orders', '/sepa-instant',
       '/fx', '/fees', '/lending',
   ]],
   ['interest:view', ['/interest']],
@@ -279,6 +311,13 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
+  // Longest-prefix-wins: '/communication/edit' must be registered so it beats the bare
+  // '/communication' entry below for anything under it, since ROUTE_PREFIXES only does a
+  // startsWith match (no wildcards) — a dynamic segment can only differentiate a permission
+  // when it comes AFTER the differentiating literal, which is why the editor lives at
+  // /communication/edit/[personaKey], not /communication/[personaId]/edit.
+  ['communication:style:propose', ['/communication/edit']],
+  ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]

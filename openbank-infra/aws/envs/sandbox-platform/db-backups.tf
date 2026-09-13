@@ -179,6 +179,11 @@ locals {
     # claiming "all remaining clusters" was simply untrue; check-db-backup-associations.py now
     # asserts it instead of trusting it.
     sdd          = { namespace = "sdd", sa = "sdd-db" }
+    # ADR-0301. Declared from the first commit rather than after the fact: a CNPG cluster whose
+    # barmanObjectStore has no matching association archives to NOWHERE and says it succeeded —
+    # archived_count rises, failed_count stays 0, ContinuousArchiving reads True, and the bucket
+    # is empty. Only `aws s3 ls` can tell the two apart.
+    wealth       = { namespace = "wealth", sa = "wealth-db" }
     tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
     vop          = { namespace = "payments", sa = "vop-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
@@ -204,6 +209,7 @@ locals {
     # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
     # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
     campaign         = { namespace = "campaign", sa = "campaign-db" }
+    communication    = { namespace = "communication", sa = "communication-db" }
     referral         = { namespace = "referral", sa = "referral-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
