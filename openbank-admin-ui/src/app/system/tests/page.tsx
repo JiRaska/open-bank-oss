@@ -524,6 +524,15 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       {row.ci.variants.map(variant => <div key={variant.browser} aria-label={t(`Evidence browseru ${variant.browser}`, `${variant.browser} browser evidence`)} style={{ padding: 10, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', fontSize: 11 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}><strong>{variant.browser}</strong><StateBadge state={variant.state} /></div>
         <div style={{ color: 'var(--text-secondary)', lineHeight: 1.35, marginTop: 6 }}>{variant.detail}</div>
+        {variant.buildAttestation ? <div
+          aria-label={variant.buildAttestation.matched ? t('Ověřeno proti nasazenému buildu', 'Rollout-attested evidence') : t('Nasazený build neodpovídá', 'Deployed build mismatch')}
+          style={{ marginTop: 7, padding: '5px 7px', borderRadius: 7, fontSize: 10, lineHeight: 1.35,
+            border: `1px solid ${variant.buildAttestation.matched ? 'var(--accent-border)' : 'var(--danger-border, var(--border))'}`,
+            color: variant.buildAttestation.matched ? 'var(--accent-text)' : 'var(--danger-text, var(--warning-text))' }}>
+          <strong>{variant.buildAttestation.matched ? t('Ověřeno proti nasazenému buildu', 'Rollout-attested') : t('Nasazený build neodpovídá', 'Build mismatch')}</strong>
+          {' · '}{t('požadováno', 'requested')} <code>{variant.buildAttestation.requestedSha.slice(0, 12)}</code>
+          {' · '}{t('nasazeno', 'observed')} <code>{variant.buildAttestation.observedSha?.slice(0, 12) ?? t('nedostupné', 'unavailable')}</code>
+        </div> : <div style={{ marginTop: 7, fontSize: 10, color: 'var(--text-tertiary)' }}>{t('CI/browser důkaz — nevztahuje se ke konkrétnímu nasazenému buildu.', 'CI/browser evidence — not tied to a specific deployed build.')}</div>}
         {variant.run ? <a href={variant.run.url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 7 }}>run {variant.run.id}</a> : null}
       </div>)}
     </div>}
