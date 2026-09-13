@@ -147,7 +147,6 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--info', '--surface'], // 3.68:1
   ['--info', '--surface-1'], // 3.68:1
   ['--warning-text', '--sidebar-bg'], // 3.85:1
-  ['--warning-text', '--surface-4'], // 4.07:1
   ['--accent', '--surface-3'], // 4.08:1
   ['--accent', '--danger-bg'], // 4.08:1
   ['--accent', '--info-bg'], // 4.1:1
@@ -156,10 +155,8 @@ const UNOBSERVED_LIGHT: ReadonlyArray<readonly [string, string]> = [
   ['--accent', '--bg'], // 4.28:1
   ['--accent', '--warning-bg'], // 4.31:1
   ['--accent', '--sidebar-bg'], // 4.33:1
-  ['--success-text', '--surface-4'], // 4.45:1
   ['--accent', '--surface'], // 4.47:1
   ['--accent', '--surface-1'], // 4.47:1
-  ['--warning-text', '--accent-bg'], // 4.49:1
 ]
 
 const UNOBSERVED_DARK: ReadonlyArray<readonly [string, string]> = [

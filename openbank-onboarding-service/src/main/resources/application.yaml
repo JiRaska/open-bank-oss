@@ -174,12 +174,11 @@ mp:
         # See the party-events-in comment above for why failure-strategy and an EXPLICIT
         # dead-letter topic are both required, and why the topic key is nested rather than
         # written as the dotted leaf `dead-letter-queue.topic:` (#686, #5745, #5751).
-        # This channel is NOT yet in the msg-override ConfigMap, unlike its three siblings: that
-        # file is applied before the image is bumped, so naming a channel there that the running
-        # image cannot serve is SRMSG00071, a hard boot failure (`msg-channel-image-parity`).
-        # Until the follow-up adds it, the deployed consumer runs on the fallback group id
-        # (quarkus.application.name) with auto.offset.reset at the Kafka default — acceptable only
-        # because this topic is new and carries no backlog. Both group ids are granted Read.
+        # The group id and auto.offset.reset for this channel live in the msg-override ConfigMap
+        # with its three siblings (#8882) — a dotted leaf key written here would be inert. They
+        # were deliberately absent until an image carrying this channel was deployed: that
+        # ConfigMap is applied before the image is bumped, so naming a channel the running image
+        # cannot serve is SRMSG00071, a hard boot failure (`msg-channel-image-parity`).
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.onboarding.kyb-events-in
