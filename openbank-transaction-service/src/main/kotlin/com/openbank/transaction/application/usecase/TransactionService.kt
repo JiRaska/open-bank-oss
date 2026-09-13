@@ -9,6 +9,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.payment.SettlementScope
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
@@ -22,8 +23,13 @@ import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
+import com.openbank.transaction.domain.settlement.SettlementDates
+import io.opentelemetry.api.GlobalOpenTelemetry
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.vertx.pgclient.PgException
@@ -47,6 +53,13 @@ class TransactionService(
     private val clock: Clock,
 ) : TransactionUseCase {
 
+    /**
+     * Field injection keeps the public constructor used by existing unit tests stable while
+     * making the trace provider replaceable in the assertion-backed integration contract.
+     */
+    @Inject
+    lateinit var tracer: Tracer
+
     @Inject
     constructor(
         transactionRepository: TransactionRepository,
@@ -65,6 +78,7 @@ class TransactionService(
 
     companion object {
         private const val TRANSACTION_INITIATED_EVENT = "openbank.transactions.transaction.initiated"
+        private const val TRANSACTION_REVERSED_EVENT = "openbank.transactions.transaction.reversed"
         // The completed/failed event types moved with the terminal write into
         // PaymentActivitiesImpl (#4238) — they are emitted by the workflow, not by this caller.
 
@@ -73,7 +87,32 @@ class TransactionService(
         private const val IMPLIED_FX_RATE_SCALE = 8
     }
 
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun initiateTransaction(command: InitiateTransactionCommand): Transaction {
+        val span = activeTracer().spanBuilder("transaction.initiate")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        try {
+            return initiateTransactionInternal(command).also {
+                // A controlled vocabulary: neither amount, account, party, description nor idempotency key.
+                span.setAttribute("openbank.transaction.status", it.status.name)
+            }
+        } catch (error: Exception) {
+            span.recordException(error)
+            throw error
+        } finally {
+            span.end()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun activeTracer(): Tracer =
+        if (this::tracer.isInitialized) tracer else GlobalOpenTelemetry.getTracer("openbank-transaction-service")
+
+    // Existing orchestration stays deliberately contiguous; extracting it only to host the
+    // span boundary must not alter payment/Temporal sequencing.
+    @Suppress("LongMethod")
+    private suspend fun initiateTransactionInternal(command: InitiateTransactionCommand): Transaction {
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
         if (existing != null) return existing
 
@@ -104,12 +143,48 @@ class TransactionService(
 
         val (fxRate, baseAmount) = resolveSettlement(amount, command.settlementCurrencyCode, command.settlementAmount)
 
-        val dates = SettlementDateResolver.resolve(
-            now = Instant.now(clock),
-            paymentCurrency = amount.currency.code,
-            settlementCurrency = baseAmount.currency.code,
-            requestedValueDate = command.valueDate,
-        )
+        // Own-account TRANSFER (checking <-> savings, pocket moves) never goes through
+        // SettlementDateResolver's cutoff/business-day rules. Those rules exist for payments that
+        // leave the bank on an external rail with a real submission deadline and a clearing
+        // calendar; a TRANSFER never leaves the ledger. Routing it through the same resolver meant
+        // a transfer submitted after the 16:00 cutoff — or on a Friday evening at all — booked on
+        // the next business day, so the money "arrived" in the app immediately (optimistic UI) but
+        // was not actually spendable until Monday: balance-service's effectiveAvailable() correctly
+        // excludes a not-yet-effective credit, so the reverse transfer back out then failed 422
+        // insufficient-funds and the optimistic UI reverted a few seconds later — reported directly
+        // as "I moved money into savings and now can't move it back, this can't work like this."
+        // Same-day for both legs: an internal transfer has no clearing window to miss.
+        //
+        // `rail == null` is the discriminator, NOT the type alone. openbank-sepa-payment books its
+        // settlement leg as type=TRANSFER with rail=SEPA_CT (the other three rails --
+        // domestic-payment, sepa-instant, swift -- book DEBIT, so SEPA is the odd one out). On type
+        // alone this branch would force every SEPA credit transfer to same-day and bypass exactly
+        // the cutoff and business-day rules the paragraph above says it must not touch: money that
+        // really does leave the bank on an external rail with a real clearing calendar. An
+        // own-account move carries no rail -- customer-edge sets none on any of its three TRANSFER
+        // payloads -- so the pair (TRANSFER, no rail) is what "never leaves the ledger" actually
+        // means here.
+        // Money that never reaches a scheme must not be dated by one. The original guard here only
+        // covered (TRANSFER, no rail), which left every other in-house booking rolling against the
+        // CERTIS calendar: an openbank-to-openbank domestic payment (rail=DOMESTIC, but with an
+        // internal payee leg), the welcome bonus (type=CREDIT), and reversals. Verified in the
+        // sandbox ledger — a bonus granted 08:31 on a Saturday booked on the Monday, and in-house
+        // "Interní převod" debits made after 16:00 booked the next business day, on a clearing
+        // calendar the money never touched. See [SettlementScope] for why the payee leg, and not
+        // the rail, is what decides this.
+        val staysInTheBank = (command.type == TransactionType.TRANSFER && command.rail == null) ||
+            SettlementScope.staysInTheBank(command.rail, hasInternalPayee = command.targetAccountId != null)
+        val dates = if (staysInTheBank) {
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            SettlementDates(bookingDate = today, valueDate = today)
+        } else {
+            SettlementDateResolver.resolve(
+                now = Instant.now(clock),
+                paymentCurrency = amount.currency.code,
+                settlementCurrency = baseAmount.currency.code,
+                requestedValueDate = command.valueDate,
+            )
+        }
 
         val transaction = Transaction(
             id = UUID.randomUUID(),
@@ -135,6 +210,8 @@ class TransactionService(
             scaExemption = command.scaExemption,
             rail = command.rail,
             instructionType = command.instructionType,
+            reversalOf = command.reversalOf,
+            isReversal = command.type == TransactionType.REVERSAL,
         )
 
         val saved = try {
@@ -194,15 +271,27 @@ class TransactionService(
             "Cannot reverse transaction ${original.id}: no source account"
         }
 
-        // Mark original as reversed; no domain event — the reversal transaction carries the audit trail
-        transactionRepository.update(original.reverse())
+        // Mark original as reversed AND announce it (#8745 finding 1): this was the only terminal
+        // transition with no event — the reversal's transaction.initiated announces THAT a reversal
+        // happened, but a consumer projecting status held the ORIGINAL at COMPLETED permanently.
+        // The row and the outbox event commit atomically (update's two-arg overload), the same
+        // transactional-outbox shape the workflow's terminal writes use.
+        val reversed = original.reverse()
+        transactionRepository.update(
+            reversed,
+            OutboxMessage(
+                aggregateId = reversed.id,
+                eventType = TRANSACTION_REVERSED_EVENT,
+                payload = eventPublisher.reversedPayload(reversed, command.reason),
+            ),
+        )
 
         // Initiate reversal credit — flows through the normal saga as an incoming credit
         // (sourceAccountId=null → no balance cover needed; DEBIT cash-clearing, CREDIT deposit-control)
         return initiateTransaction(
             InitiateTransactionCommand(
                 idempotencyKey = command.idempotencyKey,
-                type = com.openbank.transaction.domain.model.TransactionType.REVERSAL,
+                type = TransactionType.REVERSAL,
                 sourceAccountId = null,
                 targetAccountId = targetAccountId,
                 amount = original.amount.amount,
@@ -210,6 +299,7 @@ class TransactionService(
                 description = "Reversal: ${command.reason}",
                 valueDate = java.time.LocalDate.now(clock),
                 initiatedBy = UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                reversalOf = original.id,
             ),
         )
     }

@@ -87,7 +87,7 @@ Zastavení odchozích notifikací je bezpečný směr, takže **halt** je break-
 - ✅ AuthZ: `@RolesAllowed` per endpoint; aktér řízení výpravy z JWT subjektu (ne z těla)
 - ✅ Prevence IDOR: device `partyId` injektováno edgem ze zákaznického JWT
 - ✅ Důvěrnost tokenu: push token jen pro zápis přes REST, maskovaný v logu
-- ✅ Důvěrnost tajemství: těla OTP_CODE / PASSWORD_RESET se doručí, ale neukládají — redakce při zápisu i při čtení (GDPR čl. 5 odst. 1 písm. c); uložené OTP by operátorovi umožnilo dokončit zákazníkovo SCA, ADR-0021)
+- ✅ Důvěrnost tajemství: těla OTP_CODE se doručí, ale neukládají — redakce při zápisu i při čtení (GDPR čl. 5 odst. 1 písm. c); uložené OTP by operátorovi umožnilo dokončit zákazníkovo SCA, ADR-0021)
 - ✅ Minimalizace egresu: push + oversight ve výchozím stavu vypnuté; oversight bez PII z principu
 - ✅ Odolnost: outbox circuit-breaker/retry/bulkhead/timeout; break-glass halt
 - ✅ Bezpečnostní hlavičky: CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy

@@ -4,7 +4,9 @@
 
 package com.openbank.delegation.infrastructure.persistence.entity
 
+import com.openbank.delegation.domain.model.MAX_RESERVATION_IDEMPOTENCY_KEY_LENGTH
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
@@ -37,8 +39,17 @@ class SpendReservationEntity : PanacheEntityBase() {
     @Column(name = "currency", nullable = false, length = CURRENCY_CODE_LENGTH)
     lateinit var currency: String
 
-    @Column(name = "idempotency_key", nullable = false, updatable = false, length = IDEMPOTENCY_KEY_MAX_LENGTH)
+    @Column(
+        name = "idempotency_key",
+        nullable = false,
+        updatable = false,
+        length = MAX_RESERVATION_IDEMPOTENCY_KEY_LENGTH,
+    )
     lateinit var idempotencyKey: String
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "operation_type", nullable = false, updatable = false)
+    lateinit var operationType: SpendReservationOperationType
 
     @Enumerated(EnumType.STRING)
     @Column(name = "state", nullable = false)
@@ -55,6 +66,7 @@ class SpendReservationEntity : PanacheEntityBase() {
         grantId = grantId,
         amount = toMoney(amount, currency),
         idempotencyKey = idempotencyKey,
+        operationType = operationType,
         state = state,
         createdAt = createdAt,
         settledAt = settledAt,
@@ -62,9 +74,6 @@ class SpendReservationEntity : PanacheEntityBase() {
 
     companion object {
         const val CURRENCY_CODE_LENGTH = 3
-
-        /** Matches the `varchar(200)` in V4__delegation_spend_reservations.sql. */
-        const val IDEMPOTENCY_KEY_MAX_LENGTH = 200
 
         /**
          * The column is NUMERIC(20,6) — the convention this schema already uses for the three
@@ -84,6 +93,7 @@ class SpendReservationEntity : PanacheEntityBase() {
             amount = r.amount.amount
             currency = r.amount.currency.code
             idempotencyKey = r.idempotencyKey
+            operationType = r.operationType
             state = r.state
             createdAt = r.createdAt
             settledAt = r.settledAt

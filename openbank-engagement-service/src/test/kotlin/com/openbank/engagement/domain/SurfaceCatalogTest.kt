@@ -30,7 +30,19 @@ class SurfaceCatalogTest {
     @Test
     fun `forSlot returns only entries for that slot`() {
         assertThat(SurfaceCatalog.forSlot(SurfaceSlot.HOME_BANNER)).isNotEmpty
-        assertThat(SurfaceCatalog.forSlot(SurfaceSlot.REWARDS_HUB)).isEmpty()
+        assertThat(SurfaceCatalog.forSlot(SurfaceSlot.STORIES)).isEmpty()
+    }
+
+    /**
+     * ADR-0220 D3: the rewards-hub challenge card is both renderable content AND the id
+     * `AwardGamificationPointsUseCase` matches a posted CONVERSION against — same id, same
+     * catalogue, deliberately (see `SurfaceCatalog.ALL`'s own comment for why a mismatch would
+     * strand a completable challenge with no valid way to report it back).
+     */
+    @Test
+    fun `the rewards hub carries the gamification challenge card`() {
+        assertThat(SurfaceCatalog.forSlot(SurfaceSlot.REWARDS_HUB)).extracting("id")
+            .containsExactly("COMPLETE_BUDGETING_COURSE")
     }
 
     @Test

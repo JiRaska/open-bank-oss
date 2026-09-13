@@ -58,11 +58,16 @@ class DelegationProjectionIT {
             connector.source("delegation-events-in")
         source.runOnVertxContext(true)
 
-        source.send(delegationEvent("DelegationActivated", accountId))
+        source.send(delegationEvent("DelegationActivated", accountId, lifecycleRevision = 1))
         assertThat(awaitAuthorized(accountId, expected = true)).isTrue()
 
-        source.send(delegationEvent("DelegationRevoked", accountId))
+        source.send(delegationEvent("DelegationRevoked", accountId, lifecycleRevision = 2))
         assertThat(awaitAuthorized(accountId, expected = false)).isTrue()
+
+        source.send(delegationEvent("DelegationReinstated", accountId, lifecycleRevision = 1))
+        assertThat(awaitAuthorized(accountId, expected = false))
+            .describedAs("a delayed older opening must not resurrect revoked authority")
+            .isTrue()
     }
 
     /**
@@ -148,6 +153,7 @@ class DelegationProjectionIT {
         grantId: UUID = this.grantId,
         grantorPartyId: UUID = ownerParty,
         capabilities: String = """"ACCOUNT_READ_BALANCES"""",
+        lifecycleRevision: Long = 1,
     ): String =
         """
         {
@@ -160,6 +166,7 @@ class DelegationProjectionIT {
           "capabilities": [$capabilities],
           "validFrom": "2026-01-01T00:00:00Z",
           "occurredAt": "2026-08-01T12:00:00Z"
+          ,"lifecycleRevision": $lifecycleRevision
         }
         """.trimIndent()
 }

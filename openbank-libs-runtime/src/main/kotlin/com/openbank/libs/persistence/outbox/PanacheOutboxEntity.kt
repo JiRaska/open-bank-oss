@@ -51,6 +51,13 @@ open class PanacheOutboxEntity : PanacheEntity() {
     @Column(name = "last_error", columnDefinition = "TEXT")
     var lastError: String? = null
 
+    /**
+     * ADR-0252 durable hand-off: request-scoped taint cannot survive asynchronous dispatch.
+     * Each concrete outbox table receives this column in the same fleet migration.
+     */
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 
@@ -68,5 +75,6 @@ open class PanacheOutboxEntity : PanacheEntity() {
         updatedAt = updatedAt,
         sentAt = sentAt,
         lastError = lastError,
+        synthetic = synthetic,
     )
 }

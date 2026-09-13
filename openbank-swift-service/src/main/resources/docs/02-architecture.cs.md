@@ -46,7 +46,7 @@ graph TB
     uc[Application<br/>SwiftService : SwiftUseCase]
     dom[Domain<br/>SwiftMessage + enums<br/>validate]
     persist[Persistence<br/>SwiftRepositoryImpl<br/>Hibernate Reactive Panache]
-    outbox[Outbox<br/>SwiftOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>SwiftOutboxDispatcher<br/>@Scheduled každých 5s"]
     kafkap[Kafka<br/>KafkaSwiftOutboxEventPublisher]
     authz[Authz<br/>AuthzProducer → OPA]
   end

@@ -44,7 +44,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
+    // Executable, assertion-backed trace evidence for the detector boundary.
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its system

@@ -96,6 +96,25 @@ class ProductCatalogPactBrokerProviderVerificationTest {
         // Intentionally empty — see the KDoc above.
     }
 
+    /**
+     * No seeding: `CURRENT_PERSONAL` carries four seeded fees in `ProductSeed` on every boot.
+     * Keep this broker replay state in lock-step with the always-on `@PactFolder` verifier so a
+     * newly published billing pact cannot pass on a PR and then strand at `can-i-deploy`.
+     */
+    @State("a product with fees exists for code CURRENT_PERSONAL")
+    fun feeBearingProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * The pact-pinned UUID is deliberately absent from `ProductSeed`; the seeded catalogue
+     * already satisfies the account consumer's negative lookup state.
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
+    fun unknownProductIdIsAbsent() {
+        // Intentionally empty — see the KDoc above.
+    }
+
     @State("trusted insurance term-life schema version 1 is installed")
     fun trustedInsuranceSchemaIsInstalled() {
         // CatalogPackSeeder installs the trusted test pack before provider verification.
@@ -115,4 +134,10 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @State("Product Studio independently checkable draft exists")
     fun productStudioCheckableDraftExists() = catalogFixtures.independentlyCheckableDraftExists()
+
+    @State("a published fixed-rate deposit revision exists for interest synchronization")
+    fun publishedFixedRateDepositRevisionExists() = catalogFixtures.publishedFixedRateDepositRevisionExists()
+
+    @State("a published priced loan revision exists for lending originations")
+    fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
 }

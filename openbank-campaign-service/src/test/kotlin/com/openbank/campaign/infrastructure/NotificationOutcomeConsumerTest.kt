@@ -12,8 +12,10 @@ import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.campaign.infrastructure.kafka.NotificationOutcomeConsumer
+import com.openbank.libs.messaging.EventRetry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -23,8 +25,8 @@ import java.util.UUID
  *
  * The transition rule it delegates to is covered by `DeliveryTransitionTest`; what is asserted here
  * is everything between a record on a SHARED topic and the repository call: which records reach the
- * send log at all, and that the ones that must not reach it fail quietly rather than wedging the
- * channel.
+ * send log at all, that a malformed one is dropped quietly rather than wedging the channel, and
+ * that a FAILING repository is not confused with either (#5745).
  */
 class NotificationOutcomeConsumerTest {
 
@@ -38,12 +40,23 @@ class NotificationOutcomeConsumerTest {
         val applied = mutableListOf<Applied>()
         var throwOnApply: RuntimeException? = null
 
+        /** How many times the repository was ASKED, including the calls that threw. */
+        var attempts = 0
+
+        /** Fail this many times, then succeed — the transient failure the retry exists for. */
+        var failuresBeforeSuccess = 0
+
         override suspend fun applyDeliveryOutcome(
             sendId: UUID,
             outcome: String,
             reason: String?,
             occurredAt: Instant,
         ): Boolean {
+            attempts++
+            if (failuresBeforeSuccess > 0) {
+                failuresBeforeSuccess--
+                throw DownstreamDown("connection reset")
+            }
             throwOnApply?.let { throw it }
             applied += Applied(sendId, outcome, reason, occurredAt)
             return true
@@ -143,18 +156,56 @@ class NotificationOutcomeConsumerTest {
     }
 
     /**
-     * A repository failure is swallowed for the same reason. The row stays PENDING — which already
-     * means "no outcome arrived" — rather than the channel stopping and EVERY row staying pending.
+     * The defect this consumer was written to close, reintroduced through the ack (#5745, #5698).
+     *
+     * A persistent repository failure must reach the platform. Acking it leaves the send row
+     * `PENDING` forever, which is indistinguishable from an outcome still in flight — the exact
+     * ADR-0239 D3 / #3663 state the consumer exists to settle.
+     *
+     * Asserts the retry is BOUNDED as well as present: an unbounded in-handler retry would block
+     * the partition through a long outage, which is what the swallow was written against.
      */
     @Test
-    fun `a repository failure leaves the channel draining`(): Unit = runBlocking {
-        sendLog.throwOnApply = IllegalStateException("connection reset")
-        consumer.onOutcome(outcomeJson(UUID.randomUUID().toString(), "SENT", null))
+    fun `a persistent repository failure is rethrown after bounded attempts`(): Unit = runBlocking {
+        sendLog.throwOnApply = DownstreamDown("connection reset")
 
-        sendLog.throwOnApply = null
+        assertThatThrownBy {
+            runBlocking { consumer.onOutcome(outcomeJson(UUID.randomUUID().toString(), "SENT", null)) }
+        }.isInstanceOf(DownstreamDown::class.java).hasMessage("connection reset")
+
+        assertThat(sendLog.attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+        assertThat(sendLog.applied).isEmpty()
+    }
+
+    /**
+     * The other half, and the reason the retry is there at all: a blip must NOT cost a nack. A test
+     * that only asserted the rethrow would pass against a consumer that rethrew on the first
+     * failure, turning every transient hiccup into a stopped channel.
+     */
+    @Test
+    fun `a transient repository failure that recovers is retried to success`(): Unit = runBlocking {
+        sendLog.failuresBeforeSuccess = EventRetry.DEFAULT_MAX_ATTEMPTS - 1
         val sendId = UUID.randomUUID()
+
         consumer.onOutcome(outcomeJson(sendId.toString(), "SENT", null))
 
         assertThat(sendLog.applied.map { it.sendId }).containsExactly(sendId)
+        assertThat(sendLog.attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+    }
+
+    /**
+     * A malformed payload is still acked, and the repository is never asked. This is the assertion
+     * that must hold on BOTH sides of the fix — a blanket rethrow would break it, and the poison
+     * pill is the one case a nack cannot help, because replaying it fails identically forever.
+     */
+    @Test
+    fun `a malformed payload is still acked and never reaches the repository`(): Unit = runBlocking {
+        consumer.onOutcome("{not json at all")
+        consumer.onOutcome("""{"correlationId":"not-a-uuid","outcome":"SENT"}""")
+
+        assertThat(sendLog.attempts).isZero()
     }
 }
+
+/** A downstream dependency failing — the transient case, named so the tests read as intent. */
+private class DownstreamDown(message: String) : RuntimeException(message)

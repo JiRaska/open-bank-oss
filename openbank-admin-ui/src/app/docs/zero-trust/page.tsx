@@ -16,6 +16,8 @@ import {
   AlertTriangle, Ban, CheckCircle2, Globe,
 } from 'lucide-react'
 import { loadSecurityPosture } from '@/lib/governance/security'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,21 +46,18 @@ export default async function ZeroTrustPage() {
 
   if (!posture) {
     return (
-      <div>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
+      <div className="docs-printable">
+        <DocsPageHeader
+          crumbs={<>
               <span>OpenBank</span><span className="breadcrumb-sep">/</span>
               <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
               <span className="breadcrumb-sep">/</span>
               <span className="breadcrumb-current">{t('Zero-Trust mapa', 'Zero-Trust map')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-              {t('Zero-Trust bezpečnostní mapa', 'Zero-Trust Security Map')}
-            </h1>
-          </div>
-        </div>
+          </>}
+          title={t('Zero-Trust bezpečnostní mapa', 'Zero-Trust Security Map')}
+          icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+          actions={<PrintDocumentButton />}
+        />
         <div className="card" style={{ padding: '24px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             {t(
@@ -221,31 +220,28 @@ export default async function ZeroTrustPage() {
   ]
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+    <div className="docs-printable">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Zero-Trust mapa', 'Zero-Trust map')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-            {t('Zero-Trust bezpečnostní mapa', 'Zero-Trust Security Map')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Zero-Trust bezpečnostní mapa', 'Zero-Trust Security Map')}
+        subtitle={t(
               'Obrana do hloubky odvozená z reálných, gitops-nasazených manifestů (NetworkPolicy, Kyverno). Žádný service mesh v sandboxu neběží — mTLS/JWT/L7 řádky níže to říkají otevřeně, ne jako "vynuceno".',
               'Defense in depth derived from the real, gitops-deployed manifests (NetworkPolicy, Kyverno). No service mesh runs in the sandbox — the mTLS/JWT/L7 rows below say so plainly, not "enforced".',
             )}
-          </p>
-        </div>
-        <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ChevronLeft size={14} />
-          {t('Zpět na dokumentaci', 'Back to docs')}
-        </Link>
-      </div>
+        icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <PrintDocumentButton />
+          <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ChevronLeft size={14} aria-hidden="true" />
+            {t('Zpět na dokumentaci', 'Back to docs')}
+          </Link>
+        </div>}
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
         {/* Left: nested perimeters */}
@@ -303,10 +299,15 @@ export default async function ZeroTrustPage() {
                 </span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '10px' }}>
-                {t(
-                  `${sc.engine} ověřuje Cosign podpisy obrazů (${sc.policy}). Dnes v režimu Audit — nepodepsané obrazy se reportují, nic neblokuje. Roadmapa: podepisovat v CI → přepnout na Enforce.`,
-                  `${sc.engine} verifies Cosign image signatures (${sc.policy}). In Audit mode today — unsigned images are reported, nothing is blocked. Roadmap: sign in CI → flip to Enforce.`,
-                )}
+                {sc.enforced
+                  ? t(
+                      `${sc.engine} při admission ověřuje Cosign podpis obrazu i podepsanou CycloneDX SBOM attestaci (${sc.policy}). Režim Enforce — obraz bez nich je odmítnut.`,
+                      `${sc.engine} verifies the Cosign image signature and the signed CycloneDX SBOM attestation at admission (${sc.policy}). Enforce mode — an image lacking either is rejected.`,
+                    )
+                  : t(
+                      `${sc.engine} ověřuje Cosign podpis obrazu i SBOM attestaci (${sc.policy}). Režim Audit — chybějící se reportuje, nic neblokuje.`,
+                      `${sc.engine} verifies the Cosign image signature and SBOM attestation (${sc.policy}). Audit mode — gaps are reported, nothing is blocked.`,
+                    )}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {sc.rekor && (

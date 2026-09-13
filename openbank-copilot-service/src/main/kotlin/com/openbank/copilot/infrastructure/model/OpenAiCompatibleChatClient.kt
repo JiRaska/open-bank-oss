@@ -5,6 +5,7 @@
 
 package com.openbank.copilot.infrastructure.model
 
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -16,6 +17,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /** MicroProfile REST Client interface for any OpenAI-compatible /v1/chat/completions endpoint. */
 @RegisterRestClient
+@SyntheticTaintExternalBoundary("third-party OpenAI-compatible endpoint is outside the banking trust boundary")
 @Path("/")
 interface OpenAiCompatibleChatClient {
 

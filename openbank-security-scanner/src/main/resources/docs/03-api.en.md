@@ -246,9 +246,11 @@ OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED
 
 ## Events
 
+ICT incident events are emitted directly to Kafka by a SmallRye `@Channel` emitter — there is no
+outbox and no transactional guarantee. Scans emit nothing: the platform report is REST-only (#4709).
+
 | Topic | Event type | Trigger | Key fields |
 |---|---|---|---|
-| `openbank.security.scan.event` | `security.scan.completed.v1` | POST /scan or scheduler | reportId, platformScore, platformGrade, criticalFindings, generatedAt |
 | `openbank.security.ict.incident` | `ict.incident.reported.v1` | POST /ict-incidents | id, title, severity, category, affectedServices, detectedAt |
 | `openbank.security.ict.incident` | `ict.incident.updated.v1` | PATCH /status | id, newStatus, containedAt, resolvedAt, rtoMinutes |
 | `openbank.security.ict.incident` | `ict.incident.regulatory.reported.v1` | POST /regulatory-report | id, regulatoryReportId, reportedAt |

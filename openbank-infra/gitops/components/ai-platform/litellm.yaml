@@ -35,7 +35,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "6"
+        openbank.tech/litellm-config-revision: "13"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -126,6 +126,31 @@ spec:
                   name: litellm-secrets
                   key: LITELLM_SALT_KEY
                   optional: true
+            # Langfuse callback credentials (ADR-0031 D7). Same namespace, so the traces never
+            # leave the cluster and no key is duplicated into an agent pod. `optional: true` here
+            # and NOT on the langfuse pod itself, deliberately: without these the gateway must keep
+            # serving LLM calls untraced — losing observability is not a reason to stop the fleet's
+            # only egress path — whereas langfuse without them cannot start at all.
+            #
+            # The visible failure mode this leaves: callbacks configured, keys absent, so every
+            # trace POST is rejected and LiteLLM logs it per request. That is why the
+            # `openbank_langfuse_ingestion` absence check belongs in the observability component,
+            # not a comment here — a callback that silently drops is indistinguishable from an idle
+            # gateway from the outside.
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: LANGFUSE_PUBLIC_KEY
+                  optional: true
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: LANGFUSE_SECRET_KEY
+                  optional: true
+            - name: LANGFUSE_HOST
+              value: http://langfuse.ai-platform.svc:3000
             # prisma-python caches its downloaded query engine under $HOME. Without this it
             # resolves to "/" and the pod dies on
             # FileNotFoundError: '/.cache/prisma-python/binaries/...'.

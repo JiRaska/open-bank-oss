@@ -36,15 +36,24 @@ interface LlmDiagnosisPort {
     suspend fun proposeFixDiff(finding: AuthzPolicyFinding, diagnosis: String): String?
 }
 
+/**
+ * Both methods return the URL of a proposal that was actually created, or `null` when none was —
+ * an unwired write path, a missing token, or a refused finding. `null` is the ONLY way to say
+ * "nothing was created": there is deliberately no placeholder-URL return, because a well-formed
+ * string is indistinguishable from a delivered proposal to every consumer (#5897, and the
+ * `UnwiredProposalPort` precedent in `openbank-mcp-service`, #3900).
+ */
 interface GitHubProposalPort {
     /** Not called in v1 — see [LlmDiagnosisPort.proposeFixDiff]. Kept for interface parity with
-     * every sibling agent's [GitHubProposalPort] shape. */
-    suspend fun openProposalPr(finding: AuthzPolicyFinding, fixDiff: String): String
+     * every sibling agent's [GitHubProposalPort] shape. Always returns `null` for this agent:
+     * ADR-0167 forbids an auto-fix PR on an authorization policy outright. */
+    suspend fun openProposalPr(finding: AuthzPolicyFinding, fixDiff: String): String?
 
     /** The only disposition path in v1: every finding is a ticket a human triages (ADR-0167
      * Decision) — authorization-policy findings are security-adjacent, so this agent errs toward
-     * ticket-only rather than any auto-fix, even the fleet's usual "one narrow mechanical case." */
-    suspend fun openTicket(finding: AuthzPolicyFinding, diagnosis: String): String
+     * ticket-only rather than any auto-fix, even the fleet's usual "one narrow mechanical case."
+     * Returns `null` when no ticket was opened. */
+    suspend fun openTicket(finding: AuthzPolicyFinding, diagnosis: String): String?
 }
 
 interface FindingRepository {

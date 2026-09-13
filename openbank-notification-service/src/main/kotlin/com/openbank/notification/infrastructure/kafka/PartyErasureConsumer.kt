@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import jakarta.enterprise.context.ApplicationScoped
@@ -51,7 +52,11 @@ class PartyErasureConsumer {
             return
         }
 
-        try {
+        // Retried, then RETHROWN so the connector dead-letters (#5698). Swallowing left device
+        // tokens and notification history in place while the log recorded the erasure as done —
+        // a GDPR Art. 17 breach invisible to every metric, because an acked message and a
+        // successful one are the same thing from outside. Both deletes are idempotent.
+        EventRetry.withRetry(log, "PARTY_ERASED notification erasure", partyId) {
             val tokens = deviceTokenRepository.deleteByPartyId(partyId)
             val notifications = notificationRepository.deleteByPartyId(partyId)
             log.infof(
@@ -60,8 +65,6 @@ class PartyErasureConsumer {
                 notifications,
                 partyId,
             )
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to erase notification data for party %s", partyId)
         }
     }
 }

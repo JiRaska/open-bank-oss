@@ -110,7 +110,7 @@ Everything else (Quarkus types, jakarta APIs, Redis client, Persistence API, Mic
 | Service `/api/v1/info` returns `stack: null` | Service runs an old libs JAR (pre-SBOM-2) or the image was not rebuilt | `docker compose build --no-cache <service>` + `up -d --force-recreate <service>` |
 | Build fails with `ClassNotFoundException: jakarta.validation.ConstraintViolationException` | Service lacks `quarkus-hibernate-validator` extension but libs used to auto-register ConstraintViolationExceptionMapper (deleted in `62b312b`) | Pull latest libs |
 | `Circular dependency: :classes → :compileJava → :compileKotlin → :quarkusGenerateCode → :jar → :classes` | Per-service `settings.gradle.kts` using `includeBuild("../openbank-libs")` + Quarkus 3.33 + Gradle 9 | Build from root: `./gradlew :openbank-<svc>:quarkusBuild` (commit `62b312b`) |
-| `BootstrapVerifier` fails with "looks like development defaults" | A property in the prod profile contains `CHANGE_ME_LOCAL_DEV_ONLY` or `_local_dev_only` | Wire to Vault (ADR 0017) |
+| `BootstrapVerifier` fails with "looks like development defaults" — ⬜ **this symptom cannot occur** | There is no `BootstrapVerifier`, so nothing ever emits that message. The row described a check that was never shipped (#8426) | Nothing to fix here. A dev placeholder is kept out of prod by ESO/OpenBao `secretKeyRef` injection (ADR-0007) — not by a boot-time check, so the startup failure you would expect never arrives |
 
 ## Audit & support
 

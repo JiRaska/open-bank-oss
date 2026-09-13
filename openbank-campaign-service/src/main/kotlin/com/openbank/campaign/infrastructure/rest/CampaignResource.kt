@@ -9,10 +9,12 @@ import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundExcept
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
@@ -32,9 +34,30 @@ import java.util.UUID
 data class CreateCampaignRequest(
     val name: String,
     val goal: String,
+    /**
+     * ADR-0269 rule 1. Defaults to NONE when absent.
+     *
+     * I first made this mandatory on the wire, and the api-contract gate was right to refuse it: a
+     * newly required request property is a breaking change and would demand /api/v2 for an
+     * operator API, which is out of proportion to the change.
+     *
+     * The default is safe in the direction that matters. An unstated kind is NOT credit, so a
+     * client that has never heard of this field cannot create a campaign that delivers credit
+     * marketing — the failure mode is "no credit campaign", never "credit campaign to someone who
+     * did not consent". The requirement that a HUMAN state it belongs where a human is: admin-ui
+     * offers no pre-selection and refuses to submit without one.
+     */
+    val productKind: CampaignProductKind = CampaignProductKind.NONE,
     val segmentName: String,
     val segmentVersion: Int,
-    val steps: List<StepRequest>,
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection, so `{"steps": [null]}` deserialises happily into a `List<StepRequest>` holding a
+     * null. Writing the type honestly is what makes the guard in [toSteps] reachable instead of
+     * dead code.
+     */
+    val steps: List<StepRequest?>,
     val stopCondition: StopConditionRequest? = null,
     /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
     val conversionRule: String? = null,
@@ -48,8 +71,12 @@ data class CreateCampaignRequest(
      */
     val trigger: String? = null,
     /** Bounded, explicit yes/no delivery branches. Absent preserves a linear campaign. */
-    val decisions: List<DecisionRequest> = emptyList(),
+    val decisions: List<DecisionRequest?> = emptyList(),
+    /** Exact published incentive revision; redemption remains owned by incentive-service. */
+    val incentiveOfferRef: IncentiveOfferRefRequest? = null,
 )
+
+data class IncentiveOfferRefRequest(val id: UUID, val name: String, val version: Int)
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
 data class StopConditionRequest(val maxSendsPerParty: Int)
@@ -138,38 +165,46 @@ data class ApprovalRequest(val approver: String? = null)
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
-private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
+/**
+ * The only production read of [CreateCampaignRequest.steps]. `IllegalArgumentException` is mapped
+ * to 400 by libs-runtime's `CommonExceptionMappers`; no service-local mapper is added (#526).
+ */
+private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.mapIndexed { index, raw ->
+    val step = requireNotNull(raw) { "steps[$index] must not be null" }
     CampaignStep(
-        it.order,
-        it.template,
-        it.channel,
-        it.variables,
-        it.delaySeconds,
-        it.condition,
-        it.conditionSourceOrder,
-        it.variantBVariables,
-        it.fallbackToPush,
-        it.mobileDestination,
-        it.inAppSurface,
-        it.variantBTemplate,
-        it.variantBChannel,
-        it.variantBDelaySeconds,
-        it.nextStepOrder,
+        step.order,
+        step.template,
+        step.channel,
+        step.variables,
+        step.delaySeconds,
+        step.condition,
+        step.conditionSourceOrder,
+        step.variantBVariables,
+        step.fallbackToPush,
+        step.mobileDestination,
+        step.inAppSurface,
+        step.variantBTemplate,
+        step.variantBChannel,
+        step.variantBDelaySeconds,
+        step.nextStepOrder,
     )
 }
 
-private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisions.map {
+/** The only production read of [CreateCampaignRequest.decisions]; same 400 mapping as [toSteps]. */
+private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisions.mapIndexed { index, raw ->
+    val decision = requireNotNull(raw) { "decisions[$index] must not be null" }
     CampaignDecision(
-        sourceStepOrder = it.sourceStepOrder,
-        evaluationDelaySeconds = it.evaluationDelaySeconds,
-        confirmedStepOrder = it.confirmedStepOrder,
-        notConfirmedStepOrder = it.notConfirmedStepOrder,
+        sourceStepOrder = decision.sourceStepOrder,
+        evaluationDelaySeconds = decision.evaluationDelaySeconds,
+        confirmedStepOrder = decision.confirmedStepOrder,
+        notConfirmedStepOrder = decision.notConfirmedStepOrder,
     )
 }
 
 private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
     name = name,
     goal = goal,
+    productKind = productKind,
     segmentRef = SegmentRef(segmentName, segmentVersion),
     steps = toSteps(),
     stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
@@ -178,6 +213,7 @@ private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignD
     schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
     trigger = trigger,
     decisions = toDecisions(),
+    incentiveOfferRef = incentiveOfferRef?.let { IncentiveOfferRef(it.id, it.name, it.version) },
 )
 
 /**
@@ -210,12 +246,14 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             request.toSteps(),
             createdBy,
+            request.productKind,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
             request.holdoutPercent,
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
             request.toDecisions(),
+            request.incentiveOfferRef?.let { IncentiveOfferRef(it.id, it.name, it.version) },
         )
         Response.status(Response.Status.CREATED).entity(campaign).build()
     } catch (e: CampaignReferenceNotFoundException) {

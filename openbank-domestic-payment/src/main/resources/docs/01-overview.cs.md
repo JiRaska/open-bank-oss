@@ -57,12 +57,12 @@
 
 - **PostgreSQL** (databáze `openbank_domestic_payments`)
 - **Kafka** (topic `openbank.domestic.payment.events`)
-- **Redis (Valkey)** — `IdempotencyStore`
+- **Redis (Valkey)** — stav four-eyes schvalování; idempotence založení platby je trvale v PostgreSQL
 - **Keycloak** — OIDC autentizace
 - **sanctions-service** (REST klient `sanctions-service`) — synchronní screening jmen (ADR-0032)
 - **aml-service** (REST klient `aml-service`) — otevření AML případu při zásahu / kontrole / výpadku screeningu
 - **OPA sidecar** (ADR-0034) — `@Authorize` advisory authz
-- **openbank-libs** — `IdempotencyStore`, outbox plumbing, `ApiError`/`ErrorCode`, `@Authorize`, `ServiceInfoResource`, `DocsResource`
+- **openbank-libs** — approval store, outbox plumbing, `ApiError`/`ErrorCode`, `@Authorize`, `ServiceInfoResource`, `DocsResource`
 
 ## Obchodní hodnota
 

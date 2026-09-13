@@ -12,6 +12,18 @@ summary: "Verify AP2 signed agent-payment mandates (Intent/Cart/Payment VCs) ban
 
 # ADR-0182 — AP2 agent-payment mandate verification on the bank side
 
+> **The follow-up this ADR requires EXISTS: [ADR-0193](0193-ap2-mandate-verification-model-and-liability-position-promotes-adr-0182.md)**
+> (accepted, 2026-07-24). §5 below says no code ships under this ADR "until a follow-up ADR moves
+> it to `accepted` with the verification and liability model settled" — ADR-0193 is that ADR, and
+> the verifier shipped under it: `openbank-ap2-service` is built (v0.3.1) and deployed
+> (`gitops/apps/ap2.yaml`, OPA sidecar, network policies). Neither ADR pointed at the other, so a
+> reader arriving here had no way to discover the decision had been settled and built. This note
+> is that pointer, added 2026-08-19; the registry's `supersedes`/`superseded-by` fields are not
+> used because 0193 *promotes a slice of* this ADR rather than replacing it, which the schema has
+> no field for. This ADR's own status stays `proposed`/`planned` deliberately: what shipped is
+> 0193's verification slice, and the execution surface §2/§4 describe (sca-service wiring, the
+> HITL threshold on a real payment) has not.
+
 ## Context
 
 Agentic payment protocols moved from proposal to ecosystem in 2025–2026.

@@ -63,13 +63,14 @@ object ProductValidation {
             it.fxMarginBuyPct?.let { value -> requireFinite(value, "multiCurrencyConfig.fxMarginBuyPct") }
             it.fxMarginSellPct?.let { value -> requireFinite(value, "multiCurrencyConfig.fxMarginSellPct") }
             requireCurrency(it.defaultCurrency, "multiCurrencyConfig.defaultCurrency")
-            it.supportedCurrencies.forEach { currency ->
+            val currencies = it.requireSupportedCurrencies()
+            currencies.forEach { currency ->
                 requireCurrency(currency, "multiCurrencyConfig.supportedCurrencies")
             }
-            require(it.supportedCurrencies.distinct().size == it.supportedCurrencies.size) {
+            require(currencies.distinct().size == currencies.size) {
                 "multiCurrencyConfig.supportedCurrencies must be unique"
             }
-            require(!it.enabled || it.defaultCurrency in it.supportedCurrencies) {
+            require(!it.enabled || it.defaultCurrency in currencies) {
                 "enabled multi-currency product must include its defaultCurrency"
             }
         }
@@ -101,7 +102,8 @@ object ProductValidation {
         product.savingsConfig?.let {
             requireFinite(it.excessWithdrawalFee, "savingsConfig.excessWithdrawalFee")
             it.bonusRateAnnual?.let { value -> requireFinite(value, "savingsConfig.bonusRateAnnual") }
-            it.interestTiers.forEach { tier ->
+            val tiers = it.requireInterestTiers()
+            tiers.forEach { tier ->
                 requireFinite(tier.fromAmount, "savingsConfig.interestTiers.fromAmount")
                 tier.toAmount?.let { value -> requireFinite(value, "savingsConfig.interestTiers.toAmount") }
                 requireFinite(tier.rateAnnual, "savingsConfig.interestTiers.rateAnnual")
@@ -110,7 +112,7 @@ object ProductValidation {
                 "savingsConfig.freeWithdrawalsPerMonth must not be negative"
             }
             require(it.excessWithdrawalFee >= 0.0) { "savingsConfig.excessWithdrawalFee must not be negative" }
-            it.interestTiers.zipWithNext().forEach { (previous, next) ->
+            tiers.zipWithNext().forEach { (previous, next) ->
                 require(previous.toAmount != null && previous.toAmount <= next.fromAmount) {
                     "savingsConfig.interestTiers must be ordered and non-overlapping"
                 }

@@ -6,8 +6,10 @@
 import Link from 'next/link'
 import { ShieldCheck, ScrollText, Scale, Lock, Landmark, ListOrdered, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
-const ACCENT = '#6366f1'
+const ACCENT = 'var(--accent-text)'
 const INK = 'var(--text-primary)'
 const SUB = 'var(--text-secondary)'
 
@@ -15,10 +17,10 @@ type Bilingual = [string, string]
 type Verdict = 'pass' | 'conditional' | 'risk' | 'missing'
 
 const VERDICT_STYLE: Record<Verdict, { color: string; bg: string; border: string; cs: string; en: string }> = {
-  pass: { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', cs: 'projde', en: 'pass' },
-  conditional: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', cs: 'projde s podmínkami', en: 'pass with conditions' },
-  risk: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', cs: 'může změnit návrh', en: 'may change the design' },
-  missing: { color: '#64748b', bg: '#f8fafc', border: '#cbd5e1', cs: 'nezačato', en: 'not started' },
+  pass: { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', cs: 'projde', en: 'pass' },
+  conditional: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', cs: 'projde s podmínkami', en: 'pass with conditions' },
+  risk: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', cs: 'může změnit návrh', en: 'may change the design' },
+  missing: { color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', cs: 'nezačato', en: 'not started' },
 }
 
 type Area = { id: string; Icon: React.ElementType; title: Bilingual; verdict: Verdict; summary: Bilingual; items: { label: Bilingual; note: Bilingual }[] }
@@ -101,26 +103,23 @@ export default function QrlessPayReadinessPage() {
   const { t } = useLanguage()
 
   return (
-    <div>
-      <div className="page-header">
-        <div className="breadcrumb">
+    <div className="docs-printable">
+      <DocsPageHeader
+        crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
           <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
           <Link href="/docs/qrlesspay" style={{ color: 'inherit' }}>QRlessPay</Link>
           <span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-current">{t('Připravenost', 'Readiness')}</span>
-        </div>
-        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ScrollText size={18} style={{ color: ACCENT }} />
-          {t('QRlessPay — posouzení připravenosti', 'QRlessPay — readiness assessment')}
-        </h1>
-        <p className="page-subtitle">
-          {t(
+        </>}
+        title={t('QRlessPay — posouzení připravenosti', 'QRlessPay — readiness assessment')}
+        subtitle={t(
             'Co se zeptá bezpečnost, compliance a právníci — včetně otázek, které bychom raději neslyšeli. Sebehodnocení implementačního týmu, ne schválení.',
             'What security, compliance and counsel will each ask — including the questions we would rather they did not. A self-assessment by the implementing team, not an approval.',
           )}
-        </p>
-      </div>
+        icon={<ScrollText aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+        actions={<PrintDocumentButton />}
+      />
 
       <div className="card" style={{ padding: 14, marginBottom: 16, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', gap: 10 }}>
         <Info size={16} style={{ color: ACCENT, flexShrink: 0, marginTop: 1 }} />

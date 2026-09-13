@@ -24,6 +24,24 @@ sealed class CardEvent {
      * rather than a silent 1970 (#4005).
      */
     abstract val occurredAt: Instant
+
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+     * strongest (EVENT-sourced) attribution — issue #3994/#5256. Before this field,
+     * `TopicAttribution` already resolves `openbank.cards.events` -> `card-issuance-service`
+     * correctly, but only as TOPIC-sourced, not the producer's own claim — and audit-service DOES
+     * subscribe to this topic today (it is in `application.yaml`'s consumed-topics list), so this
+     * is a live attribution improvement, not a forward-looking one.
+     *
+     * **This is a serialised data class, not a hand-built map** — the wire key is this Kotlin
+     * property name, same idiom as `occurredAt` above. Declared once here (not repeated per
+     * subtype) since it is a concrete property, not part of the primary constructor.
+     */
+    val sourceService: String = SOURCE_SERVICE
+
+    companion object {
+        internal const val SOURCE_SERVICE = "card-issuance-service"
+    }
 }
 data class CardIssued(
     override val cardId: UUID,

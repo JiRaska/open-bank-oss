@@ -11,26 +11,26 @@ erDiagram
     }
 
 %% One table, and that is the whole point.
-%%
+
 %% What is NOT here matters more than what is:
-%%
+
 %%   * No payee name, no IBAN in plaintext. Proving the control ran (IPR Art. 5c)
 %%     does not require retaining every name typed into a payment form
 %%     (GDPR Art. 5(1)(c)). The hashes still answer the only question a fraud
 %%     claim asks — "did we check this name against this IBAN, and what did we
 %%     say?" — because the claimant supplies the inputs.
-%%
+
 %%   * No account-holder name cache. The authoritative name lives in
 %%     party-service (parties.legal_name / trading_name) and is resolved live on
 %%     every request. A local copy would be a second place for it to go stale —
 %%     precisely the drift party-service exists to prevent.
-%%
+
 %%   * No foreign keys. vop-service owns no account or party; it reads both over
 %%     REST with an M2M token and stores nothing about them.
-%%
+
 %% Retention: 13 months (the fraud-claim window), NOT the 7-year accounting
 %% default — a VoP record is evidence a control ran, not an accounting record.
-%%
+
 %% Indexes:
 %%   ix_vop_verification_lookup      (iban_hash, supplied_name_hash, verified_at DESC)
 %%       the fraud-claim query: "what did we answer for this IBAN + name?"

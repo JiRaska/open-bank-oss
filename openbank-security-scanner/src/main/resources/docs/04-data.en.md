@@ -4,94 +4,120 @@
 
 Dedicated PostgreSQL schema `openbank_security` in the `openbank` database (shared cluster, schema-per-service isolation).
 
-The scanner stores only the **outbox** and **ICT incidents** in PostgreSQL. Security scan results are held in-memory (ConcurrentHashMap) and republished to Kafka via the outbox; they are not individually persisted as DB rows.
+**The service persists one table: `ict_incidents`.** After `V5` the schema holds
+`flyway_schema_history` and `ict_incidents`. There is no entity, repository or JPA mapping for
+anything else in the service — scan results are still in-memory only.
 
-```mermaid
-erDiagram
-  ICT_INCIDENTS ||--o{ SECURITY_OUTBOX : "triggers"
+Consequently:
 
-  ICT_INCIDENTS {
-    uuid id PK
-    varchar title
-    text description
-    varchar category "AVAILABILITY|INTEGRITY|CONFIDENTIALITY|..."
-    varchar severity "P1_CRITICAL|P2_HIGH|P3_MEDIUM|P4_LOW"
-    varchar status "OPEN|INVESTIGATING|CONTAINED|RESOLVED|CLOSED"
-    text affected_services "JSONB array"
-    timestamptz detected_at
-    timestamptz reported_at
-    timestamptz contained_at "nullable"
-    timestamptz resolved_at "nullable"
-    integer rto_minutes "nullable"
-    integer rpo_minutes "nullable"
-    boolean reported_to_regulator
-    varchar regulatory_report_id "nullable"
-    varchar assigned_to "nullable"
-    timestamptz created_at
-    timestamptz updated_at
-  }
+- **Scan results** (`ServiceScanResult`, `PlatformSecurityReport`) live in `SecurityScannerService`
+  in `ConcurrentHashMap` fields (`lastResults`, `lastReport`). They are lost on pod restart and
+  rebuilt by the next scheduled scan (up to 30 minutes later, 2 minutes after startup on a cold pod).
+- **ICT incidents** are durable in the `ict_incidents` table (issue #4728). They used to live in
+  `IctIncidentService`'s `ConcurrentHashMap` (`store`) and were lost on every pod restart; that is
+  fixed — an incident, its containment/resolution timestamps and its
+  `reported_to_regulator`/`regulatory_report_id` state now survive a restart.
+- There is no scan history. `GET /api/v1/security/report` returns the last in-memory report only.
 
-  SECURITY_OUTBOX {
-    bigint id PK
-    uuid event_id UK
-    uuid aggregate_id
-    varchar event_type
-    text payload
-    varchar status "PENDING|PUBLISHED|FAILED"
-    integer attempt_count
-    timestamptz sent_at "nullable"
-    text last_error "nullable"
-    timestamptz created_at
-    timestamptz updated_at
-  }
+`ict_incidents` is the one table this service owns:
+
 ```
+ict_incidents
+├── id                      UUID PRIMARY KEY  (app-assigned, UUID.randomUUID())
+├── title                   TEXT NOT NULL
+├── description             TEXT NOT NULL
+├── category                VARCHAR(64) NOT NULL
+├── severity                VARCHAR(32) NOT NULL
+├── status                  VARCHAR(32) NOT NULL
+├── affected_services       TEXT NOT NULL   (comma-joined service names)
+├── detected_at             TIMESTAMPTZ NOT NULL
+├── reported_at             TIMESTAMPTZ NOT NULL
+├── contained_at            TIMESTAMPTZ
+├── resolved_at             TIMESTAMPTZ
+├── rto_minutes             INTEGER
+├── rpo_minutes             INTEGER
+├── reported_to_regulator   BOOLEAN NOT NULL DEFAULT FALSE
+├── regulatory_report_id    TEXT
+├── assigned_to             TEXT
+├── created_at              TIMESTAMPTZ NOT NULL
+└── updated_at              TIMESTAMPTZ NOT NULL
+```
+
+No other table references it and it references nothing else — a single-node diagram, not worth
+drawing as a graph.
+
+> Until #4709 this page described a `security_outbox` table and an `ict_incidents` table, and
+> claimed both were fictional. The outbox existed but was never written to (0 rows ever, and 0
+> records ever produced to its topic) and was dropped by `V4`; `ict_incidents` did not exist at that
+> point either. `V5` (issue #4728) then created the real `ict_incidents` table described above —
+> this page is updated to match.
 
 ## Migrations
 
-| Script | What it does |
-|---|---|
-| `V2__create_security_outbox.sql` | Table `security_outbox` with indexes on `(status, created_at)` and `aggregate_id` |
-| `V3__hibernate_sequences.sql` | Hibernate sequence table for surrogate key generation |
-
-> Note: V1 is absent — the scanner was initially stateless (no ICT incident persistence in the first iteration); V2 is the first migration that landed.
-
-## In-memory store vs. DB
-
-| Data | Storage | Rationale |
+| Script | What it does | Status |
 |---|---|---|
-| `ServiceScanResult` (per service) | In-memory `ConcurrentHashMap` | Low write rate (every 30m), fast dashboard reads, rebuild on restart |
-| `PlatformSecurityReport` | In-memory (last result only) | Same rationale; point-in-time snapshot |
-| `SecurityFinding` | In-memory (part of results) | Ephemeral; historical findings via Kafka / audit-service |
-| `IctIncident` | PostgreSQL `ict_incidents` | Needs lifecycle management, DORA evidence, regulatory reporting record |
-| `SecurityOutbox` | PostgreSQL `security_outbox` | Transactional guarantee for Kafka publish |
+| `V2__create_security_outbox.sql` | Created `security_outbox` with indexes on `(status, created_at)` and `aggregate_id` | Applied on the live database; superseded by V4 |
+| `V3__hibernate_sequences.sql` | Created the Hibernate/Panache sequence used for the outbox surrogate key | Applied; the sequence is dropped by V4 |
+| `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — the outbox had no producer (#4709) | Applied out of order (#5628) |
+| `V5__create_ict_incidents.sql` | Created `ict_incidents` (columns above) + indexes on `created_at`, `status`, `severity` — moves the DORA ICT incident register out of the in-memory map (#4728) | The current head |
+
+> V1 is absent — the scanner was stateless in its first iteration and V2 is the first migration that
+> landed. V2 and V3 are deliberately kept as files rather than deleted: both are recorded as applied
+> in the live `flyway_schema_history`, and removing an applied migration's file fails Flyway
+> validation exactly as editing one fails the checksum.
+
+> `ict_incidents` has no Hibernate sequence: its id is application-assigned (`UUID.randomUUID()` in
+> `IctIncidentService.reportIncident`), not `@GeneratedValue`, so the entity is
+> `PanacheEntityBase` with an explicit `@Id` rather than `PanacheEntity`. Updates go through
+> `Panache.getSession().flatMap { it.merge(entity) }` — `persist()` on an assigned id would schedule
+> an INSERT for every save and fail every status transition after the first with a duplicate-key
+> error (see `IctIncidentEntity`, `IctIncidentRepositoryImpl.save`).
+
+## Where each piece of state lives
+
+| Data | Storage | Lifetime |
+|---|---|---|
+| `ServiceScanResult` (per service) | In-memory `ConcurrentHashMap` | Until pod restart; rebuilt by next scan |
+| `PlatformSecurityReport` | In-memory (last result only) | Until pod restart; rebuilt by next scan |
+| `SecurityFinding` | In-memory (part of results) | Until pod restart |
+| `IctIncident` | `ict_incidents` table (PostgreSQL) | Durable — survives pod restart |
 
 ## Indexes
 
-- `security_outbox(status, created_at ASC)` — dispatcher poll for PENDING rows
-- `security_outbox(aggregate_id)` — event lookup by incident ID
-- `ict_incidents(status)` — list by status filter
-- `ict_incidents(severity)` — list by severity filter
-- `ict_incidents(detected_at DESC)` — chronological incident list
+`ict_incidents` carries three, matching how `GET /api/v1/ict-incidents` filters and sorts:
+
+| Index | Column(s) | Why |
+|---|---|---|
+| `idx_ict_incidents_created_at` | `created_at DESC` | The list endpoint orders by `created_at DESC` |
+| `idx_ict_incidents_status` | `status` | The list endpoint filters by status |
+| `idx_ict_incidents_severity` | `severity` | The list endpoint filters by severity |
+
+No other table exists, so these are the service's only indexes.
 
 ## Retention
 
-| Table | Retention | Reason |
-|---|---|---|
-| `ict_incidents` | 10 years | DORA Art. 17 evidence; ICT incident records are regulatory evidence |
-| `security_outbox` | 30 days after PUBLISHED | Troubleshooting, replay |
+`ict_incidents` rows are retained indefinitely — there is no TTL, archival job or delete path in the
+service. The only other durable trace of ICT-incident activity is the
+`openbank.security.ict.incident` Kafka topic and whatever `audit-service` stores from it; that
+retention is owned by audit-service, not here.
 
-ICT incidents must be retained for regulatory inspection by CNB (Czech National Bank) per DORA implementation. GDPR right to erasure does NOT apply — these are operational records, not personal data.
+DORA Art. 17 evidence needs a durable ICT incident register; `ict_incidents` (since #4728, `V5`) is
+that register. Before `V5`, the in-memory store was correctly flagged here as a gap, not a control —
+that gap is closed.
 
 ## PII considerations
 
-`ict_incidents` may contain:
-- `assigned_to` — email/name of assigned engineer (internal employee data)
+An `IctIncident` may carry:
+
+- `assignedTo` — email/name of the assigned engineer (internal employee data)
 - `description` — free text that could reference customer-facing systems
 
-These fields are not externally exposed. `assigned_to` is internal operator data, not customer PII — no GDPR erasure obligation.
+These fields are internal operator data, not customer PII. They are written to `ict_incidents`
+(`assigned_to`, `description` columns) and also travel on the Kafka event.
 
 ## Size estimates
 
-- `ict_incidents` — low volume. Estimate 10–50 incidents/month × 10 years = **6,000 rows max** (negligible)
-- `security_outbox` (30-day window) — 2 events per scan × 48 scans/day × 30 days = ~2,880 rows (negligible)
-- In-memory results: 27 services × ~5 KB each = ~135 KB (trivial)
+- Database: `flyway_schema_history` (4 rows) + `ict_incidents`, expected tens of rows per month,
+  each row well under 1 KB outside of `description` — low hundreds of KB per year, trivial for a
+  dedicated schema.
+- In-memory scan results: 27 services × ~5 KB each = ~135 KB (trivial).

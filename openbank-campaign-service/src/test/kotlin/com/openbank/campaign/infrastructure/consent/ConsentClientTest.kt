@@ -23,7 +23,7 @@ class ConsentClientTest {
         val client = mockk<ConsentServiceClient>()
         every { client.hasActiveConsent(partyId, "campaign", "MARKETING_COMMS_EMAIL") } returns
             Uni.createFrom().failure(IllegalStateException("consent unavailable"))
-        val adapter = LiveConsentCheckAdapter(client, "campaign")
+        val adapter = LiveConsentCheckAdapter(client, "campaign", "openbank")
 
         assertThatThrownBy {
             runBlocking { adapter.hasActiveConsent(partyId, "MARKETING_COMMS_EMAIL") }

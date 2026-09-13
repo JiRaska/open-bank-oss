@@ -84,6 +84,9 @@ spec:
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
       activeDeadlineSeconds: 900
       backoffLimit: 1
       template:

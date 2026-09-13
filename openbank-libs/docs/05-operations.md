@@ -110,7 +110,7 @@ Vše ostatní (Quarkus types, jakarta APIs, Redis client, Persistence API, Micro
 | Service `/api/v1/info` vrací `stack: null` | Service běží se starým libs JAR (před SBOM-2) nebo image není rebuiltlý | `docker compose build --no-cache <service>` + `up -d --force-recreate <service>` |
 | Build padá s `ClassNotFoundException: jakarta.validation.ConstraintViolationException` | Service nemá `quarkus-hibernate-validator` extension ale libs původně auto-registroval ConstraintViolationExceptionMapper (deleted v `62b312b`) | Pull latest libs |
 | `Circular dependency: :classes → :compileJava → :compileKotlin → :quarkusGenerateCode → :jar → :classes` | Per-service `settings.gradle.kts` s `includeBuild("../openbank-libs")` + Quarkus 3.33 + Gradle 9 | Build z root: `./gradlew :openbank-<svc>:quarkusBuild` (commit `62b312b`) |
-| `BootstrapVerifier` failuje s "looks like development defaults" | Property v prod profile obsahuje `CHANGE_ME_LOCAL_DEV_ONLY` nebo `_local_dev_only` | Provázat na Vault (ADR 0017) |
+| `BootstrapVerifier` failuje s "looks like development defaults" — ⬜ **tento symptom nemůže nastat** | `BootstrapVerifier` neexistuje, takže tuto hlášku nikdy nic nevypíše. Řádek popisoval kontrolu, která nebyla nikdy dodána (#8426) | Nic k řešení zde. Dev placeholder se do prod nedostane přes ESO/OpenBao `secretKeyRef` injektáž (ADR-0007) — ne přes boot-time kontrolu, takže selhání startu, které byste čekali, nepřijde |
 
 ## Audit & support
 

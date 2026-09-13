@@ -13,8 +13,13 @@ import {
 } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
+import { PageHeader, StatusBadge, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
+import { cn } from '@/lib/utils'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { EVENT_INSIGHTS } from '@/components/insights/catalog'
+import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
 
-type InfraStatus = 'UP' | 'DOWN' | 'UNKNOWN'
+type InfraStatus = InfrastructureStatus
 
 interface InfraComponent {
   id: string
@@ -53,12 +58,7 @@ const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'karpenter',       name: 'Karpenter',          probeNote: 'TCP :8080 · node autoscaler (Spot/arm64)', icon: <Cpu size={20} /> },
 ]
 
-interface StatusResult {
-  id: string
-  status: InfraStatus
-  latencyMs: number | null
-  checkedAt: string | null
-}
+type StatusResult = InfrastructureStatusResult
 
 type KafkaTopic = {
   name: string
@@ -67,30 +67,14 @@ type KafkaTopic = {
   segmentSize: number
 }
 
-const STATUS_STYLES: Record<InfraStatus, { border: string; bg: string; text: string }> = {
-  UP:      { border: 'var(--success-border)', bg: 'var(--success-bg)',  text: 'var(--success)' },
-  DOWN:    { border: 'var(--danger-border)',  bg: 'var(--danger-bg)',   text: 'var(--danger)' },
-  UNKNOWN: { border: 'var(--border)',         bg: 'var(--surface-2)',   text: 'var(--text-secondary)' },
-}
-
-function StatusBadge({ status }: { status: InfraStatus }) {
-  const s = STATUS_STYLES[status]
+function InfrastructureStatusBadge({ status }: { status: InfraStatus }) {
   const icon = status === 'UP' ? <CheckCircle2 size={13} /> : status === 'DOWN' ? <XCircle size={13} /> : <AlertTriangle size={13} />
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: '5px',
-      padding: '3px 9px', borderRadius: '20px',
-      background: s.bg, border: `1px solid ${s.border}`,
-      color: s.text, fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em',
-    }}>
-      {icon}
-      {status}
-    </div>
-  )
+  return <StatusBadge status={status} leading={icon} />
 }
 
 export default function InfrastructurePage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, StatusResult>>({})
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -133,36 +117,48 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/status', { cache: 'no-store' })
       if (!res.ok) {
-        setStatuses({})
         setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' })
       } else {
-        setStatuses(await res.json())
+        try {
+          setStatuses(parseInfrastructureStatuses(await res.json() as unknown))
+          setUnavailable(null)
+          setLastRefresh(new Date())
+        } catch {
+          setUnavailable({ kind: 'error' })
+        }
       }
     } catch {
-      setStatuses({})
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
-      setLastRefresh(new Date())
     }
   }, [])
 
   useEffect(() => {
-    loadKafkaTopics()
+    const initialKafkaId = window.setTimeout(loadKafkaTopics, 0)
     const kafkaId = setInterval(loadKafkaTopics, 30_000)
-    return () => clearInterval(kafkaId)
+    return () => {
+      clearTimeout(initialKafkaId)
+      clearInterval(kafkaId)
+    }
   }, [loadKafkaTopics])
 
   useEffect(() => {
-    load()
+    const initialId = window.setTimeout(load, 0)
     const id = setInterval(load, 15_000)
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(initialId)
+      clearInterval(id)
+    }
   }, [load])
 
   useEffect(() => {
-    loadLifecycle()
+    const initialLifecycleId = window.setTimeout(loadLifecycle, 0)
     const id = setInterval(loadLifecycle, 60_000)
-    return () => clearInterval(id)
+    return () => {
+      clearTimeout(initialLifecycleId)
+      clearInterval(id)
+    }
   }, [loadLifecycle])
 
   const upCount = Object.values(statuses).filter(s => s.status === 'UP').length
@@ -172,19 +168,15 @@ export default function InfrastructurePage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '28px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-            {t('Infrastruktura', 'Infrastructure')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('Zdraví, životní cyklus a zranitelnosti komponent platformy — patch & EoL evidence (ADR-0079, DORA)', 'Component health, lifecycle & vulnerabilities — patch & EoL evidence (ADR-0079, DORA)')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platforma', 'Platform')}</span></div>}
+        icon={<Server size={20} aria-hidden="true" />}
+        title={t('Infrastruktura', 'Infrastructure')}
+        subtitle={t('Zdraví, životní cyklus a zranitelnosti komponent platformy — patch & EoL evidence (ADR-0079, DORA)', 'Component health, lifecycle & vulnerabilities — patch & EoL evidence (ADR-0079, DORA)')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           {!loading && !unavailable && (
@@ -202,12 +194,17 @@ export default function InfrastructurePage() {
               {upgradable} {t('k aktualizaci', 'upgradable')}
             </span>
           )}
-          <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
+
+      <ContextualInsights dashboardUid="openbank-evb" panels={EVENT_INSIGHTS}
+        titleCs="Tok událostí" titleEn="Event processing"
+        descriptionCs="Spolehlivost předávání, dead letters a služby, ve kterých se práce hromadí."
+        descriptionEn="Delivery reliability, dead letters and services where work accumulates." />
 
       {unavailable && (
         <div style={{
@@ -219,6 +216,9 @@ export default function InfrastructurePage() {
             service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
+            detail={Object.keys(statuses).length > 0
+              ? t('Zobrazen je poslední ověřený snapshot infrastruktury; aktuální obnova selhala a stav se mohl změnit.', 'The last verified infrastructure snapshot is shown; the current refresh failed and status may have changed.')
+              : undefined}
             dense
           />
         </div>
@@ -240,10 +240,10 @@ export default function InfrastructurePage() {
             {INFRA_COMPONENTS.map(comp => {
               const st = statuses[comp.id]
               const status: InfraStatus = st?.status ?? 'UNKNOWN'
-              const styles = STATUS_STYLES[status]
+              const tone = statusTone(status)
 
               return (
-                <div key={comp.id} className="card" style={{ padding: '18px', borderLeft: `4px solid ${styles.text}` }}>
+                <div key={comp.id} className={cn('card tone-border-left', TONE_BORDER_LEFT_CLASS[tone])} style={{ padding: '18px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{ padding: '7px', background: 'var(--surface-2)', borderRadius: '7px', color: 'var(--text-secondary)' }}>
@@ -256,7 +256,7 @@ export default function InfrastructurePage() {
                         </div>
                       </div>
                     </div>
-                    <StatusBadge status={status} />
+                    <InfrastructureStatusBadge status={status} />
                   </div>
 
                   {st && (
@@ -277,7 +277,7 @@ export default function InfrastructurePage() {
                             {t('Ověřeno', 'Checked')}
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-                            {new Date(st.checkedAt).toLocaleTimeString()}
+                            {new Date(st.checkedAt).toLocaleTimeString(dateLocale)}
                           </div>
                         </div>
                       )}
@@ -285,7 +285,7 @@ export default function InfrastructurePage() {
                   )}
 
                   {lifecycle[comp.id] && (
-                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} />
+                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} dateLocale={dateLocale} />
                   )}
                 </div>
               )

@@ -5,6 +5,7 @@ package com.openbank.interest.infrastructure.outbox
 
 import com.openbank.interest.application.port.out.InterestOutboxRepository
 import com.openbank.interest.infrastructure.kafka.KafkaInterestOutboxEventPublisher
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -40,7 +41,8 @@ class InterestOutboxDispatcher(
     private val publisher: KafkaInterestOutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher

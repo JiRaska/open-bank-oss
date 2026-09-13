@@ -74,8 +74,10 @@ class ProductCatalogHostHeaderIT {
             http.createContext("/api/v1/products") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
                 val requestedId = ex.requestURI.path.substringAfterLast('/')
+                val currency = if (requestedId == EUR_PRODUCT_ID) "EUR" else "CZK"
                 val body =
-                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE"}""".toByteArray()
+                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE","currency":"$currency"}"""
+                        .toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
@@ -101,5 +103,6 @@ class ProductCatalogHostHeaderIT {
         private const val EXPECTED_HOST = "product-catalog.accounts.svc"
         private const val STUB_PORT = 18106
         private const val PRODUCT_ID = "11111111-1111-1111-1111-111111111111"
+        private const val EUR_PRODUCT_ID = "00000000-2222-0000-0000-000000000002"
     }
 }

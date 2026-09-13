@@ -41,36 +41,24 @@ The payment aggregate. One row per SCT Inst instruction.
 
 Indexes: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)`, and a partial `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (powers the execution watchdog / `findTimedOut`).
 
-### `sct_inst_outbox` (V2)
+### `sct_inst_outbox` — REMOVED (V2 created, V4 dropped)
 
-Transactional outbox for at-least-once event publishing.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | BIGSERIAL PK | |
-| `event_id` | UUID UNIQUE | dedup key |
-| `aggregate_id` | UUID | the `payment_id` |
-| `event_type` | VARCHAR(128) | e.g. `SctInstPaymentSubmitted` |
-| `payload` | TEXT | serialized event JSON |
-| `status` | VARCHAR(16) | NEW / SENT / FAILED |
-| `attempt_count` | INTEGER | retry counter |
-| `sent_at` | TIMESTAMPTZ | nullable |
-| `last_error` | TEXT | nullable |
-| `created_at` / `updated_at` | TIMESTAMPTZ | default `NOW()` |
-
-Indexes: `idx_sct_inst_outbox_status_created_at(status, created_at ASC)` (dispatch order), `idx_sct_inst_outbox_aggregate_id(aggregate_id)`.
-
-### Sequence (V3)
-
-`CREATE SEQUENCE IF NOT EXISTS sct_inst_outbox_seq INCREMENT BY 50` — Hibernate Reactive + Panache allocate ids from a `<table>_seq` (allocationSize 50), which BIGSERIAL alone does not provide. Without this, inserts fail at runtime with `relation "sct_inst_outbox_seq" does not exist`. Repo convention: unquoted, lowercase, `INCREMENT BY 50`.
+A transactional outbox for at-least-once event publishing was created in V2 but never wired to
+any real call site — event publishing has always gone through the direct, synchronous
+`KafkaSctInstEventPublisher` instead (issue #1034). PR #1364 removed the dead
+`SctInstOutboxPort`/`SctInstOutboxDispatcher` code; the table itself (0 rows) and its
+`sct_inst_outbox_seq` sequence (added in V3 for the Hibernate Reactive/Panache id-allocation
+convention) were dropped in V4 (issue #5127). Kept here only as a schema-history note — there is
+no live outbox table on this service.
 
 ## Flyway migrations
 
 | Version | File | Purpose | Rollback note |
 |---|---|---|---|
 | V1 | `V1__create_sct_inst_payments.sql` | payments table + 4 indexes | `DROP TABLE sct_inst_payments;` |
-| V2 | `V2__create_sct_inst_outbox.sql` | outbox table + 2 indexes | `DROP TABLE sct_inst_outbox;` |
-| V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` | `DROP SEQUENCE sct_inst_outbox_seq;` (stated in the migration) |
+| V2 | `V2__create_sct_inst_outbox.sql` | outbox table + 2 indexes (removed, see V4) | `DROP TABLE sct_inst_outbox;` |
+| V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` (removed, see V4) | `DROP SEQUENCE sct_inst_outbox_seq;` (stated in the migration) |
+| V4 | `V4__drop_sct_inst_outbox.sql` | drops the vestigial `sct_inst_outbox` table + `sct_inst_outbox_seq` sequence left behind by PR #1364 | recreates the V2/V3 table + sequence (stated in the migration) |
 
 `flyway.migrate-at-start = true` with 10 connect retries (2 s interval). **Never rewrite a migration after it is applied to a live DB** (checksum mismatch → startup fail; repo gotcha).
 

@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -16,7 +17,7 @@ type Bilingual = [string, string]
 //   • Target architecture — ADR-0027 (cloud-agnostic substrate, everything
 //     stateful/identity in-cluster OSS, OpenTofu + ArgoCD GitOps).
 //   • Status overlay      — the REAL state of the openbank-sandbox EKS cluster
-//     (account 265175468565, eu-north-1) as verified against the live cluster,
+//     as verified against the live cluster,
 //     so this page documents the gap honestly instead of selling the target.
 //
 //   live    = running in the sandbox cluster / applied today
@@ -27,9 +28,9 @@ type Bilingual = [string, string]
 type Status = 'live' | 'partial' | 'planned'
 
 const STATUS_META: Record<Status, { label: Bilingual; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: '#94a3b8', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
+  live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 
 // Maps architecture node IDs → infra probe IDs from /api/infra/status
@@ -48,9 +49,9 @@ const INFRA_PROBE_MAP: Record<string, string> = {
 }
 
 const PROBE_META = {
-  UP:      { color: '#059669', bg: '#ecfdf5', Icon: Wifi,    label: 'UP' },
-  DOWN:    { color: '#dc2626', bg: '#fef2f2', Icon: WifiOff, label: 'DOWN' },
-  UNKNOWN: { color: '#94a3b8', bg: '#f8fafc', Icon: Minus,   label: '?' },
+  UP:      { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: Wifi,    label: 'UP' },
+  DOWN:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: WifiOff, label: 'DOWN' },
+  UNKNOWN: { color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Minus,   label: '?' },
 }
 
 type Node = { id: string; name: Bilingual; status: Status; desc: Bilingual }
@@ -67,14 +68,14 @@ const EDGE: Node[] = [
 
 // --- AWS substrate (only AWS-managed layer per ADR-0027) --------------------
 const SUBSTRATE: Node[] = [
-  node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený bucket se stavem OpenTofu (openbank-tofu-state-265175468565) + bootstrap. Aplikováno.', 'Remote OpenTofu state bucket (openbank-tofu-state-265175468565) + bootstrap. Applied.']),
+  node('s3-state', ['S3 — tofu state', 'S3 — tofu state'], 'live', ['Vzdálený verzovaný bucket se stavem OpenTofu + bootstrap. Aplikováno.', 'Remote versioned OpenTofu state bucket + bootstrap. Applied.']),
   node('runner', ['EC2 / Mac mini CI runner', 'EC2 / Mac mini CI runner'], 'live', ['Self-hosted pool GitHub Actions runnerů (ADR-0040: Mac mini aktivní, EC2 studená záloha). Běží.', 'Self-hosted GitHub Actions runner pool (ADR-0040: Mac mini active, EC2 cold standby). Running.']),
-  node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: VPC 10.80.0.0/16, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: VPC 10.80.0.0/16, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
+  node('vpc', ['VPC — 3 AZ', 'VPC — 3 AZ'], 'live', ['modules/network: privátní adresní prostor, IGW, veřejné+privátní subnety napříč 3 AZ, jediný NAT (FinOps), S3 gateway + interface VPC endpointy. Aplikováno.', 'modules/network: private address space, IGW, public+private subnets across 3 AZ, single NAT (FinOps), S3 gateway + interface VPC endpoints. Applied.']),
   node('eks', ['EKS control plane (1.35)', 'EKS control plane (1.35)'], 'live', ['aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (žádný aws-auth configmap), logy control-plane do CloudWatch. Addony: vpc-cni, kube-proxy, coredns, pod-identity.', 'aws_eks_cluster v1.35, ACTIVE. OIDC/IRSA, EKS Pod Identity, authentication_mode=API (no aws-auth configmap), control-plane logs to CloudWatch. Addons: vpc-cni, kube-proxy, coredns, pod-identity.']),
   node('nodegroup', ['Bootstrap node group (Graviton)', 'Bootstrap node group (Graviton)'], 'live', ['t4g.medium AL2023 spravovaná node group — 2 uzly Ready. Nese systémové pody, Karpenter controller a ArgoCD; zbytek provisionuje Karpenter.', 't4g.medium AL2023 managed node group — 2 nodes Ready. Carries system pods, Karpenter controller and ArgoCD; Karpenter provisions the rest.']),
   node('kms', ['KMS CMK', 'KMS CMK'], 'live', ['Zákaznicky spravovaný klíč pro envelope šifrování EKS secrets (aws_kms_key.secrets). Aplikováno.', 'Customer-managed key for EKS secrets envelope encryption (aws_kms_key.secrets). Applied.']),
   node('iam', ['IAM (cluster/node, OIDC, Karpenter)', 'IAM (cluster/node, OIDC, Karpenter)'], 'live', ['Role clusteru + uzlů, IRSA OIDC provider, IAM pro Karpenter controller/node přes EKS Pod Identity, SQS interruption queue. Aplikováno.', 'Cluster + node roles, IRSA OIDC provider, Karpenter controller/node IAM via EKS Pod Identity, SQS interruption queue. Applied.']),
-  node('ecr', ['ECR', 'ECR'], 'live', ['Container registry pro všechny image openbank-*-service (265175468565.dkr.ecr.eu-north-1.amazonaws.com). Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Container registry for all openbank-*-service images (265175468565.dkr.ecr.eu-north-1.amazonaws.com). Actively used — images pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repo creation); IaC wiring is a follow-up.']),
+  node('ecr', ['ECR', 'ECR'], 'live', ['Privátní container registry pro všechny image openbank-*-service. Aktivně používáno — image pushovány přes build-push-service.sh. Zatím nespravováno přes IaC (ruční vytváření ECR repo); zapojení do IaC je follow-up.', 'Private container registry for all openbank-*-service images. Actively used — images are pushed via build-push-service.sh. Not yet managed via IaC (manual ECR repository creation); IaC wiring is a follow-up.']),
   node('cloudtrail', ['CloudTrail + Config', 'CloudTrail + Config'], 'planned', ['Neměnný audit na úrovni účtu + config drift (podmínka go-live DORA čl. 12). Zatím není v IaC.', 'Immutable account-level audit + config drift (DORA Art. 12 go-live condition). Not yet in IaC.']),
   node('worm', ['S3 Object Lock (WORM archiv)', 'S3 Object Lock (WORM archive)'], 'planned', ['Write-once compliance archiv. ADR-0027 — zatím není v IaC.', 'Write-once compliance archive. ADR-0027 — not yet in IaC.']),
 ]
@@ -122,7 +123,7 @@ const NAMESPACES: NS[] = [
       node('admin-ui', ['admin-ui (tato aplikace)', 'admin-ui (this app)'], 'live', ['Operations konzole v Next.js, kterou právě používáte — nasazena in-cluster v ns admin-ui. ArgoCD app admin-ui Synced + Healthy.', 'The Next.js operations console you are using — deployed in-cluster in ns admin-ui. ArgoCD app admin-ui Synced + Healthy.']),
       node('services', ['Nasazeno 10+ doménových vertikál', '10+ domain verticals deployed'], 'partial', ['Živé GitOps aplikace: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 zbývajících služeb (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction a další) čeká na onboarding do GitOps.', 'GitOps apps live: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 remaining services (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction, and others) pending GitOps onboarding.']),
       node('notification-svc', ['Notification Service (T2)', 'Notification Service (T2)'], 'live', ['ArgoCD app notifications Synced. KEDA ScaledObject vlastní počet replik — ustálený stav je 0 podů (FinOps T2, ADR-0057). Probouzí se na lagu consumer-group openbank.notification.requests; vyprázdní se a vrátí na 0 po cooldownu.', 'ArgoCD app notifications Synced. KEDA ScaledObject owns replica count — steady state is 0 pods (FinOps T2, ADR-0057). Wakes on openbank.notification.requests consumer-group lag; drains and returns to 0 after cooldown.']),
-      node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; publikuje nálezy do openbank.security.scan.event + openbank.security.ict.incident (DORA ICT). Historie skenů v CNPG Postgresu.', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; publishes findings to openbank.security.scan.event + openbank.security.ict.incident (DORA ICT). Backed by CNPG Postgres for scan history.']),
+      node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; report se čte přes REST, DORA ICT incidenty jdou do openbank.security.ict.incident. Report je bez perzistence (v paměti), ale DORA ICT incidenty se od V5__create_ict_incidents.sql ukládají do vlastní Postgres (#4728) — dřív žily jen v ConcurrentHashMap a restart podu je tiše smazal.', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; the report is served over REST and DORA ICT incidents go to openbank.security.ict.incident. The probe report is unpersisted (in-memory), but DORA ICT incidents have had their own Postgres table since V5__create_ict_incidents.sql (#4728) — before that they lived only in a ConcurrentHashMap and a pod restart silently emptied the register.']),
     ],
   },
   {
@@ -153,11 +154,35 @@ const NAMESPACES: NS[] = [
 
 function StatusDot({ status }: { status: Status }) {
   const m = STATUS_META[status]
-  return <m.Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
+  return <m.Icon aria-hidden="true" size={13} style={{ color: m.color, flexShrink: 0 }} />
+}
+
+type CloudNodeBoxProps = { n: Node; selectedId: string | null; liveStatus: Record<string, InfraStatusResult> | null; t: (cs: string, en: string) => string; onSelect: (node: Node) => void }
+
+function CloudNodeBox({ n, selectedId, liveStatus, t, onSelect }: CloudNodeBoxProps) {
+  const m = STATUS_META[n.status]
+  const active = selectedId === n.id
+  const probeId = INFRA_PROBE_MAP[n.id]
+  const probe = probeId && liveStatus ? liveStatus[probeId] : null
+  const pm = probe ? PROBE_META[probe.status] : null
+  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px color-mix(in srgb, ${m.color} 35%, transparent)` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
+    <StatusDot status={n.status} />
+    {t(...n.name)}
+    {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.border}`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
+  </button>
+}
+
+function ArchitectureZone({ title, subtitle, accent, children }: { title: string; subtitle?: string; accent: string; children: React.ReactNode }) {
+  return <div style={{ border: `1.5px solid ${accent}`, borderRadius: '12px', padding: '14px 16px', background: `color-mix(in srgb, ${accent} 4%, var(--surface))` }}><div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}><span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', color: accent, textTransform: 'uppercase' }}>{title}</span>{subtitle && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{subtitle}</span>}</div>{children}</div>
+}
+
+function ArchitectureArrow({ label }: { label?: string }) {
+  return <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2px 0' }}><div aria-hidden="true" style={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid var(--border)' }} />{label && <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '-2px' }}>{label}</span>}</div>
 }
 
 export default function CloudArchitecturePage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [selected, setSelected] = useState<Node | null>(null)
   const [liveStatus, setLiveStatus] = useState<Record<string, InfraStatusResult> | null>(null)
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -170,90 +195,35 @@ export default function CloudArchitecturePage() {
       if (res.ok) {
         const data: Record<string, InfraStatusResult> = await res.json()
         setLiveStatus(data)
-        setCheckedAt(new Date().toLocaleTimeString('cs-CZ'))
+        setCheckedAt(new Date().toLocaleTimeString(dateLocale))
       }
     } catch {
       // graceful degradation — static statuses remain visible
     } finally {
       setRefreshing(false)
     }
-  }, [])
+  }, [dateLocale])
 
-  useEffect(() => { void fetchStatus() }, [fetchStatus])
-
-  const Box = ({ n }: { n: Node }) => {
-    const m = STATUS_META[n.status]
-    const active = selected?.id === n.id
-    const probeId = INFRA_PROBE_MAP[n.id]
-    const probe = probeId && liveStatus ? liveStatus[probeId] : null
-    const pm = probe ? PROBE_META[probe.status] : null
-    return (
-      <button
-        onClick={() => setSelected(active ? null : n)}
-        title={t(...n.desc)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '6px',
-          padding: '6px 10px', borderRadius: '8px', cursor: 'pointer',
-          background: m.bg, border: `1px solid ${active ? m.color : m.border}`,
-          boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none',
-          color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600,
-          fontFamily: 'inherit', textAlign: 'left',
-        }}
-      >
-        <StatusDot status={n.status} />
-        {t(...n.name)}
-        {pm && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: '2px',
-            marginLeft: '4px', padding: '1px 5px', borderRadius: '10px',
-            background: pm.bg, border: `1px solid ${pm.color}44`,
-            fontSize: '10px', fontWeight: 700, color: pm.color,
-          }}>
-            <pm.Icon size={9} />
-            {pm.label}
-          </span>
-        )}
-      </button>
-    )
-  }
-
-  const Zone = ({ title, subtitle, accent, children }: { title: string; subtitle?: string; accent: string; children: React.ReactNode }) => (
-    <div style={{ border: `1.5px solid ${accent}`, borderRadius: '12px', padding: '14px 16px', background: `${accent}08` }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', color: accent, textTransform: 'uppercase' }}>{title}</span>
-        {subtitle && <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{subtitle}</span>}
-      </div>
-      {children}
-    </div>
-  )
-
-  const Arrow = ({ label }: { label?: string }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2px 0' }}>
-      <div style={{ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: '8px solid var(--border)' }} />
-      {label && <span style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '-2px' }}>{label}</span>}
-    </div>
-  )
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void fetchStatus() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [fetchStatus])
 
   const wrap = { display: 'flex', flexWrap: 'wrap' as const, gap: '8px' }
+  const selectNode = useCallback((n: Node) => setSelected(current => current?.id === n.id ? null : n), [])
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Cloud architektura', 'Cloud Architecture')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Cloud size={18} style={{ color: 'var(--accent)' }} />
-            {t('Cloud architektura (AWS)', 'Cloud Architecture (AWS)')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Cílový stav dle ADR-0027 se status overlay z živého clusteru openbank-sandbox · klikni na prvek pro detail', 'Target state per ADR-0027 with a status overlay from the live openbank-sandbox cluster · click an element for detail')}
-          </p>
-        </div>
-      </div>
+          </>}
+        title={t('Cloud architektura (AWS)', 'Cloud Architecture (AWS)')}
+        subtitle={t('Cílový stav dle ADR-0027 se status overlay z živého clusteru openbank-sandbox · klikni na prvek pro detail', 'Target state per ADR-0027 with a status overlay from the live openbank-sandbox cluster · click an element for detail')}
+        icon={<Cloud aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Legend + honesty note */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
@@ -268,20 +238,23 @@ export default function CloudArchitecturePage() {
         })}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Info size={13} />
+            <Info aria-hidden="true" size={13} />
             {t('Diagram = strategie (ADR-0027); badge', 'Diagram = strategy (ADR-0027); badge')}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #6ee7b744', fontSize: '10px', fontWeight: 700, color: '#059669' }}>
-              <Wifi size={9} />UP
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: 'var(--success-bg)', border: '1px solid var(--success-border)', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
+              <Wifi aria-hidden="true" size={9} />UP
             </span>
             {t('= živý probe z EKS openbank-sandbox.', '= live probe from EKS openbank-sandbox.')}
           </span>
           {checkedAt && <span>{t('Naposledy:', 'Last:')} {checkedAt}</span>}
           <button
+            type="button"
             onClick={() => void fetchStatus()}
             disabled={refreshing}
+            aria-busy={refreshing}
+            aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')}
             style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 8px', cursor: refreshing ? 'not-allowed' : 'pointer', color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'inherit', opacity: refreshing ? 0.6 : 1 }}
           >
-            <RefreshCw size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw aria-hidden="true" size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>
@@ -289,24 +262,24 @@ export default function CloudArchitecturePage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 320px' : '1fr', gap: '16px', alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-          <Zone title={t('Internet / Edge', 'Internet / Edge')} subtitle={t('Edge vrstva ADR-0027 — zatím neprovisionováno', 'ADR-0027 edge tier — not provisioned yet')} accent="#0ea5e9">
-            <div style={wrap}>{EDGE.map(n => <Box key={n.id} n={n} />)}</div>
-          </Zone>
+          <ArchitectureZone title={t('Internet / Edge', 'Internet / Edge')} subtitle={t('Edge vrstva ADR-0027 — zatím neprovisionováno', 'ADR-0027 edge tier — not provisioned yet')} accent="var(--info-text)">
+            <div style={wrap}>{EDGE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+          </ArchitectureZone>
 
-          <Arrow label={t('TLS (ACM)', 'TLS (ACM)')} />
+          <ArchitectureArrow label={t('TLS (ACM)', 'TLS (ACM)')} />
 
-          <Zone title={t('AWS substrate', 'AWS substrate')} subtitle={t('účet 265175468565 · eu-north-1 · jediná AWS-managed vrstva', 'account 265175468565 · eu-north-1 · the only AWS-managed layer')} accent="#f59e0b">
-            <div style={wrap}>{SUBSTRATE.map(n => <Box key={n.id} n={n} />)}</div>
-          </Zone>
+          <ArchitectureZone title={t('AWS substrate', 'AWS substrate')} subtitle={t('sandbox účet · regionální nasazení · jediná AWS-managed vrstva', 'sandbox account · regional deployment · the only AWS-managed layer')} accent="var(--warning-text)">
+            <div style={wrap}>{SUBSTRATE.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
+          </ArchitectureZone>
 
-          <Arrow />
+          <ArchitectureArrow />
 
-          <Zone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="#7c3aed">
+          <ArchitectureZone title={t('EKS cluster — openbank-sandbox', 'EKS cluster — openbank-sandbox')} subtitle={t('k8s 1.35 · Karpenter Graviton/Spot autoscaling', 'k8s 1.35 · Karpenter Graviton/Spot autoscaling')} accent="var(--accent-text)">
             <div style={{ marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 {t('Platform bootstrap (sandbox-platform → seeduje GitOps)', 'Platform bootstrap (sandbox-platform → seeds GitOps)')}
               </div>
-              <div style={wrap}>{BOOTSTRAP.map(n => <Box key={n.id} n={n} />)}</div>
+              <div style={wrap}>{BOOTSTRAP.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {NAMESPACES.map(ns => (
@@ -315,30 +288,30 @@ export default function CloudArchitecturePage() {
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{ns.label}</span>
                     {ns.note && <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{t(...ns.note)}</span>}
                   </div>
-                  <div style={wrap}>{ns.nodes.map(n => <Box key={n.id} n={n} />)}</div>
+                  <div style={wrap}>{ns.nodes.map(n => <CloudNodeBox key={n.id} n={n} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />)}</div>
                 </div>
               ))}
             </div>
-          </Zone>
+          </ArchitectureZone>
 
-          <Arrow label={t('pull (read-only deploy key)', 'pull (read-only deploy key)')} />
+          <ArchitectureArrow label={t('pull (read-only deploy key)', 'pull (read-only deploy key)')} />
 
-          <Zone title={t('Git (jediný zdroj pravdy)', 'Git (single source of truth)')} accent="#059669">
+          <ArchitectureZone title={t('Git (jediný zdroj pravdy)', 'Git (single source of truth)')} accent="var(--success-text)">
             <div style={wrap}>
-              <Box n={node('git', ['Git repo — openbank monorepo', 'Git repo — openbank monorepo'], 'live', ['IaC + k8s manifesty + app-of-apps. ArgoCD odsud pulluje desired state přes read-only SSH deploy key. Proti tomuto repu cluster rekonciluje.', 'IaC + k8s manifests + app-of-apps. ArgoCD pulls desired state from here via a read-only SSH deploy key. This repo is what the cluster reconciles against.'])} />
+              <CloudNodeBox n={node('git', ['Git repo — openbank monorepo', 'Git repo — openbank monorepo'], 'live', ['IaC + k8s manifesty + app-of-apps. ArgoCD odsud pulluje desired state přes read-only SSH deploy key. Proti tomuto repu cluster rekonciluje.', 'IaC + k8s manifests + app-of-apps. ArgoCD pulls desired state from here via a read-only SSH deploy key. This repo is what the cluster reconciles against.'])} selectedId={selected?.id ?? null} liveStatus={liveStatus} t={t} onSelect={selectNode} />
             </div>
-          </Zone>
+          </ArchitectureZone>
         </div>
 
         {selected && (
-          <div className="card" style={{ padding: '18px', position: 'sticky', top: '16px' }}>
+          <div id="cloud-architecture-selection" className="card" role="region" aria-label={t('Detail architektonického prvku', 'Architecture element details')} style={{ padding: '18px', position: 'sticky', top: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <StatusDot status={selected.status} />
                 <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(...selected.name)}</span>
               </div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
-                <X size={16} />
+              <button type="button" onClick={() => setSelected(null)} aria-label={t('Zavřít detail architektury', 'Close architecture details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
+                <X aria-hidden="true" size={16} />
               </button>
             </div>
             <span style={{

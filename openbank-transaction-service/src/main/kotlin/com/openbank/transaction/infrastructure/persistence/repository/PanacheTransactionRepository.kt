@@ -19,6 +19,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -74,6 +75,14 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
                 .replaceWith(transaction.copy(version = transaction.version + 1))
         }.awaitSuspending()
     }
+
+    override suspend fun countStuckSagas(olderThan: Instant): Long = Panache.withSession {
+        count(
+            "status in ?1 and initiatedAt <= ?2",
+            NON_TERMINAL_STATUSES,
+            olderThan,
+        )
+    }.awaitSuspending()
 
     // Truly simultaneous writers both pass the version-matched read before either commits; the
     // loser's flush then fails the @Version check (0 rows). Same conflict, same 409 (#465).
@@ -133,6 +142,15 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
                 .range(query.offset, query.offset + query.limit - 1)
                 .list()
         }.awaitSuspending().map { it.toDomain() }
+    }
+
+    private companion object {
+        /**
+         * The saga is still in flight in exactly these two states; COMPLETED / FAILED / REVERSED
+         * are terminal. Stored as the enum *names* because `TransactionEntity.status` is a String
+         * column.
+         */
+        val NON_TERMINAL_STATUSES = listOf(TransactionStatus.PENDING.name, TransactionStatus.PROCESSING.name)
     }
 }
 
@@ -208,14 +226,19 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         version = version,
         initiatedByPartyId = actorId
             ?.takeIf { actorType == "CUSTOMER" }
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            ?.let { strictPersisted(it, "actorId", id, UUID::fromString) },
         scaChallengeId = scaChallengeId,
         scaExemption = scaExemption,
-        rail = rail?.let { runCatching { com.openbank.libs.domain.payment.PaymentRail.valueOf(it) }.getOrNull() },
-        instructionType = instructionType
-            ?.let { runCatching { com.openbank.libs.domain.payment.InstructionType.valueOf(it) }.getOrNull() },
+        rail = rail?.let {
+            strictPersisted(it, "rail", id, com.openbank.libs.domain.payment.PaymentRail::valueOf)
+        },
+        instructionType = instructionType?.let {
+            strictPersisted(it, "instructionType", id, com.openbank.libs.domain.payment.InstructionType::valueOf)
+        },
         merchantCategory = merchantCategory,
         originatingPaymentId = originatingPaymentId,
+        reversalOf = reversalOf,
+        isReversal = isReversal,
     )
 }
 
@@ -251,4 +274,17 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     instructionType = this@toEntity.instructionType?.name
     merchantCategory = this@toEntity.merchantCategory
     originatingPaymentId = this@toEntity.originatingPaymentId
+    reversalOf = this@toEntity.reversalOf
+    isReversal = this@toEntity.isReversal
 }
+
+/**
+ * Read-back strictness (issue #8699): a persisted value that does not parse is data corruption,
+ * not a caller mistake — it must be LOUD, never silently nulled the way
+ * `runCatching { … }.getOrNull()` did. The enum name / UUID string is not PII, so it belongs in
+ * the message.
+ */
+private fun <T> strictPersisted(value: String, field: String, id: Any?, parse: (String) -> T): T =
+    runCatching { parse(value) }.getOrElse {
+        throw IllegalStateException("unrecognised $field '$value' persisted on transaction $id")
+    }

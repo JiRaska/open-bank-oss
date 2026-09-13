@@ -38,7 +38,9 @@ docker compose up -d sanctions-service
 | `KEYCLOAK_URL` | `http://localhost:8080` | OIDC issuer |
 | `QUARKUS_LOG_LEVEL` | `INFO` | per-package: `com.openbank.sanctions=DEBUG` |
 
-`BootstrapVerifier` z `openbank-libs` odmítne start při `QUARKUS_PROFILE=prod`, pokud detekuje dev placeholder secrets.
+⬜ **Toto se nekoná.** V `openbank-libs` žádný `BootstrapVerifier` není (`git grep BootstrapVerifier -- '*.kt'` vrací 0) — ADR-0017 ho předepisuje a jeho delivery note uvádí, že dodán nebyl. Start se tedy při dev placeholderu neodmítne, protože to nekontroluje nic.
+
+Co drží heslo mimo prod: `openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml` bere credentials přes `secretKeyRef` z ESO/OpenBao (ADR-0007) a neobsahuje žádný placeholder literál. Vlastnost konfigurace, ne boot-time kontrola (#8426).
 
 ## Health checks
 

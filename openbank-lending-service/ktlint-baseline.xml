@@ -3,6 +3,9 @@
     <file name="src/main/kotlin/com/openbank/lending/application/port/in/LendingUseCases.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>
+    <file name="src/main/kotlin/com/openbank/lending/application/port/in/CreditRiskInsightUseCase.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/lending/application/port/in/TerminateLoanUseCase.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>

@@ -3,17 +3,32 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, Fragment, useRef } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
   ToggleLeft, ToggleRight, ExternalLink, Download, Loader2
 } from 'lucide-react'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import {
+  SanctionsListChangeDialog,
+  retainEnabledSelectedListTypes,
+  type SanctionsList,
+  type SanctionsListChangeError,
+} from '@/components/sanctions/SanctionsListChangeDialog'
+import {
+  SanctionsApprovalDecisionDialog,
+  type ApprovalDecisionIntent,
+  type PendingApprovalItem,
+} from '@/components/sanctions/SanctionsApprovalDecisionDialog'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { statusTone } from '@/components/ui/tone'
+import { readApprovalId } from '@/lib/approvals/triage'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -24,10 +39,13 @@ interface SanctionMatch {
   listType: string; matchType: string; matchScore: number
   matchedName: string; programs: string[]
 }
-interface SanctionsList {
-  id: string; listType: string; displayName: string; sourceUrl: string
-  enabled: boolean; lastUpdatedAt?: string; lastEntryCount?: number
-  cronHour: number; cronMinute: number; cronDays: string
+interface SanctionsListChangeIntent {
+  list: SanctionsList
+  enabled: boolean
+}
+
+interface ListChangeFocusRequest {
+  listId: string
 }
 
 interface ApiError {
@@ -47,18 +65,10 @@ interface PendingApprovalResponse {
 }
 
 // One row of the checker's queue (GET /api/v1/sanctions/approvals, #3472).
-interface PendingApprovalItem {
-  id: string
-  action: string
-  resourceId?: string | null
-  status: string
-  makerId?: string | null
-  createdAt?: string | null
-}
-
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
 const DAY_LABELS_CS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
 const DAY_LABELS_EN: Record<string,string> = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' }
+const listToggleControlId = (listId: string) => `sanctions-list-${listId}-toggle`
 
 function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string, patch: Partial<SanctionsList>) => void }) {
   const { t } = useLanguage()
@@ -66,12 +76,6 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
   const [minute, setMinute] = useState(list.cronMinute)
   const [days, setDays] = useState<string[]>(list.cronDays.split(',').filter(Boolean))
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    setHour(list.cronHour)
-    setMinute(list.cronMinute)
-    setDays(list.cronDays.split(',').filter(Boolean))
-  }, [list.cronDays, list.cronHour, list.cronMinute])
 
   const toggleDay = (d: string) => setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
 
@@ -85,12 +89,12 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Čas', 'Time')}</span>
-        <select value={hour} onChange={e => setHour(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-hour`} aria-label={t('Hodina spouštění', 'Run hour')} value={hour} onChange={e => setHour(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
         </select>
         <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>:</span>
-        <select value={minute} onChange={e => setMinute(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-minute`} aria-label={t('Minuta spouštění', 'Run minute')} value={minute} onChange={e => setMinute(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
         </select>
@@ -98,18 +102,18 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Dny', 'Days')}</span>
         {DAYS.map(d => (
-          <button key={d} onClick={() => toggleDay(d)}
+          <button key={d} type="button" aria-pressed={days.includes(d)} aria-label={t(`Den ${DAY_LABELS_CS[d]}`, `${DAY_LABELS_EN[d]} day`)} onClick={() => toggleDay(d)}
             style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: '1px solid',
               background: days.includes(d) ? 'var(--accent)' : 'var(--surface)',
-              color: days.includes(d) ? 'white' : 'var(--text-secondary)',
+              color: days.includes(d) ? 'var(--text-inverse)' : 'var(--text-secondary)',
               borderColor: days.includes(d) ? 'var(--accent)' : 'var(--border)' }}>
             {t(DAY_LABELS_CS[d], DAY_LABELS_EN[d])}
           </button>
         ))}
       </div>
-      <button onClick={save} disabled={saving}
+      <button type="button" onClick={save} disabled={saving}
         style={{ alignSelf: 'flex-start', padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontWeight: 600,
-          background: 'var(--accent)', color: 'white', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+          background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
           display: 'flex', alignItems: 'center', gap: '5px' }}>
         {saving ? <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} /> : null}
         {t('Uložit plán', 'Save schedule')}
@@ -120,11 +124,13 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
 
 function ListCard({ list, onToggle, onRefresh, onSave }: {
   list: SanctionsList
-  onToggle: (id: string, enabled: boolean) => void
+  onToggle: (list: SanctionsList, enabled: boolean, trigger: HTMLButtonElement) => void
   onRefresh: (listType: string) => void
   onSave: (id: string, patch: Partial<SanctionsList>) => void
 }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [expanded, setExpanded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -137,9 +143,21 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', opacity: list.enabled ? 1 : 0.6, transition: 'opacity 0.2s' }}>
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface)' }}>
-        <button onClick={() => onToggle(list.id, !list.enabled)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}>
-          {list.enabled ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
-        </button>
+        <Can permission="sanctions:manage">
+          <button
+            id={listToggleControlId(list.id)}
+            type="button"
+            aria-pressed={list.enabled}
+            aria-haspopup="dialog"
+            onClick={event => onToggle(list, !list.enabled, event.currentTarget)}
+            aria-label={list.enabled
+              ? t(`Zkontrolovat pozastavení automatických aktualizací seznamu ${list.displayName}`, `Review pausing automatic updates for ${list.displayName}`)
+              : t(`Zkontrolovat obnovení automatických aktualizací seznamu ${list.displayName}`, `Review resuming automatic updates for ${list.displayName}`)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}
+          >
+            {list.enabled ? <ToggleRight size={20} aria-hidden="true" /> : <ToggleLeft size={20} aria-hidden="true" />}
+          </button>
+        </Can>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{list.displayName}</div>
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{list.listType}</div>
@@ -147,21 +165,23 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
         <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-tertiary)' }}>
           {list.lastUpdatedAt ? (
             <>
-              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString()} {t('záznamů', 'entries')}</div>
-              <div>{new Date(list.lastUpdatedAt).toLocaleString('cs-CZ')}</div>
+              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString(numberLocale)} {t('záznamů', 'entries')}</div>
+              <div>{new Date(list.lastUpdatedAt).toLocaleString(dateLocale)}</div>
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
         </div>
-        <button onClick={handleRefresh} disabled={refreshing}
+        <Can permission="sanctions:manage">
+        <button type="button" onClick={handleRefresh} disabled={refreshing} aria-busy={refreshing} aria-label={t('Stáhnout sankční seznam', 'Download sanctions list')}
           style={{ padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 600, border: '1px solid var(--border)',
             background: 'var(--surface-2)', color: 'var(--text-secondary)', cursor: refreshing ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {refreshing ? <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={11} />}
+          {refreshing ? <Loader2 size={11} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={11} aria-hidden="true" />}
           {t('Stáhnout', 'Download')}
         </button>
-        <button onClick={() => setExpanded(e => !e)}
+        </Can>
+        <button type="button" onClick={() => setExpanded(e => !e)} aria-expanded={expanded} aria-label={expanded ? t('Sbalit podrobnosti seznamu', 'Collapse list details') : t('Rozbalit podrobnosti seznamu', 'Expand list details')}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px', display: 'flex' }}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
         </button>
       </div>
       {expanded && (
@@ -172,7 +192,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
               style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{list.sourceUrl}</a>
           </div>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '2px' }}>{t('Plán stahování', 'Download schedule')}</div>
-          <CronEditor list={list} onSave={onSave} />
+          <Can permission="sanctions:manage"><CronEditor key={`${list.id}-${list.cronDays}-${list.cronHour}-${list.cronMinute}`} list={list} onSave={onSave} /></Can>
         </div>
       )}
     </div>
@@ -181,6 +201,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
 
 export default function SanctionsPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [tab, setTab] = useState<'checks'|'search'|'lists'>('checks')
   const [checks, setChecks] = useState<SanctionCheck[]>([])
   const [lists, setLists] = useState<SanctionsList[]>([])
@@ -200,7 +222,13 @@ export default function SanctionsPage() {
   const [listsError, setListsError] = useState('')
   // Selected list types for manual screening — initialised to all enabled lists once loaded
   const [selectedListTypes, setSelectedListTypes] = useState<string[]>([])
-  const [listScopeInitialised, setListScopeInitialised] = useState(false)
+  const listScopeInitialisedRef = useRef(false)
+  const [pendingListChange, setPendingListChange] = useState<SanctionsListChangeIntent | null>(null)
+  const [listChangeBusy, setListChangeBusy] = useState(false)
+  const [listChangeError, setListChangeError] = useState<SanctionsListChangeError>(null)
+  const [listChangeFocusRequest, setListChangeFocusRequest] = useState<ListChangeFocusRequest | null>(null)
+  const handledListChangeFocusRef = useRef<ListChangeFocusRequest | null>(null)
+  const listChangeTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   // Manual disposition of a hit (issue #3334). POST /api/v1/sanctions/review existed, was
   // publicly routed and had no caller anywhere in the product — so this queue could only grow.
@@ -220,6 +248,15 @@ export default function SanctionsPage() {
   const [queueUnavail, setQueueUnavail] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
   const [decideMsg, setDecideMsg] = useState('')
+  const [decisionIntent, setDecisionIntent] = useState<ApprovalDecisionIntent | null>(null)
+  const decisionTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const linkedApprovalId = readApprovalId(window.location.search)
+    if (!linkedApprovalId) return
+    const frame = requestAnimationFrame(() => setDecideId(linkedApprovalId))
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   const loadChecks = useCallback(async () => {
     setLoading(true)
@@ -250,17 +287,32 @@ export default function SanctionsPage() {
       const data = await res.json().catch(() => ([]))
       if (!res.ok) {
         const errorPayload = data as ApiError
-        setLists([])
         setListsError(errorPayload.error ?? t(`Načtení listů selhalo (HTTP ${res.status})`, `Failed to load lists (HTTP ${res.status})`))
         return
       }
-      setLists(Array.isArray(data) ? data : [])
+      const nextLists = Array.isArray(data) ? data as SanctionsList[] : []
+      setLists(nextLists)
+      // Reconciliation may reveal that an ambiguous PUT actually disabled a list. Remove only
+      // types that are no longer enabled; never add back a list the operator deliberately omitted.
+      //
+      // The ref flip must happen HERE, not inside the setSelectedListTypes updater: React
+      // StrictMode double-invokes updater functions in dev to catch impure ones, and an updater
+      // that mutates a ref as a side effect is exactly that — the throwaway first invocation
+      // flips the ref, so the real second invocation sees `initialised = true` with a still-empty
+      // `current` and takes the retain branch against nothing, permanently discarding the initial
+      // scope. Since `next dev` (not a prod build) backs the Playwright webServer, this reproduced
+      // on every single run (#9736).
+      if (!listScopeInitialisedRef.current) {
+        listScopeInitialisedRef.current = true
+        setSelectedListTypes(nextLists.filter(list => list.enabled).map(list => list.listType))
+      } else {
+        setSelectedListTypes(current => retainEnabledSelectedListTypes(current, nextLists))
+      }
     } catch (error) {
-      setLists([])
       setListsError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
     }
     finally { setListsLoading(false) }
-  }, [])
+  }, [t])
 
   const loadPendingQueue = useCallback(async () => {
     try {
@@ -281,15 +333,31 @@ export default function SanctionsPage() {
     }
   }, [])
 
-  useEffect(() => { loadChecks(); loadLists(); loadPendingQueue() }, [loadChecks, loadLists, loadPendingQueue])
-
-  // Once lists load for the first time, initialise scope to all enabled lists
   useEffect(() => {
-    if (!listScopeInitialised && lists.length > 0) {
-      setSelectedListTypes(lists.filter(lst => lst.enabled).map(lst => lst.listType))
-      setListScopeInitialised(true)
-    }
-  }, [lists, listScopeInitialised])
+    const initialLoad = window.setTimeout(() => {
+      void loadChecks()
+      void loadLists()
+      void loadPendingQueue()
+    }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [loadChecks, loadLists, loadPendingQueue])
+
+  // Restore focus only after React commits both dialog removal and the reconciled list controls.
+  // A one-shot animation frame can run while the loading branch still owns the panel, leaving only
+  // the detached initiating button to focus. A fresh request object also supports the same list
+  // being changed repeatedly without refocusing it on unrelated later renders.
+  useEffect(() => {
+    const request = listChangeFocusRequest
+    if (!request || handledListChangeFocusRef.current === request || pendingListChange || listsLoading) return
+
+    const stableControl = document.getElementById(listToggleControlId(request.listId))
+    const originalTrigger = listChangeTriggerRef.current
+    const target = stableControl instanceof HTMLButtonElement
+      ? stableControl
+      : originalTrigger?.isConnected ? originalTrigger : null
+    target?.focus()
+    handledListChangeFocusRef.current = request
+  }, [listChangeFocusRequest, listsLoading, pendingListChange])
 
   const handleScreen = async () => {
     if (!searchName.trim()) return
@@ -299,7 +367,6 @@ export default function SanctionsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
           idempotencyKey: `manual-${Date.now()}`,
           entityType: searchType,
           name: searchName.trim(),
@@ -321,15 +388,24 @@ export default function SanctionsPage() {
     setScreening(false)
   }
 
-  const handleToggleList = async (id: string, enabled: boolean) => {
-    setListsError('')
-    const res = await fetch(`/api/sanctions/lists/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) })
-    if (!res.ok) {
-      const errorPayload = await res.json().catch(() => ({ error: 'Update failed' })) as ApiError
-      setListsError(errorPayload.error ?? `Aktualizace listu selhala (HTTP ${res.status})`)
-      return
-    }
-    loadLists()
+  const requestListChange = (list: SanctionsList, enabled: boolean, trigger: HTMLButtonElement) => {
+    listChangeTriggerRef.current = trigger
+    setListChangeError(null)
+    setPendingListChange({ list, enabled })
+  }
+
+  const restoreListChangeFocus = (listId: string) => {
+    setListChangeFocusRequest({ listId })
+  }
+
+  const closeListChange = async () => {
+    if (listChangeBusy) return
+    const intent = pendingListChange
+    const mustReconcile = listChangeError !== null
+    setPendingListChange(null)
+    setListChangeError(null)
+    if (mustReconcile) await loadLists()
+    if (intent) restoreListChangeFocus(intent.list.id)
   }
 
   const handleRefreshList = async (listType: string) => {
@@ -379,12 +455,64 @@ export default function SanctionsPage() {
     setPendingApproval(null)
   }
 
+  // These are separate operations and must not block each other. The list-change lock prevents
+  // same-tick duplicate PUTs; the upstream endpoint is idempotent because it sets an explicit
+  // boolean target state. It does NOT create a maker-checker approval — sanctions.update is an
+  // immediate operation, unlike sanctions.clear below.
+  const listChangeFlight = useSingleFlight()
+  const reviewFlight = useSingleFlight()
+  const decideFlight = useSingleFlight()
+
+  const confirmListChange = async () => {
+    const intent = pendingListChange
+    if (!intent) return
+
+    const outcome = await listChangeFlight.run(`sanctions:list:${intent.list.id}`, async () => {
+      setListChangeBusy(true)
+      setListChangeError(null)
+      setListsError('')
+      try {
+        const res = await fetch(`/api/sanctions/lists/${intent.list.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: intent.enabled }),
+        })
+        if (!res.ok) {
+          setListChangeError(res.status === 401 || res.status === 403 ? 'unauthorized' : 'unconfirmed')
+          return
+        }
+
+        // A confirmed target-state PUT is safe to reflect immediately. Keep stale-list recovery:
+        // loadLists() reconciles with the service, but a failed follow-up GET must not undo the
+        // state the successful PUT already confirmed.
+        setLists(current => current.map(list => list.id === intent.list.id ? { ...list, enabled: intent.enabled } : list))
+        if (!intent.enabled) {
+          // The list scope is initialised only once, so a list disabled later would otherwise stay
+          // selected and the next manual check would still send it explicitly.
+          setSelectedListTypes(current => current.filter(listType => listType !== intent.list.listType))
+        }
+        setPendingListChange(null)
+        setListChangeError(null)
+        await loadLists()
+        restoreListChangeFocus(intent.list.id)
+      } catch {
+        // A dropped response is ambiguous: the server may have applied the idempotent target state.
+        // Keep the dialog open and never claim that nothing changed.
+        setListChangeError('unconfirmed')
+      } finally {
+        setListChangeBusy(false)
+      }
+    })
+    if (wasSkipped(outcome)) return
+  }
+
   /** Submit a disposition. `approvalId` is set only on the post-approval retry. */
   const submitReview = async (checkId: string, approvalId?: string) => {
     if (!reviewNote.trim()) {
       setReviewError(t('Poznámka je povinná — je to auditní stopa rozhodnutí.', 'A note is required — it is the audit trail for this decision.'))
       return
     }
+    const outcome = await reviewFlight.run(`sanctions:review:${checkId}`, async () => {
     setReviewBusy(true)
     setReviewError('')
     try {
@@ -427,13 +555,17 @@ export default function SanctionsPage() {
     } finally {
       setReviewBusy(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
 
   /** Checker half of the four-eyes gate. A maker deciding their own request gets 403 upstream. */
-  const decideApproval = async (approve: boolean) => {
-    const id = decideId.trim()
-    if (!id) return
+  const decideApproval = async (approval: PendingApprovalItem, approve: boolean): Promise<boolean> => {
+    const id = approval.id.trim()
+    if (!id) return false
+    let succeeded = false
+    const outcome = await decideFlight.run(`sanctions:decide:${id}`, async () => {
     setDecideBusy(true)
     setDecideMsg('')
     try {
@@ -453,6 +585,7 @@ export default function SanctionsPage() {
       setDecideMsg(approve
         ? t('Schváleno. Maker nyní může akci zopakovat.', 'Approved. The maker can now retry the action.')
         : t('Zamítnuto.', 'Rejected.'))
+      succeeded = true
       setDecideId('')
       await loadPendingQueue()
     } catch {
@@ -460,6 +593,30 @@ export default function SanctionsPage() {
     } finally {
       setDecideBusy(false)
     }
+    })
+    if (wasSkipped(outcome)) return false
+    return succeeded
+  }
+
+  const openApprovalDecision = (approve: boolean, trigger: HTMLElement) => {
+    const id = decideId.trim()
+    if (!id) return
+    decisionTriggerRef.current = trigger
+    setDecideMsg('')
+    setDecisionIntent({
+      approval: pendingQueue.find(item => item.id === id) ?? {
+        id,
+        action: t('Ručně zadaná sankční žádost', 'Manually entered sanctions approval'),
+        status: 'PENDING',
+      },
+      approve,
+    })
+  }
+
+  const closeApprovalDecision = () => {
+    if (decideBusy) return
+    setDecisionIntent(null)
+    requestAnimationFrame(() => decisionTriggerRef.current?.focus())
   }
 
   const filtered = checks.filter(c =>
@@ -472,24 +629,19 @@ export default function SanctionsPage() {
   const pending = checks.filter(c => c.status === 'POTENTIAL_HIT')
 
   const TABS = [
-    { id: 'checks' as const, label: t('Záznamy kontrol', 'Check Records'), icon: <ShieldAlert size={13} /> },
-    { id: 'search' as const, label: t('Manuální vyhledávání', 'Manual Search'), icon: <Search size={13} /> },
-    { id: 'lists' as const, label: t('Správa listů', 'List Management'), icon: <List size={13} /> },
+    { id: 'checks' as const, label: t('Záznamy kontrol', 'Check Records'), icon: <ShieldAlert size={13} aria-hidden="true" /> },
+    { id: 'search' as const, label: t('Manuální vyhledávání', 'Manual Search'), icon: <Search size={13} aria-hidden="true" /> },
+    { id: 'lists' as const, label: t('Správa listů', 'List Management'), icon: <List size={13} aria-hidden="true" /> },
   ]
 
   return (
-    <AuthGuard permission="compliance:view">
+    <AuthGuard permission="sanctions:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '24px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Prověření sankcí', 'Sanctions Screening')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB', 'OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB')}
-            </p>
-          </div>
-          <ServiceStatusBadge
+        <PageHeader
+          title={t('Prověření sankcí', 'Sanctions Screening')}
+          subtitle={t('OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB', 'OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB')}
+          icon={<ShieldAlert size={18} aria-hidden="true" />}
+          actions={<ServiceStatusBadge
             label="sanctions-service :8123"
             loading={loading}
             unavailable={checksUnavail}
@@ -499,8 +651,8 @@ export default function SanctionsPage() {
               down: t('sanctions-service neodpovídá', 'sanctions-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
             }}
-          />
-        </div>
+          />}
+        />
 
         {hits.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
@@ -515,26 +667,21 @@ export default function SanctionsPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Kontrol celkem', 'Total Checks'), value: checks.length, icon: <ShieldAlert size={16} />, color: 'var(--accent)' },
-            { label: t('Shody (HIT)', 'Matches (HIT)'), value: hits.length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
-            { label: t('Čisté', 'Clear'), value: clear.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
+            { label: t('Kontrol celkem', 'Total Checks'), value: checks.length, icon: <ShieldAlert size={16} />, tone: undefined },
+            { label: t('Shody (HIT)', 'Matches (HIT)'), value: hits.length, icon: <AlertTriangle size={16} />, tone: 'danger' },
+            { label: t('Čisté', 'Clear'), value: clear.length, icon: <CheckCircle2 size={16} />, tone: 'success' },
+            { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, tone: 'warning' },
           ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
+            <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone as Tone | undefined} />
           ))}
         </div>
 
         <div className="card">
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 4px' }}>
+          <div role="group" aria-label={t('Sekce sankčního workflow', 'Sanctions workflow sections')} style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 4px' }}>
             {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
+              <button key={t.id} type="button" aria-pressed={tab === t.id} aria-label={t.label} onClick={() => setTab(t.id)}
                 style={{ padding: '12px 16px', fontSize: '13px', fontWeight: tab === t.id ? 700 : 500,
-                  color: tab === t.id ? 'var(--accent)' : 'var(--text-secondary)',
+                  color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)',
                   background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 {t.icon}{t.label}
@@ -547,12 +694,12 @@ export default function SanctionsPage() {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
                   <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')}
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')} aria-label={t('Hledat sankční kontroly', 'Search sanctions checks')}
                     style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
-                <button onClick={loadChecks} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <RefreshCw size={12} />{t('Obnovit', 'Refresh')}
+                <button type="button" aria-busy={loading} aria-label={t('Obnovit sankční kontroly', 'Refresh sanctions checks')} onClick={loadChecks} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <RefreshCw size={12} aria-hidden="true" />{t('Obnovit', 'Refresh')}
                 </button>
               </div>
               {loading ? (
@@ -576,9 +723,9 @@ export default function SanctionsPage() {
                     const isPending = c.status === 'POTENTIAL_HIT'
                     return (
                       <Fragment key={c.id}>
-                      <tr style={{ borderBottom: '1px solid var(--border)', background: isHit ? 'rgba(239,68,68,0.03)' : '' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = isHit ? 'rgba(239,68,68,0.06)' : 'var(--surface-2)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = isHit ? 'rgba(239,68,68,0.03)' : '')}>
+                      <tr style={{ borderBottom: '1px solid var(--border)', background: isHit ? 'color-mix(in srgb, var(--danger-bg) 45%, transparent)' : '' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = isHit ? 'color-mix(in srgb, var(--danger-bg) 70%, transparent)' : 'var(--surface-2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = isHit ? 'color-mix(in srgb, var(--danger-bg) 45%, transparent)' : '')}>
                         <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <User size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />{c.name}
@@ -600,15 +747,17 @@ export default function SanctionsPage() {
                           </div>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                            background: isHit ? 'var(--danger-bg)' : isPending ? 'var(--warning-bg)' : 'var(--success-bg)',
-                            color: isHit ? 'var(--danger-text)' : isPending ? 'var(--warning-text)' : 'var(--success-text)',
-                            border: `1px solid ${isHit ? 'var(--danger-border)' : isPending ? 'var(--warning-border)' : 'var(--success-border)'}` }}>
-                            {c.status}
-                          </span>
+                          {/* Delegated to StatusBadge/tone.ts on purpose. The hand-rolled ternary
+                              this replaces read `isHit ? danger : isPending ? warning : success`,
+                              so ESCALATED — a real SanctionsCheck value that isHighRisk() treats as
+                              high risk — rendered GREEN, as did any status the UI had not been
+                              taught. statusTone() resolves an unrecognised value to `neutral`,
+                              never `success`, which is the property that makes this safe by
+                              default rather than by enumeration. */}
+                          <StatusBadge status={c.status} />
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString('cs-CZ') : '—'}
+                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString(dateLocale) : '—'}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px' }}>
                           {c.reviewedBy ? (
@@ -616,15 +765,17 @@ export default function SanctionsPage() {
                               {t('Rozhodl', 'By')} {c.reviewedBy}
                             </span>
                           ) : (isHit || isPending) ? (
-                            <button onClick={() => openReview(c)} disabled={reviewFor === c.id}
-                              style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)',
-                                color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: reviewFor === c.id ? 'default' : 'pointer' }}>
-                              {t('Posoudit', 'Review')}
-                            </button>
+                            <Can permission="sanctions:review">
+                              <button type="button" onClick={() => openReview(c)} disabled={reviewFor === c.id}
+                                style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)',
+                                  color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: reviewFor === c.id ? 'default' : 'pointer' }}>
+                                {t('Posoudit', 'Review')}
+                              </button>
+                            </Can>
                           ) : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
                         </td>
                       </tr>
-                      {reviewFor === c.id && (
+                      {reviewFor === c.id && <Can permission="sanctions:review">
                         <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                           <td colSpan={7} style={{ padding: '16px' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '640px' }}>
@@ -647,7 +798,7 @@ export default function SanctionsPage() {
                                   </code>
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Zopakovat po schválení', 'Retry once approved')}
                                     </button>
                                     <button onClick={() => { setReviewFor(null); setPendingApproval(null) }}
@@ -660,10 +811,10 @@ export default function SanctionsPage() {
                                 <>
                                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                      <label htmlFor="sanctions-review-status" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                         {t('Nový stav', 'New status')}
                                       </label>
-                                      <select value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
+                                      <select id="sanctions-review-status" value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
                                         style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                                         <option value="CLEAR">{t('CLEAR — falešná shoda', 'CLEAR — false positive')}</option>
                                         <option value="WHITELISTED">{t('WHITELISTED — trvale povoleno', 'WHITELISTED — permanently allowed')}</option>
@@ -673,10 +824,10 @@ export default function SanctionsPage() {
                                     </div>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    <label htmlFor="sanctions-review-note" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                       {t('Odůvodnění *', 'Rationale *')}
                                     </label>
-                                    <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
+                                    <textarea id="sanctions-review-note" value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
                                       placeholder={t('Proč je toto rozhodnutí správné — jde o auditní stopu.', 'Why this decision is correct — this is the audit trail.')}
                                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', resize: 'vertical' }} />
                                   </div>
@@ -685,7 +836,7 @@ export default function SanctionsPage() {
                                   )}
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
+                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Odeslat rozhodnutí', 'Submit decision')}
                                     </button>
                                     <button onClick={() => setReviewFor(null)}
@@ -698,17 +849,16 @@ export default function SanctionsPage() {
                             </div>
                           </td>
                         </tr>
-                      )}
+                      </Can>}
                       </Fragment>
                     )
                   })}</tbody>
                 </table>
               )}
 
-              {/* Checker half of the four-eyes gate. It is an id field rather than a queue because
-                  sanctions-service exposes no pending-approvals list endpoint — ApprovalResource
-                  serves only PATCH /{id}, so the id has to be handed over out of band. The
-                  ADR-0227 inbox federates lending and agent only, and is read-only by design. */}
+              {/* Checker half of the four-eyes gate. The served queue is authoritative; manual ID
+                  entry remains a recovery path for an approval handed over out of band. */}
+              <Can permission="sanctions:review" fallback={<div style={{ padding: '16px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '12px' }}>{t('Rozhodování sankčních žádostí je dostupné pouze operátorům a administrátorům.', 'Sanctions decisions are available to operators and administrators only.')}</div>}>
               <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
                 <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -740,10 +890,10 @@ export default function SanctionsPage() {
                               {a.action}{a.makerId ? ` — ${t('žádá', 'asked by')} ${a.makerId}` : ''}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString('cs-CZ')}` : ''}
+                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString(dateLocale)}` : ''}
                             </div>
                           </div>
-                          <button onClick={() => setDecideId(a.id)}
+                          <button type="button" onClick={() => setDecideId(a.id)}
                             style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent',
                               color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
                             {t('Vybrat', 'Select')}
@@ -753,53 +903,55 @@ export default function SanctionsPage() {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
+                    <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
                         fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
-                    <button onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()}
-                      style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: '#fff', fontSize: '12px', fontWeight: 600,
+                    <button type="button" onClick={event => openApprovalDecision(true, event.currentTarget)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
+                      style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600,
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Schválit', 'Approve')}
                     </button>
-                    <button onClick={() => decideApproval(false)} disabled={decideBusy || !decideId.trim()}
+                    <button type="button" onClick={event => openApprovalDecision(false, event.currentTarget)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px',
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Zamítnout', 'Reject')}
                     </button>
                   </div>
-                  {decideMsg && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
+                  {decideMsg && !decisionIntent && <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
                 </div>
               </div>
+              </Can>
             </>
           )}
 
           {tab === 'search' && (
+            <Can permission="sanctions:screen" fallback={<DataUnavailable kind="unauthorized" feature={t('Manuální sankční prověření', 'Manual sanctions screening')} lang={language} />}>
             <div style={{ padding: '24px' }}>
               <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Manuální prověření entity', 'Manual entity screening')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
-                  <input value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
+                  <label htmlFor="sanctions-search-name" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
+                  <input id="sanctions-search-name" value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
                     onKeyDown={e => e.key === 'Enter' && handleScreen()}
                     style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
-                    <select value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
+                    <label htmlFor="sanctions-search-type" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
+                    <select id="sanctions-search-type" value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                       <option value="INDIVIDUAL">{t('Fyzická osoba', 'Individual')}</option>
                       <option value="ORGANIZATION">{t('Organizace', 'Organisation')}</option>
                     </select>
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
-                    <input value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
+                    <label htmlFor="sanctions-search-dob" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
+                    <input id="sanctions-search-dob" value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }} />
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
-                    <input value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
+                    <label htmlFor="sanctions-search-nationality" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
+                    <input id="sanctions-search-nationality" value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
                       placeholder="CZ" maxLength={2}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} />
                   </div>
@@ -810,13 +962,13 @@ export default function SanctionsPage() {
                     <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       {t('Rozsah prověření', 'Search scope')}
                     </label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => setSelectedListTypes(lists.map(lst => lst.listType))}
-                        style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                    <div role="group" aria-label={t('Výběr všech sankčních listů', 'Select sanctions lists')} style={{ display: 'flex', gap: '8px' }}>
+                      <button type="button" onClick={() => setSelectedListTypes(lists.filter(lst => lst.enabled).map(lst => lst.listType))}
+                        style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent-text)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                         {t('Vše', 'All')}
                       </button>
                       <span style={{ color: 'var(--border)', fontSize: '11px' }}>·</span>
-                      <button onClick={() => setSelectedListTypes([])}
+                      <button type="button" onClick={() => setSelectedListTypes([])}
                         style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                         {t('Nic', 'None')}
                       </button>
@@ -832,27 +984,37 @@ export default function SanctionsPage() {
                         const checked = selectedListTypes.includes(lst.listType)
                         const isPep = lst.displayName.toLowerCase().includes('pep') || lst.listType.toLowerCase().includes('pep')
                         return (
-                          <label key={lst.listType} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', padding: '6px 8px', borderRadius: '5px',
-                            background: checked ? (isPep ? 'rgba(168,85,247,0.07)' : 'rgba(99,102,241,0.07)') : 'transparent',
-                            border: `1px solid ${checked ? (isPep ? 'rgba(168,85,247,0.25)' : 'rgba(99,102,241,0.25)') : 'transparent'}`,
+                          <label key={lst.listType} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: lst.enabled ? 'pointer' : 'not-allowed', padding: '6px 8px', borderRadius: '5px',
+                            background: checked ? (isPep ? 'var(--accent-bg)' : 'var(--info-bg)') : 'transparent',
+                            border: `1px solid ${checked ? (isPep ? 'var(--accent-border)' : 'var(--info-border)') : 'transparent'}`,
                             transition: 'all 0.15s', opacity: lst.enabled ? 1 : 0.5 }}>
                             <input
                               type="checkbox"
                               checked={checked}
+                              disabled={!lst.enabled}
                               onChange={e => setSelectedListTypes(prev =>
                                 e.target.checked ? [...prev, lst.listType] : prev.filter(x => x !== lst.listType)
                               )}
-                              style={{ width: '13px', height: '13px', marginTop: '1px', accentColor: isPep ? 'rgb(168,85,247)' : 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                              style={{ width: '13px', height: '13px', marginTop: '1px', accentColor: 'var(--accent)', cursor: lst.enabled ? 'pointer' : 'not-allowed', flexShrink: 0 }}
                             />
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '12px', fontWeight: 600, color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', lineHeight: 1.3 }}>
                                 {lst.displayName}
-                                {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'rgb(168,85,247)', background: 'rgba(168,85,247,0.1)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
+                                {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
                                 {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString()} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
+                              {/* A checked row paints --accent-bg (#eef2ff) behind this line, and
+                                  --text-tertiary (#64748b) on it measures 4.26:1 — under the 4.5:1
+                                  AA floor this page's own axe assertion enforces. --text-secondary
+                                  is 6.78:1 on the same surface, so a selected row steps up one
+                                  EXISTING token rather than the palette moving fleet-wide (#9749).
+                                  Unchecked rows keep the tertiary tone on --surface-2, where it
+                                  has always cleared AA. Reachable only since #9751 fixed the
+                                  selection — before that no row was ever checked, so the assertion
+                                  never ran against this state. */}
+                              <div style={{ fontSize: '10px', color: checked ? 'var(--text-secondary)' : 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString(numberLocale)} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
                               </div>
                             </div>
                           </label>
@@ -867,13 +1029,13 @@ export default function SanctionsPage() {
                   )}
                 </div>
 
-                <button onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
+                <button type="button" aria-busy={screening} aria-label={screening ? t('Prověřování probíhá', 'Screening in progress') : t('Spustit prověření sankcí', 'Run sanctions screening')} onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
                   style={{ padding: '10px 20px', borderRadius: '7px', fontSize: '13px', fontWeight: 700,
-                    background: 'var(--accent)', color: 'white', border: 'none',
+                    background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
                     cursor: screening || !searchName.trim() || selectedListTypes.length === 0 ? 'not-allowed' : 'pointer',
                     opacity: screening || !searchName.trim() || selectedListTypes.length === 0 ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' }}>
-                  {screening ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Play size={14} />}
+                  {screening ? <Loader2 size={14} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Play size={14} aria-hidden="true" />}
                   {screening ? t('Prověřuji…', 'Screening…') : t('Spustit prověření', 'Run screening')}
                   {!screening && selectedListTypes.length > 0 && selectedListTypes.length < lists.length && (
                     <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.8 }}>
@@ -886,15 +1048,34 @@ export default function SanctionsPage() {
                     {screenError}
                   </div>
                 )}
-                {screenResult && (
-                  <div style={{ padding: '16px', borderRadius: '8px', border: `2px solid ${screenResult.status === 'HIT' ? 'var(--danger-border)' : 'var(--success-border)'}`,
-                    background: screenResult.status === 'HIT' ? 'var(--danger-bg)' : 'var(--success-bg)' }}>
+                {screenResult && (() => {
+                  /* Only CLEAR and WHITELISTED may say "clear record". The previous code gated on
+                     `status === 'HIT'` alone, so POTENTIAL_HIT, ESCALATED and any unrecognised
+                     value rendered a green box, a tick, and the literal text CLEAR RECORD --
+                     a false textual assertion that a screened name is clean, which is worse than
+                     the wrong colour. POTENTIAL_HIT is directly producible by the screening
+                     endpoint this panel renders.
+
+                     The default is deliberately the cautious one: anything this UI has not been
+                     taught reads as "review required", never as clear. Same property as
+                     statusTone(), which resolves an unknown value to `neutral` and never to
+                     `success`. */
+                  const isClear = screenResult.status === 'CLEAR' || screenResult.status === 'WHITELISTED'
+                  const tone = statusTone(screenResult.status)
+                  const headline = screenResult.status === 'HIT'
+                    ? t('SHODA NALEZENA', 'MATCH FOUND')
+                    : isClear
+                      ? t('ČISTÝ ZÁZNAM', 'CLEAR RECORD')
+                      : t('NUTNÁ KONTROLA', 'REVIEW REQUIRED')
+                  return (
+                  <div style={{ padding: '16px', borderRadius: '8px', border: `2px solid var(--${tone}-border)`,
+                    background: `var(--${tone}-bg)` }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                      {screenResult.status === 'HIT'
-                        ? <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />
-                        : <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />}
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: screenResult.status === 'HIT' ? 'var(--danger-text)' : 'var(--success-text)' }}>
-                        {screenResult.status === 'HIT' ? t('SHODA NALEZENA', 'MATCH FOUND') : t('ČISTÝ ZÁZNAM', 'CLEAR RECORD')}
+                      {isClear
+                        ? <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
+                        : <AlertTriangle size={18} style={{ color: `var(--${tone})` }} />}
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: `var(--${tone}-text)` }}>
+                        {headline}
                       </span>
                       <span style={{ marginLeft: 'auto', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                         {t('Skóre', 'Score')}: {Math.round((screenResult.overallScore ?? 0) * 100)}%
@@ -909,7 +1090,7 @@ export default function SanctionsPage() {
                     {(screenResult.matches ?? []).length > 0 && (
                       <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {screenResult.matches.map((m, i) => (
-                          <div key={i} style={{ padding: '8px 10px', borderRadius: '5px', background: 'rgba(239,68,68,0.08)', fontSize: '12px' }}>
+                          <div key={i} style={{ padding: '8px 10px', borderRadius: '5px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: '12px' }}>
                             <strong>{m.listType}</strong> · {m.matchType} · {Math.round(m.matchScore * 100)}% · {m.matchedName}
                             {m.programs?.length > 0 && <span style={{ color: 'var(--text-tertiary)' }}> [{m.programs.join(', ')}]</span>}
                           </div>
@@ -917,25 +1098,38 @@ export default function SanctionsPage() {
                       </div>
                     )}
                   </div>
-                )}
+                  )})()}
               </div>
             </div>
+            </Can>
           )}
 
           {tab === 'lists' && (
             <div style={{ padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů aktivních', 'lists active')}
+                  {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů s automatickou aktualizací', 'lists with automatic updates')}
                 </div>
-                <button onClick={handleRefreshAll} disabled={refreshingAll}
-                  style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                    background: 'var(--accent)', color: 'white', border: 'none',
-                    cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
-                    display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {refreshingAll ? <Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} /> : <RefreshCw size={12} />}
-                  {t('Stáhnout vše', 'Download all')}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button type="button" aria-busy={listsLoading} aria-label={t('Obnovit stav sankčních listů', 'Refresh sanctions-list status')} onClick={() => void loadLists()} disabled={listsLoading}
+                    style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                      background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)',
+                      cursor: listsLoading ? 'not-allowed' : 'pointer', opacity: listsLoading ? 0.7 : 1,
+                      display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <RefreshCw size={12} aria-hidden="true" style={listsLoading ? { animation: 'spin 0.8s linear infinite' } : undefined} />
+                    {t('Obnovit stav', 'Refresh status')}
+                  </button>
+                  <Can permission="sanctions:manage">
+                  <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
+                    style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                      background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
+                      cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
+                      display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={12} aria-hidden="true" />}
+                    {t('Stáhnout vše', 'Download all')}
+                  </button>
+                  </Can>
+                </div>
               </div>
               {listsLoading ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
@@ -943,19 +1137,29 @@ export default function SanctionsPage() {
                 </div>
               ) : lists.length === 0 ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-                  {listsError || t('Žádné sankční listy nenalezeny. Zkontrolujte připojení ke službě.', 'No sanctions lists found. Check service connection.')}
+                  <div>{listsError || t('Žádné sankční listy nenalezeny. Zkontrolujte připojení ke službě.', 'No sanctions lists found. Check service connection.')}</div>
+                  {listsError && (
+                    <button type="button" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}
+                      style={{ marginTop: '12px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                      {t('Zkusit znovu', 'Try again')}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
                   {listsError && (
-                    <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '7px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: '13px', color: 'var(--danger-text)' }}>
-                      {listsError}
+                    <div role="status" aria-live="polite" style={{ marginBottom: '12px', padding: '12px', borderRadius: '7px', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <span>{t('Obnovení se nezdařilo; zobrazená konfigurace sankčních listů je poslední dostupná.', 'Refresh failed; the displayed sanctions-list configuration is the last available.')} {listsError}</span>
+                      <button type="button" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}
+                        style={{ flexShrink: 0, padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                        {t('Zkusit znovu', 'Try again')}
+                      </button>
                     </div>
                   )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {lists.map(list => (
                       <ListCard key={list.id} list={list}
-                        onToggle={handleToggleList}
+                        onToggle={requestListChange}
                         onRefresh={handleRefreshList}
                         onSave={handleSaveCron} />
                     ))}
@@ -966,6 +1170,24 @@ export default function SanctionsPage() {
           )}
         </div>
       </div>
+      {pendingListChange && <SanctionsListChangeDialog
+        list={pendingListChange.list}
+        enabled={pendingListChange.enabled}
+        busy={listChangeBusy}
+        error={listChangeError}
+        onCancel={() => void closeListChange()}
+        onConfirm={() => void confirmListChange()}
+      />}
+      {decisionIntent && <SanctionsApprovalDecisionDialog
+        intent={decisionIntent}
+        busy={decideBusy}
+        message={decideMsg}
+        onCancel={closeApprovalDecision}
+        onConfirm={async () => {
+          const succeeded = await decideApproval(decisionIntent.approval, decisionIntent.approve)
+          if (succeeded) setDecisionIntent(null)
+        }}
+      />}
     </AuthGuard>
   )
 }

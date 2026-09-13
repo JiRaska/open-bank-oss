@@ -178,10 +178,33 @@ class CustomerDocumentResource(private val upstream: UpstreamClient, private val
 
     // ── Internals ───────────────────────────────────────────────────────────────────────────
 
-    private fun partyId(): String = CustomerEdgeResource.resolvePartyIdClaim(
-        partyIdClaim = jwt.getClaim<String>("party_id"),
-        sub = jwt.subject,
-    ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
+    // ADR-0284 D4: an owner sharing a BUSINESS account (or reading a business document) does it
+    // while acting for the entity, so the profile switch applies here exactly as on the main
+    // resource. Fail-closed; a request without the header is the personal profile as before.
+    @Inject
+    lateinit var actingForResolver: ActingForResolver
+
+    @jakarta.ws.rs.core.Context
+    lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
+
+    private fun partyId(): String {
+        val claimed = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = jwt.getClaim<String>("party_id"),
+            sub = jwt.subject,
+        ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
+        val human = runCatching {
+            UUID.fromString(claimed)
+        }.getOrElse { throw ForbiddenException("party_id claim is not a valid party UUID") }
+        val actingFor = if (this::requestHeaders.isInitialized) {
+            requestHeaders.getHeaderString(
+                CustomerEdgeResource.ACTING_FOR_HEADER,
+            )
+        } else {
+            null
+        }
+        val resolved = if (this::actingForResolver.isInitialized) actingForResolver.resolve(human, actingFor) else human
+        return resolved.toString()
+    }
 
     private fun ownerPartyOf(response: Response): String? =
         runCatching { json.readTree(response.entity as? String ?: return null).get("partyRef")?.asText() }.getOrNull()

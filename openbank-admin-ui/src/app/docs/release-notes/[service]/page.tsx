@@ -15,6 +15,7 @@ import { fetchReleaseNotes, SERVICE_RE } from '@/lib/docs/releases'
 import { prettyLabel } from '@/lib/discovery'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 import styles from './ReleaseNotes.module.css'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 interface PageProps {
   params: Promise<{ service: string }>
@@ -43,30 +44,24 @@ export default async function ReleaseNotesPage({ params }: PageProps) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs/api" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Poznámky k vydání', 'Release Notes')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Tag size={18} style={{ color: 'var(--accent)' }} />
-            {label} — {t('Poznámky k vydání', 'Release Notes')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={`${label} — ${t('Poznámky k vydání', 'Release Notes')}`}
+        subtitle={t(
               'Publikovaná vydání služby (release-please / GitHub Releases).',
               'Published service releases (release-please / GitHub Releases).',
             )}
-          </p>
-        </div>
-        <Link href="/docs/api" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        icon={<Tag aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs/api" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na API katalog', 'Back to API catalog')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       {!valid ? (
         <div className="card" style={{ padding: '24px' }}>

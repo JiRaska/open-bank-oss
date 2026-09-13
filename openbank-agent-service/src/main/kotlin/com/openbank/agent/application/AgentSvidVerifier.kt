@@ -5,7 +5,9 @@
 
 package com.openbank.agent.application
 
+import com.openbank.agent.application.port.out.NonceStore
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.io.ByteArrayInputStream
@@ -17,7 +19,6 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Date
 import java.util.Optional
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * ADR-0031 D3b (verify side): verifies a proof-of-possession over a short-TTL OpenBao-issued client
@@ -46,14 +47,17 @@ class AgentSvidVerifier(
     caCertPem: Optional<String>,
     @ConfigProperty(name = "agent.identity.svid.max-skew-seconds", defaultValue = "60")
     private val maxSkewSeconds: Long,
+    /**
+     * Single-use nonce claim, injected so replay protection can be backed by a store the whole
+     * fleet's replicas share (issue #4728) rather than this class's own per-pod map. See
+     * [NonceStore]'s KDoc for the durability rationale and the two bindings.
+     */
+    private val nonceStore: NonceStore,
 ) {
     private val log = Logger.getLogger(AgentSvidVerifier::class.java)
 
     /** Trust anchor: the pki-agent CA. Blank/unparseable config → SVID disabled (fail to header binding). */
     private val caCert: X509Certificate? = parseCaOrNull(caCertPem.orElse(""))
-
-    /** Single-use nonce cache; each entry expires after the max time a PoP can stay fresh. */
-    private val seenNonces = ConcurrentHashMap<String, Instant>()
 
     val enabled: Boolean get() = caCert != null
 
@@ -89,7 +93,7 @@ class AgentSvidVerifier(
         if (!popVerifies(leaf, popB64, "$ts.$nonce")) return SvidResult.Rejected("PoP signature does not verify")
         // Resolve the CN before consuming the nonce, so a no-CN cert doesn't burn a nonce.
         val agentId = cnOf(leaf) ?: return SvidResult.Rejected("certificate has no CN")
-        if (!consumeNonce(nonce, now)) return SvidResult.Rejected("replayed nonce")
+        if (!consumeNonce(nonce)) return SvidResult.Rejected("replayed nonce")
         return SvidResult.Verified(agentId)
     }
 
@@ -113,12 +117,14 @@ class AgentSvidVerifier(
         }.getOrDefault(false)
     }
 
-    /** Atomically claim [nonce]; false when already seen (replay). Evicts expired entries lazily. */
-    private fun consumeNonce(nonce: String, now: Instant): Boolean {
-        if (seenNonces.size > MAX_NONCES) seenNonces.values.removeIf { it.isBefore(now) }
-        val expiry = now.plusSeconds(maxSkewSeconds * NONCE_TTL_MULTIPLIER)
-        return seenNonces.putIfAbsent(nonce, expiry) == null
-    }
+    /**
+     * Atomically claim [nonce]; false when already seen (replay). Bridges to the suspend
+     * [NonceStore] port from this class's synchronous API — the same `runBlocking` bridge this
+     * service already uses at its MCP entry point (`McpEndpoint.handle`) for the equally
+     * synchronous JAX-RS/`@Blocking`-worker-thread call path.
+     */
+    private fun consumeNonce(nonce: String): Boolean =
+        runBlocking { nonceStore.claim(nonce, maxSkewSeconds * NONCE_TTL_MULTIPLIER) }
 
     private fun cnOf(cert: X509Certificate): String? =
         CN_PATTERN.find(cert.subjectX500Principal.name)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
@@ -150,7 +156,6 @@ class AgentSvidVerifier(
     }
 
     private companion object {
-        const val MAX_NONCES = 10_000
         const val NONCE_TTL_MULTIPLIER = 2L
         const val PEM_MARKER = "BEGIN CERTIFICATE"
         val CN_PATTERN = Regex("CN=([^,]+)")

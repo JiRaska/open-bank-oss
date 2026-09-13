@@ -23,6 +23,6 @@ This is a **money-path service** (`rules.yaml: money_path_services`): changes ne
 - **Port:** 8116 (app), 8085 (management, root-path `/q`)
 - **Persistence:** dedicated database `openbank_domestic_payments`, Flyway migrations V1..V5 (governance manifest declares logical schema name `domestic_schema`)
 - **Outbox:** `domestic_payment_outbox` → Kafka topic `openbank.domestic.payment.events` (channel `events-out`)
-- **Idempotency:** `Idempotency-Key` header (required on create) → Redis-backed `IdempotencyStore`
+- **Idempotency:** `Idempotency-Key` is durably bound to the normalized request + actor in PostgreSQL
 - **Auth:** Keycloak OIDC; mutations require `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`; OPA authz sidecar (ADR-0034, advisory by default)
 - **Screening:** synchronous sanctions screening of debtor + creditor names on create, fail-closed (ADR-0032)

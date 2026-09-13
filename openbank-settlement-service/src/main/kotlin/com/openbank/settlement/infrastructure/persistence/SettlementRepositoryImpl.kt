@@ -13,6 +13,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /** Panache reactive repository keyed by the domain UUID (not a surrogate id). */
@@ -62,6 +63,15 @@ class SettlementRepositoryImpl(private val repo: SettlementPanacheRepo, private 
                 entity?.toDomain() ?: throw IllegalArgumentException("Settlement $id not found")
             }
     }.awaitSuspending()
+
+    // Both queries are served by idx_settlements_status_created_at (V2). They run every 30s from
+    // SettlementStrandedGauge.refresh(), so they must not be sequential scans.
+    override suspend fun countByStatus(status: SettlementStatus): Long =
+        Panache.withSession { repo.count("status", status.name) }.awaitSuspending()
+
+    override suspend fun oldestCreatedAt(status: SettlementStatus): Instant? = Panache.withSession {
+        repo.find("status = ?1 order by createdAt asc", status.name).firstResult()
+    }.awaitSuspending()?.createdAt
 
     private fun SettlementEntity.toDomain() = Settlement(
         id = id,

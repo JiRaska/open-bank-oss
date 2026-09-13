@@ -5,6 +5,8 @@
 'use client'
 import { Shield, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -70,8 +72,8 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
       { req: ['Politika uchovávání dat', 'Data retention policy'], status: 'warn', note: ['data_retention_until (accounts + parties V2) — sloupec bez čtenáře v kódu, issue #2370', 'data_retention_until (accounts + parties V2) — column has no code reader, issue #2370'] },
       { req: ['Klasifikace citlivosti dat', 'Data sensitivity classification'], status: 'warn', note: ['data_sensitivity (audit_entries V2) — sloupec bez čtenáře v kódu, issue #2370', 'data_sensitivity (audit_entries V2) — column has no code reader, issue #2370'] },
       { req: ['Smlouva o zpracování osobních údajů (GDPR)', 'GDPR Data Processing Agreement'], status: 'warn', note: ['Vyžaduje právní dokumentaci (mimo scope systému)', 'Requires legal documentation (outside system scope)'] },
-      { req: ['Právo na přístup (Art. 15)', 'Right of access (Art. 15)'], status: 'ok', note: ['GET /api/v1/parties/{id}/gdpr-export agreguje party+kyc+cards (issue #268 uzavřen)', 'GET /api/v1/parties/{id}/gdpr-export aggregates party+kyc+cards (issue #268 closed)'] },
-      { req: ['Přenositelnost dat (Art. 20)', 'Data portability (Art. 20)'], status: 'warn', note: ['ADR-0204 rozhodl rozsah i formát (filtrovaná projekce Art. 15 exportu, jen consent/contract basis) a Art. 20(2) přímý přenos zamítl; endpoint zatím nepostavený — issue #2371', 'ADR-0204 decided scope and format (a filtered projection of the Art. 15 export, consent/contract basis only) and declined Art. 20(2) direct transmission; the endpoint is not built yet — issue #2371'] },
+      { req: ['Právo na přístup (Art. 15)', 'Right of access (Art. 15)'], status: 'ok', note: ['GET /api/v1/parties/{id}/gdpr-export agreguje party+kyc+cards (issue #268 uzavřen); subjekt si ho vyžádá sám přes GET /customer/v1/privacy/gdpr-export (issue #8421)', 'GET /api/v1/parties/{id}/gdpr-export aggregates party+kyc+cards (issue #268 closed); the subject reaches it themselves via GET /customer/v1/privacy/gdpr-export (issue #8421)'] },
+      { req: ['Přenositelnost dat (Art. 20)', 'Data portability (Art. 20)'], status: 'ok', note: ['ADR-0204 rozhodl rozsah i formát (filtrovaná projekce Art. 15 exportu, jen consent/contract basis) a Art. 20(2) přímý přenos zamítl; GET /api/v1/parties/{id}/gdpr-portability-export postaven, subjekt jej dosáhne přes GET /customer/v1/privacy/portability-export (issue #8421)', 'ADR-0204 decided scope and format (a filtered projection of the Art. 15 export, consent/contract basis only) and declined Art. 20(2) direct transmission; GET /api/v1/parties/{id}/gdpr-portability-export is built and the subject reaches it via GET /customer/v1/privacy/portability-export (issue #8421)'] },
     ],
   },
   {
@@ -119,15 +121,15 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
 ]
 
 const STATUS_CONFIG: Record<string, { label: Bilingual; color: string; bg: string; border: string; icon: React.ReactNode }> = {
-  compliant: { label: ['V souladu', 'Compliant'], color: '#16a34a', bg: '#f0fdf4', border: '#86efac', icon: <CheckCircle2 size={14} /> },
-  partial:   { label: ['Částečně', 'Partial'],    color: '#d97706', bg: '#fffbeb', border: '#fde68a', icon: <AlertTriangle size={14} /> },
-  gap:       { label: ['Mezera', 'Gap'],          color: '#dc2626', bg: '#fef2f2', border: '#fecaca', icon: <XCircle size={14} /> },
+  compliant: { label: ['V souladu', 'Compliant'], color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', icon: <CheckCircle2 size={14} /> },
+  partial:   { label: ['Částečně', 'Partial'],    color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', icon: <AlertTriangle size={14} /> },
+  gap:       { label: ['Mezera', 'Gap'],          color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', icon: <XCircle size={14} /> },
 }
 
 const ITEM_STATUS = {
-  ok:   { color: '#16a34a', icon: <CheckCircle2 size={12} /> },
-  warn: { color: '#d97706', icon: <AlertTriangle size={12} /> },
-  fail: { color: '#dc2626', icon: <XCircle size={12} /> },
+  ok:   { color: 'var(--success-text)', icon: <CheckCircle2 size={12} /> },
+  warn: { color: 'var(--warning-text)', icon: <AlertTriangle size={12} /> },
+  fail: { color: 'var(--danger-text)', icon: <XCircle size={12} /> },
 }
 
 export default function CompliancePage() {
@@ -137,38 +139,35 @@ export default function CompliancePage() {
   const warnItems = COMPLIANCE_AREAS.flatMap(a => a.items).filter(i => i.status === 'warn').length
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+    <div className="docs-printable">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Report compliance', 'Compliance Report')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Shield size={18} style={{ color: 'var(--accent)' }} />
-            {t('Report compliance', 'Compliance Report')}
-          </h1>
-          <p className="page-subtitle">{t('EBA · ČNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · připravenost na audit', 'EBA · CNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · audit readiness')}</p>
-        </div>
-      </div>
+          </>}
+        title={t('Report compliance', 'Compliance Report')}
+        subtitle={t('EBA · ČNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · připravenost na audit', 'EBA · CNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · audit readiness')}
+        icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<PrintDocumentButton />}
+      />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         {([
-          { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: '#16a34a', bg: '#f0fdf4' },
-          { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: '#d97706', bg: '#fffbeb' },
-          { id: 'coverage', label: ['Pokrytí', 'Coverage'] as Bilingual, value: `${Math.round(okItems/totalItems*100)}%`, total: null, color: '#2563eb', bg: '#eff6ff' },
-          { id: 'frameworks', label: ['Rámce', 'Frameworks'] as Bilingual, value: COMPLIANCE_AREAS.length, total: null, color: '#7c3aed', bg: '#faf5ff' },
+          { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+          { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+          { id: 'coverage', label: ['Pokrytí', 'Coverage'] as Bilingual, value: `${Math.round(okItems/totalItems*100)}%`, total: null, color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
+          { id: 'frameworks', label: ['Rámce', 'Frameworks'] as Bilingual, value: COMPLIANCE_AREAS.length, total: null, color: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' },
         ]).map(stat => (
           <div key={stat.id} style={{
-            padding: '16px', background: stat.bg, border: `1px solid ${stat.color}30`,
+            padding: '16px', background: stat.bg, border: `1px solid ${stat.border}`,
             borderRadius: 'var(--r-lg)',
           }}>
             <div style={{ fontSize: '24px', fontWeight: 700, color: stat.color }}>
-              {stat.value}{stat.total ? <span style={{ fontSize: '14px', opacity: 0.6 }}>/{stat.total}</span> : ''}
+              {stat.value}{stat.total ? <span style={{ fontSize: '14px' }}>/{stat.total}</span> : ''}
             </div>
-            <div style={{ fontSize: '12px', color: stat.color, opacity: 0.8, marginTop: '2px' }}>{t(...stat.label)}</div>
+            <div style={{ fontSize: '12px', color: stat.color, fontWeight: 600, marginTop: '2px' }}>{t(...stat.label)}</div>
           </div>
         ))}
       </div>
@@ -176,11 +175,11 @@ export default function CompliancePage() {
       {/* Disclaimer */}
       <div style={{
         padding: '12px 16px', marginBottom: '20px',
-        background: '#eff6ff', border: '1px solid #bfdbfe',
+        background: 'var(--info-bg)', border: '1px solid var(--info-border)',
         borderRadius: 'var(--r-lg)', display: 'flex', gap: '10px',
       }}>
-        <Info size={14} style={{ color: '#2563eb', flexShrink: 0, marginTop: '1px' }} />
-        <div style={{ fontSize: '12px', color: '#1e40af', lineHeight: 1.5 }}>
+        <Info size={14} style={{ color: 'var(--info-text)', flexShrink: 0, marginTop: '1px' }} />
+        <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
           {t('Tento report reflektuje technickou implementaci databázových schémat a API. Plná regulatorní compliance vyžaduje také právní dokumentaci, interní politiky, školení zaměstnanců a pravidelné audity. Doporučujeme konzultaci s regulatorním právníkem před podáním žádosti o bankovní licenci u ČNB.', 'This report reflects the technical implementation of database schemas and APIs. Full regulatory compliance also requires legal documentation, internal policies, staff training and regular audits. We recommend consulting a regulatory lawyer before applying for a banking licence with the CNB.')}
         </div>
       </div>

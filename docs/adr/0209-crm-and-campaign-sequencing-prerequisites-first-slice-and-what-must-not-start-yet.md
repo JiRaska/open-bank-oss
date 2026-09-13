@@ -1,16 +1,25 @@
 ---
 date: 2026-07-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [governance, architecture, ml, analytics]
 summary: "Sequences ADR-0199/0200/0201: extract the 14×-duplicated Temporal wiring into libs first, ship crm-service then campaign-service with deterministic segments only, and do not start the NBA model until ADR-0140 phase 2 exists."
+followup: "#2749 — crm-service and the NBA model (D4/D5) have not started, exactly as sequenced here; ADR-0140 phase 2 (offline snapshotter, as-of join) still does not exist"
 ---
 
 # ADR-0209 — CRM and campaign sequencing: prerequisites, first slice, and what must not start yet
+
+**Delivery note (2026-08-18).** The sequencing was followed, not just decided: the Temporal-wiring
+extraction (D1) shipped as `openbank-libs-temporal`, and `openbank-campaign-service` (ADR-0200)
+was built against it as a single shared module rather than a 15th copy. `crm-service` (ADR-0199)
+and the NBA model (ADR-0201 D4/D5) have not started — both still correctly blocked, ADR-0201 D5
+by the same missing ADR-0140 phase-2 offline store this ADR's Context section identifies. The
+"Fact 1" paragraph below (zero files, nothing built) is therefore a snapshot of 2026-07-26 and is
+no longer current; left unedited as the historical record this ADR was written against.
 
 ## Context
 

@@ -38,7 +38,7 @@ Roles: `ROLE_COMPLIANCE`, `ROLE_ADMIN`.
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/` | GDPR Art. 17 erasure against the analytics layer. Body `ErasureRequestDto { aggregateType, aggregateId }`. Returns an `ErasureDecision`: either crypto-shredded (`erased=true`) or **refused** under a statutory hold (Art. 17(3)(b)) with an auditable `legalBasis`/`explanation`. |
+| `POST` | `/` | GDPR Art. 17 erasure against the analytics layer. Body `ErasureRequestDto { aggregateType, aggregateId }`. Returns an `ErasureDecision` whose `outcome` is one of three: `ERASED` (crypto-shredded), `REFUSED_LEGAL_HOLD` (a statutory hold under Art. 17(3)(b) overrides erasure, with an auditable `legalBasis`/`explanation`), or `NO_BACKEND` (this build has no erasure backend, so the request stands unfulfilled — NOT a legal refusal, see #9671). `erased` is derived from `outcome` and is true only for `ERASED`. |
 
 ## Error model
 

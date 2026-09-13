@@ -5,6 +5,7 @@
 package com.openbank.cardissuance.infrastructure.crypto
 
 import com.openbank.cardissuance.application.port.out.CardSecretCipher
+import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -40,7 +41,15 @@ import javax.crypto.spec.SecretKeySpec
  * rejects it, correctly. A per-boot random key costs dev nothing (PANs simply do not survive a
  * restart, and no dev flow depends on that) and keeps the "no key material in the repo" rule
  * absolute rather than case-by-case.
+ *
+ * **Only the active key source is registered as a CDI bean.** `openbank.card.key-source` selects
+ * between this flat-key adapter and [OpenBaoEnvelopeCardSecretCipher] (ADR-0262) at BUILD time —
+ * `enableIfMissing = true` keeps this one the default so every deployment that has not opted into
+ * envelope encryption is unaffected. Mutually exclusive with the other adapter's own
+ * `@IfBuildProperty`, so exactly one `CardSecretCipher` bean — and one `@Startup` key load — exists
+ * per build, never both racing to require their own config at once.
  */
+@IfBuildProperty(name = "openbank.card.key-source", stringValue = "flat-key", enableIfMissing = true)
 @Startup
 @ApplicationScoped
 class AesGcmCardSecretCipher(

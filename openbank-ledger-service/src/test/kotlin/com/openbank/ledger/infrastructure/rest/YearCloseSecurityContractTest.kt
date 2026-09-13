@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -24,6 +25,9 @@ class YearCloseSecurityContractTest {
         return m.getAnnotation(RolesAllowed::class.java)?.value?.toList() ?: emptyList()
     }
 
+    private fun actionOf(resource: Class<*>, name: String): String =
+        resource.declaredMethods.single { it.name == name }.getAnnotation(Authorize::class.java).action
+
     @Test
     fun `reads are gated to service, auditor, viewer, operator and admin`() {
         listOf("trialBalance", "getYearClose").forEach { name ->
@@ -40,5 +44,11 @@ class YearCloseSecurityContractTest {
                 .describedAs("%s roles (statutory close state change)", name)
                 .containsExactlyInAnyOrder("ROLE_OPERATOR")
         }
+    }
+
+    @Test
+    fun `close draft maker action is distinct from service journal posting`() {
+        assertThat(actionOf(YearCloseResource::class.java, "createDraft")).isEqualTo("ledger.close.draft")
+        assertThat(actionOf(ClosedPeriodResource::class.java, "createDraft")).isEqualTo("ledger.close.draft")
     }
 }

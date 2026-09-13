@@ -5,6 +5,7 @@ package com.openbank.campaign.application.usecase
 
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -64,6 +65,7 @@ class CampaignPlanningQueryTest {
         id = UUID.randomUUID(),
         name = name,
         goal = "plan safely",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("actives", 1),
         steps = listOf(CampaignStep(1, "MARKETING_PRODUCT_OFFER_PUSH", Channel.PUSH, mapOf("offerTitle" to "T"), 0)),
         schedule = schedule,

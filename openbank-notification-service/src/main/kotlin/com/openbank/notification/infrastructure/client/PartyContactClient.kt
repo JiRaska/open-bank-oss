@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -32,6 +33,7 @@ import java.util.UUID
  * is exactly the thing a cache would get wrong.
  */
 @RegisterRestClient(configKey = "party-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)
@@ -39,6 +41,17 @@ interface PartyContactClient {
     @GET
     @Path("/{id}")
     fun getParty(@PathParam("id") id: UUID): Uni<PartyContactResponse>
+
+    /**
+     * Same read, bound to a narrower response — see [PartyIdentityResponse]. A second method
+     * rather than widening [PartyContactResponse]: the two callers ([PartyMergeResolver] and
+     * [com.openbank.notification.application.NotificationConsumer.resolveEmailRecipient]) want
+     * different, non-overlapping slices of the same record, and keeping them apart means neither
+     * accidentally starts depending on a field the other added.
+     */
+    @GET
+    @Path("/{id}")
+    fun getPartyIdentity(@PathParam("id") id: UUID): Uni<PartyIdentityResponse>
 }
 
 /**
@@ -48,3 +61,12 @@ interface PartyContactClient {
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PartyContactResponse(val email: String? = null)
+
+/**
+ * The two fields [PartyMergeResolver] needs to follow an ADR-0179 `merged_into` pointer: whether
+ * the party is retired, and if so, which party to follow instead. `@JsonIgnoreProperties` for the
+ * same reason as [PartyContactResponse] — this service has no business holding the rest of the
+ * record, which for a MERGED party still carries the retired customer's legalName/email/phone.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PartyIdentityResponse(val status: String? = null, val mergedIntoPartyId: UUID? = null)

@@ -82,8 +82,8 @@ class StandingOrderEntity {
     var status: StandingOrderStatus = StandingOrderStatus.ACTIVE
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @field:Column(name = "updated_at")
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }

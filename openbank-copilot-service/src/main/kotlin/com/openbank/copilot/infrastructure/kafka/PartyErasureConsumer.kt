@@ -9,6 +9,7 @@ import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.infrastructure.observability.CopilotMetricsAdapter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.delay
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
 import java.util.UUID
@@ -24,8 +25,24 @@ import java.util.UUID
  *
  * Shape is copied from the seven services that already consume this event (notification-service's
  * `PartyErasureConsumer` is the closest sibling): `suspend @Incoming` so Quarkus dispatches on a
- * Vert.x duplicated context and the reactive Panache delete below runs correctly; poison-pill safe,
- * so any parse or delete failure is logged and the message acked rather than wedging the group.
+ * Vert.x duplicated context and the reactive Panache delete below runs correctly.
+ *
+ * ## Failure handling — a malformed event and a broken database are not the same thing (#5698)
+ *
+ * This consumer used to log-and-ack BOTH, which reads as poison-pill safety and is not. A malformed
+ * payload is unretryable: replaying it produces the same parse failure forever, so acking it is the
+ * only sane outcome and it stays that way below. [ConversationStore.deleteForParty] is a reactive
+ * Panache call, and a connection-refused there is the opposite case — the event is fine, the
+ * database is not, and the work must still happen once it recovers. Acking that lost a GDPR Art. 17
+ * erasure permanently: the only trace was an ERROR line nobody alerts on, and the transcripts the
+ * consumer exists to delete stayed on disk while the log claimed the erasure was handled. That is
+ * the exact shape that left ten of 73 sandbox parties without a KYC case for months (#5698).
+ *
+ * So the delete now runs under [withBoundedRetry] and, if it still fails, is RETHROWN — the
+ * connector retries and ultimately dead-letters, which is a signal someone can see. The retry is
+ * bounded and the failure moves to the DLQ, so a single bad event still cannot wedge the group.
+ * [ConversationStore.deleteForParty] is idempotent (a second delete matches nothing), so both the
+ * retry and a connector redelivery are safe.
  *
  * ## Identity — why the delete is not keyed on the storage key (#3881)
  *
@@ -73,7 +90,7 @@ class PartyErasureConsumer {
             return
         }
 
-        try {
+        withBoundedRetry(partyId) {
             val erased = conversationStore.deleteForParty(partyId.toString())
             if (erased == 0L) {
                 // Not necessarily a defect — a party that never chatted holds nothing. But it is
@@ -94,8 +111,53 @@ class PartyErasureConsumer {
                     partyId,
                 )
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to erase copilot conversations for party %s", partyId)
         }
+    }
+
+    /**
+     * Retry [block] a bounded number of times, then RETHROW so the connector dead-letters.
+     *
+     * The rethrow is the point. A caught-and-logged failure acks the message, and an acked message
+     * that did no work is indistinguishable from one that succeeded — from Kafka, from the consumer
+     * lag metric, and from every dashboard built on either. Neither erasure counter is incremented
+     * on this path either, so a failed erasure is invisible in the metric as well as in the log.
+     */
+    @Suppress("TooGenericExceptionCaught") // the retry is type-agnostic on purpose: any failure of the
+    // delete is a failure to erase, and the bounded rethrow (not a swallow) is what keeps it visible.
+    private suspend fun withBoundedRetry(partyId: UUID, block: suspend () -> Unit) {
+        var attempt = 1
+        while (true) {
+            try {
+                block()
+                return
+            } catch (e: Exception) {
+                if (attempt >= MAX_ATTEMPTS) {
+                    log.errorf(
+                        e,
+                        "[party-events-in] Erasure for party %s failed after %d attempts (%s: %s) — dead-lettering",
+                        partyId,
+                        attempt,
+                        e.javaClass.simpleName,
+                        e.message,
+                    )
+                    throw e
+                }
+                log.warnf(
+                    "[party-events-in] Erasure for party %s failed (attempt %d/%d, %s: %s) — retrying",
+                    partyId,
+                    attempt,
+                    MAX_ATTEMPTS,
+                    e.javaClass.simpleName,
+                    e.message,
+                )
+                delay(RETRY_BACKOFF_MS * attempt)
+                attempt++
+            }
+        }
+    }
+
+    private companion object {
+        const val MAX_ATTEMPTS = 3
+        const val RETRY_BACKOFF_MS = 500L
     }
 }

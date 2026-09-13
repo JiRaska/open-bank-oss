@@ -52,6 +52,8 @@ import re
 import sys
 from pathlib import Path
 
+import gatelib
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASELINE = SCRIPT_DIR / "domain-purity-baseline.txt"
 
@@ -258,6 +260,9 @@ def read_baseline() -> list[str]:
 
 def run(root: Path) -> int:
     violations, scanned = scan(root)
+    # Printed before the local floor decides, so the manifest floor sees the count on both
+    # paths — a gate that lost its corpus must not also lose the evidence of having lost it.
+    gatelib.subjects(scanned, "domain-layer .kt files scanned")
     if scanned < MIN_FILES_SCANNED:
         print(
             f"::error::domain-purity: scanned only {scanned} file(s), expected at least "

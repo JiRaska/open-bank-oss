@@ -14,14 +14,24 @@ import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.smallrye.mutiny.Uni
+import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+
+private fun noOpEmitter(): MutinyEmitter<String> {
+    val emitter = mockk<MutinyEmitter<String>>()
+    every { emitter.sendMessage(any<Message<String>>()) } returns Uni.createFrom().voidItem()
+    return emitter
+}
 
 /**
  * Unit coverage for [LedgerOutboxEventPublisher] (ADR-0143 step 2): "publishing" an outbox row
@@ -58,7 +68,7 @@ class LedgerOutboxEventPublisherTest {
             coEvery { ledger.post(capture(commandSlot)) } returns journalId
             coEvery { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments).publish(entry(payload()))
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload()))
 
             coVerify(exactly = 1) { ledger.post(any()) }
             coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
@@ -77,7 +87,7 @@ class LedgerOutboxEventPublisherTest {
         coEvery { ledger.post(any()) } throws RuntimeException("ledger down")
 
         assertThatThrownBy {
-            runBlocking { LedgerOutboxEventPublisher(ledger, assessments).publish(entry(payload())) }
+            runBlocking { LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload())) }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
@@ -116,7 +126,7 @@ class LedgerOutboxEventPublisherTest {
                 assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId)
             } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments).publish(reversalEntry(reversalPayload()))
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
 
             coVerify(exactly = 1) { ledger.postReversal(any()) }
             coVerify(exactly = 1) { assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId) }
@@ -135,9 +145,42 @@ class LedgerOutboxEventPublisherTest {
         coEvery { ledger.postReversal(any()) } throws RuntimeException("ledger down")
 
         assertThatThrownBy {
-            runBlocking { LedgerOutboxEventPublisher(ledger, assessments).publish(reversalEntry(reversalPayload())) }
+            runBlocking {
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
+            }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markReversed(any(), any()) }
+    }
+
+    private fun annualSummaryEntry(payload: String) = OutboxEntry(
+        eventId = UUID.randomUUID(),
+        aggregateId = UUID.randomUUID(),
+        eventType = "billing.annual-fee-summary.ready",
+        payload = payload,
+        status = OutboxStatus.PENDING,
+        attemptCount = 0,
+        createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
+        sentAt = null,
+        lastError = null,
+    )
+
+    @Test
+    fun `publishing an annual-fee-summary row relays the payload to Kafka, never the ledger`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val emitter = mockk<MutinyEmitter<String>>()
+        val messageSlot: CapturingSlot<Message<String>> = slot()
+        every { emitter.sendMessage(capture(messageSlot)) } returns Uni.createFrom().voidItem()
+        val payload = "{\"eventType\":\"AnnualFeeSummaryReady\",\"accountId\":\"acc-1\"}"
+
+        LedgerOutboxEventPublisher(ledger, assessments, emitter).publish(annualSummaryEntry(payload))
+
+        coVerify(exactly = 0) { ledger.post(any()) }
+        coVerify(exactly = 0) { ledger.postReversal(any()) }
+        coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+        coVerify(exactly = 0) { assessments.markReversed(any(), any()) }
+        assertThat(messageSlot.captured.payload).isEqualTo(payload)
     }
 }

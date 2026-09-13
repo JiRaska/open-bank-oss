@@ -1,5 +1,109 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.1...kyc-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **kyc:** exclude parties that predate the auto-open consumer from the orphan gauge ([#9853](https://github.com/JiRaska/open-bank-oss/issues/9853)) ([e587fdb](https://github.com/JiRaska/open-bank-oss/commit/e587fdb6cda554712a90137b43145aa5df5b95dc)), closes [#9726](https://github.com/JiRaska/open-bank-oss/issues/9726)
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.0...kyc-service-v0.15.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **kyc:** guard kyc_outbox created_at plausibility at INSERT ([#9312](https://github.com/JiRaska/open-bank-oss/issues/9312)) ([280dae2](https://github.com/JiRaska/open-bank-oss/commit/280dae2b4fdead9a8d6e74437c299f03a52b1a66))
+* **kyc:** unparseable status filter is a 400, never the unfiltered list ([#9411](https://github.com/JiRaska/open-bank-oss/issues/9411)) ([a78d9c4](https://github.com/JiRaska/open-bank-oss/commit/a78d9c42dd9ad1dd27c8e24c7b9ad6b0ad4f8b2d))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.1...kyc-service-v0.15.0) (2026-09-08)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+* **kyc:** adverse-media port with an explicit not-configured state ([#5893](https://github.com/JiRaska/open-bank-oss/issues/5893)) ([636331e](https://github.com/JiRaska/open-bank-oss/commit/636331e76fd1b2f9321331f20d7944555bac9787))
+* **kyc:** expire abandoned OPEN cases so the party can be KYC'd again ([#8562](https://github.com/JiRaska/open-bank-oss/issues/8562)) ([ccafc32](https://github.com/JiRaska/open-bank-oss/commit/ccafc32d390dd7d6e1772170deefa35da475a710))
+
+
+### Bug Fixes
+
+* **domestic-payment:** disambiguate SOURCE_SERVICE const collisions + gate budget repair ([#8823](https://github.com/JiRaska/open-bank-oss/issues/8823)) ([2e92438](https://github.com/JiRaska/open-bank-oss/commit/2e9243887b7311b46cd4365c5112b8be1cd21c8c))
+* **kyc:** replay the published case-page contract and consume it in the Admin UI ([#8482](https://github.com/JiRaska/open-bank-oss/issues/8482)) ([68c2c69](https://github.com/JiRaska/open-bank-oss/commit/68c2c69428c6b7d4f7cceddc983039dffc55b3ba))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.0...kyc-service-v0.14.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **kyc:** publish actual case page response ([#8164](https://github.com/JiRaska/open-bank-oss/issues/8164)) ([e5c7f54](https://github.com/JiRaska/open-bank-oss/commit/e5c7f547245c08c17808ebe1820dfd724acb38a4))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.13.0...kyc-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.12.0...kyc-service-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.11.2...kyc-service-v0.12.0) (2026-08-22)
+
+
+### Features
+
+* **kyc:** detect parties with no KYC case via reconciler ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5748](https://github.com/JiRaska/open-bank-oss/issues/5748)) ([dcef87f](https://github.com/JiRaska/open-bank-oss/commit/dcef87f9ee7a5cb101adde1e262f5cd8dd62a4c0))
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.11.1...kyc-service-v0.11.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.11.0...kyc-service-v0.11.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.12...kyc-service-v0.11.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.10.12](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.11...kyc-service-v0.10.12) (2026-08-18)
+
+
+### Bug Fixes
+
+* **kyc:** add sourceService to KycEvents for audit attribution ([#5336](https://github.com/JiRaska/open-bank-oss/issues/5336)) ([3aa5e63](https://github.com/JiRaska/open-bank-oss/commit/3aa5e63af6335f04c2f773a9eae1a3429054910d)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.10...kyc-service-v0.10.11) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.9...kyc-service-v0.10.10) (2026-08-13)
 
 

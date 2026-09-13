@@ -11,41 +11,56 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 
 /**
- * GitHub App adapter for opening compliance-incident tracking tickets and, for the rare
- * mechanical case, a scaffold pull request (HITL approval gate either way).
+ * The GitHub write path for this agent is NOT wired, so it refuses (#5897).
  *
- * Uses a GitHub App installation token. Full implementation tracked separately; this stub returns
- * a placeholder URL to keep the workflow structurally complete, matching the
- * finops-agent/devops-agent/control-liveness-sentinel bootstrap pattern.
+ * This replaces a bootstrap stub that returned
+ * `https://github.com/openbank/openbank/issues/pending-governance-<id>`. That was two defects at
+ * once. The string was a **fabricated success**: the caller stored it as `proposalUrl` and moved
+ * the finding to [com.openbank.govaudit.domain.model.FindingStatus.PROPOSED], so the workflow
+ * result counted a proposal, the HITL queue listed one, and a human reading the finding was told a
+ * ticket existed that nobody had opened. And the host was wrong — this repository is
+ * `JiRaska/open-bank-oss`, never `openbank/openbank` — so even read as a placeholder it pointed at
+ * nothing. Same family as `PushResult.skipped()` carrying `success = true` (ADR-0252 phase 0) and
+ * `LoggingDeadLetterSink` making "quarantined" mean `log.warnf` (#5761).
+ *
+ * The fleet settled this with `openbank-mcp-service`'s `UnwiredProposalPort` (#3900): an unwired
+ * port refuses rather than inventing an answer. This is that pattern, expressed as `null` rather
+ * than a throw because a Temporal activity must reach a terminal disposition rather than retry
+ * forever — the refusal is carried by the return TYPE, and
+ * [com.openbank.govaudit.application.workflow.DiagnoseAndProposeActivityImpl] leaves the finding
+ * `DIAGNOSED` when it gets one.
+ *
+ * Wiring this is permitted by the charter (`agents.yaml: governance-auditor` grants
+ * `tier: write_proposal` on `github-pr`) but is deliberately NOT done here: unlike
+ * `flaky-test-hunter`, this service has no `github-token` config, so there is no token path to
+ * fail closed on — only one to build. `flaky-test-hunter`'s adapter is the template if and when
+ * that happens (ADR-0164).
  */
 @ApplicationScoped
 class GitHubProposalAdapter : GitHubProposalPort {
 
     private val log = Logger.getLogger(GitHubProposalAdapter::class.java)
 
-    companion object {
-        private const val ID_PREFIX_LEN = 8
-    }
-
-    override suspend fun openProposalPr(finding: GovernanceFinding, fixDiff: String): String {
-        log.infof(
-            "GitHub PR proposal requested for finding %s checkType=%s PR #%d — stub",
+    override suspend fun openProposalPr(finding: GovernanceFinding, fixDiff: String): String? {
+        log.warnf(
+            "Refusing GitHub PR proposal for finding %s (checkType=%s PR #%d): no GitHub write " +
+                "path is wired, so NOTHING was created. Do not report this as a delivered proposal.",
             finding.id,
             finding.checkType,
             finding.prNumber,
         )
-        // TODO(ADR-0164): create branch + PR via GitHub App installation token
-        return "https://github.com/openbank/openbank/pulls/pending-governance-${finding.id.take(ID_PREFIX_LEN)}"
+        return null
     }
 
-    override suspend fun openTicket(finding: GovernanceFinding, diagnosis: String): String {
-        log.infof(
-            "GitHub compliance-incident ticket requested for finding %s checkType=%s PR #%d — stub",
+    override suspend fun openTicket(finding: GovernanceFinding, diagnosis: String): String? {
+        log.warnf(
+            "Refusing GitHub compliance-incident ticket for finding %s (checkType=%s PR #%d): no " +
+                "GitHub write path is wired, so NOTHING was created. Do not report this as a " +
+                "delivered proposal.",
             finding.id,
             finding.checkType,
             finding.prNumber,
         )
-        // TODO(ADR-0164): open a tracking issue via GitHub App installation token
-        return "https://github.com/openbank/openbank/issues/pending-governance-${finding.id.take(ID_PREFIX_LEN)}"
+        return null
     }
 }

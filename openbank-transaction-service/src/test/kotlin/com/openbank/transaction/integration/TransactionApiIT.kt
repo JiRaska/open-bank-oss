@@ -4,12 +4,17 @@
 
 package com.openbank.transaction.integration
 
+import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.transaction.application.usecase.TransactionService
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
@@ -24,6 +29,9 @@ import java.util.UUID
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TransactionApiIT {
+
+    @Inject
+    lateinit var transactionService: TransactionService
 
     companion object {
         private val sourceAccountId = UUID.randomUUID()
@@ -163,6 +171,93 @@ class TransactionApiIT {
 
     @Test
     @Order(8)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET transactions search with typo status returns 400 not unfiltered 200`() {
+        // Issue #8699: an unparseable enum filter must not silently drop the condition.
+        Given {
+            queryParam("status", "FAILDE")
+        } When {
+            get("/api/v1/transactions/search")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @Order(9)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET transactions search with valid status returns 200`() {
+        Given {
+            queryParam("status", "COMPLETED")
+        } When {
+            get("/api/v1/transactions/search")
+        } Then {
+            statusCode(200)
+        }
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST transactions with unknown rail returns 400 not persisted null rail`() {
+        // Issue #8699: an unparseable rail must not persist a money-path debit with rail=null.
+        val payload = """
+            {
+              "idempotencyKey": "${UUID.randomUUID()}",
+              "type": "DEBIT",
+              "sourceAccountId": "$sourceAccountId",
+              "amount": "10.00",
+              "currencyCode": "CZK",
+              "baseAmount": "10.00",
+              "baseCurrencyCode": "CZK",
+              "description": "Typo rail",
+              "valueDate": "$today",
+              "bookingDate": "$today",
+              "rail": "SEAP"
+            }
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(payload)
+        } When {
+            post("/api/v1/transactions")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @Order(11)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST transactions without rail still creates 201`() {
+        val payload = """
+            {
+              "idempotencyKey": "${UUID.randomUUID()}",
+              "type": "DEBIT",
+              "sourceAccountId": "$sourceAccountId",
+              "amount": "10.00",
+              "currencyCode": "CZK",
+              "baseAmount": "10.00",
+              "baseCurrencyCode": "CZK",
+              "description": "Absent rail stays legal",
+              "valueDate": "$today",
+              "bookingDate": "$today"
+            }
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(payload)
+        } When {
+            post("/api/v1/transactions")
+        } Then {
+            statusCode(201)
+        }
+    }
+
+    @Test
+    @Order(12)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `POST transactions rejects negative amount`() {
         val payload = """
@@ -191,7 +286,7 @@ class TransactionApiIT {
     }
 
     @Test
-    @Order(9)
+    @Order(13)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `POST idempotency same key returns same transaction`() {
         val idempotencyKey = UUID.randomUUID().toString()
@@ -225,5 +320,47 @@ class TransactionApiIT {
             ).extract().body().jsonPath().getString("id")
 
         assertThat(id1).isEqualTo(id2)
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `real transaction initiation emits a bounded trace contract`() {
+        val exporter = RecordingSpanExporter()
+        val provider = SdkTracerProvider.builder().addSpanProcessor(SimpleSpanProcessor.create(exporter)).build()
+        try {
+            transactionService.tracer = provider.get("transaction-trace-contract-it")
+            val payload = """
+                {
+                  "idempotencyKey": "${UUID.randomUUID()}",
+                  "type": "CREDIT",
+                  "targetAccountId": "${UUID.randomUUID()}",
+                  "amount": "10.00",
+                  "currencyCode": "CZK",
+                  "baseAmount": "10.00",
+                  "baseCurrencyCode": "CZK",
+                  "description": "Trace contract transaction",
+                  "valueDate": "$today",
+                  "bookingDate": "$today"
+                }
+            """.trimIndent()
+
+            Given {
+                contentType("application/json")
+                body(payload)
+            } When {
+                post("/api/v1/transactions")
+            } Then {
+                statusCode(201)
+            }
+
+            exporter.contract()
+                .requiresSpan("transaction.initiate")
+                .requiresAttribute("transaction.initiate", "openbank.transaction.status")
+                .hasNoErrorSpan()
+                .verifiedAs("transaction-initiate")
+        } finally {
+            provider.close()
+        }
     }
 }

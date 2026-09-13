@@ -9,7 +9,9 @@ import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
+import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
+import com.openbank.party.domain.model.Payee
 import java.time.Instant
 import java.util.UUID
 
@@ -88,6 +90,20 @@ interface PartyDocumentRepository {
     suspend fun save(doc: PartyDocument): PartyDocument
 
     suspend fun findByPartyId(partyId: UUID): List<PartyDocument>
+}
+
+/** Outbound persistence port for saved payees (TOP-10 #5). */
+interface PartyPayeeRepository {
+    /** Upsert by (partyId, normalised iban) — a re-save of an existing IBAN updates that row. */
+    suspend fun save(payee: Payee): Payee
+
+    /** Newest first, matching the app's own display order. */
+    suspend fun findByPartyId(partyId: UUID): List<Payee>
+
+    suspend fun countByPartyId(partyId: UUID): Long
+
+    /** No-op (not an error) if no such payee exists — delete is idempotent. */
+    suspend fun deleteByPartyIdAndIban(partyId: UUID, iban: String)
 }
 
 /** Outbound persistence port for KYC document binary files. */
@@ -188,4 +204,20 @@ interface PartyAccountGuardPort {
  */
 interface PartyChangeMetricsPort {
     fun changeClassified(materiality: PartyChangeMateriality)
+}
+
+/** Outbound persistence port for representation mandates (ADR-0284 D3). */
+interface PartyMandateRepository {
+    /** Row + outbox event in ONE transaction; an ACTIVE (principal, agent, role) triple is upserted, never duplicated. */
+    suspend fun save(mandate: PartyMandate, event: PartyEvent): PartyMandate
+
+    suspend fun update(mandate: PartyMandate, event: PartyEvent): PartyMandate
+
+    suspend fun findById(id: UUID): PartyMandate?
+
+    suspend fun findByPrincipal(principalPartyId: UUID): List<PartyMandate>
+
+    suspend fun findByAgent(agentPartyId: UUID): List<PartyMandate>
+
+    suspend fun findActive(principalPartyId: UUID, agentPartyId: UUID, role: String): PartyMandate?
 }

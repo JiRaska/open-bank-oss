@@ -7,9 +7,12 @@ import com.openbank.dispute.application.port.out.ComplaintRepository
 import com.openbank.dispute.domain.model.Complaint
 import com.openbank.dispute.domain.model.ComplaintCategory
 import com.openbank.dispute.domain.model.ComplaintChannel
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -46,6 +49,17 @@ class ComplaintDeadlineGaugeTest {
         )
     }
 
+    private fun gauge(
+        repository: ComplaintRepository,
+        registry: SimpleMeterRegistry?,
+        liveness: WorkflowLivenessRecorder = mockk(relaxed = true),
+    ): ComplaintDeadlineGauge {
+        val metrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns liveness
+        }
+        return ComplaintDeadlineGauge(repository, registry, clock).apply { domainMetrics = metrics }
+    }
+
     @Test
     fun `gauges bucket open complaints into open, due-soon and breached`(): Unit = runBlocking {
         val registry = SimpleMeterRegistry()
@@ -59,13 +73,15 @@ class ComplaintDeadlineGaugeTest {
             ),
         )
 
-        val gauge = ComplaintDeadlineGauge(repo, registry, clock)
+        val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val gauge = gauge(repo, registry, liveness)
         gauge.register()
         gauge.refresh()
 
         assertThat(value(registry, "openbank.complaints.open")).isEqualTo(4.0)
         assertThat(value(registry, "openbank.complaints.due_breach")).isEqualTo(1.0)
         assertThat(value(registry, "openbank.complaints.due_soon")).isEqualTo(2.0)
+        verify { liveness.recordSuccess() }
     }
 
     @Test
@@ -74,7 +90,7 @@ class ComplaintDeadlineGaugeTest {
         val repo = mockk<ComplaintRepository>()
         every { repo.findByStatus(any()) } returns Uni.createFrom().item(emptyList())
 
-        val gauge = ComplaintDeadlineGauge(repo, registry, clock)
+        val gauge = gauge(repo, registry)
         gauge.register()
         gauge.refresh()
 
@@ -87,7 +103,7 @@ class ComplaintDeadlineGaugeTest {
     fun `register is a no-op when no meter registry is present`() {
         // Slim slices without a Prometheus registry must not crash the @Startup hook.
         val repo = mockk<ComplaintRepository>()
-        ComplaintDeadlineGauge(repo, null, clock).register()
+        gauge(repo, null).register()
     }
 
     private fun value(registry: SimpleMeterRegistry, name: String): Double =

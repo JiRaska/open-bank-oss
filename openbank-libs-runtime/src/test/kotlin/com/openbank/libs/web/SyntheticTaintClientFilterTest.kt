@@ -8,18 +8,30 @@ import com.openbank.libs.synthetic.SyntheticTaint
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.opentelemetry.api.baggage.Baggage
+import io.opentelemetry.context.Context
+import io.opentelemetry.context.Scope
 import jakarta.ws.rs.client.ClientRequestContext
 import jakarta.ws.rs.core.MultivaluedHashMap
 import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 class SyntheticTaintClientFilterTest {
 
+    private lateinit var testContextScope: Scope
+
+    @BeforeEach
+    fun isolateOtelContext() {
+        testContextScope = Context.root().makeCurrent()
+    }
+
     @AfterEach
     fun clearMdc() {
         MDC.remove(MDC_SYNTHETIC)
+        testContextScope.close()
     }
 
     private fun outbound(): Pair<ClientRequestContext, MultivaluedHashMap<String, Any>> {
@@ -76,5 +88,22 @@ class SyntheticTaintClientFilterTest {
 
         assertThat(headers.getFirst(SyntheticTaint.KAFKA_HEADER)).isEqualTo("true")
         verify(exactly = 0) { ctx.headers.remove(SyntheticTaint.KAFKA_HEADER) }
+    }
+
+    @Test
+    fun `trusted OTel baggage forwards the header when reactive context has no MDC`() {
+        val (ctx, headers) = outbound()
+        val scope = Baggage.builder()
+            .put(SyntheticTaint.BAGGAGE_KEY, "true")
+            .build()
+            .storeInContext(Context.current())
+            .makeCurrent()
+        try {
+            SyntheticTaintClientFilter().filter(ctx)
+        } finally {
+            scope.close()
+        }
+
+        assertThat(headers.getFirst(SyntheticTaint.KAFKA_HEADER)).isEqualTo("true")
     }
 }

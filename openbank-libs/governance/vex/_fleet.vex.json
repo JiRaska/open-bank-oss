@@ -1,0 +1,14 @@
+{
+ "@context": "https://openvex.dev/ns/v0.2.0",
+ "@id": "https://open-bank.tech/vex/_fleet",
+ "author": "OpenBank Security",
+ "version": 1,
+ "role": "fleet-scope",
+ "notes": [
+  "Fleet/base-layer VEX scope (issue #6988). A statement here asserts the verdict for EVERY component whose image inherits the shared base layer or the named fleet artifact, and is folded into each component's release VEX document by check-vex-fleet-scope.py --expand at release time.",
+  "Products are fleet purls (pkg:generic/openbank-fleet/...), never component purls — a component-scoped CVE belongs in that component's own overlay.",
+  "A component overlay MUST NOT contradict a fleet statement for the same CVE; check-vex-fleet-scope.py fails the build on conflict. The fleet doc is the single place a shared-artifact verdict is maintained — write it here once, not N times (#7987 is what N copies cost).",
+  "Statements intentionally empty at introduction: existing per-component statements are migrated to this scope by the promotion warnings the gate emits (same CVE + same status in >= 5 overlays), not by a bulk rewrite."
+ ],
+ "statements": []
+}

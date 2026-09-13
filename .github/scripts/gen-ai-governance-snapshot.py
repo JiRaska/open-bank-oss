@@ -39,9 +39,12 @@ CURATED = ROOT / "openbank-libs" / "governance" / "ai-rollout.yaml"
 AGENTS = ROOT / "openbank-libs" / "governance" / "agents.yaml"
 PROMPT_REGISTRY = ROOT / "openbank-libs" / "governance" / "prompts" / "registry.yaml"
 EVALS_BASELINES = ROOT / "openbank-libs" / "governance" / "evals" / "baselines.json"
+EVALS_DIR = EVALS_BASELINES.parent
+EVAL_RECORDINGS = EVALS_DIR / "recordings"
 OUT = ROOT / "openbank-admin-ui" / "ai-governance-snapshot.json"
 
 ALLOWED_D_STATUSES = {"built", "partial", "planned"}
+ALLOWED_PHASE_STATUSES = {"complete", "active", "blocked", "planned"}
 EXPECTED_DECISION_IDS = [f"D{i}" for i in range(1, 10)]
 
 
@@ -77,16 +80,63 @@ def sha256_short(path: pathlib.Path) -> str:
 def validate_curated(curated: dict) -> None:
     if not isinstance(curated, dict):
         fail("ai-rollout.yaml must be a mapping")
-    for key in ["adrRef", "adrStatus", "phase", "decisions", "compliance", "auditTrail"]:
+    for key in ["adrRef", "adrStatus", "phase", "controlMaturity", "decisions", "compliance", "auditTrail"]:
         if key not in curated:
             fail(f"ai-rollout.yaml missing required key: {key}")
 
     phase = curated["phase"]
     if not isinstance(phase, dict):
         fail("phase must be a mapping")
-    for key in ["current", "total", "label", "agentsActing"]:
+    for key in ["current", "total", "label", "agentsActing", "roadmap"]:
         if key not in phase:
             fail(f"phase missing required key: {key}")
+    current = phase["current"]
+    total = phase["total"]
+    if type(current) is not int or type(total) is not int or not 1 <= current <= total:
+        fail("phase.current must be an integer between 1 and phase.total")
+    roadmap = phase["roadmap"]
+    if not isinstance(roadmap, list) or len(roadmap) != total:
+        fail("phase.roadmap must contain exactly phase.total entries")
+    numbers = [item.get("number") for item in roadmap if isinstance(item, dict)]
+    if numbers != list(range(1, total + 1)):
+        fail("phase.roadmap numbers must be consecutive and start at 1")
+    for item in roadmap:
+        if not isinstance(item, dict):
+            fail("each phase.roadmap entry must be a mapping")
+        if type(item.get("number")) is not int:
+            fail("phase.roadmap entry missing or invalid number")
+        for key in ["status", "title", "outcome"]:
+            if not isinstance(item.get(key), str) or not item[key].strip():
+                fail(f"phase.roadmap entry missing or invalid {key}")
+        if item["status"] not in ALLOWED_PHASE_STATUSES:
+            fail(f"phase.roadmap entry {item['number']} has invalid status {item['status']!r}")
+    active = [item["number"] for item in roadmap if item["status"] == "active"]
+    if active != [current]:
+        fail("phase.roadmap must have exactly the current phase marked active")
+    if any(item["status"] != "complete" for item in roadmap if item["number"] < current):
+        fail("all phases before phase.current must be complete")
+    if any(item["status"] == "complete" for item in roadmap if item["number"] > current):
+        fail("no phase after phase.current may be marked complete")
+
+    control_maturity = curated["controlMaturity"]
+    if not isinstance(control_maturity, dict):
+        fail("controlMaturity must be a mapping")
+    for key in ["current", "total", "label", "achieved", "remaining"]:
+        if key not in control_maturity:
+            fail(f"controlMaturity missing required key: {key}")
+    maturity_current = control_maturity["current"]
+    maturity_total = control_maturity["total"]
+    if type(maturity_current) is not int or type(maturity_total) is not int or not 1 <= maturity_current <= maturity_total:
+        fail("controlMaturity.current must be an integer between 1 and controlMaturity.total")
+    if not isinstance(control_maturity["label"], str) or not control_maturity["label"].strip():
+        fail("controlMaturity.label must be a non-empty string")
+    achieved = control_maturity["achieved"]
+    if not isinstance(achieved, list) or len(achieved) != maturity_current or not all(isinstance(item, str) and re.fullmatch(r"D[1-9]", item) for item in achieved):
+        fail("controlMaturity.achieved must contain one D1–D9 decision id per completed control")
+    if len(set(achieved)) != len(achieved):
+        fail("controlMaturity.achieved must not contain duplicate decision ids")
+    if not isinstance(control_maturity["remaining"], str) or not control_maturity["remaining"].strip():
+        fail("controlMaturity.remaining must be a non-empty string")
 
     decisions = curated["decisions"]
     if not isinstance(decisions, list):
@@ -102,6 +152,11 @@ def validate_curated(curated: dict) -> None:
                 fail(f"decision {item!r} missing required key: {key}")
         if item["status"] not in ALLOWED_D_STATUSES:
             fail(f"decision {item['id']} has invalid status {item['status']!r}")
+
+    decision_statuses = {item["id"]: item["status"] for item in decisions}
+    for decision_id in achieved:
+        if decision_statuses.get(decision_id) != "built":
+            fail(f"controlMaturity.achieved {decision_id} must reference a built decision")
 
     for row_name in ["compliance"]:
         rows = curated[row_name]
@@ -157,6 +212,7 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
     allowed_statuses = {"registered", "pending", "external", "not-applicable"}
     by_status: dict[str, list[str]] = {key: [] for key in sorted(allowed_statuses)}
     seen_ids: list[str] = []
+    prompts_by_charter: dict[str, list[str]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             fail("prompts/registry.yaml charters[] entries must be mappings")
@@ -168,6 +224,10 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
             fail(f"prompts/registry.yaml charter {charter_id} has invalid status {status!r}")
         seen_ids.append(charter_id)
         by_status[status].append(charter_id)
+        prompts = entry.get("prompts", [])
+        if not isinstance(prompts, list) or any(not isinstance(item, str) for item in prompts):
+            fail(f"prompts/registry.yaml charter {charter_id} has invalid prompts")
+        prompts_by_charter[charter_id] = prompts
 
     if sorted(seen_ids) != sorted(agent_ids):
         missing = sorted(set(agent_ids) - set(seen_ids))
@@ -182,16 +242,19 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
         "sha256": sha256_short(PROMPT_REGISTRY),
         "counts": {status: len(ids) for status, ids in by_status.items()},
         "idsByStatus": {status: ids for status, ids in by_status.items()},
+        "promptsByCharter": prompts_by_charter,
     }
 
 
-def collect_evals_facts() -> dict:
+def collect_evals_facts(registered_charters: list[str]) -> dict:
     baselines = load_json(EVALS_BASELINES)
     if "default_min_pass_rate" not in baselines:
         fail("evals/baselines.json missing default_min_pass_rate")
     overrides = baselines.get("overrides", {})
     if not isinstance(overrides, dict):
         fail("evals/baselines.json overrides must be an object")
+    suite_charters = sorted(path.stem for path in EVALS_DIR.glob("*.yaml"))
+    recorded_charters = sorted(path.stem for path in EVAL_RECORDINGS.glob("*.json"))
     return {
         "source": "openbank-libs/governance/evals/baselines.json",
         "sha256": sha256_short(EVALS_BASELINES),
@@ -199,6 +262,10 @@ def collect_evals_facts() -> dict:
         "defaultMinPassRate": baselines["default_min_pass_rate"],
         "overrideCount": len(overrides),
         "overrideCharters": sorted(overrides.keys()),
+        "suiteCharters": suite_charters,
+        "recordedCharters": recorded_charters,
+        "missingSuiteCharters": sorted(set(registered_charters) - set(suite_charters)),
+        "missingRecordingCharters": sorted(set(suite_charters) - set(recorded_charters)),
     }
 
 
@@ -268,7 +335,6 @@ def build_snapshot() -> dict:
     curated = cast(dict[str, Any] | None, load_yaml(CURATED))
     if curated is None:
         fail("ai-rollout.yaml is empty")
-    validate_curated(curated)
 
     agents_doc = cast(dict[str, Any] | None, load_yaml(AGENTS))
     registry_doc = cast(dict[str, Any] | None, load_yaml(PROMPT_REGISTRY))
@@ -278,9 +344,11 @@ def build_snapshot() -> dict:
         fail("prompts/registry.yaml is empty")
 
     agent_facts, agent_ids, enforced, policy_default = collect_agent_facts(agents_doc)
+    validate_curated(curated)
     prompt_facts = collect_prompt_registry_facts(registry_doc, agent_ids)
-    evals_facts = collect_evals_facts()
-    loader_facts = collect_registry_loader_facts(prompt_facts["idsByStatus"]["registered"])
+    registered_charters = prompt_facts["idsByStatus"]["registered"]
+    evals_facts = collect_evals_facts(registered_charters)
+    loader_facts = collect_registry_loader_facts(registered_charters)
 
     decisions = curated["decisions"]
     decision_summary = {
@@ -297,6 +365,8 @@ def build_snapshot() -> dict:
         "totalPhases": curated["phase"]["total"],
         "phaseLabel": curated["phase"]["label"],
         "agentsActing": curated["phase"]["agentsActing"],
+        "phaseRoadmap": curated["phase"]["roadmap"],
+        "controlMaturity": curated["controlMaturity"],
         "decisions": decisions,
         "decisionSummary": decision_summary,
         "compliance": curated["compliance"],
@@ -347,7 +417,20 @@ def self_test() -> int:
     good = {
         "adrRef": "ADR-0031",
         "adrStatus": "accepted",
-        "phase": {"current": 2, "total": 5, "label": "phase two", "agentsActing": 3},
+        "phase": {
+            "current": 2, "total": 5, "label": "phase two", "agentsActing": 3,
+            "roadmap": [
+                {"number": 1, "status": "complete", "title": "one", "outcome": "done"},
+                {"number": 2, "status": "active", "title": "two", "outcome": "now"},
+                {"number": 3, "status": "blocked", "title": "three", "outcome": "needs proof"},
+                {"number": 4, "status": "blocked", "title": "four", "outcome": "needs proof"},
+                {"number": 5, "status": "planned", "title": "five", "outcome": "later"},
+            ],
+        },
+        "controlMaturity": {
+            "current": 4, "total": 5, "label": "four controls built",
+            "achieved": ["D1", "D2", "D3", "D4"], "remaining": "D5 evidence",
+        },
         "decisions": [
             {"id": f"D{i}", "title": f"t{i}", "status": "built", "detail": f"d{i}"}
             for i in range(1, 10)
@@ -378,13 +461,29 @@ def self_test() -> int:
         fails.append(f"a well-formed curated document was rejected: {sink.getvalue().strip()}")
 
     # Top-level keys: each one absent means a section of the published page has no source.
-    for key in ("adrRef", "adrStatus", "phase", "decisions", "compliance", "auditTrail"):
+    for key in ("adrRef", "adrStatus", "phase", "controlMaturity", "decisions", "compliance", "auditTrail"):
         rejects(f"a missing top-level {key!r}", lambda d, k=key: d.pop(k))
 
     # The phase block drives the headline number on the page.
-    for key in ("current", "total", "label", "agentsActing"):
+    for key in ("current", "total", "label", "agentsActing", "roadmap"):
         rejects(f"a missing phase.{key}", lambda d, k=key: d["phase"].pop(k))
     rejects("a non-mapping phase", lambda d: d.update(phase=["not", "a", "map"]))
+    rejects("a phase above total", lambda d: d["phase"].update(current=6))
+    rejects("a dropped roadmap entry", lambda d: d["phase"]["roadmap"].pop())
+    rejects("an inactive current phase", lambda d: d["phase"]["roadmap"][1].update(status="blocked"))
+    rejects("an incomplete prior phase", lambda d: d["phase"]["roadmap"][0].update(status="blocked"))
+    rejects("a complete phase after current", lambda d: d["phase"]["roadmap"][2].update(status="complete"))
+
+    # This is a separate ruler from release autonomy. It must not become a free-form, unvalidated
+    # score that renders a stronger governance claim than its input supports.
+    for key in ("current", "total", "label", "achieved", "remaining"):
+        rejects(f"a missing controlMaturity.{key}", lambda d, k=key: d["controlMaturity"].pop(k))
+    rejects("a non-mapping controlMaturity", lambda d: d.update(controlMaturity=["not", "a", "map"]))
+    rejects("a control maturity above total", lambda d: d["controlMaturity"].update(current=6))
+    rejects("a control maturity with too few achieved controls", lambda d: d["controlMaturity"].update(achieved=["D1"]))
+    rejects("a control maturity with duplicate achieved controls", lambda d: d["controlMaturity"].update(achieved=["D1", "D1", "D3", "D4"]))
+    rejects("a control maturity citing a partial decision", lambda d: d["decisions"][2].update(status="partial"))
+    rejects("a control maturity with a blank remaining statement", lambda d: d["controlMaturity"].update(remaining=""))
 
     # D1-D9 must appear EXACTLY, in order. A dropped decision is the failure that matters most
     # here: the page renders eight rows and reads as complete, because a row that is not there
@@ -406,6 +505,10 @@ def self_test() -> int:
     for ok_status in sorted(ALLOWED_D_STATUSES):
         doc = copy.deepcopy(good)
         doc["decisions"][0]["status"] = ok_status
+        if ok_status != "built":
+            # This loop exercises the documented decision-status vocabulary, not a contradictory
+            # maturity claim. A non-built D1 cannot remain in the achieved-controls list.
+            doc["controlMaturity"].update(current=3, achieved=["D2", "D3", "D4"])
         sink = io.StringIO()
         try:
             with contextlib.redirect_stderr(sink):

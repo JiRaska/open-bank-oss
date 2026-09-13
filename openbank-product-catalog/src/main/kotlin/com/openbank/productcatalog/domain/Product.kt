@@ -47,13 +47,27 @@ data class CardConfig(
 
 data class MultiCurrencyConfig(
     val enabled: Boolean = false,
-    val supportedCurrencies: List<String> = emptyList(),
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS
+     * of a collection, so `{"supportedCurrencies": [null]}` deserialises happily into a
+     * `List<String>` holding a null. Writing the type honestly is what makes
+     * [requireSupportedCurrencies] reachable instead of dead code. Read it through that guard,
+     * never directly.
+     */
+    val supportedCurrencies: List<String?> = emptyList(),
     val defaultCurrency: String = "EUR",
     val fxMarginPct: Double = 1.5,
     val fxMarginBuyPct: Double? = null,
     val fxMarginSellPct: Double? = null,
     val crossCurrencyTransferAllowed: Boolean = true,
-)
+) {
+    /** `IllegalArgumentException` is rendered as a client error by the v1 resource; no
+     *  service-local mapper is added (#526). */
+    fun requireSupportedCurrencies(): List<String> = supportedCurrencies.mapIndexed { index, code ->
+        requireNotNull(code) { "multiCurrencyConfig.supportedCurrencies[$index] must not be null" }
+    }
+}
 
 data class OverdraftConfig(
     val type: OverdraftType = OverdraftType.ARRANGED,
@@ -77,13 +91,21 @@ data class TermDepositConfig(
 )
 
 data class SavingsConfig(
-    val interestTiers: List<InterestTier> = emptyList(),
+    /**
+     * Declared with a NULLABLE element type on purpose -- see [MultiCurrencyConfig.supportedCurrencies].
+     * Read it through [requireInterestTiers], never directly.
+     */
+    val interestTiers: List<InterestTier?> = emptyList(),
     val withdrawalNotice: WithdrawalNotice = WithdrawalNotice.NONE,
     val freeWithdrawalsPerMonth: Int = 0,
     val excessWithdrawalFee: Double = 0.0,
     val bonusRateCondition: String? = null,
     val bonusRateAnnual: Double? = null,
-)
+) {
+    fun requireInterestTiers(): List<InterestTier> = interestTiers.mapIndexed { index, tier ->
+        requireNotNull(tier) { "savingsConfig.interestTiers[$index] must not be null" }
+    }
+}
 
 data class TermsAndConditions(
     val id: String = UUID.randomUUID().toString(),
@@ -108,7 +130,10 @@ data class ProductVersion(
     val validTo: LocalDate? = null,
     val isPublic: Boolean = true,
     val changeNote: String? = null,
-    val createdAt: Instant = Instant.EPOCH,
+    /** Version-creation time. Required since the EPOCH-default burn-down (#8357): a version
+     *  stamped 1970-01-01 is a lie every recency assertion agrees with. Seeds pass their
+     *  validity start; live writes pass the caller's clock. */
+    val createdAt: Instant,
 )
 
 data class Product(
@@ -138,8 +163,8 @@ data class Product(
     val versionHistory: List<ProductVersion> = emptyList(),
     val tags: List<String> = emptyList(),
     val eligibilitySegments: List<EligibilitySegment> = listOf(EligibilitySegment.ALL),
-    val createdAt: Instant = Instant.EPOCH,
-    val updatedAt: Instant = Instant.EPOCH,
+    val createdAt: Instant,
+    val updatedAt: Instant,
     /** Optimistic concurrency token; mapped from `products.row_version`, never client-generated. */
     val revision: Long = 0,
 )

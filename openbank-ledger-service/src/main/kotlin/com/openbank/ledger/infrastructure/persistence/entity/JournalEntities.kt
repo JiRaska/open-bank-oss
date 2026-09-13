@@ -48,7 +48,7 @@ class JournalEntryEntity : PanacheEntityBase {
     var status: String = "PENDING"
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "created_by", nullable = false)
     var createdBy: UUID = UUID.randomUUID()
@@ -58,6 +58,14 @@ class JournalEntryEntity : PanacheEntityBase {
 
     @Column(name = "reversal_of")
     var reversalOf: UUID? = null
+
+    /**
+     * ADR-0252 synthetic-origin taint (V26). Explicit @Column name on purpose: only six services
+     * set a camel-case physical naming strategy and this is not one of them, so the convention
+     * here is to spell every column out (`check-entity-column-names.py`).
+     */
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
 }
 
 data class JournalEntryEntityId(val id: UUID = UUID.randomUUID(), val entryDate: LocalDate = LocalDate.EPOCH) :
@@ -131,7 +139,7 @@ class GlAccountEntity : PanacheEntityBase {
     var isEnabled: Boolean = true
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }
 
 @Entity
@@ -148,5 +156,5 @@ class LedgerIdempotencyEntity : PanacheEntityBase {
     var journalEntryDate: LocalDate = LocalDate.EPOCH
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }

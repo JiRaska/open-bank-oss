@@ -20,13 +20,15 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import {
   ArrowLeft, CreditCard, Info, RefreshCw, ShieldCheck, Clock, User, Landmark,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
@@ -36,10 +38,12 @@ import { CardLifecycleMap } from '@/components/cards/CardLifecycleMap'
 import { CardTransitionButtons } from '@/components/cards/CardTransitionButtons'
 import { ConfirmTransitionDialog } from '@/components/cards/ConfirmTransitionDialog'
 import { CardOperationFeedback } from '@/components/cards/CardOperationFeedback'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { CardLimitsPanel } from '@/components/cards/CardLimitsPanel'
 import { CardControlsPanel } from '@/components/cards/CardControlsPanel'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
 import { quotaOf } from '@/lib/cards/entitlements'
+import { parseAccountRef, parseCard, parseCardEntitlements, parseCardList, parsePartyRef } from '@/lib/cards/clientContract'
 import type { CardTransition } from '@/lib/cards/lifecycle'
 import type { AccountRef, Card, CardEntitlements, PartyRef } from '@/lib/cards/types'
 
@@ -72,14 +76,21 @@ function Panel({ icon, title, children, span }: { icon: React.ReactNode; title: 
 export default function CardDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { t, language } = useLanguage()
+  const { data: session } = useSession()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-US'
+  const canManage = hasPermission(session?.user?.roles ?? [], 'cards:manage')
+  const canBlock = hasPermission(session?.user?.roles ?? [], 'cards:block')
 
   const { data: card, loading, unavailable, waking, reload } = useServiceResource<Card>(
     id ? svcUrl('card-issuance-service', `/api/v1/cards/${id}`) : null,
+    { select: parseCard },
   )
+  const showingRetainedSnapshot = unavailable !== null && card !== null
 
   const ops = useCardOperations(reload)
   const [pending, setPending] = useState<CardTransition | null>(null)
+  const backToCardsRef = useRef<HTMLAnchorElement>(null)
+  const closeFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   // Context the card only carries as UUIDs. Each is best-effort: the card view must
   // still render when party-service or account-service is asleep, so a failed lookup
@@ -93,11 +104,11 @@ export default function CardDetailPage() {
   const accountId = card?.accountId
   const productCode = card?.productCode
 
-  const fetchJson = useCallback(async <T,>(url: string): Promise<T | null> => {
+  const fetchJson = useCallback(async <T,>(url: string, parse: (raw: unknown) => T): Promise<T | null> => {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(8000), cache: 'no-store' })
       if (!res.ok) { await classifyBffFailure(res); return null }
-      return (await res.json()) as T
+      return parse(await res.json())
     } catch {
       return null
     }
@@ -107,10 +118,10 @@ export default function CardDetailPage() {
     if (!partyId) return
     let cancelled = false
     void (async () => {
-      const p = await fetchJson<PartyRef>(svcUrl('party-service', `/api/v1/parties/${partyId}`))
+      const p = await fetchJson(svcUrl('party-service', `/api/v1/parties/${partyId}`), parsePartyRef)
       if (!cancelled) setParty(p)
-      const cards = await fetchJson<Card[]>(svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}`))
-      if (!cancelled) setSiblings(Array.isArray(cards) ? cards : null)
+      const cards = await fetchJson(svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}`), parseCardList)
+      if (!cancelled) setSiblings(cards)
     })()
     return () => { cancelled = true }
   }, [partyId, fetchJson])
@@ -119,7 +130,7 @@ export default function CardDetailPage() {
     if (!accountId) return
     let cancelled = false
     void (async () => {
-      const a = await fetchJson<AccountRef>(svcUrl('account-service', `/api/v1/accounts/${accountId}`))
+      const a = await fetchJson(svcUrl('account-service', `/api/v1/accounts/${accountId}`), parseAccountRef)
       if (!cancelled) setAccount(a)
     })()
     return () => { cancelled = true }
@@ -129,8 +140,9 @@ export default function CardDetailPage() {
     if (!partyId || !productCode) return
     let cancelled = false
     void (async () => {
-      const e = await fetchJson<CardEntitlements>(
+      const e = await fetchJson(
         svcUrl('card-issuance-service', `/api/v1/cards/party/${partyId}/entitlements`, { productCode }),
+        parseCardEntitlements,
       )
       if (!cancelled) setEntitlements(e)
     })()
@@ -151,27 +163,30 @@ export default function CardDetailPage() {
 
   const onSelectTransition = (tr: CardTransition) => {
     ops.setFeedback(null)
-    if (tr.irreversible) setPending(tr)
+    if (tr.irreversible) {
+      closeFocusOverrideRef.current = null
+      setPending(tr)
+    }
     else if (card) void ops.runTransition(card, tr)
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <div style={{ marginBottom: '18px' }}>
-          <Link href="/cards" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
+          <Link ref={backToCardsRef} href="/cards" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
             <ArrowLeft size={12} /> {t('Zpět na karty', 'Back to cards')}
           </Link>
         </div>
 
-        {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-            <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
+        {loading && !card ? (
+          <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
             <div>{waking
               ? t('Služba se probouzí…', 'The service is waking up…')
               : t('Načítám kartu…', 'Loading the card…')}</div>
           </div>
-        ) : unavailable || !card ? (
+        ) : !card ? (
           <DataUnavailable
             kind={unavailable?.kind ?? 'not_found'}
             service={t('Card-issuance-service', 'Card-issuance-service')}
@@ -180,29 +195,40 @@ export default function CardDetailPage() {
           />
         ) : (
           <>
-            {/* ── header ─────────────────────────────────────────────────── */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                  <CreditCard size={20} style={{ color: 'var(--accent)' }} />
-                  <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em', fontFamily: 'var(--font-mono)' }}>
-                    {card.maskedPan}
-                  </h1>
-                  <CardStatusChip status={card.status} current />
-                </div>
-                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                  {[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <CardTransitionButtons card={card} busy={ops.busy} onSelect={onSelectTransition} />
-                <button className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null}>
-                  <RefreshCw size={12} /> {t('Obnovit', 'Refresh')}
-                </button>
-              </div>
-            </div>
+            {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 18 }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service={t('Card-issuance-service', 'Card-issuance-service')}
+                feature={t('Aktualizace detailu karty', 'Card detail refresh')}
+                lang={language}
+                dense
+              />
+              <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+                {t(
+                  'Zobrazen je poslední úspěšný snapshot. Stav karty, limity i ovládací prvky se od té doby mohly změnit.',
+                  'Showing the last successful snapshot. Card status, limits, and controls may have changed since then.',
+                )}
+              </p>
+            </div>}
 
-            <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
+            {loading && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+              {t('Aktualizuji kartu; poslední snapshot zůstává dostupný.', 'Refreshing the card; the last snapshot remains available.')}
+            </p>}
+
+            <PageHeader
+              icon={<CreditCard size={20} aria-hidden="true" />}
+              title={card.maskedPan}
+              subtitle={[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
+              actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <CardStatusChip status={card.status} current />
+                {(canManage || canBlock) && <CardTransitionButtons card={card} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={onSelectTransition} />}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading || ops.busy !== null} aria-busy={loading} aria-label={t('Obnovit kartu', 'Refresh card')}>
+                  <RefreshCw size={12} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+                </button>
+              </div>}
+            />
+
+            {!pending && <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />}
 
             {/* ── PCI boundary, stated once, visibly ─────────────────────── */}
             <div style={{
@@ -293,18 +319,22 @@ export default function CardDetailPage() {
               {/* The `key` carries the server's own values: when the service hands
                   back a changed card the editor remounts on the new truth instead
                   of keeping a stale draft alive. */}
-              <CardLimitsPanel
-                key={`limits-${card.dailyLimitMinorUnits}-${card.monthlyLimitMinorUnits}-${card.status}`}
-                card={card}
-                busy={ops.busy}
-                onSave={(daily, monthly) => ops.saveLimits(card, daily, monthly)}
-              />
-              <CardControlsPanel
-                key={`controls-${card.contactlessEnabled}-${card.onlineEnabled}-${card.atmEnabled}-${card.abroadEnabled}-${card.status}`}
-                card={card}
-                busy={ops.busy}
-                onSave={controls => ops.saveControls(card, controls)}
-              />
+              {canManage && (
+                <>
+                  <CardLimitsPanel
+                    key={`limits-${card.dailyLimitMinorUnits}-${card.monthlyLimitMinorUnits}-${card.status}`}
+                    card={card}
+                    busy={ops.busy}
+                    onSave={(daily, monthly) => ops.saveLimits(card, daily, monthly)}
+                  />
+                  <CardControlsPanel
+                    key={`controls-${card.contactlessEnabled}-${card.onlineEnabled}-${card.atmEnabled}-${card.abroadEnabled}-${card.status}`}
+                    card={card}
+                    busy={ops.busy}
+                    onSave={controls => ops.saveControls(card, controls)}
+                  />
+                </>
+              )}
 
               {/* ── audit trail ─────────────────────────────────────────── */}
               <Panel icon={<Clock size={15} style={{ color: 'var(--accent)' }} />} title={t('Časová osa', 'Timeline')}>
@@ -354,8 +384,16 @@ export default function CardDetailPage() {
           card={card}
           transition={pending}
           busy={ops.busy !== null}
+          feedback={ops.feedback}
+          closeFocusOverrideRef={closeFocusOverrideRef}
           onCancel={() => setPending(null)}
-          onConfirm={reason => void ops.runTransition(card, pending, reason).then(ok => { if (ok) setPending(null) })}
+          onDismissFeedback={() => ops.setFeedback(null)}
+          onConfirm={reason => void ops.runTransition(card, pending, reason).then(ok => {
+            if (ok) {
+              closeFocusOverrideRef.current = backToCardsRef.current
+              setPending(null)
+            }
+          })}
         />
       )}
     </AuthGuard>

@@ -6,6 +6,7 @@
 package com.openbank.casecoordinator.application.workflow
 
 import com.openbank.casecoordinator.domain.model.CaseOutcome
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidence
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.CaseState
 import com.openbank.casecoordinator.domain.model.ContributeSignal
@@ -56,7 +57,20 @@ interface CaseSynthesisActivity {
 /** Emits the single HITL proposal into the case outbox (D7). */
 @ActivityInterface
 interface CaseProposalActivity {
+    /** Legacy activity name and payload; never change while old workflows can replay. */
     fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String
+}
+
+/** New activity type keeps shadow delivery out of legacy Temporal histories. */
+@ActivityInterface
+interface CaseProposalDeliveryActivity {
+    fun emitProposalWithDelivery(
+        caseId: String,
+        proposalType: String,
+        summary: String,
+        contested: Boolean,
+        shadow: Boolean,
+    ): String
 }
 
 /** Persists case lifecycle + contribution rows to the V1 schema. */
@@ -65,6 +79,8 @@ interface CasePersistenceActivity {
     fun recordCaseOpened(start: CaseStart, openedAtEpochMs: Long)
 
     fun recordContributions(caseId: String, contributions: List<Contribution>)
+
+    fun recordSignalEvidence(evidence: List<CaseSignalEvidence>)
 
     fun recordCaseClosed(caseId: String, status: String, closedAtEpochMs: Long)
 }

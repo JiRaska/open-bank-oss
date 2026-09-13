@@ -38,7 +38,7 @@ graph TB
     uc[Application<br/>LedgerService<br/>FxRevaluationService]
     dom[Domain<br/>JournalEntry / JournalLine / GlAccount<br/>TrialBalance / FxRevaluationPosting<br/>+ domain events]
     persist[Persistence<br/>PanacheJournalRepository<br/>PanacheGlAccountRepository<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>LedgerOutboxDispatcher<br/>@Scheduled every 5s]
+    outbox["Outbox<br/>LedgerOutboxDispatcher<br/>@Scheduled every 5s"]
     sched[Schedule<br/>FxRevaluationScheduler<br/>JournalPartitionMaintainer]
     fxcli[FX client<br/>FxServiceClient<br/>FxServiceCnbRateAdapter]
   end

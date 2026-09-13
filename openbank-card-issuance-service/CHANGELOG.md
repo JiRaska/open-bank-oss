@@ -1,5 +1,122 @@
 # Changelog
 
+## [0.26.5](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.4...card-issuance-service-v0.26.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **card-issuance:** corrupted persisted closedReason is LOUD, never a silent null ([#9413](https://github.com/JiRaska/open-bank-oss/issues/9413)) ([ddbcf34](https://github.com/JiRaska/open-bank-oss/commit/ddbcf34540eed292135967fd570e163ff0338078))
+* **card-issuance:** guard card_outbox created_at plausibility at INSERT ([#9301](https://github.com/JiRaska/open-bank-oss/issues/9301)) ([c939593](https://github.com/JiRaska/open-bank-oss/commit/c939593177452aa5778d873e25fce5c43045256d))
+
+## [0.26.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.3...card-issuance-service-v0.26.4) (2026-09-08)
+
+
+### Bug Fixes
+
+* **card-issuance:** give the corrected IssueCardRequest spec its MINOR bump ([#8452](https://github.com/JiRaska/open-bank-oss/issues/8452)) ([8691976](https://github.com/JiRaska/open-bank-oss/commit/8691976f59834abaa4cc56bf1ce1758ed257c35f)), closes [#8150](https://github.com/JiRaska/open-bank-oss/issues/8150)
+
+## [0.26.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.2...card-issuance-service-v0.26.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **card-issuance:** Card lifecycle functions and category-rule entity drop EPOCH defaults ([#8396](https://github.com/JiRaska/open-bank-oss/issues/8396)) ([f61a78d](https://github.com/JiRaska/open-bank-oss/commit/f61a78d00e1a7b7e54bc5ed5167726a511396de5)), closes [#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)
+
+## [0.26.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.1...card-issuance-service-v0.26.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.0...card-issuance-service-v0.26.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **card-issuance:** reconcile IssueCardRequest with the DTO it describes ([#6019](https://github.com/JiRaska/open-bank-oss/issues/6019)) ([1309980](https://github.com/JiRaska/open-bank-oss/commit/130998006d157543e6769dda19ab73e6f6133728))
+* **card-issuance:** reject a null array element with 400 instead of 500 ([#8009](https://github.com/JiRaska/open-bank-oss/issues/8009)) ([9fc2c38](https://github.com/JiRaska/open-bank-oss/commit/9fc2c38c51e2c5273ed5bb72d2c8448763f8a5c9)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.25.0...card-issuance-service-v0.26.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.4...card-issuance-service-v0.25.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.3...card-issuance-service-v0.24.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.2...card-issuance-service-v0.24.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **card-issuance:** alert on dead-lettered outbox rows and add an operator requeue path ([#4308](https://github.com/JiRaska/open-bank-oss/issues/4308)) ([c666a4d](https://github.com/JiRaska/open-bank-oss/commit/c666a4deae12d1025722647e4813e9ccd0d86944))
+
+## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.1...card-issuance-service-v0.24.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.0...card-issuance-service-v0.24.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **card-issuance:** add sourceService to card domain events ([#5382](https://github.com/JiRaska/open-bank-oss/issues/5382)) ([ed655a0](https://github.com/JiRaska/open-bank-oss/commit/ed655a0595190e23ac16e7f4f08b6b7f6d060f49)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.23.0...card-issuance-service-v0.24.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.22.0...card-issuance-service-v0.23.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** re-encrypt batch job for a rotated OpenBao DEK ([#5347](https://github.com/JiRaska/open-bank-oss/issues/5347)) ([13fedea](https://github.com/JiRaska/open-bank-oss/commit/13fedea50cfc44aa00b930acbb9bca290a2c72c7))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.21.0...card-issuance-service-v0.22.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** envelope encryption for PAN vault via OpenBao Transit ([#5224](https://github.com/JiRaska/open-bank-oss/issues/5224)) ([7817150](https://github.com/JiRaska/open-bank-oss/commit/78171506bf435797142827b7f60ec6ab90d8a4bd))
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.20.0...card-issuance-service-v0.21.0) (2026-08-16)
+
+
+### Features
+
+* **libs-runtime:** wire outboxDispatched/outboxDead metrics into AbstractOutboxDispatcher ([#5071](https://github.com/JiRaska/open-bank-oss/issues/5071)) ([8da83b0](https://github.com/JiRaska/open-bank-oss/commit/8da83b073b07052316c56425290579ff162dcbff)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.19.0...card-issuance-service-v0.20.0) (2026-08-14)
 
 

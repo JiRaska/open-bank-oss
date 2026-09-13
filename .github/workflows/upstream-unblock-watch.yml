@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install PyYAML
-        run: python3 -m pip install --quiet pyyaml
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
 
       # The matcher decides whether a block is stale. A matcher that has only
       # ever returned "still blocked" is indistinguishable from one that always

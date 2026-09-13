@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -135,6 +136,57 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * Named account portfolios owned by the active customer profile. A portfolio is a reusable
+     * selection for a later delegation journey; it is deliberately not a grant, an account
+     * ownership assertion, or payment/co-signing authority.
+     */
+    @GET
+    @Path("/portfolios")
+    @Blocking
+    fun portfolios(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/owner/$partyId", partyId)
+    }
+
+    /**
+     * Creates a portfolio for the active profile. The public shape intentionally has no
+     * `ownerPartyId`: accepting it, even only to overwrite it, makes a forged owner look valid to
+     * a buggy client. The edge supplies the verified active profile and upstream checks it again.
+     */
+    @POST
+    @Path("/portfolios")
+    @Blocking
+    fun createPortfolio(body: String?, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        val partyId = partyId()
+        val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        if (requested.has(FIELD_PORTFOLIO_OWNER)) {
+            return refuse(Response.Status.FORBIDDEN, "ownerPartyId is derived from the authenticated profile")
+        }
+        val command = json.createObjectNode().apply {
+            requested.get(FIELD_PORTFOLIO_NAME)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_NAME, it)
+            }
+            requested.get(FIELD_PORTFOLIO_ACCOUNTS)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_ACCOUNTS, it)
+            }
+        }
+        command.put(FIELD_PORTFOLIO_OWNER, partyId)
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command), key)
+    }
+
+    /** A guessed id is left to the upstream owner check, which returns 404 without an existence oracle. */
+    @GET
+    @Path("/portfolios/{id}")
+    @Blocking
+    fun portfolio(@PathParam("id") id: UUID): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$PORTFOLIOS/$id", partyId)
+    }
+
+    /**
      * One grant the caller is a party to. Upstream answers 404 when the caller is neither grantor
      * nor grantee, so a guessed id yields no existence oracle and the edge adds no check of its own.
      *
@@ -150,6 +202,34 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * Validate the complete draft before the app starts SCA. The authoritative service repeats
+     * every check during [offer], so preview creates no authority and cannot be used as a stale
+     * authorization decision. The edge still derives the grantor from the customer token.
+     */
+    @POST
+    @Path("/preview")
+    @Blocking
+    fun preview(body: String?): Response {
+        val context = partyContext()
+        val partyId = context.principal.toString()
+        val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
+        if (declared != null && declared != partyId) {
+            return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
+        }
+        node.put(FIELD_GRANTOR, partyId)
+        node.remove(FIELD_GRANT_SCA_SESSION)
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/preview",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
      * `grantorPartyId` is FORCED to the token's party. A body naming a different grantor is
@@ -157,41 +237,44 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
      * and quietly issuing a grant the user did not ask for is the worse of the two outcomes. An
      * absent field is filled in, since the app has no reason to send it at all.
      *
-     * `dailyLimit`/`monthlyLimit` are the ONE exception to pass-through, and they are rejected here
-     * rather than only upstream. Nothing in this platform counts cumulative spend against a grant
-     * (`DelegationOffered` does not even carry the two fields), so a ceiling set through this route
-     * would be stored, echoed back, and never applied to a single payment — the grantor would be
-     * told they capped their delegate at "5 000 Kč/den" by an API that cannot do it. delegation-
-     * service refuses them too and is the binding gate; this copy exists so the customer channel
-     * fails on its own terms and the refusal is visible in the edge contract the app reads, not
-     * only in an upstream 400 the app would surface as a generic error.
+     * `dailyLimit`/`monthlyLimit` USED to be refused here, on the ground that nothing in the
+     * platform counted cumulative spend against a grant, so a ceiling set through this route would
+     * be stored, echoed back and never applied to a single payment. That premise is no longer true:
+     * delegation-service owns the authoritative reservation counter (ADR-0249 D3), and the edge now
+     * reserves against it before initiating a delegated payment, confirming on acceptance and
+     * releasing on failure.
      *
-     * Everything else — grantee, resource, capabilities, perTransactionLimit, SCA session — is
-     * passed through untouched; delegation-service owns that validation and verifies resource
-     * ownership itself.
+     * Keeping the refusal past that point turned a safeguard into a total deadlock. delegation-
+     * service REQUIRES a cumulative ceiling on any grant carrying `ACCOUNT_INITIATE_PAYMENT`
+     * (ADR-0249 D5 — no unlimited access to someone else's account by omission), so with a ceiling
+     * this route answered 400 CUMULATIVE_LIMIT_UNSUPPORTED and without one upstream answered 400
+     * SPEND_WITHOUT_CEILING. A payment-capable grant was unconstructible through the customer
+     * channel — which silently made `POST /cards/delegated` unreachable too, since an
+     * additional-cardholder card requires exactly such a grant to exist.
+     *
+     * The body is therefore pass-through in full: grantee, resource, capabilities,
+     * perTransactionLimit, cumulative ceilings and SCA session. delegation-service owns that
+     * validation, verifies resource ownership, and is the single binding gate for the ceiling rules.
      */
     @POST
     @Blocking
     fun offer(body: String?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
-        val unenforced = UNENFORCED_CEILING_FIELDS.filter { !node.get(it).let { v -> v == null || v.isNull } }
-        if (unenforced.isNotEmpty()) {
-            return refuse(
-                Response.Status.BAD_REQUEST,
-                "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
-                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling " +
-                    "set here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
-                CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
-            )
-        }
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
         if (declared != null && declared != partyId) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
         }
         node.put(FIELD_GRANTOR, partyId)
-        return upstream.post("$delegationServiceUrl$UPSTREAM", partyId, json.writeValueAsString(node))
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -246,10 +329,37 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         return upstream.delete("$delegationServiceUrl$UPSTREAM/$id", partyId, body)
     }
 
-    private fun partyId(): String = CustomerEdgeResource.resolvePartyIdClaim(
-        partyIdClaim = jwt.getClaim<String>("party_id"),
-        sub = jwt.subject,
-    ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
+    // ADR-0284 D4: an owner sharing a BUSINESS account (or reading a business document) does it
+    // while acting for the entity, so the profile switch applies here exactly as on the main
+    // resource. Fail-closed; a request without the header is the personal profile as before.
+    @Inject
+    lateinit var actingForResolver: ActingForResolver
+
+    @jakarta.ws.rs.core.Context
+    lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
+
+    private data class PartyContext(val actor: UUID, val principal: UUID)
+
+    private fun partyId(): String = partyContext().principal.toString()
+
+    private fun partyContext(): PartyContext {
+        val claimed = CustomerEdgeResource.resolvePartyIdClaim(
+            partyIdClaim = jwt.getClaim<String>("party_id"),
+            sub = jwt.subject,
+        ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
+        val human = runCatching {
+            UUID.fromString(claimed)
+        }.getOrElse { throw ForbiddenException("party_id claim is not a valid party UUID") }
+        val actingFor = if (this::requestHeaders.isInitialized) {
+            requestHeaders.getHeaderString(
+                CustomerEdgeResource.ACTING_FOR_HEADER,
+            )
+        } else {
+            null
+        }
+        val resolved = if (this::actingForResolver.isInitialized) actingForResolver.resolve(human, actingFor) else human
+        return PartyContext(actor = human, principal = resolved)
+    }
 
     // One helper rather than a forbidden()/badRequest() pair: detekt's TooManyFunctions fires AT
     // the threshold (11), not above it, and a second one-line wrapper is the cheapest thing to give up.
@@ -260,12 +370,16 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
+        const val PORTFOLIOS = "/api/v1/delegation-portfolios"
         const val FIELD_GRANTOR = "grantorPartyId"
+        const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
+        const val FIELD_PORTFOLIO_OWNER = "ownerPartyId"
+        const val FIELD_PORTFOLIO_NAME = "name"
+        const val FIELD_PORTFOLIO_ACCOUNTS = "accountIds"
+        const val ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
         const val DEFAULT_REASON = "Revoked by grantor"
-        const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
 
         /** Constraints the schema still names but no service enforces. See [offer]. */
-        val UNENFORCED_CEILING_FIELDS = listOf("dailyLimit", "monthlyLimit")
 
         /** Matches audit-service's own customer-facing page cap; a larger value is clamped there too. */
         const val MAX_ACTIVITY_PAGE = 500

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.8.0
+  version: 1.10.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -119,6 +119,10 @@ paths:
     post:
       tags: [Balances]
       summary: Place a hold on funds
+      description: >-
+        Idempotent on the natural key (accountId, currency, referenceId): the referenceId names one
+        durable business fact (a payment authorisation), so a retried placeHold with the same triple
+        replays the original hold and reserves nothing a second time (ADR-0287).
       operationId: placeHold
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -216,6 +220,9 @@ paths:
     post:
       tags: [Balances]
       summary: Initialize balance for a new account
+      description: >-
+        Idempotent on the natural key (accountId, currency): a repeat call for an already
+        initialized pair returns the existing balance unchanged (ADR-0287).
       operationId: initializeBalance
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -238,7 +245,9 @@ paths:
       description: >-
         Runs the ADR-0039 Phase A tie-out as of the given date (default today), comparing the ledger
         deposit-control balance against the sum of booked balances per currency, persisting the run
-        and surfacing drift. Read-only — mutates no balance.
+        and surfacing drift. Read-only — mutates no balance; a re-run for the same date records a
+        fresh report row by design (an audit trail of runs), so a retry has no double effect
+        (ADR-0287).
       operationId: runReconciliation
       parameters:
         - name: asOf
@@ -274,6 +283,36 @@ paths:
         '404':
           description: No reconciliation has been run yet
 
+  /api/v1/balances/approvals:
+    get:
+      tags: [Balances]
+      summary: List pending balance approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals for balance credit/debit actions. This read-only queue is
+        consumed by the unified approval inbox; deciding remains on PATCH
+        /api/v1/balances/approvals/{id}. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending balance approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/balances/approvals/{id}:
     patch:
       tags: [Balances]
@@ -306,22 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -356,6 +380,34 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes balance approval. makerId identifies who requested the money-path action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated balance action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     BalanceResponse:
       type: object
       properties:
@@ -410,7 +462,11 @@ components:
 
     PlaceHoldRequest:
       type: object
-      required: [amount, currency, reason]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (PlaceHoldRequest in BalanceResource.kt). Before #8828 this schema published expiresAt,
+      # which no DTO has — the hold's lifetime is expressed as ttlSeconds — and omitted the
+      # non-nullable referenceId.
+      required: [amount, currency, reason, referenceId]
       properties:
         amount:
           type: number
@@ -418,9 +474,11 @@ components:
           type: string
         reason:
           type: string
-        expiresAt:
+        referenceId:
           type: string
-          format: date-time
+        ttlSeconds:
+          type: integer
+          format: int64
 
     HoldResponse:
       type: object

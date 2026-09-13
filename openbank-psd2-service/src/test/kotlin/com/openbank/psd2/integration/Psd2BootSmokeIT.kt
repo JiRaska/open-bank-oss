@@ -5,12 +5,10 @@
 package com.openbank.psd2.integration
 
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
-import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -29,20 +27,12 @@ import org.junit.jupiter.api.Test
  * service-info endpoint answers — the two signals that prove the wiring, config and migrations all
  * survive a real boot. Mirrors clearing/interest's per-job Testcontainers IT (issue #578).
  *
- * The lone `@Outgoing("psd2-events-out")` Kafka emitter is swapped to the in-memory connector so no
- * broker is needed and the readiness probe carries no Kafka health check.
+ * No Kafka in-memory swap is needed since #8510: the lone `psd2-events-out` emitter was deleted
+ * with the dead outbox apparatus, so the service declares no outgoing channel at all.
  */
 @QuarkusTest
-@QuarkusTestResource(Psd2BootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
 class Psd2BootSmokeIT {
-
-    class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("psd2-events-out")
-
-        override fun stop() = InMemoryConnector.clear()
-    }
 
     @Test
     fun `the app boots and the readiness probe reports UP`() {

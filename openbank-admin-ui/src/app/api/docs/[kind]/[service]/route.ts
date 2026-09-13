@@ -9,7 +9,7 @@
 //   - release-notes → GitHub Releases whose tag matches the component
 // Failures fail soft to an empty-but-linked payload, never a 404.
 //
-// Auth: this route is NOT in middleware.ts's public matcher exclusion, so the
+// Auth: this route is NOT in proxy.ts's public matcher exclusion, so the
 // auth() middleware gates it — an unauthenticated request is redirected to
 // login like any other admin page. We deliberately add no second in-route guard:
 // the payload is public OSS release-please output (no cluster data), and a

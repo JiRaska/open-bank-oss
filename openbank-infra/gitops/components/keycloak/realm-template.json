@@ -4,6 +4,9 @@
   "displayName": "OpenBank",
   "displayNameHtml": "OpenBank Framework",
   "loginTheme": "openbank",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self' https://admin.open-bank.tech; frame-ancestors 'self' https://admin.open-bank.tech; object-src 'none';"
+  },
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -35,18 +38,6 @@
         "description": "Bank operator"
       },
       {
-        "name": "CATALOG_SCOPE_READ",
-        "description": "Catalog read permission derived from the catalog:read OAuth scope"
-      },
-      {
-        "name": "CATALOG_SCOPE_AUTHOR",
-        "description": "Catalog author permission derived from the catalog:author OAuth scope"
-      },
-      {
-        "name": "CATALOG_SCOPE_PUBLISH",
-        "description": "Catalog publication permission derived from the catalog:publish OAuth scope"
-      },
-      {
         "name": "ROLE_VIEWER",
         "description": "Read-only access"
       },
@@ -75,6 +66,10 @@
         "description": "Read-only access to audit trail (SOX/DORA evidence)"
       },
       {
+        "name": "ROLE_DPO",
+        "description": "Data Protection Officer — GDPR Art. 15/20 export endpoints (ADR-0204); no write actions"
+      },
+      {
         "name": "ROLE_SUPERVISOR",
         "description": "Approves limit overrides, large payments, board-level escalations"
       },
@@ -91,6 +86,14 @@
         "description": "Lending officer: opens and services loan applications, cannot take the credit decision (four-eyes with ROLE_CREDIT_RISK). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
       },
       {
+        "name": "ROLE_COMMS_EDITOR",
+        "description": "Communication Studio maker: drafts and submits style/playbook versions (ADR-0285 D6). Cannot publish (four-eyes with ROLE_COMMS_APPROVER)."
+      },
+      {
+        "name": "ROLE_COMMS_APPROVER",
+        "description": "Communication Studio checker: publishes and retires style/playbook versions and decides commstyle.publish four-eyes approvals (ADR-0285 D3/D6). Never granted to the same person's own draft (application-layer maker!=checker check)."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
@@ -105,6 +108,39 @@
     }
   },
   "clients": [
+    {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "description": "Keycloak's built-in CLI/direct-grant client, declared explicitly so operator password-grant tokens carry realm_access — left to Keycloak's auto-created default (fullScopeAllowed=false, no scope mappings), it mints no realm roles at all (#5498).",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "realm roles (lightweight)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "true"
+          }
+        }
+      ]
+    },
     {
       "clientId": "openbank-admin-ui",
       "name": "OpenBank Admin UI",
@@ -402,7 +438,8 @@
         }
       ],
       "realmRoles": [
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_DEMO"
       ]
     },
     {
@@ -421,7 +458,9 @@
       ],
       "realmRoles": [
         "ROLE_COMPLIANCE",
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_COMMS_EDITOR",
+        "ROLE_DPO"
       ]
     },
     {
@@ -440,7 +479,8 @@
       ],
       "realmRoles": [
         "ROLE_COMPLIANCE",
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_COMMS_APPROVER"
       ]
     },
     {

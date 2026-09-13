@@ -15,7 +15,7 @@ graph LR
 
   admin -- "GET/POST/PUT /products<br/>GET /fees" --> pc
   acc -. "read product defs" .-> pc
-  intr -. "read declared rates" .-> pc
+  intr -. "consume pinned rate snapshots" .-> pc
   fx -. "read FX margins" .-> pc
   card -. "read card config" .-> pc
 
@@ -26,6 +26,8 @@ graph LR
 
 The catalog is a **reference-data provider**. It has no downstream calls and no money-path
 involvement. Accepted v2 changes create durable outbox records; no broker adapter is enabled yet.
+Interest processing must consume a pinned, effective-dated snapshot rather than read the latest
+catalog value while accruing money.
 
 ## C4 — Container (internal structure)
 
@@ -106,6 +108,18 @@ This is what `GET /api/v1/fees` serves, so the admin UI renders pricing without 
 attributes, exact decimal prices and effective dates. DRAFT is mutable behind a strong ETag;
 PUBLISHED and SUPERSEDED snapshots are database-enforced immutable. Publication requires a checker
 different from the stored maker.
+
+## Banking deposit pack v2
+
+`org.openbank.banking.deposit:2` is the declarative deposit profile. It requires a currency,
+product type and an `interest` object with an explicit day-count convention and payout frequency.
+The rate is either a canonical decimal-string fixed annual rate or a non-empty tier list. The pack
+keeps this banking vocabulary outside the industry-neutral kernel and makes the exact profile part
+of the immutable published revision.
+
+This is intentionally not a live pricing lookup. A later interest-service adapter must turn a
+published profile into an effective-dated rate snapshot before it is used for accrual; querying the
+latest catalog document during accrual would make historical interest non-reproducible.
 
 ## Events / outbox
 

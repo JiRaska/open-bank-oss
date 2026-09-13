@@ -241,6 +241,9 @@ spec:
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
       # Grype scans can take several minutes per image if the vuln DB needs
       # refreshing. Allow up to 30 min total; fail cleanly rather than hang.
       activeDeadlineSeconds: 1800

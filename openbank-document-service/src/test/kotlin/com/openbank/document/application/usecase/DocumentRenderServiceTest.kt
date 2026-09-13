@@ -75,6 +75,9 @@ class DocumentRenderServiceTest {
         assertThat(result.sha256).isEqualTo(Document.sha256(pdf))
         assertThat(result.sizeBytes).isEqualTo(pdf.size.toLong())
         assertThat(savedMsg.captured.eventType).isEqualTo(DocumentRenderService.EVENT_DOCUMENT_GENERATED)
+        // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
+        // (EVENT-sourced) attribution.
+        assertThat(savedMsg.captured.payload).contains("\"sourceService\":\"document-service\"")
         coVerify(exactly = 1) { renderPort.renderHtml(any(), any()) }
         coVerify(exactly = 1) { objectStore.put(any(), pdf, "application/pdf") }
         coVerify(exactly = 1) { documentRepo.saveWithOutbox(any(), any()) }

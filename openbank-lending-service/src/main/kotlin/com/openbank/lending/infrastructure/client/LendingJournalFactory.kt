@@ -92,7 +92,17 @@ object LendingJournalFactory {
      * ledger line amount is always the absolute value; the sign only picks which side each account is on.
      */
     private fun terminationAccountPair(kind: PostingKind, accounts: LendingGlAccounts) = when (kind) {
-        PostingKind.WITHDRAWAL_UNWIND -> accounts.loansReceivable to accounts.fundingClearing
+        // A cooling-off unwind reverses the disbursement (DEBIT loansReceivable / CREDIT
+        // fundingClearing) — it must therefore be its mirror image, DEBIT fundingClearing / CREDIT
+        // loansReceivable, exactly like SETTLEMENT below. It previously used the DISBURSEMENT pair
+        // unchanged, which re-booked the SAME asset increase a second time instead of clearing it:
+        // every statutory withdrawal doubled the loan's receivable rather than zeroing it. Caught
+        // by inspection, not yet triggered in production (0 WITHDRAWN/UNWOUND loans) — see #3931
+        // for the companion gap this shares with DISBURSEMENT: unwindJournal has no
+        // transaction-service leg either, so the customer's own account is never debited back the
+        // cash they received. Tracked separately; this change only fixes the loan book's own
+        // double-count, which is wrong regardless of whether the cash leg exists yet.
+        PostingKind.WITHDRAWAL_UNWIND -> accounts.fundingClearing to accounts.loansReceivable
         PostingKind.EARLY_REPAYMENT_COMPENSATION -> accounts.fundingClearing to accounts.interestIncome
         PostingKind.SETTLEMENT -> accounts.fundingClearing to accounts.loansReceivable
         else -> error("not a termination posting kind: $kind")

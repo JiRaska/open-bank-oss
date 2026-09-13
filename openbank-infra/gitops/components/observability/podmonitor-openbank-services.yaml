@@ -61,6 +61,7 @@ spec:
       - balances
       - billing
       - campaign
+      - communication
       - consent
       - control-liveness-sentinel
       - customer-edge
@@ -77,9 +78,11 @@ spec:
       - fx
       - governance-auditor
       - interest
+      - incentive
       - kyc
       - ledger
       - lending
+      - kyb
       - notifications
       - onboarding
       - party
@@ -87,6 +90,7 @@ spec:
       - pid
       - platform
       - psd2
+      - referral
       - release-steward
       - sanctions
       - sca
@@ -94,6 +98,7 @@ spec:
       - security-scanner
       - statements
       - tpp-registry
+      - wealth
   podMetricsEndpoints:
     - port: management
       path: /q/metrics

@@ -5,6 +5,7 @@
 package com.openbank.campaign.application.usecase
 
 import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
+import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.SendLogRepository
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
@@ -17,7 +18,13 @@ import java.util.UUID
  * the app nor a client-supplied campaign id can choose attribution.
  */
 @ApplicationScoped
-class CampaignInteractionQuery(private val sendLog: SendLogRepository) {
-    suspend fun resolve(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
-        sendLog.attributionForAppInteraction(interactionRef, partyId)
+class CampaignInteractionQuery(private val sendLog: SendLogRepository, private val campaigns: CampaignRepository) {
+    suspend fun validate(interactionRef: UUID, partyId: UUID): Boolean =
+        sendLog.attributionForAppInteraction(interactionRef, partyId) != null
+
+    suspend fun resolveAttribution(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? {
+        val attribution = sendLog.attributionForAppInteraction(interactionRef, partyId) ?: return null
+        val campaign = campaigns.findById(attribution.campaignId) ?: return null
+        return attribution.copy(incentiveOfferRef = campaign.incentiveOfferRef)
+    }
 }

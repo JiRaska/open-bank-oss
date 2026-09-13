@@ -45,6 +45,12 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // #8352: AuditEventTime — the ONE shared copy of the rule `AuditConsumer.eventTime` applies to
+    // a payload, so this service's own test can assert what its outbox event becomes in the audit
+    // trail (EVENT vs INGEST). Restating the rule locally is what let the two withholding events
+    // ship with no event time at all: a hand-kept second copy of an agreement between modules
+    // moves with the first and keeps passing against a contract neither side honours.
+    testImplementation(project(":openbank-libs-testing"))
 
     // CI infra sweep (#578): isolated PostgreSQL + Valkey(Redis) per test JVM
     // via Testcontainers. Kafka is already in-memory in the IT (no broker).
@@ -81,20 +87,10 @@ kover {
 // transaction-service/lending-service/billing-service/settlement-service's tasks.withType<Test>
 // block (ADR-0063 P1/P2). Without pact.rootDir the pact lands in the module's build/pacts and
 // .github/workflows/pact-drift-check.yml never sees it.
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; money-path matrix
 // extension, issue #3675). Weekly + manual via pitest.yml, advisory — never a per-PR gate.

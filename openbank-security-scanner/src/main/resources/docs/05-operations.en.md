@@ -59,7 +59,8 @@ To add a new service to the scan list, add an entry to `openbank.security-scanne
 - **Liveness:** `/q/health/live` — JVM + ArC running. Pod restart on failure.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer.
 
-Note: Redis is NOT a dependency of this service (no idempotency store used).
+Note: Redis is NOT a dependency of this service (no idempotency store used). The DB connection is
+checked but holds no business data — see [04 — Data](./04-data.md).
 
 ```yaml
 livenessProbe:
@@ -82,8 +83,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 | Availability | 99.5% (lower than money-path — not customer-facing) | `up{service="security-scanner"}` |
 | Scheduled scan completion | < 90 s for 27 services | `security_scan_duration_seconds` |
 | Latency p95 GET /report | < 50 ms | in-memory cache |
-| ICT incident API p95 | < 200 ms | DB write + outbox insert |
-| Outbox lag | < 2 s | `security_outbox_pending_age_seconds` |
+| ICT incident API p95 | < 200 ms | in-memory write + direct Kafka emit |
 
 ## Runbooks
 
@@ -111,11 +111,21 @@ Likely a network policy or DNS issue.
 2. Verify DNS from scanner pod: `kubectl exec -it <scanner-pod> -- nslookup account-service`
 3. Verify egress policy allows scanner to reach cluster services.
 
-### Outbox lag growing
+### ICT incident event missing downstream
 
-1. Check: `SELECT count(*) FROM openbank_security.security_outbox WHERE status='PENDING'`
-2. Check Kafka: `kcat -L -b kafka:9092`
-3. Check dispatcher: `kubectl logs -l app=security-scanner | grep SecurityOutboxDispatcher`
+Incidents are emitted straight to Kafka with no outbox, so a failed publish leaves no local record
+to retry from (#4709).
+
+1. Check the emitter for errors: `kubectl logs -l app=security-scanner | grep ict-incident-events-out`
+2. Check the broker: `kcat -L -b kafka:9092`
+3. Confirm the topic received it: read the tail of `openbank.security.ict.incident`.
+4. If the publish was lost, re-report the incident through `POST /api/v1/ict-incidents`.
+
+### Scan results empty after a restart
+
+Expected, not a fault: scan state is in-memory only. A restarted pod serves an empty report until
+the first scheduled scan completes (2 minutes after startup, then every 30 minutes). Trigger
+`POST /api/v1/security/scan` to fill it immediately. In-flight ICT incidents do NOT come back.
 
 ### P1_CRITICAL ICT incident — regulatory reporting
 

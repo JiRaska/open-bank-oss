@@ -1,5 +1,133 @@
 # Changelog
 
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.0...party-service-v0.23.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **party:** guard party_outbox created_at plausibility at INSERT ([#9316](https://github.com/JiRaska/open-bank-oss/issues/9316)) ([7a5c9ca](https://github.com/JiRaska/open-bank-oss/commit/7a5c9ca1c0e39380e065cf8b4c06f6258b453ac9))
+* **party:** preserve statutory signature quorum ([#9391](https://github.com/JiRaska/open-bank-oss/issues/9391)) ([4a79a3b](https://github.com/JiRaska/open-bank-oss/commit/4a79a3b0d71fed27ae117600d8ab4af15ef11a80))
+* **party:** unparseable status filter is a 400, never the unfiltered list ([#9409](https://github.com/JiRaska/open-bank-oss/issues/9409)) ([c435857](https://github.com/JiRaska/open-bank-oss/commit/c435857162fc3f3359391c84e2769c016661afc2))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.2...party-service-v0.23.0) (2026-09-08)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+* **party:** make GDPR Art. 15 and Art. 20 exports reachable by the data subject ([#8487](https://github.com/JiRaska/open-bank-oss/issues/8487)) ([2ba4787](https://github.com/JiRaska/open-bank-oss/commit/2ba4787544aeaf723cd1e867f04777c32978f68b))
+* **party:** replay the anonymous VoP pact + JSON security-abort envelope ([#8900](https://github.com/JiRaska/open-bank-oss/issues/8900)) ([9b4ae30](https://github.com/JiRaska/open-bank-oss/commit/9b4ae30e6d07dc35b602156dc35c55e2059db075))
+
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.1...party-service-v0.22.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.0...party-service-v0.22.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **party:** answer 400 for a null phone hash in a directory lookup, not 500 ([#7861](https://github.com/JiRaska/open-bank-oss/issues/7861)) ([0b05abe](https://github.com/JiRaska/open-bank-oss/commit/0b05abe058827a8fa0bdfa9955164d278a41182f)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.21.0...party-service-v0.22.0) (2026-08-28)
+
+
+### Features
+
+* **party:** expose pending approvals in unified inbox ([#7020](https://github.com/JiRaska/open-bank-oss/issues/7020)) ([0445a3e](https://github.com/JiRaska/open-bank-oss/commit/0445a3ec6c9fafc25c3640998b3872cb118aa94b))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.20.0...party-service-v0.21.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.19.0...party-service-v0.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.3...party-service-v0.19.0) (2026-08-24)
+
+
+### Features
+
+* **party:** classify synthetic canary parties ([#6730](https://github.com/JiRaska/open-bank-oss/issues/6730)) ([f478d04](https://github.com/JiRaska/open-bank-oss/commit/f478d04fec9d4c6a0a31ca0a443d4783c4d796de))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.2...party-service-v0.18.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+* **party:** create the Hibernate id sequences in lower case so inserts can allocate an id ([#6467](https://github.com/JiRaska/open-bank-oss/issues/6467)) ([134cce5](https://github.com/JiRaska/open-bank-oss/commit/134cce517a32a3e8253885b3735e4877e95fab9a)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.1...party-service-v0.18.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.0...party-service-v0.18.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.17.2...party-service-v0.18.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.17.1...party-service-v0.17.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **account,party:** add sourceService to audit-consumed events ([#5267](https://github.com/JiRaska/open-bank-oss/issues/5267)) ([2aeefeb](https://github.com/JiRaska/open-bank-oss/commit/2aeefebc6275c45068049aa40869e84a1efd58c4))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.17.0...party-service-v0.17.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.16.1...party-service-v0.17.0) (2026-08-17)
+
+
+### Features
+
+* **payees:** server-synced saved payees (TOP-10 [#5](https://github.com/JiRaska/open-bank-oss/issues/5)) ([#5154](https://github.com/JiRaska/open-bank-oss/issues/5154)) ([9c93621](https://github.com/JiRaska/open-bank-oss/commit/9c936211df184df867a6a274ce4cb09b64114f21))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.16.0...party-service-v0.16.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **party:** bump the API contract version to 1.16.0 ([#4986](https://github.com/JiRaska/open-bank-oss/issues/4986)) ([f731440](https://github.com/JiRaska/open-bank-oss/commit/f73144007ecd27cd322fea497a475b7fc18b92eb)), closes [#4808](https://github.com/JiRaska/open-bank-oss/issues/4808)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.6...party-service-v0.16.0) (2026-08-14)
 
 

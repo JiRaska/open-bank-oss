@@ -14,8 +14,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { SessionProvider } from 'next-auth/react'
 import { EntityChip } from '@/components/entities/EntityChip'
-import { counterpartyLabel } from '@/components/delegations/GrantView'
+import { counterpartyLabel, grantCounterparty, type Grant } from '@/components/delegations/GrantView'
+import { ROLES } from '@/lib/auth/roles'
 
 const PARTY_ID = '33333333-3333-4333-8333-333333333333'
 
@@ -43,9 +45,30 @@ describe('counterpartyLabel', () => {
   })
 })
 
+describe('grantCounterparty', () => {
+  const grant = {
+    grantorPartyId: 'grantor-id',
+    grantorName: 'Owner',
+    granteePartyId: 'grantee-id',
+    granteeName: 'Delegate',
+  } as Grant
+
+  it('shows the recipient for access shared by the selected party', () => {
+    expect(grantCounterparty(grant, 'granted')).toEqual({ id: 'grantee-id', name: 'Delegate' })
+  })
+
+  it('shows the owner for access shared with the selected party', () => {
+    expect(grantCounterparty(grant, 'received')).toEqual({ id: 'grantor-id', name: 'Owner' })
+  })
+})
+
 describe('delegation counterparty chip', () => {
+  const renderChip = (roles: string[], chip: React.ReactElement) => render(
+    <SessionProvider session={{ user: { roles } } as never}>{chip}</SessionProvider>,
+  )
+
   it('shows the snapshotted name and asks no service for it', async () => {
-    render(<EntityChip type="party" id={PARTY_ID} label={counterpartyLabel('Alice Testerova')} />)
+    renderChip([ROLES.OPERATOR], <EntityChip type="party" id={PARTY_ID} label={counterpartyLabel('Alice Testerova')} />)
 
     expect(await screen.findByText('Alice Testerova')).toBeTruthy()
     // The regression this guards: the id must not be what the human reads.
@@ -55,8 +78,15 @@ describe('delegation counterparty chip', () => {
 
   it('falls back to a shortened id, never a blank, when the grant carries no name', async () => {
     // A grant offered before #3604: party-service answers, but with nothing usable as a label.
-    render(<EntityChip type="party" id={PARTY_ID} label={counterpartyLabel(null)} />)
+    renderChip([ROLES.OPERATOR], <EntityChip type="party" id={PARTY_ID} label={counterpartyLabel(null)} />)
 
     await waitFor(() => expect(screen.getByText('33333333…')).toBeTruthy())
+  })
+
+  it('keeps a party snapshot visible but non-linking for a role denied party PII', () => {
+    renderChip([ROLES.COMPLIANCE], <EntityChip type="party" id={PARTY_ID} label={counterpartyLabel('Alice Testerova')} />)
+    expect(screen.getByText('Alice Testerova')).toBeTruthy()
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(vi.mocked(global.fetch)).not.toHaveBeenCalled()
   })
 })

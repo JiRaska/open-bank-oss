@@ -37,7 +37,7 @@ data class AmlCaseStatusChangedEvent(
     val occurredAt: Instant,
 )
 
-fun AmlCase.toCreatedEvent(now: Instant = Instant.EPOCH) = AmlCaseCreatedEvent(
+fun AmlCase.toCreatedEvent(now: Instant) = AmlCaseCreatedEvent(
     caseId = id,
     idempotencyKey = idempotencyKey,
     partyId = partyId,

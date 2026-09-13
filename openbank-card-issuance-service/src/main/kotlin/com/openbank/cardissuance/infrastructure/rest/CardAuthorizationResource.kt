@@ -95,13 +95,14 @@ class CardAuthorizationResource(
     @Authorize(action = "card.category-limits.update", resource = "#id")
     @Operation(summary = "Replace a card's per-category blocks and monthly caps")
     suspend fun replaceCategoryLimits(@PathParam("id") id: UUID, req: CategoryLimitsRequest): Response {
-        val unknown = req.limits.map { it.category }.filterNot { MerchantCategoryTaxonomy.isKnown(it) }
+        val limits = req.requireLimits()
+        val unknown = limits.map { it.category }.filterNot { MerchantCategoryTaxonomy.isKnown(it) }
         if (unknown.isNotEmpty()) {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(ErrorResponse("Unknown category: ${unknown.joinToString()}", "CATEGORY_UNKNOWN"))
                 .build()
         }
-        val notBlockable = req.limits.filter { it.blocked }.map { it.category }
+        val notBlockable = limits.filter { it.blocked }.map { it.category }
             .filterNot { MerchantCategoryTaxonomy.isBlockable(it) }
         if (notBlockable.isNotEmpty()) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -115,7 +116,7 @@ class CardAuthorizationResource(
         }
         val saved = categoryRules.replaceForCard(
             id,
-            req.limits.map { CategoryRule(it.category, it.blocked, it.monthlyLimitMinorUnits) },
+            limits.map { CategoryRule(it.category, it.blocked, it.monthlyLimitMinorUnits) },
         )
         return Response.ok(
             CategoryLimitsResponse(
@@ -194,7 +195,24 @@ data class CategoryLimit(val category: String, val monthlyLimitMinorUnits: Long?
 
 data class CategoryLimitsResponse(val limits: List<CategoryLimit>, val spendTracking: Boolean)
 
-data class CategoryLimitsRequest(val limits: List<CategoryLimitInput> = emptyList())
+data class CategoryLimitsRequest(
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection, so `{"limits": [null]}` deserialises happily into a `List<CategoryLimitInput>`
+     * holding a null. Writing the type honestly is what makes [requireLimits] reachable instead of
+     * dead code.
+     */
+    val limits: List<CategoryLimitInput?> = emptyList(),
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`; no
+     * service-local mapper is added (#526).
+     */
+    fun requireLimits(): List<CategoryLimitInput> = limits.mapIndexed { index, limit ->
+        requireNotNull(limit) { "limits[$index] must not be null" }
+    }
+}
 
 data class CategoryLimitInput(
     val category: String = "",

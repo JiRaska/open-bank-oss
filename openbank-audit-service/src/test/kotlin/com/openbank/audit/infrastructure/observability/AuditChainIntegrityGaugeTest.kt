@@ -112,6 +112,33 @@ class AuditChainIntegrityGaugeTest {
     }
 
     @Test
+    fun `verification duration publishes percentiles, not just count and sum`() {
+        // #5049: openbank_audit_chain_verify_duration_seconds_bucket has zero series in
+        // Prometheus because the timer never called publishPercentileHistogram(). A registry
+        // that only got count/sum would report a non-null timer here too -- percentileValues()
+        // is what distinguishes "the Timer.builder(...).publishPercentiles(...) config is
+        // actually active" from "a bare timer exists", so assert that, not merely presence.
+        // (HistogramSnapshot.histogramCounts() -- the more direct-looking assertion -- was tried
+        // first and rejected: it is EMPTY on SimpleMeterRegistry regardless of
+        // publishPercentileHistogram(), confirmed with a throwaway diagnostic against this exact
+        // registry type before writing this assertion. That histogram flavor is specific to
+        // registries like Atlas; Prometheus's own _bucket series come from the same underlying
+        // config but are only materialized by PrometheusMeterRegistry.scrape(), which is not
+        // reachable from a plain unit test in this module. percentileValues() is the strongest
+        // claim actually falsifiable here.)
+        val repo = mockk<AuditRepository>()
+        coEvery { repo.verifyChain(any()) } returns
+            ChainVerification(intact = true, checked = 1, unchained = 0, firstBrokenEntryId = null)
+        val (g, registry) = gauge(repo)
+
+        runBlocking { g.verify() }
+
+        val timer = registry.find("openbank.audit.chain.verify.duration").timer()
+            ?: error("timer openbank.audit.chain.verify.duration not registered")
+        assertThat(timer.takeSnapshot().percentileValues()).isNotEmpty()
+    }
+
+    @Test
     fun `disabled means no verification is attempted at all`() {
         val repo = mockk<AuditRepository>()
         coEvery { repo.verifyChain(any()) } returns

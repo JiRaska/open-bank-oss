@@ -40,6 +40,10 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.settledAt = settledAt
     it.createdAt = createdAt
     it.updatedAt = updatedAt
+    it.initiatedByPartyId = initiatedByPartyId
+    it.requestFingerprint = requestFingerprint
+    it.delegationId = delegationId
+    it.reservationId = reservationId
 }
 
 fun DomesticPaymentEntity.toDomain() = DomesticPayment(
@@ -71,4 +75,8 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     createdAt = createdAt,
     updatedAt = updatedAt,
     schemeDispatchedAt = schemeDispatchedAt,
+    initiatedByPartyId = initiatedByPartyId,
+    requestFingerprint = requestFingerprint,
+    delegationId = delegationId,
+    reservationId = reservationId,
 )

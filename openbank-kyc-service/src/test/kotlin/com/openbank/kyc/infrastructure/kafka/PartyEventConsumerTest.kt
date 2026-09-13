@@ -19,8 +19,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.time.Instant
 import java.util.UUID
+
+/** Named so detekt's TooGenericExceptionThrown does not have to be suppressed at the throw site. */
+private class TransientDbFailure : RuntimeException("connection refused")
 
 class PartyEventConsumerTest {
 
@@ -70,7 +74,7 @@ class PartyEventConsumerTest {
     @Test
     fun `PARTY_CREATED skips PEP screening when the sandbox auto-approve path already settled the case`(): Unit =
         runBlocking {
-            // openbank.kyc.auto-approve=true (sandbox STP, ADR-0073) settles the case to APPROVED
+            // openbank.kyc.auto-approve=true (sandbox STP, ADR-0116 §4) settles the case to APPROVED
             // before this consumer ever sees it — re-screening a terminal case here would race the
             // already-closed state rather than extend it.
             val partyId = UUID.randomUUID()
@@ -108,17 +112,6 @@ class PartyEventConsumerTest {
     }
 
     @Test
-    fun `PARTY_ERASED anonymisation failure is swallowed to protect the consumer group`(): Unit = runBlocking {
-        val partyId = UUID.randomUUID()
-        val now = fixedClock.instant()
-        coEvery { kycCaseRepository.anonymizeByPartyId(partyId, now) } throws RuntimeException("db down")
-
-        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
-
-        coVerify(exactly = 1) { kycCaseRepository.anonymizeByPartyId(partyId, now) }
-    }
-
-    @Test
     fun `unknown party events are ignored`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
 
@@ -143,15 +136,51 @@ class PartyEventConsumerTest {
         coVerify(exactly = 0) { kycCaseRepository.anonymizeByPartyId(any(), any()) }
     }
 
+    /**
+     * This test replaces one that asserted the OPPOSITE — that a domain failure is swallowed "so
+     * the consumer group is not wedged", on the stated assumption that "the party stream can
+     * replay". Nothing replays it: the message was acked, and the only trace of the lost work was
+     * an ERROR line. That is how a few seconds of kyc-db downtime on 2026-08-19 left a party
+     * un-KYC'd, two accounts stuck in PENDING_ACTIVATION and a welcome bonus unpaid, with ten such
+     * parties in sandbox (#5698). The green test was the defect's own documentation.
+     */
     @Test
-    fun `a domain failure is swallowed so the consumer group is not wedged`(): Unit = runBlocking {
+    fun `a persistent infrastructure failure is RETHROWN so the connector dead-letters`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { kycService.openCaseForParty(partyId) } throws RuntimeException("db down")
+        coEvery { kycService.openCaseForParty(partyId) } throws TransientDbFailure()
 
-        // Must not throw — the message is acked and the party stream can replay.
+        assertThrows<TransientDbFailure> {
+            runBlocking { consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId"}""") }
+        }
+
+        coVerify(exactly = 3) { kycService.openCaseForParty(partyId) }
+    }
+
+    @Test
+    fun `a TRANSIENT failure is retried and the case is opened without dead-lettering`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val case = caseFor(partyId)
+        var calls = 0
+        coEvery { kycService.openCaseForParty(partyId) } answers {
+            calls++
+            if (calls == 1) throw TransientDbFailure() else KycCaseResult(case, created = true)
+        }
+
         consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { kycService.openCaseForParty(partyId) }
+        coVerify(exactly = 2) { kycService.openCaseForParty(partyId) }
+    }
+
+    @Test
+    fun `a failed GDPR erasure is RETHROWN rather than logged as done`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { kycCaseRepository.anonymizeByPartyId(partyId, any()) } throws TransientDbFailure()
+
+        assertThrows<TransientDbFailure> {
+            runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
+        }
+
+        coVerify(exactly = 3) { kycCaseRepository.anonymizeByPartyId(partyId, any()) }
     }
 
     private fun caseFor(partyId: UUID) = KycCase(

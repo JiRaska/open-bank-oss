@@ -251,6 +251,24 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# Incentive offer, inventory and reservation lifecycle evidence. This resource only declares the
+# broker destination; incentive-service itself is not deployed by this PR. The producer-first
+# consumer gap is explicitly tracked by #7210 and allowlisted in governance until the first real
+# downstream projection removes that exception.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.incentive.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Campaign-owned commands consumed by engagement-service. A compacted key (the campaign send-log
 # id) makes the placement idempotent across Temporal/Kafka retries while keeping the current slot
 # materialisation recoverable.

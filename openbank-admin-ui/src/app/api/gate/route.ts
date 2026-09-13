@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic"
  * never throw. It returns no body on success and proxies nothing: its whole job
  * is to answer "may this session reach this tool".
  *
- * This is the one route excluded from `src/middleware.ts` (ADR-0080 P0 kept the
+ * This is the one route excluded from `src/proxy.ts` (ADR-0080 P0 kept the
  * matcher at "everything except Auth.js and static assets"). It has to be: the
  * middleware answers an unauthenticated request with a 302 to /auth/login, and
  * nginx turns any non-2xx/401/403 auth sub-response into a 500 — so the gate

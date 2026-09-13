@@ -11,6 +11,8 @@ import com.openbank.tppregistry.application.port.`in`.RegisterTppCommand
 import com.openbank.tppregistry.application.port.out.TppRepository
 import com.openbank.tppregistry.domain.model.TppAuthorizationResult
 import com.openbank.tppregistry.domain.model.TppEntry
+import com.openbank.tppregistry.domain.model.TppEvent
+import com.openbank.tppregistry.domain.model.TppEvents
 import com.openbank.tppregistry.domain.model.TppRole
 import com.openbank.tppregistry.domain.model.TppStatus
 import io.mockk.coEvery
@@ -18,6 +20,7 @@ import io.mockk.coVerify
 import io.mockk.confirmVerified
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -26,7 +29,6 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
-import kotlinx.coroutines.runBlocking
 
 class TppRegistryServiceTest {
 
@@ -93,7 +95,13 @@ class TppRegistryServiceTest {
     fun `checkAuthorization returns unauthorized when QWAC expired`(): Unit = runBlocking {
         coEvery { repo.findByTppId("tpp-5") } returns sampleTpp(
             roles = setOf(TppRole.AISP),
-            qwacExpiresAt = LocalDate.now().minusDays(1),
+            // Derived from the SAME clock the service is given, not from the JVM default zone.
+            // `checkAuthorization` compares against `LocalDate.now(clock)`, and `clock` here is
+            // `Clock.systemUTC()`, so a bare `LocalDate.now()` disagrees with it for every hour
+            // the test JVM's zone is a day ahead of UTC. The margin is exactly one day, so the
+            // expired certificate reads as still valid and `authorized` comes back `true`.
+            // Measured RED under `TZ=Pacific/Kiritimati`; see the KDoc on `sampleTpp`.
+            qwacExpiresAt = LocalDate.now(clock).minusDays(1),
         )
 
         val result = service.checkAuthorization(CheckTppAuthorizationQuery("tpp-5", TppRole.AISP))
@@ -108,7 +116,8 @@ class TppRegistryServiceTest {
     fun `registerTpp saves new entry`(): Unit = runBlocking {
         coEvery { repo.findByTppId("tpp-6") } returns null
         val saved = slot<TppEntry>()
-        coEvery { repo.save(capture(saved)) } answers { firstArg() }
+        val savedEvent = slot<TppEvent>()
+        coEvery { repo.save(capture(saved), capture(savedEvent)) } answers { firstArg() }
 
         val result = service.registerTpp(
             RegisterTppCommand(
@@ -127,8 +136,12 @@ class TppRegistryServiceTest {
         assertThat(saved.captured.status).isEqualTo(TppStatus.ACTIVE)
         assertThat(saved.captured.qwacSubjectDn).isEqualTo("CN=QWAC")
         assertThat(result).isEqualTo(saved.captured)
+        // The event is a REQUIRED parameter of save (issue #4007), so the use case cannot persist
+        // without one. What it carries is asserted for real against the DB in TppOutboxWriteIT.
+        assertThat(savedEvent.captured.eventType).isEqualTo(TppEvents.TPP_REGISTERED)
+        assertThat(savedEvent.captured.aggregateId).isEqualTo(saved.captured.id)
         coVerify(exactly = 1) { repo.findByTppId("tpp-6") }
-        coVerify(exactly = 1) { repo.save(any()) }
+        coVerify(exactly = 1) { repo.save(any(), any()) }
         confirmVerified(repo)
     }
 
@@ -154,7 +167,7 @@ class TppRegistryServiceTest {
             .hasMessage("TPP tpp-7 already registered")
 
         coVerify(exactly = 1) { repo.findByTppId("tpp-7") }
-        coVerify(exactly = 0) { repo.save(any()) }
+        coVerify(exactly = 0) { repo.save(any(), any()) }
         confirmVerified(repo)
     }
 
@@ -163,7 +176,8 @@ class TppRegistryServiceTest {
         val existing = sampleTpp(tppId = "tpp-8", status = TppStatus.ACTIVE)
         coEvery { repo.findByTppId("tpp-8") } returns existing
         val updated = slot<TppEntry>()
-        coEvery { repo.update(capture(updated)) } answers { firstArg() }
+        val updatedEvent = slot<TppEvent>()
+        coEvery { repo.update(capture(updated), capture(updatedEvent)) } answers { firstArg() }
 
         val result = service.blacklistTpp(BlacklistTppCommand("tpp-8", "fraud"))
 
@@ -172,8 +186,10 @@ class TppRegistryServiceTest {
         assertThat(updated.captured.blacklistReason).isEqualTo("fraud")
         assertThat(updated.captured.blacklistedAt).isNotNull()
         assertThat(result).isEqualTo(updated.captured)
+        assertThat(updatedEvent.captured.eventType).isEqualTo(TppEvents.TPP_BLACKLISTED)
+        assertThat(updatedEvent.captured.envelope["blacklistReason"]).isEqualTo("fraud")
         coVerify(exactly = 1) { repo.findByTppId("tpp-8") }
-        coVerify(exactly = 1) { repo.update(any()) }
+        coVerify(exactly = 1) { repo.update(any(), any()) }
         confirmVerified(repo)
     }
 
@@ -189,7 +205,7 @@ class TppRegistryServiceTest {
             .hasMessage("TPP tpp-9 not found")
 
         coVerify(exactly = 1) { repo.findByTppId("tpp-9") }
-        coVerify(exactly = 0) { repo.update(any()) }
+        coVerify(exactly = 0) { repo.update(any(), any()) }
         confirmVerified(repo)
     }
 

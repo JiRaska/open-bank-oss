@@ -1,0 +1,74 @@
+# Single-owner PostgreSQL for the future Incentive service. CNPG creates the incentive-db-app
+# secret and incentive-db-rw Service; no application workload consumes either in this slice.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: incentive-db
+  namespace: incentive
+spec:
+  monitoring:
+    enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      max_wal_size: "512MB"
+  # The Pod Identity association is introduced by the parent prerequisite PR before this
+  # Application may be synced. It supplies barman-cloud through the AWS SDK chain, never Git.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/incentive-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: openbank_incentive
+      owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: incentive-db-daily
+  namespace: incentive
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 57 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: incentive-db

@@ -34,7 +34,12 @@ class FraudOutboxDispatcherTest {
     fun `dispatch is a no-op when dispatch-enabled is false`() {
         val repo = mockk<FraudOutboxRepository>()
         val publisher = mockk<OutboxEventPublisher>()
-        val dispatcher = FraudOutboxDispatcher(repo, publisher, dispatchEnabled = false)
+        val dispatcher = FraudOutboxDispatcher(
+            repo,
+            publisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         runBlocking { dispatcher.dispatch() }
 
@@ -48,7 +53,7 @@ class FraudOutboxDispatcherTest {
         coEvery { repo.claimProcessable(any(), any()) } returns listOf(entry) andThen emptyList()
         coEvery { publisher.publish(entry) } returns Unit
         coEvery { repo.markSent(entry.eventId, any()) } returns Unit
-        val dispatcher = FraudOutboxDispatcher(repo, publisher, dispatchEnabled = true)
+        val dispatcher = FraudOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true))
 
         runBlocking { dispatcher.dispatch() }
 
@@ -61,7 +66,7 @@ class FraudOutboxDispatcherTest {
         val repo = mockk<FraudOutboxRepository>()
         val publisher = mockk<OutboxEventPublisher>()
         coEvery { repo.claimProcessable(any(), any()) } throws IllegalStateException("db down")
-        val dispatcher = FraudOutboxDispatcher(repo, publisher, dispatchEnabled = true)
+        val dispatcher = FraudOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true))
 
         // OutboxDispatch.dispatchOnce catches claimProcessable failures internally (libs-runtime) —
         // this asserts that contract holds through the dispatch() gate too: no propagation.

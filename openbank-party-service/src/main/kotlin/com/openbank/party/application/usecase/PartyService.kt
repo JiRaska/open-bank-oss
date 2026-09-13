@@ -8,6 +8,7 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.api.search.SearchRequest
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.identity.BlindIndex
 import com.openbank.libs.identity.RodneCislo
 import com.openbank.libs.observability.DomainMetrics
@@ -24,6 +25,9 @@ import java.util.UUID
 
 private const val RC_KEY_VERSION = 1
 
+/** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
+private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
+
 class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id")
 class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
 class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
@@ -39,6 +43,10 @@ class PartyService : PartyUseCase {
     @Inject lateinit var documentRepo: PartyDocumentRepository
 
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
+
+    @Inject lateinit var payeeRepo: PartyPayeeRepository
+
+    @Inject lateinit var mandateRepo: PartyMandateRepository
 
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
@@ -82,6 +90,7 @@ class PartyService : PartyUseCase {
             // keycloakSub so sub-keyed lookups (getMyParty, legacy mobile path) agree.
             keycloakSub = cmd.id?.toString(),
             partyType = cmd.partyType,
+            classification = cmd.classification,
             status = PartyStatus.PENDING_KYC,
             legalName = cmd.legalName,
             tradingName = cmd.tradingName,
@@ -89,6 +98,8 @@ class PartyService : PartyUseCase {
             nationality = cmd.nationality,
             taxId = cmd.taxId,
             registrationNumber = cmd.registrationNumber,
+            legalForm = cmd.legalForm,
+            registrationCountry = cmd.registrationCountry,
             email = cmd.email,
             phone = cmd.phone,
             address = cmd.address,
@@ -179,6 +190,97 @@ class PartyService : PartyUseCase {
     }
 
     override suspend fun getParty(id: UUID): Party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+
+    // ── Representation mandates (ADR-0284 D3) ────────────────────────────────────────────────
+
+    override suspend fun grantMandate(cmd: GrantMandateCommand): PartyMandate {
+        val principal = partyRepo.findById(cmd.principalPartyId) ?: throw PartyNotFoundException(cmd.principalPartyId)
+        val agent = partyRepo.findById(cmd.agentPartyId) ?: throw PartyNotFoundException(cmd.agentPartyId)
+        if (principal.partyType == PartyType.INDIVIDUAL) {
+            throw PartyMandateRejectedException(
+                "principal ${principal.id} is an INDIVIDUAL — only a legal entity can be acted for",
+            )
+        }
+        if (agent.partyType != PartyType.INDIVIDUAL) {
+            throw PartyMandateRejectedException(
+                "agent ${agent.id} is a ${agent.partyType} — only a natural person can hold a mandate",
+            )
+        }
+        listOf(agent, principal).firstOrNull { it.status in MANDATE_INELIGIBLE }?.let {
+            throw PartyMandateRejectedException("party ${it.id} is ${it.status} and cannot take part in a mandate")
+        }
+        validateMandateThreshold(cmd.authority, cmd.requiredSignatures)
+        val now = Instant.now(clock)
+        val existing = mandateRepo.findActive(principal.id, agent.id, cmd.role.name)
+        val mandate = (
+            existing ?: PartyMandate(
+                // ADR-0106: a durable, indexed identifier — UUIDv7 for insert locality, not a v4.
+                id = Ids.newId(),
+                principalPartyId = principal.id,
+                agentPartyId = agent.id,
+                role = cmd.role,
+                authority = cmd.authority,
+                requiredSignatures = cmd.requiredSignatures,
+                source = cmd.source,
+                status = MandateStatus.ACTIVE,
+                evidenceRef = cmd.evidenceRef,
+                validFrom = now,
+                validTo = cmd.validTo,
+                createdAt = now,
+                updatedAt = now,
+            )
+            ).copy(
+            authority = cmd.authority,
+            requiredSignatures = cmd.requiredSignatures,
+            source = cmd.source,
+            evidenceRef = cmd.evidenceRef ?: existing?.evidenceRef,
+            validTo = cmd.validTo,
+            updatedAt = now,
+        )
+        val event = PartyEvents.mandateGranted(mandate, now, PartyActor.system("party-api"))
+        return if (existing == null) mandateRepo.save(mandate, event) else mandateRepo.update(mandate, event)
+    }
+
+    private fun validateMandateThreshold(authority: MandateAuthority, requiredSignatures: Int) {
+        val valid = when (authority) {
+            MandateAuthority.SOLE -> requiredSignatures == 1
+            MandateAuthority.JOINT -> requiredSignatures >= 2
+        }
+        if (!valid) {
+            throw PartyMandateRejectedException(
+                "$authority authority is inconsistent with requiredSignatures=$requiredSignatures",
+            )
+        }
+    }
+
+    override suspend fun revokeMandate(cmd: RevokeMandateCommand): PartyMandate {
+        val mandate = mandateRepo.findById(cmd.mandateId)?.takeIf { it.principalPartyId == cmd.principalPartyId }
+            ?: throw PartyNotFoundException(cmd.mandateId)
+        if (mandate.status != MandateStatus.ACTIVE) return mandate
+        val now = Instant.now(clock)
+        val revoked = mandate.copy(
+            status = MandateStatus.REVOKED,
+            revokedAt = now,
+            revokeReason = cmd.reason,
+            updatedAt = now,
+        )
+        return mandateRepo.update(revoked, PartyEvents.mandateRevoked(revoked, now, PartyActor.system("party-api")))
+    }
+
+    override suspend fun listMandates(principalPartyId: UUID): List<PartyMandate> =
+        mandateRepo.findByPrincipal(principalPartyId)
+
+    override suspend fun actingFor(agentPartyId: UUID): List<ActingForProfile> {
+        val now = Instant.now(clock)
+        return mandateRepo.findByAgent(agentPartyId)
+            .filter { it.isActiveAt(now) }
+            .mapNotNull { m ->
+                partyRepo.findById(m.principalPartyId)?.takeIf {
+                    it.status != PartyStatus.CLOSED &&
+                        it.status != PartyStatus.MERGED
+                }?.let { ActingForProfile(it, m) }
+            }
+    }
 
     override suspend fun updateParty(cmd: UpdatePartyCommand): Party {
         val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
@@ -474,7 +576,34 @@ class PartyService : PartyUseCase {
         documentFileRepo.findByIdAndPartyId(fileId, partyId)
 
     override suspend fun getPartyKeycloakSub(id: UUID): String? = partyRepo.findById(id)?.keycloakSub
+
+    override suspend fun listPayees(partyId: UUID): List<Payee> = payeeRepo.findByPartyId(partyId)
+
+    override suspend fun savePayee(cmd: SavePayeeCommand): Payee {
+        val normalizedIban = cmd.iban.filterNot { it.isWhitespace() }.uppercase()
+        val existing = payeeRepo.findByPartyId(cmd.partyId)
+        val alreadySaved = existing.any { it.iban == normalizedIban }
+        if (!alreadySaved && existing.size >= MAX_PAYEES) {
+            throw PayeeLimitExceededException(cmd.partyId)
+        }
+        val payee = Payee(
+            id = existing.firstOrNull { it.iban == normalizedIban }?.id ?: Ids.newId(),
+            partyId = cmd.partyId,
+            name = cmd.name.trim(),
+            iban = normalizedIban,
+            bic = cmd.bic?.trim()?.ifBlank { null },
+            createdAt = Instant.now(clock),
+        )
+        return payeeRepo.save(payee)
+    }
+
+    override suspend fun deletePayee(partyId: UUID, iban: String) {
+        payeeRepo.deleteByPartyIdAndIban(partyId, iban.filterNot { it.isWhitespace() }.uppercase())
+    }
 }
+
+/** Mirrors the app's own PayeeStore.MAX_PAYEES. */
+private const val MAX_PAYEES = 30
 
 /** SHA-256 rendered as lowercase hex. */
 private const val SHA256_HEX_LENGTH = 64

@@ -42,8 +42,10 @@ import sys
 SCHEDULED_RE = re.compile(r"^\s*@Scheduled\b", re.M)
 LIVENESS_RE = re.compile(r"registerWorkflowLiveness")
 # Outbox infra is exempt by ROLE (own openbank.outbox.backlog freshness signal,
-# ADR-0237 point 1): the shared base classes cover most, but security-scanner's
-# hand-rolled dispatcher predates the abstraction — name the role, not the base.
+# ADR-0237 point 1): the shared base classes cover most, but some hand-rolled
+# dispatchers predate the abstraction — name the role, not the base. (The example
+# this comment used to cite, security-scanner's, was deleted in #4709: the whole
+# outbox existed with nothing ever writing to it.)
 OUTBOX_INFRA_RE = re.compile(
     r"AbstractOutboxDispatcher|AbstractOutboxBacklogGauge"
     r"|class\s+\w*(OutboxDispatcher|OutboxBacklogGauge)\b")
@@ -68,17 +70,6 @@ ALLOWLIST = {
 # `mode: enforced`. Their being left here after healing is what kept the gate at
 # exit 1, which `mode: advisory` then converted to a warning; nothing else noticed.
 BASELINE = [
-    # non-money-path
-    "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
-    "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",
-    "openbank-audit-service/src/main/kotlin/com/openbank/audit/application/AuditAnchorService.kt",
-    "openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/ConsentExpirationJob.kt",
-    "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/DelegationExpirationJob.kt",
-    "openbank-dispute-service/src/main/kotlin/com/openbank/dispute/infrastructure/observability/ComplaintDeadlineGauge.kt",
-    "openbank-onboarding-service/src/main/kotlin/com/openbank/onboarding/infrastructure/observability/OnboardingFunnelGauge.kt",
-    "openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/crypto/TrustedListService.kt",
-    "openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/metrics/CloseLastRunGauge.kt",
-    "openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/scheduler/PeriodCloseScheduler.kt",
 ]
 
 

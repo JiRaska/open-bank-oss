@@ -42,9 +42,9 @@ graph TB
     uc[Application<br/>PartyService<br/>+ CaseTransitionEngine]
     dom[Domain<br/>agregát Party<br/>+ doménové události]
     persist[Persistence<br/>PartyRepositoryImpl<br/>Hibernate Reactive / Panache]
-    obx[Outbox<br/>PidOutboxDispatcher<br/>@Scheduled každých 5s]
+    obx["Outbox<br/>PidOutboxDispatcher<br/>@Scheduled každých 5s"]
     msg[Messaging<br/>KafkaPartyEventPublisher<br/>KafkaPidOutboxEventPublisher]
-    authz[Authz<br/>AuthzProducer + @Authorize]
+    authz["Authz<br/>AuthzProducer + @Authorize"]
   end
 
   rest --> uc

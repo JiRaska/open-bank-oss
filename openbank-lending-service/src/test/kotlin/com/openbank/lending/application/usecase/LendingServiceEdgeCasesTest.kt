@@ -4,6 +4,8 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -79,6 +81,8 @@ class LendingServiceEdgeCasesTest {
     }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
+    private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
+    private val borrowerCredit = mockk<BorrowerCreditPort>()
 
     private val service = LendingService(
         applications,
@@ -100,6 +104,8 @@ class LendingServiceEdgeCasesTest {
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             clock,
         ),
+        borrowerAccounts,
+        borrowerCredit,
     )
 
     private val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")
@@ -400,6 +406,7 @@ class LendingServiceEdgeCasesTest {
         val loanId = LoanId.random()
         val saved: CapturingSlot<Collateral> = slot()
         every { valuation.revalue("REAL_ESTATE", eur("250000.00")) } returns Uni.createFrom().item(eur("230000.00"))
+        every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
         every { collateral.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
 
         val result = service.register(
@@ -460,6 +467,7 @@ class LendingServiceEdgeCasesTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
@@ -487,6 +495,7 @@ class LendingServiceEdgeCasesTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = Money.zero("EUR"),
+                modelVersion = "test-model-v1",
             ),
         )
         every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())

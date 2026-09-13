@@ -30,9 +30,9 @@ Idempotency-Key: <client-generated-unique-key>
 ```
 
 Rules:
-- A blank key is rejected (`400`, "Idempotency-Key header is required").
-- Same key already seen → the cached response is returned with header `X-Idempotency-Replayed: true` (Redis-backed `IdempotencyStore`).
-- In addition, the repository deduplicates by `idempotency_key` (UNIQUE) — a create with a previously-used key returns the existing payment rather than creating a duplicate.
+- A blank or longer-than-128-character key is rejected (`400`).
+- Postgres atomically binds the key to a SHA-256 of the normalized command and authenticated actor scope, together with the payment and its outbox event.
+- An exact replay returns the durable payment with `X-Idempotency-Replayed: true`; a changed request or unverifiable legacy row returns `409 IDEMPOTENCY_KEY_REUSED` (`application/problem+json`). Redis is not a create-payment authority. For an unverifiable legacy row, do not retry under a new key: the first attempt may have committed, so resolve it through payment-status lookup/operator reconciliation.
 
 ## Key endpoints
 

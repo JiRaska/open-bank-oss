@@ -7,8 +7,8 @@
 // Trace Explorer (/observability/traces): Tempo search (`/api/search`) and
 // single-trace fetch (`/api/traces/{id}`, OTLP JSON). Read-only.
 //
-// Tempo serves its query API on port 3100 (tempo.observability.svc). In the
-// docker-compose dev stack it is reachable as http://tempo:3100. Unreachable →
+// Tempo serves its query API on port 3200 (tempo.observability.svc). In the
+// docker-compose dev stack it is reachable as http://tempo:3200. Unreachable →
 // a typed 502 the page degrades on (never a raw error leaked to the operator).
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -16,8 +16,8 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 function tempoBase(): string {
-  if (process.env.SERVICES_HOST === 'container') return 'http://tempo:3100'
-  return process.env.TEMPO_URL ?? 'http://localhost:3100'
+  if (process.env.SERVICES_HOST === 'container') return 'http://tempo:3200'
+  return process.env.TEMPO_URL ?? 'http://localhost:3200'
 }
 
 export async function GET(

@@ -1,7 +1,8 @@
 ---
 date: 2026-08-11
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; party materiality is shipped by #4751, while KYC/coordinator, sanctions diff, and expiry triggers remain"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "KYC review turns event-driven: a sanctions-list refresh whose per-entr
 ---
 
 # ADR-0256 — Perpetual KYC: event-driven re-screening between periodic reviews
+
+**Delivery note (2026-08-20).** The party-side half of D1 is shipped by #4751: `openbank-party-service` compares the before/after master-data records, emits additive `materiality` and `materialFields` on `PARTY_UPDATED`, and records classification metrics. This does **not** make the trigger live: `openbank-kyc-service` still has no `PARTY_DATA_CHANGED` consumer or `case-coordinator` client, and the sanctions per-entry diff/hash plus `KYC_CASE_EXPIRED` sweep remain unimplemented. `decision-status` is unchanged and `delivery-status` therefore remains `partial`; the remaining slices are triaged in #5708.
+
 
 ## Context
 
@@ -94,14 +98,12 @@ members and one deferred:
 - `KYC_CASE_EXPIRED` *(active)* — `expiresAt` reached without review, raised by a sweep over the
   existing field. The calendar floor made explicit: expiry opens a case instead of the case
   silently lapsing to EXPIRED with no queue entry.
-- `PARTY_DATA_CHANGED` *(deferred — catalogue member, not yet wired)* — a material change to a
-  party's master data (name, date of birth, residency country, beneficial-owner set) requires
-  party-service to publish a **materiality-classified** change event: materiality must be
-  declared in the publisher's event contract, never inferred by the consumer from a generic
-  update, and address-only/contact-only edits are excluded. `KafkaPartyEventPublisher` publishes
-  today, but no materiality classification exists — this member is inert until that contract
-  lands, tracked as #4458. This ADR therefore ships the catalogue with two live triggers and says
-  so, rather than declaring three and delivering two.
+- `PARTY_DATA_CHANGED` *(producer shipped, consumer deferred)* — a material change to a party's
+  master data (name, date of birth, residency country, beneficial-owner set) must be declared by
+  the publisher, never inferred by a consumer from a generic update; address-only/contact-only
+  edits are excluded. Party-service now emits the additive `materiality` and `materialFields`
+  contract (#4751). KYC has not yet consumed that contract or opened the coordinator case, so this
+  catalogue member remains inert. The catalogue therefore still has two live triggers, not three.
 
 Extending the catalogue is an ADR-level act (it changes what may put a customer under review),
 not a config flag.

@@ -28,3 +28,15 @@ interface BackfillSource {
     /** Raw event payloads (same shape the live topics carry) for [window], narrowed per [request]. */
     suspend fun read(window: BackfillWindow, request: BackfillRequest): List<String>
 }
+
+/**
+ * Raised when a recovery request reaches a deployment without a durable replay reader.
+ *
+ * An empty result is not a successful backfill: it would produce a green COMPLETED report while
+ * ingesting no rows and hide an unrecoverable evidence gap. Deployments must bind an outbox/export
+ * adapter before enabling recovery operations.
+ */
+class DurableBackfillUnavailableException :
+    IllegalStateException(
+        "No durable analytics backfill reader is configured; bind an outbox or archive export adapter",
+    )

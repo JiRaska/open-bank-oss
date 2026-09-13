@@ -1,7 +1,8 @@
 ---
 date: 2026-07-30
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5679 — 14 of 16 services expose no pending list, so the federated inbox cannot see them"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,28 @@ summary: "Sixteen per-service ApprovalResources become one canonical ApprovalIte
 ---
 
 # ADR-0227 — Unified approval inbox: one disposition point for human and agent proposals
+
+**Delivery note (2026-08-19).** Phase 1 exists and the ADR's premise about D1 is stale: the
+sixteen `ApprovalResource`s do **not** carry sixteen item shapes — they all sit on the shared
+`com.openbank.libs.approval.ApprovalStore` / `PendingApproval`, and `findPending` in
+libs-domain already documents itself as D2's read side. So D1 is effectively delivered, and the
+real gap is coverage of the *read*: measured 2026-08-19, only **2 of 16** services expose a
+pending-list `@GET` (sanctions #3472, lending), and the BFF route `/api/approvals/pending`
+federated only lending and the agent plane. Every money-path domain — ledger, transaction,
+sepa-payment, domestic-payment, balance, sepa-instant, fx, clearing, swift — is invisible to the
+supervisor screen, and an unread source renders identically to a source with nothing in it.
+
+That PR closed the smaller half: sanctions was already serving its queue and the inbox was not
+reading it. **2026-08-19 (this PR, ledger-service).** Ledger did not even have the smaller half —
+it served `PATCH /api/v1/journals/approvals/{id}` (decide) but no `GET` (list), so a
+`ledger.reverse` four-eyes decision parked at 202 was discoverable only by whoever had been
+handed its id out of band, on the highest-priority money-path service per #5679's own ordering.
+Now serves `GET /api/v1/journals/approvals`, federated into `/api/approvals/pending` as a fourth
+source. **3 of 16 services now expose a pending list (sanctions, lending, ledger); 13 remain**
+(transaction, sepa-payment, domestic-payment, balance, sepa-instant, fx, clearing, swift, account,
+billing, consent, notification, party) — tracked in #5679, one PR per service (each an API change
+under ADR-0048). D3 (filters, risk bands) and D4 (SCA-bound disposal in the governed UI) are
+untouched.
 
 Relates: ADR-0155 (four-eyes mechanism), ADR-0223 D4 (four-eyes rollout),
 ADR-0224 D3 (action-class propose/dispose), ADR-0031 (agents propose, humans dispose).

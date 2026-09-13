@@ -1,0 +1,196 @@
+# Falco agent liveness (ADR-0030 / issue #5734 follow-up).
+#
+# WHY THIS EXISTS, AND WHY IT REPLACED A LOKI RULE: liveness for the runtime-security
+# agent used to be `FalcoAgentSilent` in loki-rules-falco-runtime.yaml —
+# `absent_over_time({namespace="falco"}[30m])`. Its own comment stated the premise it
+# rested on: "Falco emits continuously (the untuned NOTICE rules alone are thousands a
+# day, and `Run shell untrusted` is deliberately left noisy), so an empty 30m window
+# means the agent, Alloy, or Loki ingestion is broken."
+#
+# That premise was true when written and was then destroyed BY US. #6075 and #6198 tuned
+# the Falco ruleset from ~33,000 events/day to zero — deliberately, because the noise was
+# what made the control unreadable. Measured 2026-08-21, minutes after the Loki ruler
+# started evaluating rules for the first time: 13/13 Falco pods Ready, zero log lines in
+# 60 minutes, and `FalcoAgentSilent` sitting in `pending` on its way to firing. The alert
+# that exists to reveal a dead agent had become an alert that fires on the healthy resting
+# state — and noise on that control is the one thing that hides a genuinely dead agent.
+#
+# This is the same shape as the WorkflowLivenessStale/Instant.EPOCH lesson in the root
+# CLAUDE.md, one layer up: an alert whose discriminator was a MAGNITUDE stops being able
+# to discriminate the moment that magnitude legitimately changes. The fix is a different
+# observable, not a retuned threshold — there is no event rate that separates
+# "well-tuned Falco" from "dead Falco", because both are zero.
+#
+# The observable used here is the DaemonSet's own readiness from kube-state-metrics, which
+# is emitted whether or not Falco ever detects anything. Verified live 2026-08-21:
+#   kube_daemonset_status_desired_number_scheduled{daemonset="falco"} = 13
+#   kube_daemonset_status_number_ready{daemonset="falco"}             = 13
+#   kube_daemonset_status_number_unavailable{daemonset="falco"}       = 0
+#
+# Falco's own `falco_*` metrics are NOT an option today: `metrics.enabled: false` in
+# apps/falco.yaml and there is no Service in the falco namespace, so Prometheus has zero
+# falco-named series. Enabling them would give a richer signal (rules loaded, event
+# drops) and is worth doing separately; this file deliberately depends only on what
+# already exists.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-runtime-security-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.runtime-security.falco
+      rules:
+        # A Falco pod that is not Ready is a NODE with no runtime detection. Falco is a
+        # DaemonSet, so this is per-node coverage, not redundancy: one unavailable pod
+        # means one node is dark, and nothing else in the estate reports that.
+        - alert: FalcoAgentNotReady
+          expr: |
+            kube_daemonset_status_number_unavailable{daemonset="falco", namespace="falco"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Falco is not running on {{ $value | printf \"%.0f\" }} node(s) — those nodes have no runtime detection"
+            description: >-
+              {{ $value | printf "%.0f" }} Falco DaemonSet pod(s) have been unavailable for over
+              15 minutes. Falco runs one pod per node, so each unavailable pod is a node with NO
+              syscall-level detection: every Falco rule is blind there and nothing else covers it.
+              Check: kubectl -n falco get ds,pods -o wide — then the node itself
+              (system-node-critical priority means a pending pod is a node problem, not preemption).
+        # The absence case, which the readiness comparison above CANNOT see. If
+        # kube-state-metrics stops, or the DaemonSet is deleted outright, the
+        # `unavailable > 0` comparison is evaluated over an absent series and matches
+        # nothing — so it reports healthy for a Falco that is not merely degraded but
+        # gone. An absent series is a third state next to ready and unavailable, and it
+        # needs its own rule; this is the lesson the dead alert rules in #5733 cost.
+        - alert: FalcoDaemonSetAbsent
+          expr: |
+            absent(kube_daemonset_status_desired_number_scheduled{daemonset="falco", namespace="falco"})
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "The Falco DaemonSet has disappeared from monitoring — runtime security is unverifiable"
+            description: >-
+              No `kube_daemonset_status_desired_number_scheduled{daemonset="falco"}` series for 15
+              minutes. Either the Falco DaemonSet no longer exists, or kube-state-metrics has
+              stopped — and in the second case EVERY kube_* based alert in this estate is equally
+              blind, not just this one. FalcoAgentNotReady cannot fire while this is true, because
+              a threshold over an absent series matches nothing.
+              Check: kubectl -n falco get ds && kubectl -n observability get pods -l app.kubernetes.io/name=kube-state-metrics
+
+    # Falco's OWN metrics (#6236 / #6322). Everything in the group above is a proxy: it reports on
+    # the Kubernetes object, not on the agent's behaviour. These read what Falco says about itself.
+    #
+    # The metric names below were read off the running agent on 2026-08-22, not taken from docs.
+    # The prefix is `falcosecurity_`, NOT `falco_` — a probe written against the obvious guess
+    # reported zero for ten minutes against a perfectly working agent, and the only thing that
+    # caught it was checking the scrape targets (12, all `up`) instead of believing the zero.
+    # 44 metric names, 12 pods.
+    - name: openbank.runtime-security.falco-agent
+      rules:
+        # Nodes running DIFFERENT rulesets. `falcosecurity_falco_sha256_rules_files_info` carries
+        # the hash as a LABEL with a constant value of 1, one series per pod per rule file — so the
+        # question is not what the value is, it is how many distinct hashes exist. Measured
+        # 2026-08-22: 24 series, 12 pods x 2 files (falco_rules.yaml, openbank-tuning.yaml), and
+        # exactly ONE hash per file. More than one means some nodes are enforcing rules the others
+        # are not, which no readiness check can see: every pod is Ready and the estate has a hole
+        # shaped like whichever nodes lag.
+        - alert: FalcoRulesetDrift
+          expr: |
+            count by (file_name) (
+              count by (file_name, sha256) (falcosecurity_falco_sha256_rules_files_info)
+            ) > 1
+          for: 20m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            # No subject_period here, deliberately: this is an INSTANT query with no range
+            # window, so there is nothing for a period to be checked against and the #5736 gate
+            # rejects the declaration as unverifiable. The 20m `for:` is what does the damping —
+            # a DaemonSet rollout legitimately puts two hashes in flight, and paging on every
+            # falco config change would be exactly the noise this session spent its time removing.
+            summary: "Falco nodes disagree on {{ $labels.file_name }} — {{ $value }} different rulesets are live"
+            description: >-
+              {{ $value }} distinct sha256 hashes of `{{ $labels.file_name }}` are running across the
+              Falco DaemonSet, sustained for 20 minutes. Some nodes are enforcing rules the others
+              are not. Every pod is Ready throughout, so no liveness signal shows this. A rollout in
+              progress explains it for a few minutes, not twenty.
+              Check: kubectl -n falco get pods -o wide, then compare
+              kubectl -n falco exec <pod> -c falco -- sha256sum /etc/falco/rules.d/*
+        # Falco DETECTED something and then threw it away. This is the worst failure mode in the
+        # agent, because the detection happened: the rule matched, and the output queue dropped it
+        # before anything downstream saw it. Distinct from kernel drops below, where the event never
+        # reached the rule engine at all.
+        - alert: FalcoOutputsDropped
+          expr: |
+            sum by (pod) (rate(falcosecurity_falco_outputs_queue_num_drops_total[10m])) > 0
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "Falco on {{ $labels.pod }} is DROPPING its own detections before output"
+            description: >-
+              Falco's output queue on `{{ $labels.pod }}` has been discarding messages for 15
+              minutes. These are detections that fired and were then lost — the rule matched, and
+              nothing downstream will ever see it. Zero across all 12 pods at the time this rule
+              was written, so any sustained non-zero is a change, not a baseline.
+              Check: kubectl -n falco logs {{ $labels.pod }} -c falco | tail, and whether the
+              output channel (stdout/HTTP) is backing up.
+        # Events that never reached the rule engine, because the kernel ring buffer overflowed.
+        # This is NOT a duplicate of the log-based FalcoSyscallEventDrops in
+        # loki-rules-falco-runtime.yaml, and both are kept on purpose: that one fires on Falco's own
+        # internal alert, which `syscall_event_drops.threshold: 0.1` only raises once 10% of events
+        # are being lost. This one sees the first dropped event. Different sensitivities, so the
+        # cheap one fires first and the severe one confirms — and it does not depend on the log
+        # pipeline reaching Loki, which is the dependency that made the old FalcoAgentSilent
+        # unusable.
+        - alert: FalcoKernelEventDrops
+          expr: |
+            sum by (pod) (rate(falcosecurity_scap_n_drops_total[10m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            # 30m rather than 15m: a momentary buffer overflow under load is not a control failure,
+            # and Falco's own 10% threshold covers the severe case. Sustained for half an hour is a
+            # blind spot.
+            subject_period: continuous
+            summary: "Falco on {{ $labels.pod }} is dropping kernel events — that node has detection gaps"
+            description: >-
+              The kernel ring buffer feeding Falco on `{{ $labels.pod }}` has been overflowing for
+              30 minutes, so syscalls are never reaching the rule engine and detections on that node
+              are silently incomplete. Fires BEFORE FalcoSyscallEventDrops, which waits for Falco's
+              own 10% threshold. Zero across all pods when written.
+              Check: node CPU pressure, and the Falco resource limits in gitops/apps/falco.yaml.
+        # The absence companion for this whole group, which none of the rules above can provide:
+        # every one is a `> 0` comparison, and a comparison over an absent series matches nothing.
+        # FalcoDaemonSetAbsent does not cover it either — that reads kube-state-metrics, so it stays
+        # quiet while the DaemonSet is healthy and only Falco's own scrape is broken.
+        - alert: FalcoAgentMetricsAbsent
+          expr: |
+            absent(falcosecurity_falco_version_info)
+          for: 20m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Falco is not reporting its own metrics — ruleset drift and drops are unverifiable"
+            description: >-
+              No `falcosecurity_falco_version_info` series for 20 minutes, so the falco-metrics
+              scrape is broken or metrics were turned off. FalcoRulesetDrift, FalcoOutputsDropped
+              and FalcoKernelEventDrops are all comparisons and CANNOT fire while this is true.
+              The DaemonSet may be perfectly healthy — that is the point, and why
+              FalcoDaemonSetAbsent does not cover this.
+              Check: kubectl -n falco get servicemonitor,svc,endpoints falco-metrics

@@ -13,11 +13,20 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
+
+/** Immutable catalog evidence used to price and constrain an originated loan. */
+data class CatalogLoanSnapshot(
+    val offeringId: UUID,
+    val revisionId: UUID,
+    val contentHash: String,
+    val schemaVersion: Int,
+)
 
 /** Servicing and termination lifecycle of a booked loan (ADR-0028, ADR-0215 D1). */
 enum class LoanStatus {
@@ -120,6 +129,12 @@ data class LoanApplication(
     val decidedAt: OffsetDateTime? = null,
     val jurisdiction: String? = null,
     val productType: String? = null,
+    /**
+     * ADR-0269 rule 3: which of the three credit shapes this application is, and therefore which
+     * steps the customer walks. Defaults to UNSECURED — the only intake route that exists today —
+     * so an existing caller keeps the behaviour it already had.
+     */
+    val productKind: CreditProductKind = CreditProductKind.UNSECURED,
     val packVersion: Int? = null,
     val verifiedIncomeMonthly: Money? = null,
     val existingDebtServiceMonthly: Money? = null,
@@ -133,6 +148,7 @@ data class LoanApplication(
     val policyVersions: String? = null,
     val decisionInputHash: String? = null,
     val decidedEngineAt: OffsetDateTime? = null,
+    val catalogSnapshot: CatalogLoanSnapshot? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */
@@ -225,6 +241,7 @@ data class LoanApplicationRequest(
     val ageYears: Int? = null,
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
+    val catalogOfferingId: UUID? = null,
 )
 
 /**
@@ -292,6 +309,8 @@ data class ProvisioningSnapshot(
     val stage: Ifrs9Stage,
     val horizon: EclHorizon,
     val expectedCreditLoss: Money,
+    /** The risk-parameter model that produced [expectedCreditLoss] (issue #8364) — flows onto the persisted record. */
+    val modelVersion: String,
 )
 
 /**
@@ -315,6 +334,13 @@ data class LoanProvisioningRecord(
     val stage: Ifrs9Stage,
     val expectedCreditLoss: Money,
     val createdAt: OffsetDateTime,
+    /**
+     * The risk-parameter model version that produced this row's ECL (issue #8364) — the audit
+     * trail half of PD/LGD governance: any parameter change ships with a new version string in
+     * the same commit, so the persisted history shows exactly which periods were provisioned
+     * under which parameter set.
+     */
+    val modelVersion: String,
 )
 
 /** Outcome of one scheduled IFRS 9 provisioning pass over the live book. */

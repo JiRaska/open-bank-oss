@@ -71,6 +71,12 @@ class DomesticPaymentWorkflowLivenessTest {
         }
         override suspend fun recordRedriveAttempt(paymentId: UUID) = Unit
         override suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")
+        override suspend fun saveDelegated(
+            payment: DomesticPayment,
+            outboxMessage: OutboxMessage,
+            boundAt: Instant,
+            debitOwnerPartyId: UUID,
+        ) = error("unused")
         override suspend fun findById(paymentId: UUID) = error("unused")
         override suspend fun findByIdempotencyKey(idempotencyKey: String) = error("unused")
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =

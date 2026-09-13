@@ -6,6 +6,7 @@ package com.openbank.campaign.application
 
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -15,6 +16,7 @@ import com.openbank.campaign.application.usecase.TriggeredEnrolment
 import com.openbank.campaign.application.usecase.TriggeredEnrolmentService
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -22,6 +24,8 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -43,10 +47,20 @@ class TriggeredEnrolmentTest {
     private val outOfSegment = UUID.randomUUID()
     private val segment = Segment("new-customers", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
 
+    // A REAL adapter over a real registry (#5705).
+    private val registry = SimpleMeterRegistry()
+    private val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+    private fun enrolments(outcome: String): Double = registry.find(CampaignMetricsAdapter.ENROLMENTS_METRIC)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
+
     private fun campaign(state: CampaignState = CampaignState.ACTIVE, trigger: String? = "ACCOUNT_OPENED") = Campaign(
         id = campaignId,
         name = "welcome",
         goal = "greet a new account holder",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("new-customers", 1),
         steps = listOf(CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         trigger = trigger,
@@ -85,6 +99,7 @@ class TriggeredEnrolmentTest {
         journeys: JourneySignaller,
         members: Set<UUID> = setOf(inSegment),
         segmentPresent: Boolean = true,
+        creditConsent: (UUID) -> Boolean = { true },
     ) = TriggeredEnrolmentService(
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = stored?.takeIf { it.id == id }
@@ -104,6 +119,11 @@ class TriggeredEnrolmentTest {
             override suspend fun matches(segment: Segment, partyId: UUID) = partyId in members
         },
         journeys = journeys,
+        metrics = metrics,
+        consentCheck = object : ConsentCheckPort {
+            override suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean =
+                if (scope == CampaignProductKind.CREDIT_OFFERS_SCOPE) creditConsent(partyId) else true
+        },
     )
 
     @Test
@@ -116,6 +136,7 @@ class TriggeredEnrolmentTest {
         assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
         assertThat(journeys.started).containsExactly(inSegment to JourneyType.LINEAR)
         assertThat(enrolments.saved.map { it.partyId }).containsExactly(inSegment)
+        assertThat(enrolments("started")).isEqualTo(1.0)
     }
 
     @Test
@@ -130,6 +151,10 @@ class TriggeredEnrolmentTest {
             .describedAs("the trigger decides when, the segment decides who — this is the audience boundary")
             .isEmpty()
         assertThat(enrolments.saved).isEmpty()
+        // The negative control that makes the tag load-bearing: an event that qualified nobody
+        // must leave the series flat, or "campaign-service is enrolling" would be true of a
+        // service enrolling nobody.
+        assertThat(enrolments("started")).isEqualTo(0.0)
     }
 
     @Test
@@ -215,5 +240,67 @@ class TriggeredEnrolmentTest {
         val outcome = service(null, Enrolments(), Journeys()).enrol(campaignId, inSegment)
 
         assertThat(outcome).isEqualTo(TriggeredEnrolment.CAMPAIGN_GONE)
+    }
+
+    // ── ADR-0269 rule 1 on the trigger path ─────────────────────────────────────────────────
+
+    @Test
+    fun `a credit campaign does not enrol a party who never switched credit offers on`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { false }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.NO_CREDIT_CONSENT)
+        // The refusal has to reach the journey, not merely the return value: an enrolment row or a
+        // started workflow would mean the party is in the campaign regardless of what we answered.
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
+    }
+
+    @Test
+    fun `a credit campaign enrols a party who did switch credit offers on`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { true }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
+        assertThat(enrolments.saved).hasSize(1)
+    }
+
+    @Test
+    fun `a non-credit campaign is not gated on credit consent`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+
+        // campaign is NONE. Refusing here would make the credit consent a general marketing switch,
+        // which is exactly what ADR-0269 says it is not.
+        val outcome = runBlocking {
+            service(campaign(), enrolments, journeys, creditConsent = { false }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
+    }
+
+    @Test
+    fun `an unreadable consent refuses the credit enrolment rather than assuming it`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { error("consent-service down") })
+                .enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.NO_CREDIT_CONSENT)
+        assertThat(enrolments.saved).isEmpty()
     }
 }

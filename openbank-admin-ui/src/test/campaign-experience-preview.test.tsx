@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import React from 'react'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -30,6 +31,18 @@ describe('campaign customer experience preview', () => {
     expect(screen.getByText(/Summer saving → Savings/)).toBeTruthy()
     expect(container.querySelector('[data-preview-channel="PUSH"]')).toBeTruthy()
     expect(screen.getByText('openbank://savings')).toBeTruthy()
+    const cta = container.querySelector<HTMLElement>('.campaign-phone-cta')!
+    expect(cta).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+
+    // This test deliberately loads the real cascade. The CTA shares the generic hero's `span`
+    // selector, so checking the class alone would miss an equally-coloured label on its own fill.
+    const style = document.createElement('style')
+    style.textContent = readFileSync('src/app/globals.css', 'utf8')
+    document.head.append(style)
+    expect(getComputedStyle(cta).color).toBe('rgb(255, 255, 255)')
+    expect(getComputedStyle(cta).display).toBe('inline-block')
+    style.remove()
   })
 
   it('does not pretend an email is a push notification', () => {

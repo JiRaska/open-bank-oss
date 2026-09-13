@@ -12,7 +12,6 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 interface DelegationRepository {
-    suspend fun save(grant: DelegationGrant): DelegationGrant
     suspend fun save(grant: DelegationGrant, event: DomainEvent): DelegationGrant
     suspend fun findById(id: UUID): DelegationGrant?
     suspend fun findByGrantorId(grantorPartyId: UUID): List<DelegationGrant>
@@ -24,8 +23,20 @@ interface DelegationRepository {
     ): List<DelegationGrant>
 
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<DelegationGrant>>
-    fun markExpired(id: UUID, expiredAt: OffsetDateTime, event: DomainEvent): Uni<Boolean>
+    fun markExpired(
+        id: UUID,
+        expectedLifecycleRevision: Long,
+        expiredAt: OffsetDateTime,
+        event: DomainEvent,
+    ): Uni<Boolean>
 }
+
+/**
+ * The aggregate changed after the use case read it. Retrying from a fresh read is safe; writing the
+ * detached snapshot is not, because it could reopen a grant a concurrent transition already closed.
+ */
+class DelegationConcurrentTransitionException(id: UUID, expectedRevision: Long) :
+    RuntimeException("delegation $id changed after lifecycle revision $expectedRevision")
 
 /**
  * ADR-0232 D5 — what the eligibility gate needs to know about a party, nothing more.
@@ -45,6 +56,15 @@ data class PartyEligibility(
 
 interface PartyEligibilityClient {
     suspend fun eligibilityOf(partyId: UUID): PartyEligibility
+}
+
+enum class GrantorAuthorityVerdict { AUTHORIZED, DENIED, UNVERIFIABLE }
+
+data class GrantorAuthority(val verdict: GrantorAuthorityVerdict, val displayName: String? = null)
+
+/** ADR-0232 D5 / ADR-0284: may this authenticated human create authority for this principal? */
+interface GrantorAuthorityClient {
+    suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority
 }
 
 data class ScaChallengeSnapshot(val id: UUID, val partyId: UUID, val purpose: String, val status: String)

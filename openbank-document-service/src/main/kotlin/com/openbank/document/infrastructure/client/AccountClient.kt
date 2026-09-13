@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -23,6 +24,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * before the sign step), so this is real on-file data, not a placeholder.
  */
 @RegisterRestClient(configKey = "account-service-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface AccountClient {

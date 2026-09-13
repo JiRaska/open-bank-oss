@@ -9,19 +9,20 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { paymentListQuery } from '@/lib/payments/paymentListQuery'
 
 // In-cluster ClusterIP (payments namespace). Overridable via env for local/dev.
 const DOMESTIC_SERVICE = process.env.DOMESTIC_SERVICE_URL || 'http://domestic-payment.payments.svc:8116'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await auth()
     if (!session?.user?.accessToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const res = await fetch(`${DOMESTIC_SERVICE}/api/v1/domestic-payments`, {
+    const res = await fetch(`${DOMESTIC_SERVICE}/api/v1/domestic-payments${paymentListQuery(req.nextUrl.searchParams)}`, {
       headers: { 'Authorization': `Bearer ${session.user.accessToken}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),

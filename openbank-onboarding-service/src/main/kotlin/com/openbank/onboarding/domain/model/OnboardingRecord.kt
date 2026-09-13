@@ -63,11 +63,21 @@ enum class FunnelStage {
             party == PartyStage.SUSPENDED || party == PartyStage.CLOSED -> BLOCKED
             party == PartyStage.ACTIVE && scaEnrolled -> ACTIVE
             party == PartyStage.ACTIVE && !scaEnrolled -> SCA_PENDING
-            kyc == KycStage.UNDER_REVIEW -> KYC_UNDER_REVIEW
-            kyc == KycStage.DOCUMENTS_REQUIRED -> KYC_DOCUMENTS_REQUIRED
-            kyc == KycStage.OPEN || kyc == null -> KYC_OPEN
-            kyc == KycStage.REJECTED || kyc == KycStage.EXPIRED -> BLOCKED
-            else -> REGISTERED
+            else ->
+                // Exhaustive on purpose (#8951): the previous catch-all `else -> REGISTERED` is
+                // the actual root cause — APPROVED had no branch and fell through to the FIRST
+                // funnel column, so the board moved a customer backwards at the exact moment
+                // their KYC was approved (APPROVED + not-yet-ACTIVE is the normal ordering:
+                // kyc-service approves, party-service activates afterwards). A new KycStage
+                // value is now a compile error here, not a silent fall-through.
+                when (kyc) {
+                    null, KycStage.OPEN -> KYC_OPEN
+                    KycStage.DOCUMENTS_REQUIRED -> KYC_DOCUMENTS_REQUIRED
+                    // APPROVED stays in the KYC column until party activation — KYC_OPEN would
+                    // lie (the KYC is not open) and there is no KYC_APPROVED board column.
+                    KycStage.UNDER_REVIEW, KycStage.APPROVED -> KYC_UNDER_REVIEW
+                    KycStage.REJECTED, KycStage.EXPIRED -> BLOCKED
+                }
         }
     }
 }

@@ -33,6 +33,7 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1731: plai
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1993: plaintext http:// env value http://keda-add-ons-http-interceptor-proxy.keda:8080
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1998: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2257: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2047: plaintext http:// env value http://openbao.vault.svc:8200
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2496: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2548: plaintext http:// env value http://sepa-payment.payments.svc:8115
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2651: plaintext http:// env value http://tempo.observability.svc:4317
@@ -53,12 +54,20 @@ V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:56: plainte
 V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:65: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:113: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:122: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
+V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:130: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/anacredit/anacredit-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+# analytics-sink -> account-service (#8792/#2891). The INITIAL_LOAD backfill sweeps the account
+# registry to seed ownership for accounts that pre-date the event stream. In-cluster hop, plaintext
+# for the same reason as the other 200+ lines here; retiring it is the mesh-mTLS work (Layer 1).
+# The token it carries is NOT plaintext-dependent: it is an OIDC client_credentials bearer minted
+# against Keycloak, and the call is refused without it (optional:false on the secret ref).
+V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:107: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:143: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:153: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:155: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:160: plaintext http:// env value http://interest-service.interest.svc:8125
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:165: plaintext http:// env value http://kyc-service.kyc.svc:8114
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:173: plaintext http:// env value http://wealth-service.wealth.svc:8154
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:169: plaintext http:// env value http://lending-service.lending.svc:8126
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:171: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:173: plaintext http:// env value http://domestic-payment.payments.svc:8116
@@ -120,6 +129,11 @@ V9.1 openbank-infra/gitops/components/observability/cronjob-journey-public-edge.
 V9.1 openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml:58: plaintext http:// env value http://tempo.observability.svc:3200
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:109: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
+# #3931: the disbursement customer-credit leg (account-service lookup + transaction-service
+# TRANSFER). Same debt class as every other in-cluster plaintext hop on this baseline — mesh-mTLS
+# is the real fix (Layer 1), not this PR's concern.
+V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100
+V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:126: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:103: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:105: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:107: plaintext http:// env value http://account-service.accounts.svc:8100
@@ -156,7 +170,7 @@ V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:85: plaintext http:
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:91: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:92: plaintext http:// env value http://mcp-service.platform.svc:8150/mcp
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:116: plaintext http:// env value http://security-scanner-service.security-scanner.svc:8120
-V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:121: plaintext http:// env value http://tempo.observability.svc:3100
+V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:167: plaintext http:// env value http://tempo.observability.svc:3200
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:127: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:139: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/tpp-registry/tpp-registry-service.yaml:94: plaintext http:// env value http://tempo.observability.svc:4317
@@ -202,6 +216,8 @@ V9.1 openbank-infra/gitops/components/document-service/document-service-service.
 V9.1 openbank-infra/gitops/components/release-steward/release-steward.yaml:58: plaintext http:// env value http://litellm.ai-platform.svc:4000
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:100: plaintext http:// env value http://consent-service.consent.svc:8106
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:103: plaintext http:// env value http://clickhouse.analytics.svc:8123
+V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:147: plaintext http:// env value http://lending-service.lending.svc:8126
+V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:153: plaintext http:// env value http://incentive-service.incentive.svc:8156
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:62: plaintext http:// env value http://keda-add-ons-http-interceptor-proxy.keda:8080
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:68: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:70: plaintext http:// env value http://balance-service.balances.svc:8103
@@ -235,7 +251,6 @@ V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-finops-agent: serves REST resources but publishes no openapi.yaml
-V13.1 openbank-flaky-test-hunter: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-governance-auditor: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-release-steward: serves REST resources but publishes no openapi.yaml
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: plaintext http:// env value http://sca-service.sca.svc:8110
@@ -246,6 +261,7 @@ V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: pla
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:122: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:99: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
+V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:104: plaintext http:// env value http://flaky-test-hunter.flaky-test-hunter.svc:8148
 # V9.1 — customer-edge -> delegation-service. NOT a new plaintext edge: the call already
 # ran over plaintext via the resource's @ConfigProperty default
 # (openbank-customer-edge/src/main/resources/application.yaml:121), where neither this gate nor
@@ -270,3 +286,7 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:477: plain
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:832: plaintext http:// env value http://fraud-service.fraud.svc:8133
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1160: plaintext http:// env value http://fraud-service.fraud.svc:8133
 V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:89: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/ai-platform/litellm.yaml:153: plaintext http:// env value http://langfuse.ai-platform.svc:3000
+V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:98: plaintext http:// env value http://tempo.observability.svc:4318
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plaintext http:// env value http://kyb-service.kyb.svc:8157
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111

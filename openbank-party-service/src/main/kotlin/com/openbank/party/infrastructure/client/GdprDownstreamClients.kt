@@ -4,6 +4,7 @@
 
 package com.openbank.party.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -29,6 +30,7 @@ import java.util.UUID
  * `java.net.http` GET with no Authorization header, which every deployed environment answered 401.
  */
 @RegisterRestClient(configKey = "kyc-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/kyc/cases")
 @Produces(MediaType.APPLICATION_JSON)
@@ -47,6 +49,7 @@ interface KycServiceRestClient {
  * ROLE_OPERATOR the client_credentials token carries, so the same M2M filter covers both hops.
  */
 @RegisterRestClient(configKey = "card-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/cards")
 @Produces(MediaType.APPLICATION_JSON)
@@ -90,6 +93,7 @@ data class MarketingConsentResponse(val id: UUID, val status: String)
  * grant/revoke any OTHER party's or grantee's consent.
  */
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)

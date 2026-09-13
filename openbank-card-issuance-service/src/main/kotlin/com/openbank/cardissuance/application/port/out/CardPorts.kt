@@ -58,4 +58,28 @@ interface CardRepository {
      * a card that already has a credential.
      */
     suspend fun storePanCredentialIfAbsent(cardId: UUID, panEncrypted: String, cvvEncrypted: String): Boolean
+
+    /**
+     * Every card carrying a stored PAN credential (`pan_encrypted IS NOT NULL`), including
+     * terminal ones. Feeds `CardPanKeyReencrypt` (ADR-0262 follow-up): a KEK rotation must retire
+     * the OLD DEK everywhere, and a terminal card's row still needs migrating even though the
+     * vault backfill above would never mint it a NEW credential — unlike that backfill, this is
+     * re-encrypting an EXISTING number, not choosing a new one, so a dead card's row is not exempt.
+     */
+    suspend fun findWithPanCredential(): List<Card>
+
+    /**
+     * Compare-and-swap: writes the re-encrypted PAN/CVV only if the row still holds exactly
+     * [expectedPanEncrypted] (the ciphertext the caller successfully decrypted under the OLD key a
+     * moment earlier). Returns true when the row was written. The guard is what makes a re-encrypt
+     * pass safe to race against a concurrent card-detail read/write elsewhere, or a second replica
+     * running the same pass: if the row changed underneath us, this update is a no-op rather than
+     * clobbering fresher data with a re-encryption of a value that is no longer current.
+     */
+    suspend fun updatePanCredentialIfMatches(
+        cardId: UUID,
+        expectedPanEncrypted: String,
+        newPanEncrypted: String,
+        newCvvEncrypted: String,
+    ): Boolean
 }

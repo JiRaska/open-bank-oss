@@ -41,7 +41,7 @@ graph TB
     dom[Doména<br/>Open Banking modely<br/>PaymentProduct / ConsentStatusOb / …]
     cli[Výstupní klienti<br/>Resilient* → Stub*<br/>account / consent / transaction]
     guard[TppAuthorizationGuard<br/>RestClient → tpp-registry]
-    outbox[Outbox<br/>Psd2OutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>Psd2OutboxDispatcher<br/>@Scheduled každých 5s"]
     msg[Messaging<br/>KafkaPsd2OutboxEventPublisher]
     idem[Idempotence<br/>RedisIdempotencyStore]
   end

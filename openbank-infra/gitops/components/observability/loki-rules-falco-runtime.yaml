@@ -1,0 +1,159 @@
+# Runtime-security alerting on Falco detections (issue #5734).
+#
+# THE GAP THIS CLOSES. Falco has been deployed, healthy (14/14 DaemonSet pods) and actively
+# detecting since ADR-0081, and NOTHING alerted on any of it: zero PrometheusRule CRs referenced
+# Falco, and the cluster has zero Grafana-managed alert rules of any kind. apps/falco.yaml's own
+# design note said alerting "rides the existing Loki datasource" — the delivery half was built
+# (json stdout -> Alloy -> Loki, and the openbank-soc panels read it, #5052), the alerting half
+# never was. A control that detects and cannot tell anyone is write-only.
+#
+# WHY THIS FILE AND NOT A GRAFANA-MANAGED RULE. The issue suggested Grafana unified alerting.
+# This repo has no mechanism for that — no Grafana alert rule is expressible as a manifest here,
+# and building one would mean either provisioning CRs the Grafana chart is not configured for or
+# pushing rules through an API, which makes them a mutable runtime object rather than a reviewed
+# artifact. The Loki RULER is the mechanism that already exists and already does exactly this job:
+# a ConfigMap labelled loki_rule=1, picked up by the chart's k8s-sidecar into the ruler's local
+# rules directory (apps/loki.yaml `ruler` + `sidecar.rules`), evaluated against Loki and delivered
+# to the SAME Alertmanager as every PrometheusRule (`alertmanager_url` is configured and pointed at
+# kube-prometheus-stack-alertmanager). loki-rules-silent-failures.yaml and
+# loki-rules-endpoint-availability.yaml are the precedents. So: no new mechanism, no new plumbing,
+# no new webhook surface — which is what falco.yaml asked for in the first place.
+# The file is NEW rather than a document appended to an existing one on purpose: this repo has a
+# documented history of git calling a merge clean while keeping only ONE of two neighbouring
+# additions to a shared file (#3450/#3460), and a separate file cannot lose that way.
+#
+# WHY THE TUNING HAD TO COME FIRST, AND WHAT THE PRIORITIES ACTUALLY ARE. Measured 24h baseline
+# with each rule's STOCK priority:
+#
+#   29465  Contact K8S API Server From Container   NOTICE
+#    3150  Run shell untrusted                     NOTICE
+#     450  Drop and execute new binary in container CRITICAL
+#       5  Falco internal: syscall event drop      CRITICAL (Falco-internal, not a detection)
+#
+# The "33k/day" headline is NOT the alertable volume: a Critical-or-above filter sees 455/day, and
+# the two NOTICE rules are invisible to it. Untuned, that is ~19 pages an hour, forever — the
+# WorkflowLivenessStale shape this estate has already paid for, where noise on the control that
+# exists to make a dead control visible is the one thing that hides a dead control. The tuning in
+# apps/falco.yaml attributes the 450 to one CronJob's `apk add jq curl` and excepts exactly that;
+# the two NOTICE rules cannot reach these alerts at all.
+#
+# WHY NONE OF THESE PAGE YET, AND WHAT WOULD CHANGE THAT. All three are `warning` -> the
+# slack-alerts receiver, which is the only leg that reaches a human outside the perimeter
+# (kube-prometheus-stack.yaml routing; GoAlert and ntfy have no Ingress). That is a real alert
+# reaching a real human, and it is deliberately NOT `critical`, because the post-tuning volume has
+# not been MEASURED — only predicted from the repo. This estate's documented root cause is alert
+# fatigue, and both sibling files here made the same call for the same reason
+# (loki-rules-silent-failures.yaml: "a new rule that pages is a regression even when it is
+# correct"). PROMOTION CRITERION, so this does not sit at `warning` by inertia: when
+# FalcoCriticalRuntimeDetection has fired on fewer than 1 day in 7, flip its severity to `critical`
+# and it pages via GoAlert + Slack. Until that is done, and until a known-positive has been shown
+# to reach a human end-to-end, the runtime-security control is NOT complete — see #5734 step 3.
+#
+# Loki retention is 7d (ADR-0088 D3), so every window below stays well inside it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-falco-runtime
+  namespace: observability
+  labels:
+    loki_rule: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  falco-runtime.yaml: |
+    groups:
+      - name: openbank.logs.falco-runtime
+        interval: 1m
+        rules:
+          # THE detection alert. Critical-or-above, which after the tuning means
+          # `Drop and execute new binary in container` (an executable written into the
+          # container's writable layer after image build, then run — MITRE persistence,
+          # PCI_DSS_11.5.1) plus anything else Falco rates Critical/Alert/Emergency.
+          #
+          # Deliberately NOT scoped to a rule name: the whole point is to catch the stock
+          # rule nobody predicted. A hand-kept list of rules to watch is a coverage set
+          # maintained separately from the thing it covers, which is how a gate ends up
+          # green about work it never did.
+          #
+          # `rule != "Falco internal: syscall event drop"` because that one is Falco
+          # reporting on ITSELF at Critical — agent health, not a detection, with a
+          # different responder and a different fix. It gets its own alert below.
+          #
+          # No `for:`. A drop-and-execute is a point event, not a condition that persists;
+          # `for` on a bursty log signal delays delivery and can drop it entirely if the
+          # burst does not span two evaluations.
+          - alert: FalcoCriticalRuntimeDetection
+            expr: |
+              sum by (rule) (
+                count_over_time(
+                  {namespace="falco"}
+                    | json
+                    | __error__=""
+                    | priority=~"Emergency|Alert|Critical"
+                    | rule!="Falco internal: syscall event drop"
+                  [10m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "Falco: {{ $labels.rule }} fired {{ $value | printf \"%.0f\" }}x in 10m"
+              description: >-
+                Falco raised a Critical-or-above runtime detection. This is the syscall-layer
+                control that watches a container AFTER admission — Kyverno and PSS cannot see any
+                of it. Read the full event, which names the namespace, pod, image, process,
+                command line and parent, in Loki:
+                {namespace="falco"} | json | rule="{{ $labels.rule }}"
+                — or the "Falco events by rule" panel on the openbank-soc dashboard. If the
+                detection is legitimate estate behaviour, tune it as a narrowly-scoped exception in
+                the `customRules` block of gitops/apps/falco.yaml (every stock rule ships a
+                user_known_* hook for exactly this); do NOT silence the rule, and do not widen this
+                alert. Known-legitimate today: the arc-stuck-runner-reaper CronJob's
+                `apk add jq curl`, already excepted there.
+
+          # Falco reporting that IT dropped syscall events: for that window the agent was
+          # partially blind, so the absence of a detection proves nothing. Rate-limited by
+          # Falco itself to one message per 30s (chart default syscall_event_drops:
+          # threshold .1, rate .03333), so 5/day is a genuinely small number of windows and
+          # not a suppressed flood. Separate from the alert above because the responder
+          # action is resource limits / driver, not incident response.
+          - alert: FalcoSyscallEventDrops
+            expr: |
+              sum by (hostname) (
+                count_over_time(
+                  {namespace="falco"}
+                    | json
+                    | __error__=""
+                    | rule="Falco internal: syscall event drop"
+                  [1h]
+                )
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "Falco dropped syscall events on {{ $labels.hostname }}"
+              description: >-
+                Falco's ring buffer overflowed on this node, so it did not see every syscall in
+                that window — a gap in the runtime-security control that no detection alert can
+                reveal, because the evidence is what went missing. Usually the CPU limit
+                (gitops/apps/falco.yaml sets 500m) under an event storm, or a busy node. Check
+                whether it correlates with a workload burst before raising the limit.
+
+          # FalcoAgentSilent USED TO LIVE HERE, and was removed on 2026-08-21 rather than
+          # retuned. It fired on `absent_over_time({namespace="falco"}[30m])`, resting on a
+          # premise its own comment spelled out: "Falco emits continuously ... so an empty 30m
+          # window means the agent, Alloy, or Loki ingestion is broken". #6075 and #6198
+          # deliberately tuned Falco from ~33,000 events/day to ZERO, which made silence the
+          # healthy resting state and the alert a guaranteed false positive — measured minutes
+          # after the ruler first evaluated it: 13/13 pods Ready, no log line in 60m, alert
+          # `pending`. There is no event rate that separates well-tuned Falco from dead Falco,
+          # so the fix is a different observable, not a threshold: agent liveness now comes from
+          # the DaemonSet's own readiness in prometheus-rules-runtime-security.yaml.
+          #
+          # What this loses, stated plainly rather than quietly: that rule also happened to
+          # cover "the Alloy tail or Loki ingestion has stopped". Nothing covers that now.
+          # Loki's own `loki_distributor_*` metrics would be the right observable and are not
+          # scraped (`monitoring.selfMonitoring.enabled: false`), so a replacement needs that
+          # turned on first — tracked separately, NOT silently inherited by the rules below.

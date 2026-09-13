@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+# Semgrep IaC security lane (ADR-0279 #16/#20, issue #8590).
+#
+# Scans the container and manifest surface — every Dockerfile and every YAML manifest —
+# with the repo-local rules in .semgrep/rules/. The engine is GA-strong on
+# Dockerfile/YAML; Kotlin fleet patterns deliberately stay with the Python gates
+# (Semgrep's Kotlin support is experimental and lost the annotation-context bake-off,
+# measured 2026-09-03 — that is recorded in .semgrep/rules/openbank-iac.yml's header).
+#
+# The gate is ENFORCED from day one: the measured corpus was 1,108 files with exactly one
+# finding, and that one (the CI runner image's build-time USER root) carries a documented
+# in-place nosemgrep exception. A finding from here on is a real defect, not noise.
+#
+# Engine pinned by digest (the K6_IMAGE precedent): a version tag alone is mutable.
+name: Semgrep IaC security
+
+on:
+  pull_request:
+    paths:
+      - "**/Dockerfile"
+      - "**/*.yaml"
+      - "**/*.yml"
+      - ".semgrep/**"
+      - ".github/workflows/semgrep-iac.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**/Dockerfile"
+      - "**/*.yaml"
+      - "**/*.yml"
+      - ".semgrep/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: semgrep-iac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep-iac:
+    name: semgrep-iac
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # semgrep/semgrep:1.99.0 @ 2026-09-03 linux/amd64.
+      - name: Semgrep scan (Dockerfile + YAML manifests)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src" \
+            semgrep/semgrep@sha256:ae27024c16f7848cdbfd49c24ed0b78b13f13b85fcd7b87c679aaa8b0c0dce98 \
+            semgrep scan --config /src/.semgrep/rules/openbank-iac.yml \
+              --include="Dockerfile" --include="*.yaml" --include="*.yml" \
+              --exclude="node_modules" --exclude="**/build/**" \
+              --metrics=off --error /src

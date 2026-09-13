@@ -42,6 +42,21 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # OIDC CLIENT (outbound M2M) — the token this service PRESENTS when it calls another.
+  # Distinct from `quarkus.oidc` above, which is the inbound resource-server side that VALIDATES
+  # tokens arriving here. The two blocks carry the same three field names and differ by one
+  # hyphen, which is how this went missing: the config reads correct at a glance and configures
+  # the wrong half. Any client annotated `@RegisterProvider(OidcClientRequestReactiveFilter)`
+  # mints its bearer token from HERE, and with no `quarkus.oidc-client` the filter has no client
+  # to mint from, so the call leaves unauthenticated and the callee answers 401 — not 403, which
+  # is the tell: there is no token at all, rather than a token missing a role.
+  # Enforced by .github/scripts/check-oidc-client-configured.py.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
   rest-client:
     # Local-dev default ONLY — the in-cluster URL comes from PARTY_SERVICE_URL on the Deployment
     # (openbank-infra/gitops/components/onboarding/onboarding-service.yaml), as customer-edge,
@@ -110,16 +125,65 @@ mp:
     # name unambiguously. Same pattern as transaction-service's msg-override (ADR-0137).
     incoming:
       party-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.party-events-in
         connector: smallrye-kafka
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       kyc-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.kyc-events-in
         connector: smallrye-kafka
         topic: openbank.kyc.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       sca-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.sca-events-in
         connector: smallrye-kafka
         topic: openbank.sca.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+      kyb-events-in:
+        # See the party-events-in comment above for why failure-strategy and an EXPLICIT
+        # dead-letter topic are both required, and why the topic key is nested rather than
+        # written as the dotted leaf `dead-letter-queue.topic:` (#686, #5745, #5751).
+        # The group id and auto.offset.reset for this channel live in the msg-override ConfigMap
+        # with its three siblings (#8882) — a dotted leaf key written here would be inert. They
+        # were deliberately absent until an image carrying this channel was deployed: that
+        # ConfigMap is applied before the image is bumped, so naming a channel the running image
+        # cannot serve is SRMSG00071, a hard boot failure (`msg-channel-image-parity`).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.kyb-events-in
+        connector: smallrye-kafka
+        topic: openbank.kyb.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 openbank:

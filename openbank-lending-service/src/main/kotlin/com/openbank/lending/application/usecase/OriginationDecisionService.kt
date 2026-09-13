@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
 import com.openbank.lending.application.port.out.CreditPolicyPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
+import com.openbank.lending.domain.model.AffordabilityRatios
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.libs.decision.PolicyApplication
@@ -130,7 +131,27 @@ class OriginationDecisionService(
             attributes[PolicyAttribute.PRODUCT_TYPE] = PolicyValue.Text(it)
         }
         attributes[PolicyAttribute.REQUESTED_AMOUNT] = PolicyValue.Numeric(application.requestedAmount.amount)
-        application.verifiedIncomeMonthly?.takeIf { it.isPositive() }?.let { income ->
+        affordabilityRatios(application)?.let { ratios ->
+            attributes[PolicyAttribute.DSTI] = PolicyValue.Numeric(ratios.dsti)
+            attributes[PolicyAttribute.DTI] = PolicyValue.Numeric(ratios.dti)
+        }
+        return attributes
+    }
+
+    companion object {
+        /**
+         * DSTI/DTI exactly as the ASSESSMENT leg reads them — the single definition, shared with the
+         * credit-risk read side so a console can never show a ratio the engine did not evaluate.
+         * Null when there is no positive verified income (the engine then fails closed to REFER with
+         * `INPUT_MISSING`, ADR-0213 D2).
+         *
+         * `dsti` is the NEW installment over income, which is what `PolicyAttribute.DSTI` has meant
+         * since the engine shipped; `dstiIncludingExistingDebt` adds `existingDebtServiceMonthly`
+         * (the CNB/EBA total-debt-service definition) and is exposed for the read side only. Making
+         * the engine read the total is a credit-policy change (ADR-0213 D4), not a refactor.
+         */
+        fun affordabilityRatios(application: LoanApplication): AffordabilityRatios? {
+            val income = application.verifiedIncomeMonthly?.takeIf { it.isPositive() } ?: return null
             val schedule = Amortization.schedule(
                 principal = application.requestedAmount,
                 nominalAnnualRate = application.nominalAnnualRate,
@@ -139,16 +160,16 @@ class OriginationDecisionService(
                 firstDueDate = application.firstDueDate,
             )
             val monthlyPayment = schedule.installments.first().payment.amount
-            attributes[PolicyAttribute.DSTI] =
-                PolicyValue.Numeric(monthlyPayment.divide(income.amount, MathContext.DECIMAL128))
-            attributes[PolicyAttribute.DTI] = PolicyValue.Numeric(
-                application.requestedAmount.amount.divide(
+            val existing = application.existingDebtServiceMonthly?.amount ?: BigDecimal.ZERO
+            return AffordabilityRatios(
+                dsti = monthlyPayment.divide(income.amount, MathContext.DECIMAL128),
+                dti = application.requestedAmount.amount.divide(
                     income.amount.multiply(BigDecimal(MONTHS_IN_YEAR)),
                     MathContext.DECIMAL128,
                 ),
+                dstiIncludingExistingDebt = monthlyPayment.add(existing).divide(income.amount, MathContext.DECIMAL128),
             )
         }
-        return attributes
     }
 
     private fun outcomeName(decision: PolicyDecision): String = when (decision) {
@@ -165,6 +186,7 @@ class OriginationDecisionService(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""outcome":"${outcomeName(decision)}",""")
             append(""""priceBand":${application.decisionPriceBand?.let { band -> "\"$band\"" } ?: "null"},""")
             append(""""policyVersions":"${application.policyVersions}",""")

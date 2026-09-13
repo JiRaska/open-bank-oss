@@ -1,0 +1,203 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/incentive-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59921"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59919"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59901"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59900"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59899"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59898"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56746"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56745"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55851"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55833"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55831"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line. Verified for this component, not inherited: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves every io.netty:* artifact on the runtime classpath to 4.1.136.Final.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-mfg7-5gfp-c4w3"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The advisory's affected range is io.netty:netty-codec-dns >=4.2.0.Final and <=4.2.15.Final (4.2.x line only). The fleet resolves netty on the 4.1.x line (4.1.136.Final, pinned in openbank.dependency-vulnerability-pins.gradle.kts), which the advisory does not list as affected; the 4.2.x sighting in the dependency graph is the Gradle dependency-graph tooling classpath, not any service's runtime classpath. Verified for this component: the same runtimeClasspath resolution for openbank-incentive-service lists io.netty:netty-codec-dns at 4.1.136.Final and no 4.2.x netty artifact at all.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The advisory expresses its affected range as a single interval (< 4.2.1), which under Maven version ordering sweeps in the entire hibernate-reactive 3.x line. That expression misclassifies this fleet. Hibernate Reactive maintains two parallel release lines, and 3.4.x was branched and released AFTER the fix, not before it: 4.2.1.Final was released 2025-12-21, while 3.4.0.Final was released 2026-05-27 and 3.4.2.Final on 2026-06-16 (Maven Central publication dates). The upstream fix commit cd7f104e10de918004707ca0e26e3840976f780a ('[#2926] Roll back open transactions on close', 2025-12-18), the only code change the advisory references, is PRESENT in the 3.4.2.Final artifact this fleet resolves. Measured by disassembling the exact jar the build verifies (sha256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, the value already pinned for this artifact in gradle/verification-metadata.xml, so the inspected bytes are the shipped bytes): SqlClientConnection.close() calls the post-fix validateNoTransactionInProgressOnClose(); the class carries the post-fix 'private boolean closed' field in place of the pre-fix 'private io.vertx.sqlclient.Transaction transaction'; and Log declares the fix's new liveTransactionDetectedOnClose() message. Control for the probe: the same javap check reports the fix ABSENT in 4.2.0.Final (the last release before the patch) and PRESENT in 4.2.1.Final (the advisory's stated first patched version), so it discriminates fixed from unfixed rather than always answering yes. No Quarkus platform ships hibernate-reactive-core >= 4.2.1 (quarkus-bom 3.38.0, 3.38.1, 3.38.2 and 3.39.0.CR1 all resolve 3.4.2.Final), and none is needed: the vulnerable code is not present in the resolved artifact. This supersedes the earlier 'affected' statements, which reasoned from the advisory's version range alone and did not inspect the artifact. Verified for this component: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` resolves org.hibernate.reactive:hibernate-reactive-core to 3.4.2.Final, the artifact inspected above.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42198"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "org.postgresql:postgresql (pgjdbc) is a transitive dependency, floored by the fleet-wide pin in build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts (force org.postgresql:postgresql:42.7.12). `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` (run 2026-09-01 against origin/main b37c7d67c) resolves org.postgresql:postgresql to 42.7.12, above this advisory's patched 42.7.11 on the same 42.7.x line, so no cross-line version argument is involved. The vulnerable unbounded-iteration SCRAM code path is not present in the shipped artifact.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59949"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved at.yawk.lz4:lz4-java is pinned to 1.11.1 fleet-wide (openbank.dependency-vulnerability-pins.gradle.kts), the advisory's patched version; same-minor patch on the transitive kafka-clients compression dependency. Verified for this component: `./gradlew :openbank-incentive-service:dependencies --configuration runtimeClasspath` shows at.yawk.lz4:lz4-java requested at 1.10.1 and resolved to 1.11.1 by that force.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33818"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39821"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46600"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56853"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56858"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56859"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56860"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56862"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain. Verified for this component: openbank-incentive-service/Dockerfile pins the identical base digest (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) and overrides the entrypoint with the same java -jar /app/quarkus-run.jar command; check-dockerfile-no-build-stage.py enforces that this FROM cannot drift from Dockerfile.deploy.",
+      "timestamp": "2026-09-01T12:00:00Z"
+    }
+  ]
+}

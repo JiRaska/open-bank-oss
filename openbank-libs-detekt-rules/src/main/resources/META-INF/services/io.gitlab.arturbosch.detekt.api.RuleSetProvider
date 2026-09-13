@@ -1,1 +1,2 @@
 com.openbank.libs.detekt.contact.ContactPolicyRuleSetProvider
+com.openbank.libs.detekt.boundary.ModuleBoundaryRuleSetProvider

@@ -146,10 +146,14 @@ data class ObConsentRequest(
     val combinedServiceIndicator: Boolean = false,
 )
 
+// Element types are nullable ON PURPOSE (#7867): Jackson's Kotlin module null-checks
+// constructor parameters but not collection elements, so `{"accounts": [null]}` arrives
+// as a list holding a null. Only a nullable element type lets the guard in
+// ConsentManagementService reject it with a 400 instead of an NPE-driven 500.
 data class ObAccess(
-    val accounts: List<ObAccountRef>?,
-    val balances: List<ObAccountRef>?,
-    val transactions: List<ObAccountRef>?,
+    val accounts: List<ObAccountRef?>?,
+    val balances: List<ObAccountRef?>?,
+    val transactions: List<ObAccountRef?>?,
     val additionalInformation: ObAdditionalInformation?,
 )
 

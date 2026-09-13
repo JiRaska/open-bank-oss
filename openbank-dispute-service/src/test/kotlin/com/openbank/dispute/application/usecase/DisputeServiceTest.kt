@@ -4,6 +4,7 @@
 
 package com.openbank.dispute.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.dispute.application.port.out.DisputeEvidenceRepository
 import com.openbank.dispute.application.port.out.DisputeRepository
 import com.openbank.dispute.application.port.out.DisputeTimelineRepository
@@ -109,6 +110,33 @@ class DisputeServiceTest {
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 
+    /**
+     * #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+     * `AuditConsumer.resolveSourceService` reads. Before this field, `TopicAttribution` already
+     * resolved `openbank.dispute.events` -> `dispute-service` correctly, but only as
+     * TOPIC-sourced — and audit-service subscribes to this topic today, so this is a live
+     * attribution upgrade, not a forward-looking one.
+     */
+    @Test
+    fun `open publishes sourceService in the payload body for AuditConsumer attribution`() {
+        val request = OpenDisputeRequest(
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            amount = BigDecimal("25.00"),
+            transactionDate = today,
+            description = "Unauthorized card payment",
+        )
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.save(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        service.open(request).await().indefinitely()
+
+        assertThat(outbox.captured.single().payload).contains(""""sourceService":"dispute-service"""")
+    }
+
     @Test
     fun `update changes status and emits timeline event`() {
         val id = UUID.randomUUID()
@@ -128,7 +156,13 @@ class DisputeServiceTest {
         )
         val update = UpdateDisputeRequest(status = DisputeStatus.RESOLVED_CUSTOMER, resolvedBy = "caseworker")
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        val outbox = slot<List<OutboxMessage>>()
+        // #8745: the transition INTO a terminal status now commits dispute.resolved atomically —
+        // the same event doResolve emits — instead of the timeline-only write that never left
+        // the service.
+        every { disputeRepo.update(any(), capture(outbox)) } answers {
+            Uni.createFrom().item(firstArg<Dispute>())
+        }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.update(id, update).await().indefinitely()
@@ -139,8 +173,41 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
+        assertThat(outbox.captured.single().payload).contains(""""eventType":"dispute.resolved"""")
+    }
+
+    @Test
+    fun `update to a non-terminal status emits no outbox event`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-1001",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.DUPLICATE,
+            amount = BigDecimal("10.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.update(
+            id,
+            UpdateDisputeRequest(status = DisputeStatus.UNDER_REVIEW),
+        ).await().indefinitely()
+
+        assertThat(result.status).isEqualTo(DisputeStatus.UNDER_REVIEW)
+        assertThat(result.resolvedAt).isNull()
+        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 0) { disputeRepo.update(any(), any()) }
     }
 
     @Test
@@ -160,11 +227,22 @@ class DisputeServiceTest {
             createdAt = now,
             updatedAt = now,
         )
+        val outbox = slot<List<OutboxMessage>>()
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        // WITHDRAWN is terminal: withdraw (which delegates to update) now commits
+        // dispute.resolved atomically via the two-arg overload (#8745).
+        every { disputeRepo.update(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.withdraw(id, "customer").await().indefinitely()
+
+        // A withdrawal carries no remediation outcome, so the field must be JSON null -- not the
+        // four-character string "null" in a quoted field, which is what interpolating a null
+        // Kotlin reference into a quoted JSON value produces. Parsed rather than substring-matched:
+        // `contains("\"outcome\":null")` would also pass on a payload that is not valid JSON at all.
+        val node = ObjectMapper().readTree(outbox.captured.single().payload)
+        assertThat(node.get("outcome").isNull).isTrue()
+        assertThat(node.get("eventType").asText()).isEqualTo("dispute.resolved")
 
         assertThat(result.status).isEqualTo(DisputeStatus.WITHDRAWN)
         assertThat(result.resolution).isEqualTo(DisputeResolution.WITHDRAWN)
@@ -172,7 +250,7 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 
@@ -254,6 +332,11 @@ class DisputeServiceTest {
         val remediationEvent = messagesSlot.captured.first { it.eventType == "dispute.remediation_requested" }
         assertThat(remediationEvent.payload).contains(existing.accountId.toString())
         assertThat(remediationEvent.payload).contains("\"amount\":50.00")
+
+        // #3994/#5256: both outbox events carry the producer's own sourceService claim.
+        messagesSlot.captured.forEach {
+            assertThat(it.payload).contains(""""sourceService":"dispute-service"""")
+        }
     }
 
     /**
@@ -295,6 +378,44 @@ class DisputeServiceTest {
         val resolvedAt = requireNonNull(resolved.resolvedAt).toInstant()
         assertThat(messagesSlot.captured).hasSize(2)
         messagesSlot.captured.forEach { AuditEventTime.assertRecordedAsEventTime(it.payload, resolvedAt) }
+    }
+
+    /**
+     * #8352: red against `origin/main`, where `dispute.opened` carried `openedAt` and no
+     * `occurredAt` — so every audit row for the moment a customer disputed a payment recorded the
+     * audit consumer's ingest clock instead.
+     *
+     * Both halves are asserted, and the second is the one a rename alone would not have satisfied:
+     * `Dispute.createdAt` is an `OffsetDateTime`, so interpolating it directly renders an offset
+     * form rather than the `Z`-normalised instant the two sibling builders in the same file emit.
+     * `assertRecordedAsEventTime` compares the parsed value, so a payload carrying the right key
+     * with the wrong form fails here rather than downstream.
+     *
+     * The sibling assertion on `openedAt` is not decoration: this change had to be additive, and a
+     * test that only looked at the new key could not tell an addition from a rename.
+     */
+    @Test
+    fun `the opened outbox payload carries the opening instant as the audit event time`() {
+        val request = OpenDisputeRequest(
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            amount = BigDecimal("25.00"),
+            transactionDate = today,
+            description = "Unauthorized card payment",
+        )
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.save(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        service.open(request).await().indefinitely()
+
+        val payload = outbox.captured.single().payload
+        AuditEventTime.assertRecordedAsEventTime(payload, now.toInstant())
+        assertThat(payload)
+            .describedAs("occurredAt is ADDITIVE — openedAt keeps its name, place and form")
+            .contains(""""openedAt":"$now"""")
     }
 
     private fun <T> requireNonNull(value: T?): T = requireNotNull(value) { "resolvedAt must be set by resolve()" }

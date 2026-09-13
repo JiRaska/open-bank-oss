@@ -13,8 +13,15 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 `openbank-security-scanner` is a platform-level probe that runs every 30 minutes and checks
 all deployed services for: reachability, missing OWASP security headers, sensitive info
 exposure on the management port, OpenAPI spec exposure, and unauthenticated actuator endpoints.
-Results are published to Kafka (`openbank.security.scan.event`). DORA-grade critical findings
-go to `openbank.security.ict.incident`.
+Results are held in memory and served over REST (`GET /api/v1/security/report`). DORA-grade
+critical findings go to Kafka on `openbank.security.ict.incident` via a direct emitter.
+
+`openbank.security.scan.event` and the transactional outbox behind it were removed in #4709:
+they were fully provisioned — port, entity, repository, dispatcher, gauge, publisher, topic,
+KafkaUser, mTLS and matching audit-side ACLs — and nothing ever constructed a message. Measured
+before removal: 0 rows in `security_outbox` on the live database, end offset 0 on the topic, and
+0 of 1979 `audit_entries` rows attributed to security-scanner. The service persists nothing: its
+database now holds Flyway history only.
 
 **This threat model covers the network-reachability grant in PR #1811 fix**: the scanner is
 granted ingress from the `security-scanner` namespace into all 27 scan-target namespaces on
@@ -29,9 +36,11 @@ network path to any target; the NPs dropped every probe silently.
                                     +--> mgmt:8085  /q/health/ready   (each of 27 targets)
                                     +--> api:<port> (security-headers check, OpenAPI, actuators)
                                     |
-                                    +--> [Postgres: scan_results, security_outbox]
-                                    +--> [Kafka outbox] --> openbank.security.scan.event
-                                    +--> [Kafka outbox] --> openbank.security.ict.incident
+                                    +--> [in-memory report] --> GET /api/v1/security/report
+                                    +--> [Kafka direct emitter] --> openbank.security.ict.incident
+
+  (No datastore in this flow. Scan results and ICT incidents live in ConcurrentHashMaps and are
+   lost on pod restart; the CNPG Postgres holds flyway_schema_history and nothing else.)
 ```
 
 - **No OIDC credentials** in the scanner pod (no client_id/secret, OIDC disabled).
@@ -73,9 +82,20 @@ caller for every production service's API and management ports within the cluste
 
 2. **Unauthenticated routes not tested**: The scanner checks a hardcoded set of actuator paths.
    A new unauthenticated route introduced in a money-path service that the scanner does not
-   probe would not be detected. Mitigation: the security-contract test (`SecurityContractTest`)
-   enforces that every JAX-RS endpoint is annotated (`@PermitAll` or `@RolesAllowed`) — this
-   is the primary defence; the scanner is a belt-and-suspenders check.
+   probe would not be detected. Mitigation: **partial, and narrower than this entry claimed.**
+   There is no fleet-wide `SecurityContractTest` — no class by that exact name exists, and the
+   invariant is enforced per service by nine hand-written variants
+   (`AccountSecurityContractTest`, `BalanceSecurityContractTest`, `ClearingSecurityContractTest`,
+   `DocumentSecurityContractTest`, `LedgerSecurityContractTest`, `YearCloseSecurityContractTest`,
+   `StandingOrderSecurityContractTest`, `TppRegistrySecurityContractTest`,
+   `TransactionSecurityContractTest`) covering **8 of the 61 modules that expose a JAX-RS
+   resource**. Each of those does enforce the stated invariant for its own service, by reflection
+   over the resource class, so for those 8 the mitigation is real and strong. For the other 53 —
+   including security-scanner itself, which has no such test — nothing enforces it, so the
+   scanner's hardcoded probe set is not a belt-and-suspenders check but the only automated check,
+   and it is exactly the one this residual says is incomplete. Making the invariant fleet-wide (a
+   shared reflective test in `openbank-libs`, or a CI gate over `@Path` classes) is the real
+   mitigation and is not in place.
 
 3. **Management port drift**: If a service begins serving sensitive data on port 8085 (contrary
    to Quarkus management-port design), the scanner has network access to it. Mitigation: existing
@@ -83,6 +103,28 @@ caller for every production service's API and management ports within the cluste
    `SecurityScannerService.scanService`) would flag it.
 
 ## 6. Change log
+
+- **2026-09-03** — Doc correction, no behavior change: §5.2 credited its mitigation to "the
+  security-contract test (`SecurityContractTest`)" enforcing that "**every** JAX-RS endpoint is
+  annotated", and called it "the primary defence". `SecurityContractTest` does not exist as a class —
+  `git grep -nE 'class SecurityContractTest\b' -- '*.kt'` returns nothing — and the name is not a
+  rename of one thing but a family label for nine per-service variants. Measured against the tree:
+  61 modules declare a JAX-RS resource, 8 of them carry such a test. security-scanner is not one of
+  the 8.
+
+  The consequence is specific rather than cosmetic, which is why the residual is rewritten rather
+  than just renamed. §5.2's risk is "a new unauthenticated route in a money-path service the
+  scanner does not probe". The mitigation as written retired that risk by asserting a fleet-wide
+  invariant; the invariant covers 8 modules, so for the remaining 53 the scanner's hardcoded probe
+  list is the only automated check — and the residual exists precisely because that list is
+  incomplete. The mitigation was, for most of the fleet, the thing it was mitigating.
+
+  **What still holds:** for the 8 covered modules the control is real and strong — each test walks
+  its resource class by reflection and fails the build on a `@PermitAll` or an unannotated
+  endpoint, which is how the balance and clearing regression guards referenced in their own threat
+  models work. Nothing here changes the scanner, any service's annotations, or a role. Closing the
+  gap properly means a shared reflective test in `openbank-libs` or a CI gate over `@Path` classes,
+  which is a code change and deliberately not made in a docs commit.
 
 - **2026-06-23** — Initial threat model for the fleet-wide network-reachability grant (PR #1811 fix).
   Scanner previously had no network path to any target — this grant enables the scanner to

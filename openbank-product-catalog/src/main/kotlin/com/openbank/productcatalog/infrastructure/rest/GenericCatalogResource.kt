@@ -177,6 +177,13 @@ class GenericCatalogResource(
         return Response.ok(revisionResponse(found)).tag(EntityTag(found.revision.toString())).build()
     }
 
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read", resource = "#id")
+    override suspend fun getRevisionV2(id: UUID): Response {
+        val found = service.findRevision(id)
+        return Response.ok(revisionResponse(found)).tag(EntityTag(found.revision.toString())).build()
+    }
+
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author", resource = "#offeringId")
     override suspend fun replaceOfferingRevisionV2(

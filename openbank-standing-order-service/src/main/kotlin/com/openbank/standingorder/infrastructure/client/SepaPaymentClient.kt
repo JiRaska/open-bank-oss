@@ -4,6 +4,7 @@
 
 package com.openbank.standingorder.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -30,6 +31,7 @@ import java.util.UUID
  * sepa-payment's createPayment accepts (`@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")`).
  */
 @RegisterRestClient(configKey = "sepa-payment-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter::class)
 interface SepaPaymentClient {
 

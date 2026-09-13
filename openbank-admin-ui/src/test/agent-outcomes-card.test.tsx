@@ -73,4 +73,19 @@ describe('OutcomeMetricsCard', () => {
     expect(screen.queryByText(/Coverage:/)).toBeNull()
     expect(screen.queryByText('0%')).toBeNull()
   })
+
+  it('renders a weekly rate once a week has enough decisions, and "insufficient data" when it does not', () => {
+    // Week of 2026-06-08: 5 decided, 3 approved -> a real rate.
+    renderCard(<OutcomeMetricsCard items={decided(3, 2)} />)
+
+    expect(screen.getByText('2026-06-08')).toBeTruthy()
+    expect(screen.getByText('60% (3 of 5)')).toBeTruthy()
+  })
+
+  it('shows the weekly insufficient-data label with its own count, not the overall one', () => {
+    // 2 decided this week; the overall coverage line and the weekly line are different claims.
+    renderCard(<OutcomeMetricsCard items={decided(2, 0)} />)
+
+    expect(screen.getByText('insufficient data (2 decided)')).toBeTruthy()
+  })
 })

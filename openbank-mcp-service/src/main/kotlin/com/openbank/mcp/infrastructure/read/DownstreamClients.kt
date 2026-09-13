@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.read
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -25,6 +26,7 @@ import java.util.UUID
 // Each downstream endpoint + its @Authorize action is cited in the KDoc it backs (RealAccountReadPort).
 
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
@@ -46,6 +48,7 @@ interface AccountServiceClient {
 }
 
 @RegisterRestClient(configKey = "balance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/balances")
 @Produces(MediaType.APPLICATION_JSON)
@@ -58,6 +61,7 @@ interface BalanceServiceClient {
 }
 
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
@@ -73,6 +77,7 @@ interface TransactionServiceClient {
 }
 
 @RegisterRestClient(configKey = "statement-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/statements")
 @Produces(MediaType.APPLICATION_JSON)
@@ -99,6 +104,7 @@ interface StatementServiceClient {
 }
 
 @RegisterRestClient(configKey = "sepa-payment-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sepa-payments")
 @Produces(MediaType.APPLICATION_JSON)
@@ -111,6 +117,7 @@ interface SepaPaymentServiceClient {
 }
 
 @RegisterRestClient(configKey = "domestic-payment-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/domestic-payments")
 @Produces(MediaType.APPLICATION_JSON)

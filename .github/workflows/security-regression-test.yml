@@ -1,0 +1,169 @@
+# -----------------------------------------------------------------------------
+# Security regression test — a security issue is never closed without a test (ADR-0279 WS1 #5).
+#
+# THE RULE. A PR that closes an issue labeled `security` must touch a test surface
+# (`src/test`, `e2e`, or `*.spec.*`/`*.test.*` anywhere). The defect history in CLAUDE.md
+# is the justification: the recurring security classes (nullable JAX-RS params, silent
+# no-op success, scheduler context loss) each shipped more than once precisely because
+# the fix PR changed only the production code, leaving the next service to rediscover the
+# same hole. A fix without a test is a fix that regresses on schedule.
+#
+# SCOPE, STATED PLAINLY. Only CLOSING keywords (Closes/Fixes/Resolves) bind the rule —
+# `Refs #` is a mention, not a resolution, and demanding a test for a mention would make
+# the gate cry wolf. Only the `security` label is in scope: review-gate labels like
+# `security-review-required` are PR-applied checklist state, not issue types.
+#
+# Lives in its own workflow (not ci.yml) so the `edited` event re-evaluates when the PR
+# body is fixed — same shape as issue-hygiene.yml, whose header documents why.
+#
+# Escape hatch: a security issue that genuinely cannot carry a test (a policy-only fix)
+# is closed by a PR whose body states `no-test-justification: <reason>` on its own line.
+# The justification is text in a permanent record, which is the point — the gate forces
+# the decision to be conscious, not impossible.
+# -----------------------------------------------------------------------------
+name: Security regression test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: security-regression-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security-regression-test:
+    name: security-regression-test
+    # actions/github-script only — no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: A PR closing a `security` issue must touch a test surface
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+
+            // Closing keywords only — Refs is a mention, not a resolution.
+            const closing = [...new Set(
+              [...body.matchAll(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)]
+                .map(m => Number(m[1])),
+            )];
+            if (closing.length === 0) {
+              core.info("No closing issue references — rule does not apply.");
+              return;
+            }
+
+            if (/^no-test-justification:\s*\S+/im.test(body)) {
+              core.info("no-test-justification present — conscious escape hatch, passing.");
+              return;
+            }
+
+            // One GraphQL request covers every referenced issue and the PR files. The previous
+            // N+1 REST shape shared the installation's core quota with the whole workflow fleet;
+            // once that quota reached zero this gate failed before evaluating the policy at all.
+            const issueFields = closing
+              .map((n, i) => `issue${i}: issue(number: ${n}) { labels(first: 100) { nodes { name } } }`)
+              .join("\n");
+            // A number that resolves to NO issue makes the whole query answer with an error, and
+            // octokit throws before any of the logic below runs. That is not a hypothetical: a PR
+            // body quoting text like `would close #6225` — which is literally the output of this
+            // repo's own supersede-deploy-prs self-test, whose fixtures use PR numbers that were
+            // never issues — matches the closing-keyword regex above and reddens this check on a
+            // PR that closes nothing. Measured 2026-09-12 on #9861.
+            //
+            // Recover only requested issue aliases explicitly reported as NOT_FOUND.
+            // Permission, rate-limit and nested resolver failures can ALSO carry partial data;
+            // they must fail the check rather than silently removing an issue from its scope.
+            const missingAliases = new Set();
+            let data;
+            try {
+              data = await github.graphql(
+              `query($owner: String!, $repo: String!, $pr: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  ${issueFields}
+                  pullRequest(number: $pr) {
+                    files(first: 100) {
+                      nodes { path }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }`,
+              { owner: context.repo.owner, repo: context.repo.repo, pr: pr.number },
+              );
+            } catch (err) {
+              const aliases = new Set(closing.map((n, i) => `issue${i}`));
+              if (!err.data?.repository || !Array.isArray(err.errors) || err.errors.length === 0 ||
+                  !err.errors.every(error => error.type === "NOT_FOUND" &&
+                    Array.isArray(error.path) && error.path.length === 2 &&
+                    error.path[0] === "repository" && aliases.has(error.path[1]) &&
+                    err.data.repository[error.path[1]] === null)) throw err;
+              for (const error of err.errors) missingAliases.add(error.path[1]);
+              core.info(`Ignoring ${missingAliases.size} explicitly unresolved issue reference(s).`);
+              data = err.data;
+            }
+            const repository = data.repository;
+            const securityIssues = closing.filter((n, i) => {
+              const issue = repository[`issue${i}`];
+              if (issue === null && missingAliases.has(`issue${i}`)) {
+                // This requested alias was explicitly reported as NOT_FOUND.
+                core.info(`#${n} does not resolve to an issue — a quoted reference, not a closure.`);
+                return false;
+              }
+              if (!Array.isArray(issue?.labels?.nodes) ||
+                  !issue.labels.nodes.every(label => typeof label?.name === "string")) {
+                throw new Error(`Incomplete labels for issue #${n}`);
+              }
+              return issue.labels.nodes.some(label => label.name === "security");
+            });
+            if (securityIssues.length === 0) {
+              core.info(`Closed issues ${closing.join(", ")} — none labeled 'security'.`);
+              return;
+            }
+
+            const fileConnection = repository.pullRequest?.files;
+            if (!fileConnection) throw new Error(`Pull request #${pr.number} was not found`);
+            const files = [...fileConnection.nodes];
+            let pageInfo = fileConnection.pageInfo;
+            while (pageInfo.hasNextPage) {
+              const page = await github.graphql(
+                `query($owner: String!, $repo: String!, $pr: Int!, $cursor: String!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      files(first: 100, after: $cursor) {
+                        nodes { path }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }`,
+                {
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  pr: pr.number, cursor: pageInfo.endCursor,
+                },
+              );
+              const next = page.repository.pullRequest?.files;
+              if (!next) throw new Error(`Pull request #${pr.number} disappeared during pagination`);
+              files.push(...next.nodes);
+              pageInfo = next.pageInfo;
+            }
+            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
+            const touchedTests = files.map(file => file.path).filter(path => TEST_SURFACE.test(path));
+            if (touchedTests.length > 0) {
+              core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
+              return;
+            }
+
+            core.setFailed(
+              `This PR closes security issue(s) ${securityIssues.map(n => "#" + n).join(", ")} but touches no test surface ` +
+              `(src/test/, e2e/, *.spec.*, *.test.*). Add the regression test that would have caught the defect — ` +
+              `or, only if a test genuinely cannot express this fix, state \`no-test-justification: <reason>\` ` +
+              `on its own line in the PR body (ADR-0279, #8590).`
+            );

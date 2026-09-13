@@ -242,6 +242,9 @@ class FxServiceTest {
         assertThat(outboxMessage.captured.eventType).isEqualTo("fx.conversion.executed.v1")
         assertThat(outboxMessage.captured.aggregateId).isEqualTo(result.id)
         assertThat(outboxMessage.captured.payload).contains(result.id.toString()).contains("\"toAmount\"")
+        // Issue #3994/#5256: the wire payload actually reaching Kafka carries sourceService — a
+        // domain-level assertion on FxConversionExecuted alone cannot prove that.
+        assertThat(outboxMessage.captured.payload).contains("\"sourceService\":\"fx-service\"")
     }
 
     @Test
@@ -391,10 +394,31 @@ class FxServiceTest {
     @Test
     fun `getRateHistory returns empty list when no data stored`() = runBlocking<Unit> {
         coEvery { rateRepo.findHistory("USD", "CZK", null, null, null, 100, 0) } returns emptyList()
+        coEvery { rateRepo.findHistory("CZK", "USD", null, null, null, 100, 0) } returns emptyList()
 
         val result = service.getRateHistory(GetRateHistoryQuery("USD", "CZK"))
 
         assertThat(result).isEmpty()
+    }
+
+    @Test
+    fun `getRateHistory inverts reverse history when direct pair is absent`() = runBlocking<Unit> {
+        val stored = fxRate().copy(
+            baseCurrency = "EUR",
+            quoteCurrency = "CZK",
+            bidRate = java.math.BigDecimal("24.00"),
+            askRate = java.math.BigDecimal("25.00"),
+        )
+        coEvery { rateRepo.findHistory("CZK", "EUR", null, null, null, 100, 0) } returns emptyList()
+        coEvery { rateRepo.findHistory("EUR", "CZK", null, null, null, 100, 0) } returns listOf(stored)
+
+        val result = service.getRateHistory(GetRateHistoryQuery("CZK", "EUR"))
+
+        assertThat(result).hasSize(1)
+        assertThat(result.single().baseCurrency).isEqualTo("CZK")
+        assertThat(result.single().quoteCurrency).isEqualTo("EUR")
+        assertThat(result.single().bidRate).isEqualByComparingTo("0.04000000")
+        assertThat(result.single().askRate).isEqualByComparingTo("0.04166667")
     }
 
     @Test

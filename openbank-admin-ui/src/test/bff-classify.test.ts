@@ -31,6 +31,10 @@ describe('classifyBffFailure', () => {
     expect(await classifyBffFailure(res(401, { error: 'unauthorized' }))).toBe('unauthorized')
   })
 
+  it('maps 403 to unauthorized so privileged snapshots are purged', async () => {
+    expect(await classifyBffFailure(res(403, { error: 'forbidden' }))).toBe('unauthorized')
+  })
+
   it('maps 502 "upstream_unreachable" to unreachable', async () => {
     expect(await classifyBffFailure(res(502, { error: 'upstream_unreachable' }))).toBe('unreachable')
   })

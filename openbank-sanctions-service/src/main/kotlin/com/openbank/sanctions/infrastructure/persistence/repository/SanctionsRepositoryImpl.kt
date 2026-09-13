@@ -110,17 +110,28 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
     }
 
     /**
-     * The outbox payload: the serialised [SanctionsCheck] plus the event's own `occurredAt` (#3914).
+     * The outbox payload: the serialised [SanctionsCheck] plus the event's own `occurredAt` (#3914)
+     * and `sourceService` (#3994/#5256).
      *
      * ADDITIVE, and it has to be. The payload is the aggregate itself, so the obvious alternative —
      * an `occurredAt` field on [SanctionsCheck] — would put a per-EVENT value on a per-AGGREGATE
      * type, where the screening and the review events legitimately disagree about which instant
      * they mean. Every existing field keeps its name and place; consumers that never look at
-     * `occurredAt` see no change at all.
+     * `occurredAt`/`sourceService` see no change at all.
+     *
+     * `sourceService` is read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution, stronger than its topic-derived fallback. Before this field,
+     * `EventAttribution.TopicAttribution` already resolves `openbank.sanctions.screening.event` ->
+     * `sanctions-service` correctly, but only as TOPIC-sourced, not the producer's own claim — and
+     * audit-service DOES subscribe to this topic today (it is in `application.yaml`'s consumed-topics
+     * list), so this is a live attribution improvement, not a forward-looking one like sca-service's
+     * #5337 (whose topic audit-service does not consume at all). Value matches the fleet's audit
+     * convention: the module directory without the `openbank-` prefix.
      */
     private fun eventPayload(check: SanctionsCheck, occurredAt: Instant): String {
         val node = mapper.valueToTree<ObjectNode>(check)
         node.put("occurredAt", occurredAt.toString())
+        node.put("sourceService", SOURCE_SERVICE)
         return mapper.writeValueAsString(node)
     }
 
@@ -145,6 +156,13 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
 
     private companion object {
         const val IDEMPOTENCY_KEY_CONSTRAINT = "sanctions_checks_idempotency_key_key"
+
+        /**
+         * Producing service for `AuditConsumer` attribution (#3994/#5256). Matches the module
+         * directory without the `openbank-` prefix, the same spelling `EventAttribution`
+         * (`TopicAttribution`) already maps `openbank.sanctions.screening.event` to.
+         */
+        const val SOURCE_SERVICE = "sanctions-service"
     }
 
     override suspend fun findById(id: UUID) =

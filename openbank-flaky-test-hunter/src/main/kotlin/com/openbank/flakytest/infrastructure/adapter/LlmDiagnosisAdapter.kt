@@ -20,13 +20,15 @@ import jakarta.inject.Inject
  *    deterministic placeholder exactly as before; the adapter is now injectable, so an eval can
  *    drive it with a stub gateway.
  *  - The system prompt is loaded from the ADR-0148 prompt registry (the flaky-test-hunter
- *    `system.v1.md` file), packaged at build time (see build.gradle.kts) and read verbatim, so the
+ *    `system.v2.md` file), packaged at build time (see build.gradle.kts) and read verbatim, so the
  *    runtime prompt equals the registered content byte-for-byte — the `prompt_hash` in an
  *    AI-attributed AuditEvent now resolves.
  *
- * `proposeFixDiff` stays unimplemented for all check types in v1 (ADR-0168 Decision: every finding is
- * ticket-only because a wrong auto-fix on a test's coroutine builder, Pact provider target, or gating
- * annotation could silently mask a real bug). The wiring and registry entry are the scope of this change.
+ * `proposeFixDiff` is intentionally not a free-form model edit. Its sole phase-3 path is the
+ * deterministic marker for one mechanically safe repair in this non-money-path service: adding an
+ * explicit `: Unit` return type to exactly one locally detected expression-body `runBlocking` test.
+ * The GitHub adapter fetches and validates that one file before changing it; every other finding is
+ * ticket-only. This keeps the model out of the write decision (ADR-0031 D9).
  */
 @ApplicationScoped
 class LlmDiagnosisAdapter : LlmDiagnosisPort {
@@ -63,25 +65,37 @@ class LlmDiagnosisAdapter : LlmDiagnosisPort {
                 )
     }
 
-    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = null
+    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = if (
+        finding.checkType == com.openbank.flakytest.domain.model.FlakyTestCheckType.RUNBLOCKING_UNIT_MISSING &&
+        // The bound is asserted in ONE place. This used to repeat the prefix as its own string
+        // literal, which is the hand-kept-copy shape a widening edit could silently desynchronise:
+        // relaxing it here while BoundedTestPath stayed strict (or the reverse) would leave the
+        // two halves of the same rule disagreeing, with nothing red.
+        BoundedTestPath.isSafe(finding.filePath)
+    ) {
+        ADD_EXPLICIT_UNIT_RETURN_TYPE
+    } else {
+        null
+    }
 
     private companion object {
+        const val ADD_EXPLICIT_UNIT_RETURN_TYPE = "add-explicit-unit-return-type"
         val SYSTEM_PROMPT = loadRegisteredPrompt()
 
         /**
          * Load the system prompt from the ADR-0148 registry, packaged onto the classpath at build
-         * time from the flaky-test-hunter `system.v1.md` registry file. Read verbatim so the runtime
+         * time from the flaky-test-hunter `system.v2.md` registry file. Read verbatim so the runtime
          * prompt equals the registry file byte-for-byte (the `prompt_hash` resolvability contract). A
          * missing resource is a build misconfiguration and fails fast rather than shipping a silent
          * empty prompt.
          */
         private fun loadRegisteredPrompt(): String {
-            val path = "/governance-prompts/flaky-test-hunter/system.v1.md"
+            val path = "/governance-prompts/flaky-test-hunter/system.v2.md"
             return LlmDiagnosisAdapter::class.java.getResourceAsStream(path)
                 ?.bufferedReader()?.use { it.readText() }
                 ?: error(
                     "prompt registry resource missing: $path — packaged by build.gradle.kts from " +
-                        "openbank-libs/governance/prompts/flaky-test-hunter/system.v1.md (ADR-0148)",
+                        "openbank-libs/governance/prompts/flaky-test-hunter/system.v2.md (ADR-0148)",
                 )
         }
     }

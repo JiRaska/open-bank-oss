@@ -16,6 +16,7 @@ import com.openbank.account.application.port.`in`.ListAccountsQuery
 import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.ListPocketsQuery
 import com.openbank.account.application.port.`in`.OpenAccountCommand
+import com.openbank.account.application.port.`in`.RenameAccountCommand
 import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
@@ -26,6 +27,7 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.domain.event.AccountClosedEvent
@@ -33,6 +35,7 @@ import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
+import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.account.domain.model.PocketResolution
 import com.openbank.account.domain.model.PocketRouter
@@ -46,6 +49,7 @@ import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -63,6 +67,11 @@ class AccountService(
     private val productCatalog: ProductCatalogPort,
     private val metrics: DomainMetrics,
     private val clock: Clock,
+    /**
+     * Customer-facing lifecycle notifications (#8432). NO Kotlin default value: a default on a
+     * CDI bean's constructor parameter makes Arc fail to resolve the bean, silently.
+     */
+    private val notificationRequestPort: NotificationRequestPort,
 ) : AccountUseCase {
 
     @Suppress("LongMethod") // issue #668: the product-catalog validation block added a few lines past threshold
@@ -96,14 +105,31 @@ class AccountService(
         when (val lookup = productCatalog.findById(command.productId)) {
             is ProductLookupResult.NotFound ->
                 throw ProductNotEligibleException(command.productId, "product does not exist")
-            is ProductLookupResult.Found ->
+            is ProductLookupResult.Found -> {
                 if (lookup.product.status != "ACTIVE") {
                     throw ProductNotEligibleException(
                         command.productId,
                         "product status is ${lookup.product.status}, not ACTIVE",
                     )
                 }
+                if (lookup.product.currency != command.currency.code) {
+                    throw ProductNotEligibleException(
+                        command.productId,
+                        "product currency is ${lookup.product.currency}, not ${command.currency.code}",
+                    )
+                }
+            }
             ProductLookupResult.Unavailable -> Unit
+        }
+
+        // #9044: a TERM_DEPOSIT must never open without a record of the terms version it was
+        // opened under — the terms carry the early-withdrawal penalty and the notice period, and
+        // "which terms govern this deposit" is the first question of any complaints/conduct
+        // review. IllegalArgumentException → 400 via libs-runtime's mapper, same as the REST
+        // layer's own validation. The DB backs this with chk_accounts_terms (NOT VALID — honest
+        // nulls on pre-V24 accounts stay untouched).
+        require(command.accountType != AccountType.TERM_DEPOSIT || !command.termsVersion.isNullOrBlank()) {
+            "termsVersion is required when opening a TERM_DEPOSIT account"
         }
 
         val iban = ibanGenerator.generate(command.currency)
@@ -127,6 +153,9 @@ class AccountService(
             sanctionsScreenedAt = now,
             sanctionsStatus = screening.status,
             legalName = command.legalName.ifBlank { null },
+            termsVersion = command.termsVersion,
+            termsUrl = command.termsUrl,
+            termsEffectiveFrom = command.termsEffectiveFrom,
         )
 
         // Account + pocket + idempotency key commit in ONE transaction (#465). A concurrent
@@ -142,7 +171,7 @@ class AccountService(
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
-        // event-driven (ADR-0073): balance-service's BalanceInitConsumer creates the zero
+        // event-driven (ADR-0267): balance-service's BalanceInitConsumer creates the zero
         // balance from the AccountCreated event below. The previous synchronous REST init
         // failed for onboarding accounts opened from a Kafka consumer (no request JWT to
         // propagate → fail-closed; blocking REST call on the Vert.x event loop threw) and,
@@ -160,16 +189,48 @@ class AccountService(
                 productId = saved.productId,
                 currency = saved.currency.code,
                 occurredAt = clock.instant(),
+                sourceService = "account-service",
             ),
         )
 
         metrics.accountCreated(saved.accountType.name, saved.currency.code)
+        // Only an account that can already move money. ADR-0267 opens onboarding accounts
+        // PENDING_ACTIVATION and activateAccount announces those once the KYC+AML gate clears.
+        if (saved.status == AccountStatus.ACTIVE) {
+            notifyCustomer("account opened") {
+                notificationRequestPort.notifyAccountOpened(saved.partyId, saved.accountNumber.value)
+            }
+        }
         return saved
     }
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
         val account = requireAccount(command.accountId)
+        // Status validity first (throws IllegalStateException for an already-CLOSED/PENDING
+        // account) so a doomed request fails on "wrong state" rather than a balance lookup it
+        // was never going to need.
         val closed = account.close(clock)
+        // KNOWN LIMITATIONS (flagged for review, not silently swept under the guard):
+        //  1. This is a point-in-time balance read, not a lock — a credit that settles between
+        //     this check and accountRepository.update() below still lands on the now-CLOSED
+        //     account. account-service's own optimistic version check (AccountUpdateConflict-
+        //     Exception) does not cover this: the race is against balance-service state, not
+        //     this row's version.
+        //  2. It only sees CURRENT booked/reserved balance, not money already in flight to this
+        //     account — a future-dated standing order or an internal transfer sitting on its
+        //     documented value-date delay reads as zero here today and still executes later
+        //     against a closed account. Catching that needs a cross-service check (standing-
+        //     order-service, sepa-instant, etc.) that does not exist yet — out of scope for this
+        //     guard; closing this gap is a follow-up, not something this check can fix alone.
+        val balances = balancePort.getByAccount(command.accountId)
+        val notEmpty = balances.filter { it.booked.signum() != 0 || it.reserved.signum() != 0 }
+        if (notEmpty.isNotEmpty()) {
+            throw AccountNotEmptyException(
+                "Account ${command.accountId} still holds money in " +
+                    notEmpty.joinToString(", ") { "${it.currency} ${it.booked}" } +
+                    " — move it out before closing",
+            )
+        }
         val updated = accountRepository.update(closed)
 
         eventPublisher.publish(
@@ -180,10 +241,14 @@ class AccountService(
                 version = updated.version,
                 reason = command.reason,
                 occurredAt = clock.instant(),
+                sourceService = "account-service",
             ),
         )
 
         metrics.accountClosed(account.accountType.name, closeReasonTag(command.reason))
+        notifyCustomer("account closed") {
+            notificationRequestPort.notifyAccountClosed(updated.partyId, updated.accountNumber.value)
+        }
         return updated
     }
 
@@ -202,11 +267,17 @@ class AccountService(
                 version = updated.version,
                 previousStatus = previous,
                 newStatus = updated.status,
-                reason = "KYC + AML cleared (ADR-0073)",
+                reason = "KYC + AML cleared (ADR-0267)",
                 occurredAt = clock.instant(),
+                sourceService = "account-service",
             ),
         )
 
+        // Idempotent above (an already-ACTIVE account returns early), so this fires once —
+        // and it is the moment the customer can actually use the account.
+        notifyCustomer("account activated") {
+            notificationRequestPort.notifyAccountOpened(updated.partyId, updated.accountNumber.value)
+        }
         return updated
     }
 
@@ -226,9 +297,17 @@ class AccountService(
                 newStatus = updated.status,
                 reason = command.reason,
                 occurredAt = clock.instant(),
+                sourceService = "account-service",
             ),
         )
 
+        notifyCustomer("account frozen") {
+            notificationRequestPort.notifyAccountFrozen(
+                updated.partyId,
+                updated.accountNumber.value,
+                command.reason,
+            )
+        }
         return updated
     }
 
@@ -248,10 +327,27 @@ class AccountService(
                 newStatus = updated.status,
                 reason = command.reason,
                 occurredAt = clock.instant(),
+                sourceService = "account-service",
             ),
         )
 
         return updated
+    }
+
+    /**
+     * Emit a customer notification after the state change is persisted, never instead of it.
+     *
+     * **The failure is swallowed on purpose.** Opening, closing, freezing and activating an account
+     * are money-path state changes with events and audit behind them; a broker hiccup must not roll
+     * one back, nor turn a completed operation into a 500 that an operator or a saga retries. So a
+     * customer may, rarely, not be told about something that did happen — the honest direction to
+     * fail. Logged at WARN rather than dropped, because "the customer was not told" is an
+     * operational fact someone can act on.
+     */
+    private suspend fun notifyCustomer(what: String, emit: suspend () -> Unit) {
+        runCatching { emit() }.onFailure { failure ->
+            LOG.warnf(failure, "%s recorded but the customer notification could not be published (#8432)", what)
+        }
     }
 
     override suspend fun getAccount(query: GetAccountQuery): Account = requireAccount(query.accountId)
@@ -392,6 +488,17 @@ class AccountService(
         )
     }
 
+    // Same "plain field update on the existing aggregate" shape as the savings goal above —
+    // the nickname is cosmetic customer-preference metadata, not a money-path transition, so
+    // no new event/topic either.
+    override suspend fun renameAccount(command: RenameAccountCommand): Account {
+        require(command.nickname == null || command.nickname.length <= NICKNAME_MAX_LENGTH) {
+            "Nickname must be at most $NICKNAME_MAX_LENGTH characters"
+        }
+        val account = requireAccount(command.accountId)
+        return accountRepository.update(account.rename(command.nickname))
+    }
+
     private suspend fun requireAccount(id: UUID): Account = accountRepository.findById(id)
         ?: throw AccountNotFoundException("Account not found: $id")
 
@@ -421,8 +528,13 @@ class AccountService(
     }
 
     companion object {
+        private val LOG: Logger = Logger.getLogger(AccountService::class.java)
+
         /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */
         const val GOAL_NAME_MAX_LENGTH = 120
+
+        /** Matches the nickname VARCHAR(60) column (V20) — validated app-side too. */
+        const val NICKNAME_MAX_LENGTH = 60
 
         /**
          * Map the free-text close reason to a **closed, low-cardinality** set for the
@@ -467,6 +579,17 @@ class AccountNotFoundException(message: String) : RuntimeException(message)
  */
 class AccountUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
+/**
+ * Closing an account with money still in any of its currency pockets would strand that money —
+ * the account moves to CLOSED and stops appearing anywhere a customer or ops person would think
+ * to look for it. [closeAccount] refuses rather than closing anyway; the caller must move the
+ * balance out (or open a dispute) first.
+ *
+ * Best-effort, not a guarantee: see the KNOWN LIMITATIONS note at the [closeAccount] call site
+ * for the point-in-time race and the in-flight-money gap this check does not cover.
+ */
+class AccountNotEmptyException(message: String) : RuntimeException(message)
+
 class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: String?) :
     RuntimeException("Account opening blocked by sanctions screening for party $partyId (matched: $matchedName)")
 
@@ -476,7 +599,10 @@ class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: Stri
  * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately (not
  * a bare [RuntimeException] like [AccountOpeningBlockedByScreeningException]) so it resolves to
  * the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead of falling
- * through to the generic 500 mapper.
+ * through to the generic 500 mapper. The screening exception above must NEVER copy this pattern
+ * (#8512): its message carries the matched sanctions name, and the IllegalStateException mapper
+ * echoes `message` on the wire — a free sanctions-list oracle. It has a dedicated mapper in
+ * ExceptionMappers.kt that answers 422 with a fixed body and keeps the detail in a WARN log.
  */
 class ProductNotEligibleException(productId: UUID, reason: String) :
     IllegalStateException("Cannot open account against product $productId: $reason")

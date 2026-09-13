@@ -87,7 +87,7 @@ Stopping outbound notifications is the fail-safe direction, so **halt** is a sin
 - ✅ AuthZ: `@RolesAllowed` per endpoint; dispatch-control actor from JWT subject (not body)
 - ✅ IDOR prevention: device `partyId` injected by the edge from the customer JWT
 - ✅ Token confidentiality: push token write-only over REST, masked in logs
-- ✅ Secret confidentiality: OTP_CODE / PASSWORD_RESET bodies delivered but never stored — redacted on write and again on read (GDPR Art. 5(1)(c); a stored OTP would let an operator complete the customer's SCA, ADR-0021)
+- ✅ Secret confidentiality: OTP_CODE bodies delivered but never stored — redacted on write and again on read (GDPR Art. 5(1)(c); a stored OTP would let an operator complete the customer's SCA, ADR-0021)
 - ✅ Egress minimisation: push + oversight off by default; oversight PII-free by construction
 - ✅ Resilience: outbox circuit-breaker/retry/bulkhead/timeout; break-glass halt
 - ✅ Security headers: CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy

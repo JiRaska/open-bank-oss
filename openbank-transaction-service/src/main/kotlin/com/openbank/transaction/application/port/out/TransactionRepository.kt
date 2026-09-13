@@ -6,6 +6,7 @@ package com.openbank.transaction.application.port.out
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.domain.model.Transaction
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -31,4 +32,11 @@ interface TransactionRepository {
 
     /** Update a transaction and enqueue a domain-event outbox message, atomically. */
     suspend fun update(transaction: Transaction, outboxMessage: OutboxMessage): Transaction
+
+    /**
+     * Count payment sagas wedged in a non-terminal state: rows still `PENDING` or `PROCESSING`
+     * that were initiated at or before [olderThan]. Feeds the `openbank.transaction.sagas.stuck`
+     * gauge that `TransactionSagaStuck` (critical, money path) pages on.
+     */
+    suspend fun countStuckSagas(olderThan: Instant): Long
 }

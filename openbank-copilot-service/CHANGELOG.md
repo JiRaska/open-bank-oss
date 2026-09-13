@@ -1,5 +1,94 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.16.0...copilot-service-v0.17.0) (2026-09-13)
+
+
+### Features
+
+* **copilot:** ADR-0285 D5 published-style client (infra only, not wired) ([#9729](https://github.com/JiRaska/open-bank-oss/issues/9729)) ([cbdee07](https://github.com/JiRaska/open-bank-oss/commit/cbdee0763a5b6c355bba94b97bcb583fbfdf1b63))
+
+
+### Bug Fixes
+
+* **copilot:** publish the two ActionKind values the spec omits ([#9827](https://github.com/JiRaska/open-bank-oss/issues/9827)) ([37ab7cb](https://github.com/JiRaska/open-bank-oss/commit/37ab7cbc010f9421dcbdf9f8c2836a1aafebc871)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.15.0...copilot-service-v0.16.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.14.2...copilot-service-v0.15.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.14.1...copilot-service-v0.14.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.14.0...copilot-service-v0.14.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.3...copilot-service-v0.14.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** put the content-safety classifier on the operator plane too ([#6204](https://github.com/JiRaska/open-bank-oss/issues/6204)) ([13a21b5](https://github.com/JiRaska/open-bank-oss/commit/13a21b5835739937a16bcfdbb233381d305f3089)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.2...copilot-service-v0.13.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** record an LLM metric on every streaming outcome ([#5960](https://github.com/JiRaska/open-bank-oss/issues/5960)) ([f6fdb0f](https://github.com/JiRaska/open-bank-oss/commit/f6fdb0fc302acb7d84b288ee29d2d98b9de1e994))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.1...copilot-service-v0.13.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** give every help chunk its own id — the index held ONE row, not 13 ([#5954](https://github.com/JiRaska/open-bank-oss/issues/5954)) ([f4ba956](https://github.com/JiRaska/open-bank-oss/commit/f4ba95694f2f2ffbb195a2be962f0dcca134a5ca)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.0...copilot-service-v0.13.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** index the help corpus 90s after boot, not on the next 6h cron ([#5935](https://github.com/JiRaska/open-bank-oss/issues/5935)) ([eba367a](https://github.com/JiRaska/open-bank-oss/commit/eba367a3c0b5af7c11c69ca60d9b9327f2ae9b55)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.1...copilot-service-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.0...copilot-service-v0.12.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.2...copilot-service-v0.12.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.1...copilot-service-v0.11.2) (2026-08-09)
 
 

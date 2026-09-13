@@ -1,0 +1,13 @@
+# Known-and-accepted `@ConfigProperty` injections whose application.yaml value resolves EMPTY
+# (`${VAR:}`, a literal "", or a YAML null) into a NON-Optional target.
+#
+# SmallRye reads an empty value as no value, so each such injection throws SRCFG00040 and the
+# service does not start (#5844 / #5946). There is no good reason for an entry here — the fix is
+# `Optional<...>` or a real fallback — so this file is EMPTY on purpose, and an entry needs a
+# written reason next to it.
+#
+# Format:  <path/to/File.kt>::<property.name>   # why this one is accepted
+#
+# Enforced in BOTH directions by check-configproperty-supplied.py: a new occurrence not listed
+# here fails the gate, and a listed entry that no longer matches anything fails it too, so a debt
+# cannot quietly become permanent by outliving the code it described.

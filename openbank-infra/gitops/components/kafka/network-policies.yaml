@@ -62,6 +62,9 @@ spec:
               kubernetes.io/metadata.name: balances
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: billing
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: campaign
         - namespaceSelector:
             matchLabels:
@@ -89,7 +92,13 @@ spec:
               kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: incentive
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: interest
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyb
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kyc
@@ -141,6 +150,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: wealth
       ports:
         - protocol: TCP
           port: 9093

@@ -41,6 +41,10 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.rest.assured.kotlin)
+    // @TestSecurity: SddOutboxAtomicityIT (#8353) drives POST /mandates and POST /mandates/{id}/suspend,
+    // both behind @RolesAllowed on SddResource. The module's existing ITs only hit unsecured routes
+    // (health, /api/v1/info) and the dispatcher directly, so nothing pulled this in before.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
@@ -50,6 +54,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+
+    // Consumer-driven contract against transaction-service's POST /api/v1/transactions (#8345).
+    // pact.rootDir, `pact.writer.overwrite` and the pactbroker.* forwarding are centralised in the
+    // `openbank.quarkus-service` convention plugin (ADR-0250 Phase 2, #4414), so this dependency is
+    // the whole of the per-module wiring.
+    testImplementation(libs.pact.consumer)
 }
 
 kover {

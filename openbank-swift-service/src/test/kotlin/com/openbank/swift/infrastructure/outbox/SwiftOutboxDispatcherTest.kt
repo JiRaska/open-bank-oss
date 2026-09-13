@@ -26,7 +26,12 @@ class SwiftOutboxDispatcherTest {
 
     private val outboxRepository = mockk<SwiftOutboxRepository>(relaxed = true)
     private val eventPublisher = mockk<KafkaSwiftOutboxEventPublisher>(relaxed = true)
-    private val dispatcher = SwiftOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+    private val dispatcher = SwiftOutboxDispatcher(
+        outboxRepository,
+        eventPublisher,
+        dispatchEnabled = true,
+        metrics = mockk(relaxed = true),
+    )
 
     @Test
     fun `dispatch publishes each processable row and marks it sent`(): Unit = runBlocking {
@@ -68,7 +73,12 @@ class SwiftOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
-        val disabledDispatcher = SwiftOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+        val disabledDispatcher = SwiftOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         disabledDispatcher.dispatch()
 

@@ -1,5 +1,127 @@
 # Changelog
 
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.0...lending-service-v0.33.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **lending:** replay-safe applications/collateral/compliance proposals + ADR-0297 ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9077](https://github.com/JiRaska/open-bank-oss/issues/9077)) ([4219b4e](https://github.com/JiRaska/open-bank-oss/commit/4219b4e1b407293e2afe262e1177b2b8a4395fa8))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.2...lending-service-v0.33.0) (2026-09-08)
+
+
+### Features
+
+* **lending:** credit-risk & decisioning console — and the engine evidence that was never persisted ([#8898](https://github.com/JiRaska/open-bank-oss/issues/8898)) ([e8a085f](https://github.com/JiRaska/open-bank-oss/commit/e8a085f4bac736226e408b5febd6e2d28bfedf79))
+* **lending:** expose the credit-offer eligibility decision to push surfaces ([#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)) ([#8956](https://github.com/JiRaska/open-bank-oss/issues/8956)) ([b79e499](https://github.com/JiRaska/open-bank-oss/commit/b79e49901af64f98648254b2ad255ea88d6dce8b))
+* **lending:** version IFRS 9 risk parameters end-to-end with calibration replay ([#8681](https://github.com/JiRaska/open-bank-oss/issues/8681)) ([76b5ff0](https://github.com/JiRaska/open-bank-oss/commit/76b5ff01d6e01a4553b92f29010a9dc8146cdc3e))
+
+
+### Bug Fixes
+
+* **lending:** add sourceService to loan.withdrawn and loan.accelerated ([#5894](https://github.com/JiRaska/open-bank-oss/issues/5894)) ([a54c9f6](https://github.com/JiRaska/open-bank-oss/commit/a54c9f6042f713b43f30fa1798c4c482fdee3671)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **lending:** correct the 44 epoch-stamped outbox rows and guard the column ([#9079](https://github.com/JiRaska/open-bank-oss/issues/9079)) ([c0678e8](https://github.com/JiRaska/open-bank-oss/commit/c0678e899a5fcfa0bf551cd4a637c9fd20300424)), closes [#9003](https://github.com/JiRaska/open-bank-oss/issues/9003)
+* **lending:** every event settles its own aggregate identity, and four gain partyId ([#8928](https://github.com/JiRaska/open-bank-oss/issues/8928)) ([222e332](https://github.com/JiRaska/open-bank-oss/commit/222e3325ec8cb6d0b43d87d6806f5a8d4102732a)), closes [#8893](https://github.com/JiRaska/open-bank-oss/issues/8893)
+* **lending:** order pending pack proposals by the entity property, not the column ([#5948](https://github.com/JiRaska/open-bank-oss/issues/5948)) ([e1d9906](https://github.com/JiRaska/open-bank-oss/commit/e1d9906c2117afc64420b5e03c58578e9f92b7cf))
+
+## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.1...lending-service-v0.32.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **lending:** rename worker switch to openbank.lending.worker.enabled ([#8374](https://github.com/JiRaska/open-bank-oss/issues/8374)) ([1bd8471](https://github.com/JiRaska/open-bank-oss/commit/1bd84712836abf92ba0d73e41f3fab163028a690))
+
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.0...lending-service-v0.32.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **lending:** distinguish an unconfigured court register from a clear one ([#7595](https://github.com/JiRaska/open-bank-oss/issues/7595)) ([3144e07](https://github.com/JiRaska/open-bank-oss/commit/3144e073e9dc5391190861402c8944257a9a9ae7))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.31.0...lending-service-v0.32.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.30.0...lending-service-v0.31.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** enrich operator cockpit ([#5905](https://github.com/JiRaska/open-bank-oss/issues/5905)) ([9a2207a](https://github.com/JiRaska/open-bank-oss/commit/9a2207aa5e66797f7f33789df2846da049113a9d))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.29.0...lending-service-v0.30.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.28.0...lending-service-v0.29.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.27.0...lending-service-v0.28.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.26.1...lending-service-v0.27.0) (2026-08-21)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 0 — credit-offer consent and the distress suppression floor ([#6226](https://github.com/JiRaska/open-bank-oss/issues/6226)) ([bf87d31](https://github.com/JiRaska/open-bank-oss/commit/bf87d314745d72eae965a256e6f68f34e8bf01b2))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.26.0...lending-service-v0.26.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **lending:** bind the real GL-posting and credit adapters, and refuse to boot when they are not ([#6081](https://github.com/JiRaska/open-bank-oss/issues/6081)) ([2875938](https://github.com/JiRaska/open-bank-oss/commit/2875938dc5e50a872fd60a952bdf0439ec198ac0))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.25.0...lending-service-v0.26.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.5...lending-service-v0.25.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **lending:** add sourceService to remaining event types for audit attribution ([#5399](https://github.com/JiRaska/open-bank-oss/issues/5399)) ([1de3bff](https://github.com/JiRaska/open-bank-oss/commit/1de3bffdbacc242e13cf5635a2637995a822584a)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.24.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.4...lending-service-v0.24.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **lending:** actually pay the borrower on disbursement ([#3931](https://github.com/JiRaska/open-bank-oss/issues/3931)) ([#5231](https://github.com/JiRaska/open-bank-oss/issues/5231)) ([0d664f0](https://github.com/JiRaska/open-bank-oss/commit/0d664f078df84a07be659ea50659bc68b340c51f))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.3...lending-service-v0.24.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.2...lending-service-v0.24.3) (2026-08-13)
 
 

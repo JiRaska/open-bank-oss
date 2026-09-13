@@ -42,6 +42,7 @@ Modes (ADR-0144 gate graduation):
 from __future__ import annotations
 
 import argparse
+import difflib
 import importlib.util
 import pathlib
 import re
@@ -174,6 +175,40 @@ def hunk_moves_boundary(diff_text: str) -> bool:
     return False
 
 
+def split_yaml_documents(text: str) -> list[str]:
+    """Split a multi-document gitops manifest on its `---` document separators."""
+    docs: list[list[str]] = [[]]
+    for line in text.splitlines():
+        if line.strip() == "---":
+            docs.append([])
+            continue
+        docs[-1].append(line)
+    return ["\n".join(d) for d in docs]
+
+
+# Kinds whose document is itself a trust boundary (NetworkPolicy: reach by construction;
+# Deployment/Rollout: gated by hunk_moves_boundary). Matches GITOPS_KIND above.
+BOUNDARY_DOC_KIND = re.compile(r"^kind:\s*(NetworkPolicy|Deployment|Rollout)\s*$", re.MULTILINE)
+
+
+def boundary_docs_text(full_text: str) -> str:
+    """The boundary-relevant YAML documents in a (possibly multi-document) manifest file,
+    concatenated -- never the whole file.
+
+    A component manifest here routinely bundles a Deployment with a Service, a ServiceAccount,
+    and a PodMonitor/ServiceMonitor as separate `---`-separated documents in ONE file (see
+    billing-service.yaml, document-service-service.yaml, statement-service.yaml). Without this,
+    hunk_moves_boundary sees the WHOLE FILE'S diff text, so a deleted PodMonitor's
+    `podMetricsEndpoints: - port: management` matches the `ports?` boundary key exactly as if it
+    were the Deployment's own `containerPort` -- flagging a scrape-config removal as a
+    trust-boundary move on the workload it shares a file with (#9071: the PodMonitor-dedup PR
+    tripped this on billing-service.yaml with no Deployment change at all).
+    """
+    return "\n---\n".join(
+        doc for doc in split_yaml_documents(full_text) if BOUNDARY_DOC_KIND.search(doc)
+    )
+
+
 def file_diff(base: str | None, head: str, rel: str) -> str | None:
     """Unified diff of one path, or None when it cannot be inspected."""
     if base is None:
@@ -209,6 +244,17 @@ def adapter_is_client(rel: str) -> bool:
         return False
 
 
+def read_at_ref(ref: str, rel: str) -> str | None:
+    """Content of `rel` at `ref`, or None when it cannot be read (path did not exist there,
+    or `ref` cannot be resolved)."""
+    res = subprocess.run(
+        ["git", "show", f"{ref}:{rel}"], capture_output=True, text=True, cwd=REPO,
+    )
+    if res.returncode != 0:
+        return None
+    return res.stdout
+
+
 def gitops_hit(
     service: str, comp: str, fname: str, base: str | None = None, head: str = "HEAD",
 ) -> str | None:
@@ -230,12 +276,27 @@ def gitops_hit(
         except OSError:
             return None
         if GITOPS_KIND.search(text) and token_in(tokens, text):
-            diff_text = file_diff(base, head, rel)
-            if diff_text is None:
+            if base is None:
                 # Cannot inspect hunks (synthetic --changed-files list): stay conservative,
                 # same contract as yaml_security_keys_changed.
                 return f"{rel} (Deployment/Rollout)"
-            if not hunk_moves_boundary(diff_text):
+            base_text = read_at_ref(base, rel)
+            if base_text is None:
+                # New file, or base ref cannot be read -- nothing to scope the diff against,
+                # stay conservative rather than assume it is boundary-irrelevant.
+                return f"{rel} (Deployment/Rollout)"
+            # Scope the diff to just the Deployment/Rollout/NetworkPolicy documents, not the
+            # whole file -- see boundary_docs_text. A component manifest here routinely bundles
+            # those with a Service/PodMonitor/ServiceMonitor as separate `---` documents, and a
+            # hunk in one of THOSE must never be read as a change to another.
+            base_scoped = boundary_docs_text(base_text)
+            head_scoped = boundary_docs_text(text)
+            if base_scoped == head_scoped:
+                return None
+            scoped_diff = "\n".join(
+                difflib.unified_diff(base_scoped.splitlines(), head_scoped.splitlines(), lineterm=""),
+            )
+            if not hunk_moves_boundary(scoped_diff):
                 return None
             return f"{rel} (Deployment/Rollout)"
     return None
@@ -311,6 +372,50 @@ SELF_TEST_CASES: list[tuple[str, str, bool]] = [
 ]
 
 
+# Multi-document gitops manifest cases (#9071): boundary_docs_text must scope the diff to
+# just the Deployment/Rollout/NetworkPolicy documents in the file, so a hunk in a sibling
+# PodMonitor/Service document sharing the same file is never read as a change to the
+# workload's own boundary. These exercise the actual gitops_hit code path (document split +
+# difflib), not just hunk_moves_boundary on a hand-written diff -- the earlier SELF_TEST_CASES
+# above would all still pass even if the document-scoping were missing entirely.
+DOC_SELF_TEST_CASES: list[tuple[str, str, str, bool]] = [
+    (
+        "a removed PodMonitor's scrape port must NOT flag the Deployment sharing its file",
+        "apiVersion: apps/v1\nkind: Deployment\nspec:\n  ports:\n    - port: 8085\n"
+        "---\n"
+        "apiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nspec:\n"
+        "  podMetricsEndpoints:\n    - port: management\n",
+        "apiVersion: apps/v1\nkind: Deployment\nspec:\n  ports:\n    - port: 8085\n",
+        False,
+    ),
+    (
+        "a real Deployment containerPort change in the SAME multi-doc file must still flag",
+        "apiVersion: apps/v1\nkind: Deployment\nspec:\n  ports:\n    - port: 8085\n"
+        "---\n"
+        "apiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nspec:\n"
+        "  podMetricsEndpoints:\n    - port: management\n",
+        "apiVersion: apps/v1\nkind: Deployment\nspec:\n  ports:\n    - port: 8085\n"
+        "    - port: 9443\n"
+        "---\n"
+        "apiVersion: monitoring.coreos.com/v1\nkind: PodMonitor\nspec:\n"
+        "  podMetricsEndpoints:\n    - port: management\n",
+        True,
+    ),
+]
+
+
+def doc_scoped_flags(before: str, after: str) -> bool:
+    """Same comparison gitops_hit makes: scope both sides to boundary docs, diff, classify."""
+    base_scoped = boundary_docs_text(before)
+    head_scoped = boundary_docs_text(after)
+    if base_scoped == head_scoped:
+        return False
+    diff_text = "\n".join(
+        difflib.unified_diff(base_scoped.splitlines(), head_scoped.splitlines(), lineterm=""),
+    )
+    return hunk_moves_boundary(diff_text)
+
+
 def self_test() -> int:
     """Feed the classifier diffs it MUST flag and diffs it MUST NOT.
 
@@ -321,6 +426,12 @@ def self_test() -> int:
     ok = True
     for name, diff_text, expected in SELF_TEST_CASES:
         got = hunk_moves_boundary(diff_text)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    for name, before, after, expected in DOC_SELF_TEST_CASES:
+        got = doc_scoped_flags(before, after)
         mark = "ok" if got == expected else "FAIL"
         if got != expected:
             ok = False

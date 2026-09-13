@@ -95,6 +95,29 @@ describe('campaign builder canvas', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('keeps canvas controls reachable and operable by keyboard', () => {
+    const onAdd = vi.fn()
+    const onRemove = vi.fn()
+    const onSelect = vi.fn()
+    const { container } = canvas([step(), step()], { onAdd, onRemove, onSelect })
+
+    const firstStep = container.querySelector('[data-step="0"]')!
+    expect(firstStep.getAttribute('tabindex')).toBe('0')
+    expect(firstStep.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.keyDown(firstStep, { key: 'Enter' })
+    expect(onSelect).toHaveBeenCalledWith(0)
+
+    const removeSecond = container.querySelector('[data-remove-step="1"]')!
+    expect(removeSecond.getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(removeSecond, { key: ' ' })
+    expect(onRemove).toHaveBeenCalledWith(1)
+
+    const add = container.querySelector('[data-add-step]')!
+    expect(add.getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(add, { key: 'Enter' })
+    expect(onAdd).toHaveBeenCalledTimes(1)
+  })
+
   it('offers a delivery decision only when its two complementary paths fit', () => {
     const onAddDecision = vi.fn()
     const { container } = canvas([step()], { onAddDecision })

@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Guard: every @RolesAllowed role name must exist in a Keycloak realm (issue #2404).
+# Guard: every @RolesAllowed role name must exist in a Keycloak realm (issue #2404), and
+# every literal role probed via hasRole("...") must have an issuer too (issue #8495 — the
+# same dead-name defect one layer down, where it reads as a working endpoint with a
+# silently unreachable branch).
 #
 # WHY THIS EXISTS
 #   `@RolesAllowed` takes a compile-time string, and nothing checked that the string names a role
@@ -55,6 +58,14 @@ ROLES_KT = "openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/Role
 CATALOG_ROLES_KT = "openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/security/CatalogScopeIdentityAugmentor.kt"
 
 ANNOTATION_RE = re.compile(r"@RolesAllowed\s*\(([^)]*)\)", re.S)
+# The same dead-role defect one layer down (#8495): `hasRole("ROLE_X")` is a runtime probe of
+# the same string. A role no realm issues makes the branch it guards unreachable forever, and
+# worse than the annotation case, it fails CLOSED-looking: the endpoint answers 200 through its
+# other caller shapes, so nothing anywhere notices the branch is dead. ROLE_DPO sat in exactly
+# that state for the life of the GDPR export endpoints — the DPO branch was dead code and the
+# only test mentioning it stubbed the probe to `false`. Literal-argument calls only; a
+# `hasRole(Roles.X)` constant is resolved through `consts` the same way the annotation form is.
+HASROLE_RE = re.compile(r'hasRole\s*\(\s*(?:"([^"]+)"|(?:(Roles|CatalogRoles)\.(\w+)))\s*\)')
 ARG_RE = re.compile(r'"([^"]+)"|(?:(Roles|CatalogRoles)\.(\w+))')
 CONST_RE = re.compile(r'const\s+val\s+(\w+)\s*[:=][^"]*"([^"]+)"')
 
@@ -104,6 +115,44 @@ def realm_roles(root: pathlib.Path, errors):
     return names, files
 
 
+AUGMENTOR_MARKERS = ("SecurityIdentityAugmentor", "addRoles")
+
+
+def augmentor_roles(root: pathlib.Path):
+    """Role names a `SecurityIdentityAugmentor` synthesises per request, and so no realm issues.
+
+    A third source of roles exists alongside the realm and the annotation, and this gate could
+    not see it: Quarkus lets a `SecurityIdentityAugmentor` add roles to the identity AFTER the
+    token is verified. `CatalogScopeIdentityAugmentor` does exactly that — it derives
+    CATALOG_SCOPE_READ/AUTHOR/PUBLISH from the token's OAuth `scope` claim, and its KDoc says
+    why: *"without trusting a tenant claim or OPA"*. The scope-to-role mapping is meant to be
+    the ONLY path to those roles.
+
+    Before this, the only way to satisfy this gate was to declare them as realm roles, which is
+    the one thing that must not happen: a realm role is assignable in the admin console, so an
+    operator could grant CATALOG_SCOPE_PUBLISH to a user directly and reach every
+    `@RolesAllowed(CATALOG_SCOPE_PUBLISH)` endpoint with a token carrying no catalog scope at
+    all — the exact bypass the augmentor exists to prevent. And declaring them put the two
+    checks in direct conflict: `check-realm-role-parity` (template vs LIVE realm) then reported
+    all three as declared-and-never-issued, failing the keycloak-realm-drift CronJob daily,
+    because a role that only ever exists at runtime cannot appear in a live realm dump either.
+    Both gates were right about their own comparison and both were blind to the same third
+    source (2026-08-16).
+
+    DERIVED, not a list. A file counts only if it both implements `SecurityIdentityAugmentor`
+    and calls `addRoles`, and only the constants in that file are admitted. Delete the augmentor
+    and its roles stop being known here, so the 25 catalog sites go red again — which is the
+    correct verdict at that point, since nothing would issue them any more.
+    """
+    names = set()
+    for f in sorted(root.glob("openbank-*/src/main/kotlin/**/*.kt")):
+        text = f.read_text()
+        if not all(marker in text for marker in AUGMENTOR_MARKERS):
+            continue
+        names |= {value for _, value in CONST_RE.findall(text)}
+    return names
+
+
 def role_constants(root: pathlib.Path):
     constants = {}
     for qualifier, relative_path in (("Roles", ROLES_KT), ("CatalogRoles", CATALOG_ROLES_KT)):
@@ -114,19 +163,31 @@ def role_constants(root: pathlib.Path):
 
 
 def scan(root: pathlib.Path, known, consts):
-    """Yield (path, line, all_names, dead_names) for every @RolesAllowed in service main sources."""
+    """Yield (path, line, all_names, dead_names) for every role reference in service main sources.
+
+    Covers both reference shapes: `@RolesAllowed(...)` annotations and `hasRole(...)` probes
+    (the same dead-name defect one layer down, #8495). A hasRole call names exactly one role,
+    so for it `names` is always a one-element list. The fifth element is the reference form
+    ("annotation" or "probe") so the finding names what was actually read.
+    """
     for f in sorted(root.glob("openbank-*/src/main/kotlin/**/*.kt")):
         src = strip_comments(f.read_text())
-        for m in ANNOTATION_RE.finditer(src):
-            names = []
-            for literal, qualifier, const in ARG_RE.findall(m.group(1)):
-                key = f"{qualifier}.{const}" if qualifier else ""
-                names.append(literal or consts.get(key, key))
-            if not names:
-                continue
-            line = src[: m.start()].count("\n") + 1
-            dead = [n for n in names if n not in known]
-            yield f.relative_to(root), line, names, dead
+        for pattern, form in ((ANNOTATION_RE, "annotation"), (HASROLE_RE, "probe")):
+            for m in pattern.finditer(src):
+                # The annotation captures its whole argument list in group 1; the probe
+                # captures either the literal (1) or the qualifier.constant (2, 3).
+                argtext = m.group(1) if form == "annotation" else (
+                    f'"{m.group(1)}"' if m.group(1) is not None else f"{m.group(2)}.{m.group(3)}"
+                )
+                names = []
+                for literal, qualifier, const in ARG_RE.findall(argtext):
+                    key = f"{qualifier}.{const}" if qualifier else ""
+                    names.append(literal or consts.get(key, key))
+                if not names:
+                    continue
+                line = src[: m.start()].count("\n") + 1
+                dead = [n for n in names if n not in known]
+                yield f.relative_to(root), line, names, dead, form
 
 
 def self_test() -> int:
@@ -174,13 +235,37 @@ def self_test() -> int:
             '@RolesAllowed(Roles.GHOST)\nfun d() {}\n\n'                           # constant, unknown
             '@RolesAllowed("ROLE_OPERATOR", "ROLE_TYPO2")\nfun e() {}\n\n'         # partial
             '@RolesAllowed(CatalogRoles.AUTHOR)\nfun g() {}\n\n'                  # catalog constant
+            '@RolesAllowed("ROLE_DERIVED_AT_RUNTIME")\nfun h() {}\n\n'            # augmentor-issued
             '// @RolesAllowed("ROLE_IN_A_COMMENT")\nfun f() {}\n'                   # prose
+            'fun i() { id.hasRole("ROLE_OPERATOR") }\n\n'                        # probe, known
+            'fun j() { id.hasRole("ROLE_TYPO3") }\n\n'                           # THE PROBE DEFECT (#8495)
+            'fun k() { id.hasRole(Roles.GHOST) }\n\n'                            # probe via constant
+            '// id.hasRole("ROLE_PROBE_IN_A_COMMENT")\n'                          # probe prose
+        )
+
+        # A real augmentor: implements SecurityIdentityAugmentor AND calls addRoles, so the role
+        # it synthesises has an issuer even though no realm declares it. The CatalogRoles fixture
+        # above is the NEGATIVE control for the same rule — constants only, neither marker — so
+        # ROLE_CATALOG_AUTHOR must stay dead. Without that pair the new branch could admit every
+        # constant in the tree and this self-test would still pass.
+        aug = root / "openbank-y/src/main/kotlin/com/openbank/y"
+        aug.mkdir(parents=True)
+        (aug / "ScopeAugmentor.kt").write_text(
+            'object DerivedRoles {\n  const val SCOPED: String = "ROLE_DERIVED_AT_RUNTIME"\n}\n'
+            'class ScopeAugmentor : SecurityIdentityAugmentor {\n'
+            '  override fun augment(i: SecurityIdentity) = builder(i).addRoles(setOf(DerivedRoles.SCOPED)).build()\n'
+            '}\n'
         )
 
         errors: list = []
         known, files = realm_roles(root, errors)
         if known != {"ROLE_OPERATOR", "ROLE_API"}:
             fails.append(f"realm roles wrong: {sorted(known)}")
+        derived = augmentor_roles(root)
+        if derived != {"ROLE_DERIVED_AT_RUNTIME"}:
+            fails.append(f"augmentor-derived roles wrong: {sorted(derived)} "
+                         f"(want exactly the constants of files carrying BOTH markers)")
+        known |= derived
         consts = role_constants(root)
         expected_consts = {
             "Roles.OPERATOR": "ROLE_OPERATOR",
@@ -190,18 +275,20 @@ def self_test() -> int:
         if consts != expected_consts:
             fails.append(f"role constants wrong: {consts}")
 
-        found = {str(rel) + ":" + str(line): (names, dead) for rel, line, names, dead in scan(root, known, consts)}
+        found = {str(rel) + ":" + str(line): (names, dead) for rel, line, names, dead, _ in scan(root, known, consts)}
         allnames = [n for names, _ in found.values() for n in names]
         alldead = sorted({d for _, dead in found.values() for d in dead})
 
-        # THE DEFECT and its constant-valued twin must both be dead.
-        for want in ("ROLE_TYPO", "ROLE_NEVER_DEFINED", "ROLE_TYPO2", "ROLE_CATALOG_AUTHOR"):
+        # THE DEFECT, its constant-valued twin, and the probe-shape twin must all be dead.
+        for want in ("ROLE_TYPO", "ROLE_NEVER_DEFINED", "ROLE_TYPO2", "ROLE_CATALOG_AUTHOR", "ROLE_TYPO3"):
             if want not in alldead:
                 fails.append(f"{want} should be reported as not in the realm; dead={alldead}")
         # Known roles must NOT be — a gate that flags valid roles is one nobody keeps.
-        for notdead in ("ROLE_OPERATOR",):
+        # ROLE_DERIVED_AT_RUNTIME is in no realm at all; it must pass purely on having an
+        # augmentor that issues it, which is the whole point of the new branch.
+        for notdead in ("ROLE_OPERATOR", "ROLE_DERIVED_AT_RUNTIME"):
             if notdead in alldead:
-                fails.append(f"{notdead} is a real realm role and must not be reported dead")
+                fails.append(f"{notdead} has an issuer and must not be reported dead")
         # The CONSTANT must be resolved to its value. Unresolved it compares as "Roles.GHOST",
         # which is in no realm either — right verdict, wrong reason, and it would mask a
         # resolver that had stopped working entirely.
@@ -212,6 +299,8 @@ def self_test() -> int:
         # Prose must not be read as code.
         if "ROLE_IN_A_COMMENT" in allnames:
             fails.append("an annotation inside a // comment was read as code")
+        if "ROLE_PROBE_IN_A_COMMENT" in allnames:
+            fails.append("a hasRole probe inside a // comment was read as code")
 
     # --- the comment stripper, which is where nesting bites (Kotlin block comments NEST) ---
     if "X" in strip_comments("/* a /* b */ X */"):
@@ -234,7 +323,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: @RolesAllowed realm parity is falsifiable (13 cases)")
+    print("self-test ok: @RolesAllowed + hasRole realm parity is falsifiable (20 cases)")
     return 0
 
 
@@ -250,11 +339,17 @@ def main() -> int:
 
     errors = []
     known, realm_files = realm_roles(root, errors)
+    derived = augmentor_roles(root)
+    known |= derived
     consts = role_constants(root)
 
-    unreachable, partial, checked = [], [], 0
-    for rel, line, names, dead in scan(root, known, consts):
+    unreachable, partial, dead_probes, checked = [], [], [], 0
+    for rel, line, names, dead, form in scan(root, known, consts):
         checked += 1
+        if form == "probe":
+            if dead:
+                dead_probes.append((rel, line, names[0]))
+            continue
         if dead and len(dead) == len(names):
             unreachable.append((rel, line, names))
         elif dead:
@@ -274,19 +369,29 @@ def main() -> int:
             f"Keycloak or delete it from the annotation.",
         )
 
+    for rel, line, role in dead_probes:
+        errors.append(
+            f"{rel}:{line} — hasRole(\"{role}\") probes a role no realm issues, so the branch it "
+            f"guards is unreachable forever while the endpoint answers through its other caller "
+            f"shapes — nothing anywhere says so (#8495: ROLE_DPO sat exactly like this on the "
+            f"GDPR export endpoints). Define the role in the realm template or delete the branch.",
+        )
+
     # Before the verdict, so a gate that found its corpus and then failed on it is not also
     # reported as having lost the corpus.
-    gatelib.subjects(checked, "@RolesAllowed sites")
+    gatelib.subjects(checked, "role-reference sites")
 
     if errors:
         for e in errors:
             sys.stderr.write(f"::error title=RolesAllowed realm parity::{e}\n")
-        sys.stderr.write(f"::error::check-roles-allowed-realm: {len(errors)} @RolesAllowed name(s) no realm issues.\n")
+        sys.stderr.write(f"::error::check-roles-allowed-realm: {len(errors)} role name(s) no realm issues.\n")
         return 1
 
     print(
-        f"roles-allowed parity: {checked} @RolesAllowed site(s) checked against "
-        f"{len(known)} role(s) from {', '.join(realm_files)}; every named role is issued by a realm.",
+        f"roles-allowed parity: {checked} role-reference site(s) (@RolesAllowed + hasRole) checked "
+        f"against {len(known)} role(s) — {len(known) - len(derived)} from "
+        f"{', '.join(realm_files)} and {len(derived)} synthesised by a SecurityIdentityAugmentor "
+        f"({', '.join(sorted(derived)) or 'none'}); every named role has an issuer.",
     )
     return 0
 

@@ -183,6 +183,14 @@ class LegacyDelegationArmRefusedIT {
         StubUpstreams.stub("/api/v1/parties/$DELEGATE_PARTY") { 200 to """{"legalName":"Delegate Name"}""" }
         StubUpstreams.stub("/api/v1/sca/challenges/$SCA_ID/consume") { 200 to """{"status":"CONSUMED"}""" }
         StubUpstreams.stub(PAYMENTS_PATH) { 201 to """{"id":"$PAYMENT_ID","status":"RECEIVED"}""" }
+        // ADR-0249 D3: the delegated path reserves cumulative headroom before it pays, and a
+        // reservation it cannot establish is a refusal. Without these three the control below
+        // 403s for the right reason but the wrong subject.
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations") {
+            201 to """{"reservationId":"$RESERVATION_ID","delegationId":"$GRANT_ID"}"""
+        }
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations/$RESERVATION_ID/confirm") { 200 to "{}" }
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations/$RESERVATION_ID/release") { 200 to "{}" }
     }
 
     private fun stubDecision(body: String) =
@@ -230,6 +238,10 @@ class LegacyDelegationArmRefusedIT {
                 "openbank.edge.domestic-payment-service-url" to base,
                 "openbank.edge.sca-service-url" to base,
                 "openbank.edge.party-service-url" to base,
+                // The delegated path reserves against delegation-service before paying (ADR-0249
+                // D3); without this the reservation cannot be established and every delegated
+                // payment here 403s.
+                "openbank.edge.delegation-service-url" to base,
             )
         }
 
@@ -271,6 +283,7 @@ class LegacyDelegationArmRefusedIT {
         const val OWNER_IBAN = "CZ6508000000192000145399"
         const val SCA_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         const val PAYMENT_ID = "99999999-8888-7777-6666-555555555555"
+        const val RESERVATION_ID = "11111111-2222-3333-4444-555555555555"
 
         /** What account-service answers today for an un-reconciled legacy row. No grantor. */
         const val LEGACY_ARM = """{"authorized":true,"outcome":"LEGACY_AUTHORIZATION"}"""

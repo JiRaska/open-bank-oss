@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.consent
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.engagement.application.port.out.ConsentCheckPort
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -24,6 +25,7 @@ import java.util.UUID
 
 /** Same shape as campaign-service's `ConsentServiceClient` — the live per-call check, never cached. */
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)

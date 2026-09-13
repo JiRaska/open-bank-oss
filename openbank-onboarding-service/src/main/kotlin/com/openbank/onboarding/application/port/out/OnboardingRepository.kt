@@ -16,6 +16,17 @@ interface OnboardingRepository {
 
     suspend fun upsert(record: OnboardingRecord)
 
+    /**
+     * Records that [credentialId] is enrolled for [partyId] and returns the party's resulting
+     * total number of distinct enrolled credentials.
+     *
+     * **Idempotent by construction (#6248).** Re-recording a credential already present is a
+     * no-op and returns the unchanged total, so a replayed `DEVICE_ENROLLED` converges instead
+     * of inflating `deviceCount`. This is what makes any backfill of the enrolments lost to
+     * #4353 safe to run more than once — the previous `deviceCount + 1` did not.
+     */
+    suspend fun recordDeviceEnrolment(partyId: UUID, credentialId: String, enrolledAt: java.time.Instant): Int
+
     suspend fun findByPartyId(partyId: UUID): OnboardingRecord?
 
     suspend fun listByStage(stage: FunnelStage, page: Int, size: Int): List<OnboardingRecord>

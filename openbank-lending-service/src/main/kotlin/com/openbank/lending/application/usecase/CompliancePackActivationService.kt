@@ -9,6 +9,7 @@ import com.openbank.lending.infrastructure.persistence.entity.CompliancePackActi
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
+import com.openbank.libs.lending.compliance.CompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
 import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
@@ -30,6 +31,9 @@ data class PackActivationView(
     val proposedBy: String,
     val decidedBy: String?,
     val decidedAt: String?,
+    val proposedAt: String?,
+    val decisionReason: String?,
+    val pack: CompliancePack,
 )
 
 /**
@@ -49,21 +53,32 @@ class CompliancePackActivationService(
         require(maker.isNotBlank()) { "Proposer identity is required" }
         val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
-        val entity = CompliancePackActivationEntity().apply {
-            id = com.openbank.libs.domain.identifiers.Ids.newId()
-            state = ProposalState.PROPOSED
-            jurisdiction = compiled.pack.jurisdiction
-            productType = compiled.pack.productType.name
-            packVersion = compiled.pack.version
-            effectiveFrom = compiled.pack.effectiveFrom
-            payload = packJson
-            contentHash = compiled.contentHash
-            proposedBy = maker
-            proposedAt = now
-            createdAt = now
-            updatedAt = now
+        // Idempotent replay (ADR-0297, #8351): a pack proposal is content-addressed — the
+        // contentHash IS its natural key. A retried propose with the identical payload while the
+        // original is still PROPOSED replays the ORIGINAL proposal instead of stacking a
+        // duplicate awaiting a checker. A re-proposal of the same content AFTER a decision is a
+        // legitimate new proposal (e.g. re-submitting a rejected pack) and persists.
+        return activations.findByState(ProposalState.PROPOSED).flatMap { proposed ->
+            proposed.firstOrNull { it.contentHash == compiled.contentHash }
+                ?.let { twin -> Uni.createFrom().item(twin.toView()) }
+                ?: run {
+                    val entity = CompliancePackActivationEntity().apply {
+                        id = com.openbank.libs.domain.identifiers.Ids.newId()
+                        state = ProposalState.PROPOSED
+                        jurisdiction = compiled.pack.jurisdiction
+                        productType = compiled.pack.productType.name
+                        packVersion = compiled.pack.version
+                        effectiveFrom = compiled.pack.effectiveFrom
+                        payload = packJson
+                        contentHash = compiled.contentHash
+                        proposedBy = maker
+                        proposedAt = now
+                        createdAt = now
+                        updatedAt = now
+                    }
+                    activations.save(entity).map { it.toView() }
+                }
         }
-        return activations.save(entity).map { it.toView() }
     }
 
     fun decide(proposalId: UUID, approve: Boolean, checker: String, reason: String?): Uni<PackActivationView> =
@@ -129,6 +144,9 @@ class CompliancePackActivationService(
             proposedBy = "-",
             decidedBy = null,
             decidedAt = null,
+            proposedAt = null,
+            decisionReason = null,
+            pack = compiled.pack,
         )
     }
 
@@ -156,5 +174,8 @@ class CompliancePackActivationService(
         proposedBy = proposedBy,
         decidedBy = decidedBy,
         decidedAt = decidedAt?.toString(),
+        proposedAt = proposedAt.toString(),
+        decisionReason = decisionReason,
+        pack = CompliancePackJson.fromJson(payload),
     )
 }

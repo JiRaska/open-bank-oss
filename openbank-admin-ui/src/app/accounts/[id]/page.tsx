@@ -4,13 +4,16 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { validateAccountBalance, validateAccountDetail } from '@/lib/accounts/detailContract'
 import type { Account, AccountBalance } from '@/types'
 
 const STATUS_PILL: Record<string, string> = {
@@ -23,41 +26,70 @@ const STATUS_PILL: Record<string, string> = {
 
 export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [account, setAccount]   = useState<Account | null>(null)
   const [balance, setBalance]   = useState<AccountBalance | null>(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing]     = useState(false)
+  const actionInFlight = useRef(false)
+  const loadSequence = useRef(0)
+  const [actionIntent, setActionIntent] = useState<'freeze' | 'unfreeze' | 'close' | null>(null)
+  const [actionReason, setActionReason] = useState('')
 
   async function load() {
+    const sequence = ++loadSequence.current
     setLoading(true); setError(null)
     try {
       const [acc, bal] = await Promise.allSettled([
         accountApi.get(id),
         accountApi.getBalance(id),
       ])
-      if (acc.status === 'fulfilled') setAccount(acc.value)
-      else throw new Error(acc.reason?.message ?? 'Failed to load account')
-      if (bal.status === 'fulfilled') setBalance(bal.value)
+      if (sequence !== loadSequence.current) return
+      if (acc.status !== 'fulfilled') throw new Error(acc.reason?.message ?? 'Failed to load account')
+      const verifiedAccount = validateAccountDetail(acc.value, id)
+      if (!verifiedAccount) {
+        throw new Error(t('Služba vrátila neověřitelná data účtu.', 'The service returned unverifiable account data.'))
+      }
+      setAccount(verifiedAccount)
+      setBalance(bal.status === 'fulfilled' ? validateAccountBalance(bal.value, verifiedAccount) : null)
     } catch (e: unknown) {
+      if (sequence !== loadSequence.current) return
       setError(e instanceof Error ? e.message : 'Failed to load account')
-    } finally { setLoading(false) }
+    } finally {
+      if (sequence === loadSequence.current) setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [id])
+  useEffect(() => {
+    void load()
+    return () => { loadSequence.current += 1 }
+  }, [id])
 
-  async function doAction(action: 'freeze' | 'unfreeze' | 'close') {
-    if (!account) return
-    const reason = window.prompt(`Reason for ${action}:`)
-    if (reason === null) return
+  function requestAction(action: 'freeze' | 'unfreeze' | 'close') {
+    setActionIntent(action)
+    setActionReason('')
+    setActionError(null)
+  }
+
+  async function doAction(action: 'freeze' | 'unfreeze' | 'close', reason: string) {
+    if (!account || actionInFlight.current) return
+    const normalizedReason = reason.trim()
+    if (!normalizedReason) {
+      setActionError(t('Pro tuto změnu uveďte důvod do auditní stopy.', 'Provide a reason for this change in the audit trail.'))
+      return
+    }
+    actionInFlight.current = true
     setActing(true); setActionError(null)
     try {
-      if (action === 'freeze')   await accountApi.freeze(id, reason)
-      if (action === 'unfreeze') await accountApi.unfreeze(id, reason)
-      if (action === 'close')    await accountApi.close(id, reason)
+      if (action === 'freeze')   await accountApi.freeze(id, normalizedReason)
+      if (action === 'unfreeze') await accountApi.unfreeze(id, normalizedReason)
+      if (action === 'close')    await accountApi.close(id, normalizedReason)
       await load()
+      setActionIntent(null)
+      setActionReason('')
     } catch {
       // Never surface a raw backend message (could be a bare "HTTP 500") for a
       // user-initiated write — show a calm, localized human message instead.
@@ -67,12 +99,15 @@ export default function AccountDetailPage() {
         close:    t('Účet se nepodařilo zrušit. Zkuste to prosím znovu.', 'The account could not be closed. Please try again.'),
       }
       setActionError(human[action])
-    } finally { setActing(false) }
+    } finally {
+      actionInFlight.current = false
+      setActing(false)
+    }
   }
 
   if (loading) return (
-    <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <RefreshCw size={14} className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
+    <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <RefreshCw size={14} aria-hidden="true" className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
     </div>
   )
 
@@ -87,48 +122,90 @@ export default function AccountDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{account.accountNumber}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span className="mono">{account.accountNumber}</span>
-            <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
-          </h1>
-          <p className="page-subtitle">{account.accountType} · {account.currencyCode}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13}/> {t('Zpět', 'Back')}</Link>
+      <PageHeader
+        title={account.accountNumber}
+        subtitle={`${account.accountType} · ${account.currencyCode}`}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{account.accountNumber}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
+          <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>
           {account.status === 'ACTIVE' && (
-            <button className="btn btn-secondary" onClick={() => doAction('freeze')} disabled={acting}>
-              <Lock size={13}/> {t('Zmrazit', 'Freeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting} aria-busy={acting} aria-label={t('Zmrazit účet', 'Freeze account')}>
+                <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
+              </button>
+            </Can>
           )}
           {account.status === 'FROZEN' && (
-            <button className="btn btn-secondary" onClick={() => doAction('unfreeze')} disabled={acting}>
-              <Unlock size={13}/> {t('Odzmrazit', 'Unfreeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting} aria-busy={acting} aria-label={t('Odmrazit účet', 'Unfreeze account')}>
+                <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
+              </button>
+            </Can>
           )}
           {account.status !== 'CLOSED' && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => doAction('close')}
-              disabled={acting}
-              style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
-            >
-              <XCircle size={13}/> {t('Zrušit účet', 'Close')}
-            </button>
+            <Can permission="accounts:close">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => requestAction('close')}
+                disabled={acting}
+                aria-busy={acting}
+                aria-label={t('Zrušit účet', 'Close account')}
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
+              >
+                <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
+              </button>
+            </Can>
           )}
-        </div>
-      </div>
+        </div>}
+      />
+
+      {actionIntent && (
+        <section
+          aria-labelledby="account-action-title"
+          aria-describedby="account-action-description"
+          style={{
+            marginBottom: '16px', padding: '16px', background: 'var(--surface)',
+            border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
+            boxShadow: '0 12px 28px rgba(15,23,42,0.12)',
+          }}
+        >
+          <h2 id="account-action-title" style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>
+            {t(
+              actionIntent === 'freeze' ? 'Zmrazit účet' : actionIntent === 'unfreeze' ? 'Odmrazit účet' : 'Zrušit účet',
+              actionIntent === 'freeze' ? 'Freeze account' : actionIntent === 'unfreeze' ? 'Unfreeze account' : 'Close account',
+            )}
+          </h2>
+          <p id="account-action-description" style={{ margin: '6px 0 12px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            {t('Uveďte důvod. Důvod se uloží do auditní stopy této změny.', 'Provide a reason. It will be recorded in this change’s audit trail.')}
+          </p>
+          <label htmlFor="account-action-reason" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: 'var(--text-primary)', marginBottom: '6px' }}>
+            {t('Důvod změny', 'Reason for change')}
+          </label>
+          <textarea
+            id="account-action-reason"
+            className="input"
+            rows={3}
+            autoFocus
+            value={actionReason}
+            onChange={event => setActionReason(event.target.value)}
+            placeholder={t('Např. žádost klienta / podezření na zneužití…', 'E.g. customer request / suspected abuse…')}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => { setActionIntent(null); setActionReason(''); setActionError(null) }} disabled={acting}>
+              {t('Zrušit', 'Cancel')}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => doAction(actionIntent, actionReason)} disabled={acting || !actionReason.trim()} aria-busy={acting}>
+              {acting ? t('Ukládám…', 'Saving…') : t('Potvrdit změnu', 'Confirm change')}
+            </button>
+          </div>
+        </section>
+      )}
 
       {actionError && (
         <div
+          role="alert"
           className="form-error"
           style={{
             marginBottom: '16px', padding: '12px 16px',
@@ -155,8 +232,8 @@ export default function AccountDetailPage() {
               { label: t('Typ', 'Type'),                   value: account.accountType },
               { label: t('Měna', 'Currency'),              value: account.currencyCode },
               { label: t('Stav', 'Status'),                value: account.status },
-              { label: t('Otevřen', 'Opened'),             value: new Date(account.openedAt).toLocaleString('en-GB') },
-              ...(account.closedAt ? [{ label: t('Uzavřen', 'Closed'), value: new Date(account.closedAt).toLocaleString('en-GB') }] : []),
+              { label: t('Otevřen', 'Opened'),             value: new Date(account.openedAt).toLocaleString(numberLocale) },
+              ...(account.closedAt ? [{ label: t('Uzavřen', 'Closed'), value: new Date(account.closedAt).toLocaleString(numberLocale) }] : []),
             ].map((row, i, arr) => (
               <div key={row.label} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -204,13 +281,13 @@ export default function AccountDetailPage() {
                     color: row.highlight ? 'var(--accent)' : 'var(--text-primary)',
                     fontFamily: 'JetBrains Mono, monospace',
                   }}>
-                    {Number(row.value).toLocaleString('en-US', { minimumFractionDigits: 2 })} {balance.currencyCode}
+                    {Number(row.value).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {balance.currencyCode}
                   </span>
                 </div>
               ))}
               <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border)' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  {t('Naposledy aktualizováno:', 'Last updated:')} {new Date(balance.lastUpdatedAt).toLocaleString('en-GB')}
+                  {t('Naposledy aktualizováno:', 'Last updated:')} {new Date(balance.lastUpdatedAt).toLocaleString(numberLocale)}
                 </span>
               </div>
             </div>

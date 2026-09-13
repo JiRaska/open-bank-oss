@@ -202,6 +202,47 @@ class Psd2ServicesTest {
     }
 
     @Test
+    fun `createConsent rejects a null JSON array element with IllegalArgumentException`(): Unit = runBlocking {
+        // #7867: Jackson null-checks constructor parameters but not collection elements, so
+        // `{"accounts": [null]}` arrives as a list holding a null. The guard must reject it
+        // (IllegalArgumentException -> 400) before any dereference turns it into a 500.
+        val request = ObConsentRequest(
+            access = ObAccess(
+                accounts = listOf(sampleAccountRef("acc-iban"), null),
+                balances = null,
+                transactions = null,
+                additionalInformation = null,
+            ),
+            recurringIndicator = true,
+            validUntil = fixedToday.plusDays(30),
+            frequencyPerDay = 4,
+        )
+
+        var thrown: Throwable? = null
+        try {
+            consentManagementService.createConsent(
+                CreateConsentCommand(
+                    tppId = "tpp-1",
+                    tppName = "TPP One",
+                    request = request,
+                    redirectUri = null,
+                    tppTransactionId = null,
+                    ipAddress = null,
+                ),
+            )
+        } catch (e: IllegalArgumentException) {
+            thrown = e
+        }
+
+        assertThat(thrown)
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("access.accounts[1]")
+        coVerify(exactly = 0) {
+            consentClient.createConsent(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
     fun `createConsent returns consent response with correct links`(): Unit = runBlocking {
         val access = ObAccess(accounts = null, balances = null, transactions = null, additionalInformation = null)
         val request = ObConsentRequest(

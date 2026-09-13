@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -16,6 +17,7 @@ import jakarta.ws.rs.PathParam
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -32,6 +34,7 @@ data class ConsumeScaChallengeRequest(val partyId: UUID)
 
 @Path("/api/v1/sca/challenges")
 @RegisterRestClient(configKey = "sca-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface ScaServiceRestClient {
     @GET
     @Path("/{id}")

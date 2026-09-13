@@ -177,11 +177,25 @@ mp:
       # scheduled monthly period-close). The consumer filters by eventType (AccountCreated) and upserts
       # idempotently; auto.offset.reset=earliest back-fills the full account history on first deploy.
       account-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.statement.account-events-in
         connector: smallrye-kafka
         topic: openbank.accounts.account.created
         group.id: openbank-statement-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
     outgoing:
       statement-events-out:
         connector: smallrye-kafka

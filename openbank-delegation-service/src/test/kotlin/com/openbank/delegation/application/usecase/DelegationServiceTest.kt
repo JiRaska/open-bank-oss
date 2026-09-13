@@ -6,8 +6,12 @@ package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
+import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthority
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
@@ -22,6 +26,7 @@ import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
@@ -46,6 +51,7 @@ class DelegationServiceTest {
     private val repository: DelegationRepository = mockk()
     private val scaClient: ScaChallengeClient = mockk()
     private val eligibilityClient: PartyEligibilityClient = mockk()
+    private val authorityClient: GrantorAuthorityClient = mockk()
     private val ownershipClient: ResourceOwnershipClient = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-07-31T12:00:00Z"), ZoneOffset.UTC)
 
@@ -58,7 +64,9 @@ class DelegationServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
+        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
@@ -87,14 +95,9 @@ class DelegationServiceTest {
         )
     }
 
-    private fun eligibilityOk(
-        grantorKyc: String = "FULL",
-        granteeKyc: String = "FULL",
-        grantorName: String? = null,
-        granteeName: String? = null,
-    ) {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, grantorKyc, grantorName)
+    private fun eligibilityOk(granteeKyc: String = "FULL", grantorName: String? = null, granteeName: String? = null) {
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, grantorName)
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns
             PartyEligibility(grantee, true, granteeKyc, granteeName)
     }
@@ -144,6 +147,7 @@ class DelegationServiceTest {
         capabilities: Set<DelegationCapability> = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
     ) = OfferDelegationCommand(
         callerPartyId = grantor,
+        actorPartyId = grantor,
         grantorPartyId = grantor,
         granteePartyId = grantee,
         resourceType = DelegationResourceType.ACCOUNT,
@@ -152,6 +156,78 @@ class DelegationServiceTest {
         validTo = now.plusDays(30),
         grantScaSessionId = UUID.randomUUID(),
     )
+
+    private fun previewCommand() = PreviewDelegationCommand(
+        callerPartyId = grantor,
+        actorPartyId = grantor,
+        grantorPartyId = grantor,
+        granteePartyId = grantee,
+        resourceType = DelegationResourceType.ACCOUNT,
+        resourceId = accountId,
+        capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+        validTo = now.plusDays(30),
+    )
+
+    @Test
+    fun `preview runs authoritative draft gates without SCA persistence or events`(): Unit = runBlocking {
+        eligibilityOk()
+
+        service.preview(previewCommand())
+
+        coVerify(exactly = 1) { ownershipClient.verifyOwnership(grantor, DelegationResourceType.ACCOUNT, accountId) }
+        coVerify(exactly = 1) { authorityClient.authorityFor(grantor, grantor) }
+        coVerify(exactly = 1) { eligibilityClient.eligibilityOf(grantee) }
+        coVerify(exactly = 0) { scaClient.getChallenge(any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `preview fails closed on ownership without consuming SCA or writing`() {
+        coEvery { ownershipClient.verifyOwnership(grantor, any(), accountId) } returns OwnershipVerdict.NOT_OWNED
+
+        assertThatThrownBy { runBlocking { service.preview(previewCommand()) } }
+            .isInstanceOf(DelegationResourceOwnershipException::class.java)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `legacy exposure offer cannot be accepted or spend SCA`() {
+        val legacy = offeredGrant().copy(
+            resourceType = DelegationResourceType.DOCUMENT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.OBJECT_READ),
+            exposure = Exposure(maxViews = 1),
+        )
+        coEvery { repository.findById(legacy.id) } returns legacy
+
+        assertThatThrownBy {
+            runBlocking { service.accept(legacy.id, grantee, UUID.randomUUID(), grantee) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .extracting("code")
+            .isEqualTo(DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer refuses exposure before ownership eligibility or SCA`() {
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(exposure = Exposure(maxViews = 1))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .extracting("code")
+            .isEqualTo(DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED)
+
+        coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
+        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
+        coVerify(exactly = 0) { scaClient.getChallenge(any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
 
     /**
      * #3410: the aggregate carried `validFrom`, `validTo` and `perTransactionLimit` and no event
@@ -526,7 +602,6 @@ class DelegationServiceTest {
     @Test
     fun `offer rejects inactive grantee party`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns PartyEligibility(grantor, true, "FULL")
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, false, "FULL")
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationEligibilityException::class.java)
@@ -592,6 +667,42 @@ class DelegationServiceTest {
         )
         assertThat(denied).isInstanceOf(DelegationCheckResult.Denied::class.java)
     }
+
+    @Test
+    fun `check denies a legacy active grant carrying exposure while allowing an unconstrained duplicate`(): Unit =
+        runBlocking {
+            val documentId = UUID.randomUUID()
+            val legacy = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                    exposure = Exposure(maxViews = 1),
+                )
+                .accept(UUID.randomUUID(), now)
+            val safe = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                )
+                .accept(UUID.randomUUID(), now)
+            coEvery {
+                repository.findActiveByGranteeAndResource(grantee, DelegationResourceType.DOCUMENT, documentId)
+            } returns listOf(legacy, safe)
+
+            val result = service.check(
+                CheckDelegationCommand(
+                    grantee,
+                    DelegationResourceType.DOCUMENT,
+                    documentId,
+                    DelegationCapability.OBJECT_READ,
+                ),
+            )
+
+            assertThat(result).isInstanceOf(DelegationCheckResult.Allowed::class.java)
+            assertThat((result as DelegationCheckResult.Allowed).grant.id).isEqualTo(safe.id)
+        }
 
     @Test
     fun `check denies when the grant exists but is not active`(): Unit = runBlocking {

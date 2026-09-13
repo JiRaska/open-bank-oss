@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -53,6 +54,7 @@ data class PidCoreAttributes(val givenName: String? = null, val familyName: Stri
  */
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "pid-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface PidServiceRestClient {
     @GET
     @Path("/{id}")

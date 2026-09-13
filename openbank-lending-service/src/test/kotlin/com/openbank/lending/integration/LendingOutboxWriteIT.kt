@@ -159,13 +159,18 @@ class LendingOutboxWriteIT {
 
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                "SELECT event_type, payload FROM lending_outbox WHERE aggregate_id = ?",
+                "SELECT event_type, payload, created_at FROM lending_outbox WHERE aggregate_id = ?",
             ).use { ps ->
                 ps.setObject(1, UUID.fromString(loanId))
                 ps.executeQuery().use { rs ->
                     assertThat(rs.next()).describedAs("a lending_outbox row for loan $loanId").isTrue()
                     assertThat(rs.getString("event_type")).isEqualTo("loan.disbursed")
                     assertThat(rs.getString("payload")).contains(loanId)
+                    // #9003 falsification: do not accept "the default is Instant.now()" as proof —
+                    // assert the row that lands through the REAL emitter is not epoch-stamped
+                    // (44 of 45 sandbox rows carried 1970-01-01, the #3272 defect class).
+                    assertThat(rs.getTimestamp("created_at").toInstant())
+                        .isAfter(java.time.Instant.parse("2020-01-01T00:00:00Z"))
                 }
             }
         }

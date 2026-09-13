@@ -28,10 +28,18 @@ data class OpenAccountCommand(
     /**
      * Initial lifecycle status. Defaults to ACTIVE for operator-opened accounts.
      * The onboarding path opens PENDING_ACTIVATION accounts that activate only once
-     * the party clears KYC + AML (ADR-0073); a PENDING_ACTIVATION account is inert
+     * the party clears KYC + AML (ADR-0267); a PENDING_ACTIVATION account is inert
      * (canDebit/canCredit both require ACTIVE).
      */
     val initialStatus: AccountStatus = AccountStatus.ACTIVE,
+    /**
+     * Terms version + document reference the account is opened under (#9044). The use case
+     * REQUIRES a non-blank [termsVersion] for TERM_DEPOSIT; other account types may carry it
+     * but are not required to.
+     */
+    val termsVersion: String? = null,
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 )
 
 data class CloseAccountCommand(val accountId: UUID, val reason: String?, val requestedBy: UUID)
@@ -70,10 +78,13 @@ data class UpdateSavingsGoalCommand(
 )
 data class ClearSavingsGoalCommand(val accountId: UUID, val requestedBy: UUID)
 
+/** Set or clear the customer-chosen display label. Blank/null clears it. */
+data class RenameAccountCommand(val accountId: UUID, val nickname: String?, val requestedBy: UUID)
+
 interface AccountUseCase {
     suspend fun openAccount(command: OpenAccountCommand): Account
 
-    /** Transition a PENDING_ACTIVATION account to ACTIVE (KYC + AML cleared, ADR-0073). */
+    /** Transition a PENDING_ACTIVATION account to ACTIVE (KYC + AML cleared, ADR-0267). */
     suspend fun activateAccount(accountId: UUID): Account
     suspend fun closeAccount(command: CloseAccountCommand): Account
     suspend fun freezeAccount(command: FreezeAccountCommand): Account
@@ -92,6 +103,7 @@ interface AccountUseCase {
     suspend fun resolvePocket(query: ResolvePocketQuery): PocketResolution
     suspend fun updateSavingsGoal(command: UpdateSavingsGoalCommand): Account
     suspend fun clearSavingsGoal(command: ClearSavingsGoalCommand): Account
+    suspend fun renameAccount(command: RenameAccountCommand): Account
 }
 
 data class GrantAuthorizationCommand(
@@ -129,6 +141,14 @@ interface AuthorizationUseCase {
         partyId: UUID,
         role: com.openbank.account.domain.model.AuthorizationRole,
     ): Boolean
+
+    /**
+     * Everyone who can act on an account right now, from BOTH stores the payment guard consults.
+     *
+     * Built for the account owner's transparency view. Returns an empty list for an unknown
+     * account rather than throwing, so a caller cannot use it as an existence oracle.
+     */
+    suspend fun effectiveAccess(accountId: UUID): List<com.openbank.account.domain.model.AccountAccessEntry>
 
     /**
      * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated

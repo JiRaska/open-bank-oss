@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.2...aml-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **aml:** guard aml_outbox created_at plausibility at INSERT ([#9299](https://github.com/JiRaska/open-bank-oss/issues/9299)) ([792e3e4](https://github.com/JiRaska/open-bank-oss/commit/792e3e46f96043afadf149920ae72af28b685386))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.1...aml-service-v0.10.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.0...aml-service-v0.10.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **aml:** toCreatedEvent requires the caller's clock, not an EPOCH default ([#8379](https://github.com/JiRaska/open-bank-oss/issues/8379)) ([01a46e8](https://github.com/JiRaska/open-bank-oss/commit/01a46e8543284b489a59be634a231ca45f786bd7)), closes [#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.2...aml-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.1...aml-service-v0.9.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **aml:** stamp the real decision time on every AML case transition, and decide openbank.aml.auto-clear ([#5837](https://github.com/JiRaska/open-bank-oss/issues/5837)) ([#6029](https://github.com/JiRaska/open-bank-oss/issues/6029)) ([60e9450](https://github.com/JiRaska/open-bank-oss/commit/60e9450313db736ed32d26c3477c973dc719bf9b))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.0...aml-service-v0.9.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.8.3...aml-service-v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.8.2...aml-service-v0.8.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.8.1...aml-service-v0.8.2) (2026-08-09)
 
 

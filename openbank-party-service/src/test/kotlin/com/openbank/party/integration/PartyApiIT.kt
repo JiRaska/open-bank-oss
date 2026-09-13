@@ -60,6 +60,35 @@ class PartyApiIT {
     }
 
     @Test
+    @Order(3)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET parties with an unparseable status filter is a 400, not the unfiltered list`() {
+        // #9038: runCatching{}.getOrNull() used to drop the condition, answering every party
+        // with a 200 to a typo.
+        Given {
+            queryParam("status", "ACTVE")
+        } When {
+            get("/api/v1/parties")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @Order(3)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET parties with a valid status filter still answers 200`() {
+        Given {
+            queryParam("status", "ACTIVE")
+        } When {
+            get("/api/v1/parties")
+        } Then {
+            statusCode(200)
+            body("items", notNullValue())
+        }
+    }
+
+    @Test
     @Order(4)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `POST parties creates individual party and returns 201`() {
@@ -287,6 +316,19 @@ class PartyApiIT {
     }
 
     @Test
+    @Order(17)
+    fun `GET party by id with no identity at all returns 401`() {
+        // The VoP hop-2 path (GET /api/v1/parties/{id}). A recorded 401 pact cannot survive
+        // provider replay — the replay TestAuthMechanism authenticates every request — so the
+        // negative case is asserted here instead (#8552 class).
+        Given { this } When {
+            get("/api/v1/parties/${java.util.UUID.randomUUID()}")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
     @Order(16)
     fun `GET gdpr-export with no identity at all returns 401`() {
         // Previously this endpoint carried no @Authenticated/@RolesAllowed annotation and an
@@ -399,6 +441,42 @@ class PartyApiIT {
             get("/api/v1/parties/search")
         } Then {
             statusCode(403)
+        }
+    }
+
+    /**
+     * An absent body, and a null element inside `phoneHashes`.
+     *
+     * `lookupDirectory` is a `suspend fun`, and the Kotlin compiler emits NO
+     * `Intrinsics.checkNotNullParameter` for a suspending function, so the null JAX-RS injects for
+     * an absent body did not fail at offset 0 -- it flowed into the body and died at the first
+     * dereference with `Parameter specified as non-null is null` (#5913).
+     *
+     * The null element is the same defect one level down: Jackson's Kotlin module null-checks
+     * constructor PARAMETERS, never the ELEMENTS of a collection, so `[null]` deserialises into a
+     * `List<String>` holding a null and `PartyService.lookupByPhoneHashes` NPEs on `it.trim()`.
+     *
+     * Both are malformed input from the customer edge, so both must be 400.
+     */
+    @Test
+    @Order(24)
+    @TestSecurity(user = "directory-lookup-it", roles = ["ROLE_API"])
+    fun `POST directory lookup answers 400 for an absent body and for a null hash`() {
+        Given {
+            contentType("application/json")
+        } When {
+            post("/api/v1/parties/directory/lookup")
+        } Then {
+            statusCode(400)
+        }
+
+        Given {
+            contentType("application/json")
+            body("""{"phoneHashes": [null]}""")
+        } When {
+            post("/api/v1/parties/directory/lookup")
+        } Then {
+            statusCode(400)
         }
     }
 }

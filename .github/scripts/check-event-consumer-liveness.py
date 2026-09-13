@@ -139,6 +139,20 @@ def build_topic_maps(root: pathlib.Path) -> tuple[dict[str, set[str]], dict[str,
     return all_producers, all_consumers, yaml_files
 
 
+def classify_topics(
+    all_producers: dict[str, set[str]],
+    all_consumers: dict[str, set[str]],
+    allowlist: dict[str, str],
+) -> tuple[list[str], list[str], list[str]]:
+    """(violations, allowlisted_hit, stale_allowlist) — the three-way split over producer
+    topics. `stale_allowlist` is a topic that is BOTH in the allowlist AND now has a consumer:
+    the exemption's removal condition has been met and nothing else would say so."""
+    violations = sorted(t for t in all_producers if t not in all_consumers and t not in allowlist)
+    allowlisted_hit = sorted(t for t in all_producers if t not in all_consumers and t in allowlist)
+    stale_allowlist = sorted(t for t in all_producers if t in all_consumers and t in allowlist)
+    return violations, allowlisted_hit, stale_allowlist
+
+
 def self_test() -> int:
     """Falsify the topic resolver and the producer/consumer scanner.
 
@@ -213,6 +227,31 @@ def self_test() -> int:
         prod3, _c = scan_application_yaml(f3, "openbank-x")
         case("an unresolvable topic is not recorded", sorted(prod3), [])
 
+    # --- three-way classification --------------------------------------------------------
+    # A still-needed allowlist entry (no consumer anywhere) must NOT fire as stale.
+    v, hit, stale = classify_topics(
+        {"needed.topic": {"svc-a"}}, {}, {"needed.topic": "external sink, tracked #1"}
+    )
+    case("a genuinely-still-needed allowlist entry is not a violation", v, [])
+    case("...and is reported as allowlisted-hit", hit, ["needed.topic"])
+    case("...and is NOT reported as stale", stale, [])
+
+    # An allowlist entry whose topic now HAS a consumer must fire as stale, not as
+    # allowlisted-hit (it's no longer producer-only) and not as an ordinary violation
+    # (it's not unconsumed).
+    v2, hit2, stale2 = classify_topics(
+        {"fixed.topic": {"svc-a"}}, {"fixed.topic": {"svc-b"}}, {"fixed.topic": "remove once #999 merges"}
+    )
+    case("a now-consumed allowlisted topic is not an ordinary violation", v2, [])
+    case("...and is not reported as still-uncovered", hit2, [])
+    case("...and IS reported as stale", stale2, ["fixed.topic"])
+
+    # An unallowlisted, unconsumed topic is the ordinary violation path — must stay unchanged.
+    v3, hit3, stale3 = classify_topics({"broken.topic": {"svc-a"}}, {}, {})
+    case("an unallowlisted unconsumed topic is a violation", v3, ["broken.topic"])
+    case("...and not allowlisted-hit", hit3, [])
+    case("...and not stale", stale3, [])
+
     # A live read: fixtures cannot tell that the fleet glob still resolves.
     live_prod, live_cons, live_files = build_topic_maps(pathlib.Path("."))
     if not live_files or not live_prod:
@@ -226,7 +265,7 @@ def self_test() -> int:
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
     print(f"self-test ok: event-consumer liveness is falsifiable "
-          f"(9 cases + a live read of {len(live_files)} config(s))")
+          f"(18 cases + a live read of {len(live_files)} config(s))")
     return 0
 
 
@@ -245,12 +284,22 @@ def main() -> int:
 
     allowlist = load_allowlist(root / args.rules)
 
-    violations = sorted(t for t in all_producers if t not in all_consumers and t not in allowlist)
-    allowlisted_hit = sorted(t for t in all_producers if t not in all_consumers and t in allowlist)
+    violations, allowlisted_hit, stale_allowlist = classify_topics(all_producers, all_consumers, allowlist)
 
     for topic in allowlisted_hit:
         producers = ", ".join(sorted(all_producers[topic]))
         print(f"::notice::event-consumer-liveness: {topic} (published by {producers}) has no consumer — allowlisted: {allowlist[topic]}")
+
+    for topic in stale_allowlist:
+        producers = ", ".join(sorted(all_producers[topic]))
+        consumers = ", ".join(sorted(all_consumers[topic]))
+        annotation = "error" if args.enforce else "warning"
+        print(
+            f"::{annotation}::event-consumer-liveness: {topic} is listed in rules.yaml: "
+            f"event_consumer_liveness.allowlist ({allowlist[topic]}) but is now consumed by "
+            f"{consumers} (published by {producers}) — delete the stale entry, the gap it was "
+            f"covering no longer exists."
+        )
 
     for topic in violations:
         producers = ", ".join(sorted(all_producers[topic]))
@@ -266,10 +315,11 @@ def main() -> int:
     print(
         f"check-event-consumer-liveness: {len(all_producers)} producer topic(s) scanned across "
         f"{len(yaml_files)} service(s); {len(violations)} unallowlisted violation(s), "
-        f"{len(allowlisted_hit)} allowlisted producer-only topic(s)."
+        f"{len(allowlisted_hit)} allowlisted producer-only topic(s), "
+        f"{len(stale_allowlist)} stale allowlist entry/entries."
     )
 
-    if violations and args.enforce:
+    if (violations or stale_allowlist) and args.enforce:
         return 1
     return 0
 

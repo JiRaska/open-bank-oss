@@ -14,6 +14,7 @@ import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.MarketingCallSite
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.notification.application.port.out.EmailMetricsPort
 import com.openbank.notification.application.port.out.NotificationOutboxRepository
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
@@ -21,6 +22,7 @@ import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
+import com.openbank.notification.domain.model.EmailSendOutcome
 import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
@@ -34,6 +36,8 @@ import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
+import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -51,6 +55,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -58,12 +63,31 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Executor
+import java.util.function.Function
+import java.util.function.Supplier
 
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
-class NotificationConsumer {
+class NotificationConsumer @Inject constructor(
+    /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
+    @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
+    val mailerMocked: Boolean,
+    /**
+     * Default-off guard for the reviewed no-device fallback policy (#4363). Enabling it is a
+     * separate reviewed GitOps decision: sandbox mail is deliberately mocked, so a false default
+     * must never be mistaken for delivery readiness.
+     */
+    @ConfigProperty(name = "openbank.notification.push-fallback.enabled", defaultValue = "false")
+    val pushFallbackEnabled: Boolean,
+) {
 
     companion object {
+        /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
+        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = NotificationDeduplication.CONSTRAINT
+
+        /** Postgres SQLState for unique_violation, as surfaced by the reactive pg client. */
+        const val SQLSTATE_UNIQUE_VIOLATION = NotificationDeduplication.SQLSTATE_UNIQUE_VIOLATION
+
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
          * payloads must never carry the transaction amount, account number, or any PII — the
@@ -72,6 +96,10 @@ class NotificationConsumer {
          * party-scoped GET /api/v1/notifications/{id}/self.
          */
         const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
+
+        /** PII-free fallback e-mail body. Full detail remains behind the authenticated app. */
+        const val GENERIC_FALLBACK_EMAIL_BODY =
+            "A notification is waiting in the OpenBank app. Open the app to view details."
 
         /**
          * The consent scope a MARKETING send is checked against, per target channel (ADR-0198 D4).
@@ -98,6 +126,34 @@ class NotificationConsumer {
             accepted > 0 -> NotificationOutcome.SENT
             skipped > 0 -> NotificationOutcome.SUPPRESSED
             else -> NotificationOutcome.FAILED
+        }
+
+        /**
+         * Terminal status of one EMAIL send from its three-state [EmailSendOutcome] (issue #4737).
+         *
+         * Visible for tests, and deliberately a pure function of one value: like [pushOutcomeOf],
+         * this mapping *is* the defect. The previous form asked only "did the `Uni` fail?", and a
+         * mocked `ReactiveMailer.send` does not fail — it completes exactly like a real accept —
+         * so an environment with no SMTP recorded `SENT` with `sent_at` for mail that never left
+         * the process, and looked healthy from the status column, the outcome stream and the logs
+         * alike.
+         *
+         * `MOCKED` maps to SUPPRESSED, not FAILED, for the reason [pushOutcomeOf] gives: nothing
+         * was rejected and nothing is retryable, the channel is switched off. It must also never
+         * map to SENT — that is the whole bug, and the sandbox's mock is deliberate (its gitops
+         * manifest says so), so the record's honesty has to hold independently of the config.
+         */
+        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome = when (outcome) {
+            EmailSendOutcome.ACCEPTED -> NotificationOutcome.SENT
+            EmailSendOutcome.MOCKED -> NotificationOutcome.SUPPRESSED
+            EmailSendOutcome.FAILED -> NotificationOutcome.FAILED
+        }
+
+        /** Reason code accompanying [emailOutcomeOf]; null exactly when the mailer accepted. */
+        fun emailReasonOf(outcome: EmailSendOutcome): String? = when (outcome) {
+            EmailSendOutcome.ACCEPTED -> null
+            EmailSendOutcome.MOCKED -> NotificationOutcomeEvent.REASON_MAILER_MOCKED
+            EmailSendOutcome.FAILED -> NotificationOutcomeEvent.REASON_MAILER_REFUSED
         }
 
         /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
@@ -133,6 +189,30 @@ class NotificationConsumer {
      */
     @Inject lateinit var pushMetrics: PushMetricsPort
 
+    @Inject lateinit var emailMetrics: EmailMetricsPort
+
+    /**
+     * Whether `ReactiveMailer` is the Quarkus mock (issue #4737).
+     *
+     * Read as configuration rather than inferred from the send result, because there is nothing to
+     * infer from: a mocked send completes exactly like a real accept — same `Uni`, no item, no
+     * failure, no distinguishing signal anywhere in the reactive chain. The configuration is the
+     * only place the difference exists.
+     *
+     * Deliberately **not** the `@ConfigProperty` + `var x: Boolean = false` field shape its
+     * neighbours use (`ApnsPushSender.enabled` and 109 other fleet occurrences, all frozen in
+     * `configproperty-kotlin-defaults-baseline.txt`): a Kotlin default generates a synthetic
+     * constructor, ArC builds the bean through it, and the annotation is never applied — the field
+     * would sit at `false` forever, whatever the environment says. That would have made this
+     * entire fix inert in the one deployment that needs it, and silently so, which is the same
+     * family of defect as the bug being fixed.
+     *
+     * `defaultValue = "false"` matches Quarkus's own production default, so a deployment that says
+     * nothing about the mailer is treated as a real one; the sandbox sets `QUARKUS_MAILER_MOCK`
+     * explicitly.
+     */
+    // Declared on the primary constructor (see KDoc above) — the one shape that actually applies.
+
     @Inject lateinit var clock: Clock
 
     @Inject lateinit var audit: AuditEventPublisher
@@ -143,6 +223,10 @@ class NotificationConsumer {
     @Inject
     @RestClient
     lateinit var partyContactClient: PartyContactClient
+
+    /** Follows the ADR-0179 `merged_into` pointer at dispatch entry (issue #1984) — see [dispatch]. */
+    @Inject
+    lateinit var partyMergeResolver: PartyMergeResolver
 
     private val log = Logger.getLogger(NotificationConsumer::class.java)
 
@@ -159,6 +243,7 @@ class NotificationConsumer {
 
     @PostConstruct
     fun init() {
+        pushMetrics.recordFallbackEnabled(pushFallbackEnabled)
         cdiOversightAdapters = jakarta.enterprise.inject.spi.CDI.current()
             .select(OversightWebhookPublisher::class.java).toList()
         log.infof("notification.consumer.init oversight_adapters=%d", cdiOversightAdapters.size)
@@ -218,15 +303,39 @@ class NotificationConsumer {
             return Uni.createFrom().voidItem()
         }
         return dispatch(req)
-            .onFailure().recoverWithUni { e ->
-                // Processing failure (e.g. transient DB error): log and ack. Preserves the prior
-                // swallow semantics so the consumer keeps draining; redelivery is safe (see above).
-                log.errorf(e, "Failed to process notification: %s", payload)
-                Uni.createFrom().voidItem()
+            .onFailure().invoke { e ->
+                // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
+                // logged and ACKED here — "redelivery is safe" was never true, because acking is
+                // exactly what tells Kafka NOT to redeliver. An acked message and a successfully
+                // handled one are indistinguishable from outside, so the notification itself (a
+                // transactional or SECURITY-category send, not only marketing) was silently lost.
+                //
+                // Deliberately NOT wrapped in EventRetry's bounded in-process retry, unlike
+                // PartyErasureConsumer's idempotent deletes: dispatchResolved() mints a fresh
+                // notificationId and persists a NEW row on every call, so retrying this Uni from
+                // the top after a failure that occurred AFTER that persist (e.g. in sendEmail)
+                // would insert a second row and could re-send — trading a lost notification for a
+                // duplicated one. A single attempt, then rethrow, hands the decision to the
+                // connector's own failure-strategy (dead-letter-queue, application.yaml) instead.
+                log.errorf(e, "Failed to process notification — rethrowing so it is not acked: %s", payload)
             }
     }
 
-    private fun dispatch(req: NotificationRequest): Uni<Void> {
+    /**
+     * Resolves `req.partyId` through [PartyMergeResolver] before anything else runs (issue #1984
+     * fleet sweep — ADR-0179 consumer adoption). This is the identity chokepoint: persistence,
+     * the preference check, the device-token fan-out and the EMAIL address lookup all read
+     * `partyId` off the request that reaches [dispatchResolved], so resolving once here means none
+     * of them need their own adoption. A request for a since-merged party is redirected to the
+     * survivor; an unaffected request pays one resolver call that is almost always a cache hit
+     * (see [PartyMergeResolver]).
+     */
+    private fun dispatch(req: NotificationRequest): Uni<Void> =
+        partyMergeResolver.resolve(req.partyId).chain { resolved ->
+            dispatchResolved(if (resolved == req.partyId) req else req.copy(partyId = resolved))
+        }
+
+    private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
         val (subject, body) = renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
@@ -239,11 +348,13 @@ class NotificationConsumer {
             // rendered secret to the delivery adapters, so the customer receives it as usual.
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
             it.correlationId = req.correlationId
+            it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
-        return Panache.withTransaction { notificationRepo.persist(entity) }
-            .chain { _ ->
+        return persistOnce(entity, req.deduplicationKey)
+            .chain { persisted ->
+                if (!persisted) return@chain Uni.createFrom().voidItem()
                 // Consent gate BEFORE the channel dispatch (ADR-0198 D4, issue #2369). Deliberately
                 // NOT a per-channel check: the defect the issue names is precisely that gating lived
                 // inside the channel branches, so PUSH got a (default-true) check and EMAIL got none,
@@ -264,6 +375,35 @@ class NotificationConsumer {
             // this can neither leak customer data nor break notification dispatch.
             .call { _ -> publishOversight(req) }
     }
+
+    /**
+     * A security event may be redelivered indefinitely. A database uniqueness fact, rather than
+     * Kafka offset timing, is the authority that says its customer notification already exists.
+     */
+    private fun persistOnce(entity: NotificationEntity, deduplicationKey: UUID?): Uni<Boolean> =
+        Panache.withTransaction { notificationRepo.persist(entity) }
+            .replaceWith(true)
+            .onFailure()
+            .recoverWithUni { failure ->
+                if (deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
+                    Uni.createFrom().item(false)
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+
+    /**
+     * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
+     * (sqlState 23505, the server message naming the constraint) beneath its
+     * ConstraintViolationException — never the pgjdbc [PSQLException] this check used to
+     * require, so every redelivery of a dedup-keyed request rethrew and was nacked instead of
+     * skipped. #8334 shipped the path with its test structurally invisible: the duplicate-V14
+     * Flyway collision failed boot, so CI reported those tests as skipped, not failed. The
+     * constraint name must appear in the message so an unrelated unique violation on this
+     * table is not swallowed as a dedup skip.
+     */
+    private fun Throwable.isDeduplicationConflict(): Boolean = NotificationDeduplication.isConflict(this)
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
@@ -491,6 +631,25 @@ class NotificationConsumer {
                 }
         }
 
+    /**
+     * Hand one rendered mail to the mailer and record what actually happened (issue #4737).
+     *
+     * Terminal status comes from the three-state [EmailSendOutcome], not from "did the `Uni`
+     * fail?":
+     * - **SENT** — the mailer accepted the message. Accepted, not delivered: an SMTP accept is a
+     *   handoff to a relay and a later bounce can still refine it (ADR-0239 D4 `BOUNCED`).
+     * - **SUPPRESSED** / `mailer_mocked` — `quarkus.mailer.mock=true`, so nothing left the
+     *   process. This used to be SENT *with `sent_at` populated*: the mock completes successfully,
+     *   the code asked only whether the call threw, and so a deployment with no SMTP produced
+     *   byte-identical status and telemetry to a working one. Exactly the `PushResult.skipped()`
+     *   defect (ADR-0252 phase 0) on the channel #4363 is considering re-routing *to* — and that
+     *   one was found by a customer, not by any signal.
+     * - **FAILED** / `mailer_refused` — the mailer rejected the message or the call failed.
+     *
+     * The deployed sandbox mocks the mailer deliberately, and that stays true; what changes is
+     * that the record now says so. A configuration choice must not be able to make the database
+     * assert a delivery that never occurred.
+     */
     private fun deliverEmail(
         req: NotificationRequest,
         recipient: String,
@@ -503,9 +662,33 @@ class NotificationConsumer {
         // "the mail never went out" vs "the mail went out but recording it failed" — is kept, and
         // is now visible as two branches instead of two positions in a chain.
         .onItemOrFailure().transformToUni { _, failure ->
-            if (failure != null) {
-                log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
-                markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_MAILER_REFUSED)
+            // Three states, not two (issue #4737). A mocked mailer completes with no failure, so
+            // `failure == null` on its own means "the call did not throw", never "the mail left".
+            val sendOutcome = when {
+                failure != null -> EmailSendOutcome.FAILED
+                mailerMocked -> EmailSendOutcome.MOCKED
+                else -> EmailSendOutcome.ACCEPTED
+            }
+            emailMetrics.recordSend(req.template, sendOutcome)
+            if (sendOutcome != EmailSendOutcome.ACCEPTED) {
+                if (failure != null) {
+                    log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
+                } else {
+                    // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
+                    // no-op is greppable, and counted as MOCKED so it is alertable — a log line is
+                    // not a signal anyone watches, which is how the push channel's identical
+                    // no-op went unnoticed until a customer reported it.
+                    log.infof(
+                        "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
+                            "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
+                        req.partyId,
+                        req.template,
+                        NotificationOutcomeEvent.REASON_MAILER_MOCKED,
+                    )
+                }
+                // sent = false, so `sent_at` stays NULL: the column means "when did this leave the
+                // process", and nothing left it.
+                markStatus(req, entity, emailOutcomeOf(sendOutcome), emailReasonOf(sendOutcome))
             } else {
                 markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
                     .onItem().invoke { _ ->
@@ -606,12 +789,7 @@ class NotificationConsumer {
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
                     pushMetrics.recordFanOut(req.template, NotificationOutcome.FAILED, 0)
-                    return@chain markStatus(
-                        req,
-                        entity,
-                        NotificationOutcome.FAILED,
-                        NotificationOutcomeEvent.REASON_NO_DEVICE,
-                    )
+                    return@chain rerouteNoDevice(req, subject, entity)
                 }
                 // Snapshot detached values before crossing the async send boundary — the
                 // managed entities belong to the (now closed) read transaction.
@@ -635,6 +813,80 @@ class NotificationConsumer {
                     .replaceWithVoid()
             }
     }
+
+    /**
+     * Keep the original row truthful (`FAILED` / no active device) and publish the more precise
+     * REROUTED outcome and fresh EMAIL request commit in one transaction. The fallback has a new
+     * row and its own terminal outcome, so neither row claims that a different channel delivered
+     * it. In particular, a crash cannot publish REROUTED without a durable fallback request.
+     */
+    private fun rerouteNoDevice(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
+        val fallback = req.template.noDeviceFallbackChannel
+        if (!pushFallbackEnabled || fallback == null) {
+            return markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_NO_DEVICE)
+        }
+        val fallbackRequest = req.copy(
+            channel = fallback,
+            deepLink = null,
+            interactionRef = null,
+        )
+        val fallbackEntity = fallbackNotificationEntity(fallbackRequest, subject)
+        return persistReroute(req, entity, fallbackEntity)
+            .invoke(
+                Runnable {
+                    pushMetrics.recordFallbackRouted(
+                        req.template,
+                        NotificationChannel.PUSH,
+                        NotificationChannel.EMAIL,
+                        NotificationOutcome.REROUTED,
+                    )
+                },
+            )
+            .chain(Supplier { sendEmail(fallbackRequest, subject, GENERIC_FALLBACK_EMAIL_BODY, fallbackEntity) })
+    }
+
+    /** Builds the separate generic EMAIL notification persisted with the original reroute evidence. */
+    private fun fallbackNotificationEntity(req: NotificationRequest, subject: String): NotificationEntity =
+        NotificationEntity().also { entity ->
+            entity.notificationId = Ids.newId()
+            entity.partyId = req.partyId
+            entity.channel = NotificationChannel.EMAIL.name
+            entity.template = req.template.name
+            entity.recipient = req.recipient
+            entity.subject = subject
+            entity.body = GENERIC_FALLBACK_EMAIL_BODY
+            entity.correlationId = req.correlationId
+            entity.status = "PENDING"
+            entity.createdAt = Instant.now(clock)
+        }
+
+    /** Atomically records the original failed PUSH outcome, its REROUTED evidence, and the fallback request. */
+    private fun persistReroute(
+        req: NotificationRequest,
+        original: NotificationEntity,
+        fallback: NotificationEntity,
+    ): Uni<Void> = Panache.withTransaction {
+        notificationRepo.find("notificationId", original.notificationId).firstResult()
+            .chain(
+                Function { persisted: NotificationEntity? ->
+                    if (persisted == null) {
+                        reportMissingRow(req, original, NotificationOutcome.REROUTED)
+                        Uni.createFrom().failure<Void>(IllegalStateException("notification row missing during reroute"))
+                    } else {
+                        persisted.status = NotificationStatus.FAILED.name
+                        persisted.failureReason = NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE
+                        outboxRepo.persistInTransaction(
+                            outcomeMessage(
+                                req,
+                                original,
+                                NotificationOutcome.REROUTED,
+                                NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE,
+                            ),
+                        ).chain(Supplier { notificationRepo.persist(fallback) })
+                    }
+                },
+            )
+    }.replaceWithVoid()
 
     /**
      * FCM/APNs data is a routing envelope, not customer content. `notificationId` lets an app
@@ -712,12 +964,13 @@ class NotificationConsumer {
         status: NotificationOutcome,
         reason: String?,
         sent: Boolean = false,
+        persistedStatus: String = status.name,
     ): Uni<Void> = Panache.withTransaction {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
             .map { e ->
                 if (e == null) reportMissingRow(req, entity, status)
                 e?.also {
-                    it.status = status.name
+                    it.status = persistedStatus
                     // Persist the reason alongside the status (V13): the outcome event below
                     // carries the same value, but its outbox row is pruned after dispatch, so
                     // without this the table can only ever say FAILED.
@@ -838,10 +1091,6 @@ class NotificationConsumer {
                     "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars.v(
                         "reason",
                     )}. Please contact support.</p>"
-            NotificationTemplate.KYC_DOCUMENT_REQUIRED ->
-                "We need a document from you" to
-                    "<h2>Document Required</h2><p>To finish verifying your identity we need your " +
-                    "<b>${vars.v("documentType")}</b>. You can upload it in the OpenBank app.</p>"
             NotificationTemplate.CONSENT_GRANTED ->
                 "Access to your account data was granted" to
                     "<h2>Consent Granted</h2><p>You granted access to your account data " +
@@ -853,11 +1102,6 @@ class NotificationConsumer {
             NotificationTemplate.OTP_CODE ->
                 "Your OpenBank verification code" to
                     "<h2>Verification Code</h2><p>Your code is: <b>${vars.v("code")}</b>. Valid for 5 minutes.</p>"
-            NotificationTemplate.PASSWORD_RESET ->
-                "Reset your OpenBank password" to
-                    "<h2>Password Reset</h2><p>Use the link below to set a new password. It expires in 15 minutes " +
-                    "and can be used once. If you did not ask for this, ignore this message and your password stays " +
-                    "unchanged.</p><p><a href=\"${vars.v("resetLink")}\">Reset your password</a></p>"
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
                     "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
@@ -870,6 +1114,42 @@ class NotificationConsumer {
                     "<p><b>${vars.v("ctaText")}</b></p>" +
                     "<p style=\"font-size:small;color:#666\">You are receiving this because you opted in to " +
                     "marketing emails. Manage your preferences in the app.</p>"
+            NotificationTemplate.DELEGATION_OFFERED ->
+                "You have a delegated access offer to review" to
+                    "<h2>Delegated Access Offer</h2><p>Someone has offered you delegated access to their " +
+                    "<b>${vars.v("resourceType")}</b>. Open the OpenBank app to accept or decline.</p>"
+            NotificationTemplate.DELEGATION_ACCEPTED ->
+                "Your delegated access offer was accepted" to
+                    "<h2>Offer Accepted</h2><p>Your delegated access offer for your " +
+                    "<b>${vars.v("resourceType")}</b> was accepted and is now active.</p>"
+            NotificationTemplate.DELEGATION_DECLINED ->
+                "Your delegated access offer was declined" to
+                    "<h2>Offer Declined</h2><p>Your delegated access offer for your " +
+                    "<b>${vars.v("resourceType")}</b> was declined. No access was granted.</p>"
+            NotificationTemplate.DELEGATION_REVOKED ->
+                "Your delegated access was revoked" to
+                    "<h2>Access Revoked</h2><p>Delegated access to a <b>${vars.v("resourceType")}</b> " +
+                    "granted to you has been revoked. You can no longer act on it.</p>"
+            NotificationTemplate.DELEGATION_SUSPENDED ->
+                "Delegated access was suspended" to
+                    "<h2>Access Suspended</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
+                    "was temporarily suspended by the bank. It cannot be used while suspended.</p>"
+            NotificationTemplate.DELEGATION_REINSTATED ->
+                "Delegated access was restored" to
+                    "<h2>Access Restored</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
+                    "was restored by the bank and may be used again within its existing scope and conditions.</p>"
+            NotificationTemplate.DELEGATION_RENOUNCED ->
+                "Delegated access was renounced" to
+                    "<h2>Access Renounced</h2><p>The person who held delegated access to your " +
+                    "<b>${vars.v("resourceType")}</b> ended that access. It is no longer active.</p>"
+            NotificationTemplate.DELEGATION_EXPIRED ->
+                "A delegated access grant has expired" to
+                    "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
+                    "has reached the end of its validity period and is no longer active.</p>"
+            NotificationTemplate.DELEGATION_FIRST_USE ->
+                "Delegated access was used for a payment" to
+                    "<h2>Delegated Access Used</h2><p>A person you authorised used delegated access " +
+                    "for a confirmed payment. Open the OpenBank app to review your delegated access.</p>"
         }
 }
 
@@ -881,11 +1161,13 @@ class NotificationConsumer {
  * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
  *
  * Escaping happens HERE, not per call site (issue #1382): every one of [renderTemplate]'s ~16
- * reads interpolates straight into an HTML body (or, for `PASSWORD_RESET`'s `resetLink`, an
- * `href="..."` attribute) with zero escaping between a domain-event-supplied variable and the
- * mail actually sent — a `reason`, `documentType`, or `scope` containing markup rendered verbatim
- * in the customer's mail client. Escaping the shared accessor closes every call site in one place
- * instead of relying on each of the 16 to remember it.
+ * reads interpolates straight into an HTML body with zero escaping between a domain-event-supplied
+ * variable and the mail actually sent — a `reason`, `documentType`, or `scope` containing markup
+ * rendered verbatim in the customer's mail client. Escaping the shared accessor closes every call
+ * site in one place instead of relying on each of the 16 to remember it. (The escaper also covers
+ * the attribute-value context: `"` and `'` are escaped, so a variable remains safe if a template
+ * ever interpolates one into an `href="..."` attribute again — the removed PASSWORD_RESET's
+ * `resetLink` was the case that originally forced that, #8568.)
  *
  * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
  * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.

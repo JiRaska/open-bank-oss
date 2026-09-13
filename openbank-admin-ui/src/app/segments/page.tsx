@@ -4,12 +4,16 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
-import { ArrowRight, Clock3, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
+import { parseAudiencePreview, type AudiencePreview } from '@/lib/audiences/previewContract'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -19,12 +23,9 @@ interface Segment {
   name: string
   version: number
   rules: string[]
-}
-
-interface Preview {
-  size?: number
-  asOf?: string
-  state: string
+  state: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED'
+  createdBy: string
+  approvedBy?: string | null
 }
 
 export default function SegmentsPage() {
@@ -32,23 +33,83 @@ export default function SegmentsPage() {
   const [items, setItems] = useState<Segment[]>([])
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
-  const [previews, setPreviews] = useState<Record<string, Preview | 'loading'>>({})
+  const [previews, setPreviews] = useState<Record<string, AudiencePreview | 'loading'>>({})
+  const previewRequests = useRef<Record<string, number>>({})
+  const [lifecycleAction, setLifecycleAction] = useState<{ key: string; action: 'submit' | 'approve' } | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [approvalIntent, setApprovalIntent] = useState<Segment | null>(null)
+  const approvalTriggerRef = useRef<HTMLButtonElement | null>(null)
+  // Set only immediately before a successful approval removes the initiating trigger; left null
+  // (idle cancel/Escape) so the dialog's default close-focus falls back to the exact trigger.
+  const approvalCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
+  const audienceWorkspaceRef = useRef<HTMLElement>(null)
+  const lifecycleFlight = useSingleFlight()
+
+  const loadAudiences = useCallback(async (keepExistingOnFailure = false) => {
+    try {
+      const response = await fetch('/api/audiences')
+      const d = await response.json() as { items: Segment[]; state: string }
+      if (d.state !== 'ok') {
+        if (!keepExistingOnFailure) setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
+        return false
+      }
+      // Older catalogue rows were approved before lifecycle metadata existed. Treating an omitted
+      // state as a draft would remove a previously targetable audience during a rolling rollout.
+      setItems((d.items ?? []).map(item => ({ ...item, state: item.state ?? 'APPROVED' })))
+      setUnavailable(null)
+      return true
+    } catch {
+      if (!keepExistingOnFailure) setUnavailable('unreachable')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetch('/api/segments')
-      .then(r => r.json())
-      .then((d: { items: Segment[]; state: string }) => {
-        if (d.state !== 'ok') {
-          setUnavailable(
-            d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable',
-          )
-          return
+    loadAudiences()
+  }, [loadAudiences])
+
+  const lifecycle = async (s: Segment, action: 'submit' | 'approve'): Promise<boolean> => {
+    // Submit/approve are state transitions, not catalogue reads. One in-flight transition keeps
+    // a double click or two cards from racing the same maker-checker lifecycle, while a failure
+    // remains local to the action and never turns an already loaded catalogue into "unavailable".
+    const audienceKey = key(s)
+    let succeeded = false
+    const outcome = await lifecycleFlight.run('audience:lifecycle', async () => {
+      setLifecycleAction({ key: audienceKey, action })
+      setLifecycleError(null)
+      try {
+        const response = await fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' })
+        if (!response.ok) {
+          const body = await response.json().catch(() => null) as { error?: string } | null
+          throw new Error(body?.error || 'lifecycle mutation failed')
         }
-        setItems(d.items ?? [])
-      })
-      .catch(() => setUnavailable('unreachable'))
-      .finally(() => setLoading(false))
-  }, [])
+        succeeded = true
+        if (!await loadAudiences(true)) {
+          setLifecycleError(t(
+            'Stav se mohl změnit, ale katalog se nepodařilo obnovit. Zkuste načtení znovu.',
+            'The state may have changed, but the catalogue could not be refreshed. Try loading it again.',
+          ))
+        }
+      } catch {
+        setLifecycleError(t(
+          'Změna stavu publika se nepodařila. Katalog zůstává dostupný; zkuste akci znovu.',
+          'The audience state change did not complete. The catalogue is still available; try the action again.',
+        ))
+      } finally {
+        setLifecycleAction(null)
+      }
+    })
+    if (wasSkipped(outcome)) return false
+    return succeeded
+  }
+
+  const closeApprovalReview = () => {
+    if (lifecycleFlight.busy) return
+    approvalCloseFocusOverrideRef.current = null
+    setApprovalIntent(null)
+  }
 
   const key = (s: Segment) => `${s.name}@${s.version}`
 
@@ -56,11 +117,19 @@ export default function SegmentsPage() {
   // layer, so loading the page must not fire one per row.
   const loadPreview = (s: Segment) => {
     const k = key(s)
+    const requestId = (previewRequests.current[k] ?? 0) + 1
+    previewRequests.current[k] = requestId
     setPreviews(p => ({ ...p, [k]: 'loading' }))
-    fetch(`/api/segments/${encodeURIComponent(s.name)}/${s.version}/preview`)
-      .then(r => r.json())
-      .then((d: Preview) => setPreviews(p => ({ ...p, [k]: d })))
-      .catch(() => setPreviews(p => ({ ...p, [k]: { state: 'unreachable' } })))
+    fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/preview`)
+      .then(async r => r.ok
+        ? parseAudiencePreview(await r.json() as unknown, s.name, s.version)
+        : { state: 'unreachable' } as const)
+      .then(d => {
+        if (previewRequests.current[k] === requestId) setPreviews(p => ({ ...p, [k]: d }))
+      })
+      .catch(() => {
+        if (previewRequests.current[k] === requestId) setPreviews(p => ({ ...p, [k]: { state: 'unreachable' } }))
+      })
   }
 
   const formatAsOf = (iso: string) =>
@@ -82,7 +151,7 @@ export default function SegmentsPage() {
   const audiencePurpose = (s: Segment) => {
     if (s.name === 'actives') return t('Široký výchozí okruh pro ověřenou produktovou nabídku.', 'A broad default audience for a verified product offer.')
     if (s.name === 'actives-tenured-30d') return t('Stabilnější publikum pro nabídky po prvním měsíci vztahu.', 'A more established audience for offers after the first month of a relationship.')
-    return t('Verzované publikum z katalogu kampaní.', 'A versioned audience from the campaign catalogue.')
+    return t('Verzované publikum s dohledatelným schválením.', 'A versioned audience with traceable approval.')
   }
 
   const renderPreview = (s: Segment) => {
@@ -90,6 +159,7 @@ export default function SegmentsPage() {
     if (!p) {
       return (
         <button
+          type="button"
           onClick={() => loadPreview(s)}
           className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50"
           data-audience-count={key(s)}
@@ -103,30 +173,41 @@ export default function SegmentsPage() {
       // Never render a failed preview as 0 — "nobody matches" is a business answer a marketer
       // would act on, and a 403 or a timeout is not that answer.
       return (
-        <span className="text-xs text-amber-600">
+        <span className="inline-flex items-center gap-2 text-xs text-amber-600">
           {p.state === 'unauthorized'
             ? t('Bez oprávnění', 'Not permitted')
             : p.state === 'unknown_segment'
               ? t('Neznámý segment', 'Unknown segment')
               : t('Nedostupné', 'Unavailable')}
+          <button
+            type="button"
+            className="font-semibold underline underline-offset-2"
+            onClick={() => loadPreview(s)}
+            aria-label={t(`Znovu spočítat dosah ${audienceName(s)}`, `Retry reach for ${audienceName(s)}`)}
+          >
+            {t('Zkusit znovu', 'Retry')}
+          </button>
         </span>
       )
     }
     return (
       <span className="text-sm" data-audience-size={key(s)}>
-        <strong className="text-lg tracking-tight">{p.size?.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
+        <strong className="text-lg tracking-tight">{p.size.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
         <span className="text-muted-foreground">{t('lidí nyní odpovídá', 'people match now')}</span>
-        {p.asOf && (
-          // The cohort moves as the silver layer moves; a number without its timestamp is a claim
-          // with no time attached, which is what ADR-0201 D1's "provably a different version" rules out.
-          <span className="ml-2 text-xs text-muted-foreground">{t('k', 'as of')} {formatAsOf(p.asOf)}</span>
-        )}
+        {/* The cohort moves as the silver layer moves; a number without its timestamp is a claim
+            with no time attached, which is what ADR-0201 D1's versioning rules out. */}
+        <span className="ml-2 text-xs text-muted-foreground">{t('k', 'as of')} {formatAsOf(p.asOf)}</span>
       </span>
     )
   }
 
-  return (
-    <div className="space-y-6">
+  return <AuthGuard permission="campaign:view">
+    <section
+      ref={audienceWorkspaceRef}
+      tabIndex={-1}
+      aria-label={t('Pracovní plocha publik', 'Audience workspace')}
+      className="space-y-6"
+    >
       <PageHeader
         title={t('Publika', 'Audiences')}
         subtitle={t(
@@ -134,12 +215,19 @@ export default function SegmentsPage() {
           'Choose an audience by intent, verify its current reach, then go straight to designing the journey.',
         )}
         icon={<Users className="h-6 w-6" />}
+        actions={<Can permission="campaign:create"><Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link></Can>}
       />
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
 
       {!loading && unavailable && (
         <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Segmenty', 'Segments')} />
+      )}
+
+      {!loading && !unavailable && lifecycleError && !approvalIntent && (
+        <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {lifecycleError}
+        </p>
       )}
 
       {!loading && !unavailable && items.length === 0 && (
@@ -157,7 +245,7 @@ export default function SegmentsPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <ShieldCheck className="h-5 w-5 text-emerald-600" />
               <p className="mt-3 text-sm font-semibold text-slate-900">{t('Bezpečné publikum', 'Safe audiences')}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Definice jsou verzované a reviewované v kódu. Souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Definitions are versioned and reviewed in code. Consent and frequency protections are evaluated again at send time.')}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Pravidla jsou uzavřená a typovaná. Verze se stává použitelnou až po schválení jiným člověkem; souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Rules are closed and typed. A version becomes targetable only after a different person approves it; consent and frequency protections are evaluated again at send time.')}</p>
             </div>
           </section>
 
@@ -166,7 +254,7 @@ export default function SegmentsPage() {
               <article key={key(s)} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-950/5" data-audience-card={key(s)}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{t('Verzované publikum', 'Versioned audience')} · v{s.version}</p>
+                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{s.state === 'APPROVED' ? t('Schválené publikum', 'Approved audience') : s.state === 'PENDING_APPROVAL' ? t('Čeká na schválení', 'Awaiting approval') : t('Rozpracované publikum', 'Draft audience')} · v{s.version}</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{audienceName(s)}</h2>
                     <p className="mt-1 text-sm leading-5 text-slate-500">{audiencePurpose(s)}</p>
                   </div>
@@ -182,13 +270,13 @@ export default function SegmentsPage() {
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="min-h-8">{renderPreview(s)}</div>
-                  <Link
+                  {s.state === 'APPROVED' ? <Link
                     href={`/campaigns/new?audience=${encodeURIComponent(key(s))}`}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-700"
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={event => { approvalTriggerRef.current = event.currentTarget; approvalCloseFocusOverrideRef.current = null; setLifecycleError(null); setApprovalIntent(s) }} disabled={lifecycleFlight.busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{t('Zkontrolovat a schválit', 'Review and approve')}</button></Can>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
@@ -196,6 +284,87 @@ export default function SegmentsPage() {
           </section>
         </>
       )}
-    </div>
+      {approvalIntent && <AudienceApprovalDialog
+        audience={approvalIntent}
+        busy={lifecycleFlight.busy}
+        error={lifecycleError}
+        closeFocusOverrideRef={approvalCloseFocusOverrideRef}
+        triggerRef={approvalTriggerRef}
+        onCancel={closeApprovalReview}
+        onConfirm={async () => {
+          if (await lifecycle(approvalIntent, 'approve')) {
+            // The approve button that opened this dialog is gone once state flips to APPROVED —
+            // land focus on the catalogue landmark instead of the stale trigger.
+            approvalCloseFocusOverrideRef.current = audienceWorkspaceRef.current
+            setApprovalIntent(null)
+          }
+        }}
+      />}
+    </section>
+  </AuthGuard>
+}
+
+function AudienceApprovalDialog({ audience, busy, error, closeFocusOverrideRef, triggerRef, onCancel, onConfirm }: {
+  audience: Segment
+  busy: boolean
+  error: string | null
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  triggerRef: RefObject<HTMLElement | null>
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const { t } = useLanguage()
+  const backRef = useRef<HTMLButtonElement>(null)
+
+  return (
+    <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[1200] bg-slate-950/70" />
+        <Dialog.Content
+          role="alertdialog"
+          aria-busy={busy}
+          className="fixed inset-0 z-[1200] grid place-items-center p-5"
+          onOpenAutoFocus={event => {
+            // The safe action gets initial focus, never the destructive confirm — an operator who
+            // dismisses on reflex (Enter/Space) lands on Back, not on an approval they did not read.
+            event.preventDefault()
+            backRef.current?.focus()
+          }}
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            const override = closeFocusOverrideRef.current
+            const target = override?.isConnected ? override : triggerRef.current
+            target?.focus()
+          }}
+          onEscapeKeyDown={event => {
+            if (busy) event.preventDefault()
+          }}
+          onInteractOutside={event => event.preventDefault()}
+        >
+          <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
+              <div>
+                <Dialog.Title className="text-lg font-semibold text-slate-950">{t('Schválit publikum', 'Approve audience')}</Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm leading-6 text-slate-600">{t(
+                  'Tato verze se stane použitelnou v kampaních. Schválení samo nic neodešle; souhlas a frekvenční ochrany se znovu ověří při odeslání.',
+                  'This version will become available to campaigns. Approval sends nothing by itself; consent and frequency protections are checked again at send time.',
+                )}</Dialog.Description>
+              </div>
+            </div>
+            <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 font-semibold text-slate-900">{audience.name} · v{audience.version}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{audience.createdBy || t('neuvedeno', 'not provided')}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Pravidla, která schvalujete', 'Rules you are approving')}</dt><dd><ul className="mt-2 space-y-1.5 text-slate-700">{audience.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}</ul></dd></div>
+            </dl>
+            {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
+              <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Schvaluji…', 'Approving…') : t('Potvrdit schválení', 'Confirm approval')}</button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

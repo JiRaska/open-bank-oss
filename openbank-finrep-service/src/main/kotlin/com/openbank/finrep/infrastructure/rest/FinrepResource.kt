@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.FinrepTemplate
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
@@ -46,10 +47,15 @@ class FinrepResource(private val finrepUseCase: FinrepUseCase, private val clock
     suspend fun getTemplate(
         @PathParam("templateId") templateId: String,
         @QueryParam("asOf") @DefaultValue("") asOf: String,
+        @QueryParam("evidence") @DefaultValue("FROZEN") evidence: String = "FROZEN",
     ): Response {
         val date = if (asOf.isBlank()) LocalDate.now(clock) else LocalDate.parse(asOf)
         val template: FinrepTemplate = finrepUseCase.getTemplate(
-            GetFinrepTemplateQuery(templateId = templateId, asOf = date),
+            GetFinrepTemplateQuery(
+                templateId = templateId,
+                asOf = date,
+                evidence = TrialBalanceEvidence.valueOf(evidence.uppercase()),
+            ),
         )
         return Response.ok(template).build()
     }

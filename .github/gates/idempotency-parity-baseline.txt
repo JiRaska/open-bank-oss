@@ -1,0 +1,6 @@
+# idempotency-contract-parity — declared, already-known findings (issue #8351).
+#
+# Format: <service> <name-mismatch|published-not-bound|bound-not-published> <VERB> <path>
+#
+# A finding NOT listed here is NEW drift and fails. A line here with no matching finding is
+# STALE and also fails — the declared backlog must not outlive the debt it declares.

@@ -6,10 +6,12 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 type PageHeaderProps = {
-  title: string
-  subtitle?: string
+  title: ReactNode
+  subtitle?: ReactNode
   /** Leading icon beside the title. */
   icon?: ReactNode
+  /** Optional hierarchy label rendered above the title. */
+  breadcrumb?: ReactNode
   /** Right-aligned actions (buttons, filters). */
   actions?: ReactNode
   className?: string
@@ -24,10 +26,11 @@ type PageHeaderProps = {
  * wrapper class of its own — a sibling element is enough. Adding one would mean adding CSS, and this
  * layer exists to consume the design vocabulary, not to grow it.
  */
-export function PageHeader({ title, subtitle, icon, actions, className }: PageHeaderProps) {
+export function PageHeader({ title, subtitle, icon, breadcrumb, actions, className }: PageHeaderProps) {
   return (
     <div className={cn('page-header', className)}>
       <div>
+        {breadcrumb}
         <div className="flex items-center gap-3">
           {icon}
           <h1 className="page-title">{title}</h1>

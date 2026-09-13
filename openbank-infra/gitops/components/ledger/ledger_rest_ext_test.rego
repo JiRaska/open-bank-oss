@@ -99,6 +99,11 @@ test_shared_m2m_may_reverse_via_identity_rule if {
 		with data.rules as rules_mock
 }
 
+test_shared_m2m_may_not_create_close_draft if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "ledger.close.draft"}
+		with data.rules as rules_mock
+}
+
 test_shared_m2m_no_longer_admitted_via_role_only_reason if {
 	# The ext reason no longer fires for a service-account principal. (The shared client can
 	# still be admitted on matrix-granted actions via base matrix-allows — a pre-existing
@@ -123,6 +128,14 @@ test_operator_may_attest_year_close if {
 		with data.rules as rules_mock
 	decision.allow == true
 	"operator-year-close-attest" in rest.allowed_reasons with input as {"principal": operator, "action": "ledger.approve"}
+		with data.rules as rules_mock
+}
+
+test_operator_may_create_close_draft if {
+	decision := rest.allow with input as {"principal": operator, "action": "ledger.close.draft"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"operator-ledger-close-draft" in rest.allowed_reasons with input as {"principal": operator, "action": "ledger.close.draft"}
 		with data.rules as rules_mock
 }
 

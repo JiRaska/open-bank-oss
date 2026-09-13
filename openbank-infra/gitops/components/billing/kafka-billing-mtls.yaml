@@ -1,0 +1,89 @@
+# Kafka mTLS identity + cert projection for billing-service (issue #4701).
+#
+# Pattern mirrors components/ledger/kafka-ledger-mtls.yaml. billing-service's
+# application.yaml (ADR-0248) has read KAFKA_BOOTSTRAP_SERVERS / KAFKA_SECURITY_PROTOCOL /
+# KAFKA_SSL_* since the outbox producer shipped, but this Deployment never supplied them —
+# no env vars, no KafkaUser, no cert Secret at all. Every publish attempt fell through
+# SmallRye's connector default of localhost:9092, which billing-service's own readiness
+# probe already reported (SmallRye Reactive Messaging readiness check DOWN,
+# "Connection to node -1 (localhost/127.0.0.1:9092) could not be established") — this
+# had been failing since the topic was introduced, not a new regression. Confirmed live
+# 2026-08-18: billing_outbox carries 2 DEAD rows, both last_error "circuit breaker is
+# open" — the dispatcher's own resilience wrapper giving up on a target that was never
+# going to answer, not a broker or payload problem (the "why they died" question #4701
+# asked). KafkaUser minted in `messaging` (where Strimzi User Operator watches); the
+# Strimzi User Operator writes a Secret of the same name there with user.crt/key/p12 +
+# password. The ExternalSecrets below project that secret from `messaging` into `billing`
+# via the shared `kafka-messaging-certs` ClusterSecretStore, same as every other service.
+#
+# Topic model:
+#   billing-service WRITES openbank.billing.fee.event → Write+Describe ACL on that topic.
+#   No incoming channels (billing has no @Incoming Kafka consumer).
+#   No consumer-group ACL needed.
+#
+# Gate: allow.everyone.if.no.acl.found=true until all ~33 clients are migrated (issue #2665).
+# This identity is provisioned ahead of the eventual deny-by-default flip, same as ledger's.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: billing-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.billing.fee.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# Project the billing-service keystore from `messaging` into `billing` namespace.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: billing-service-kafka-keystore
+  namespace: billing
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: billing-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: billing-service
+---
+# Shared cluster-CA truststore for all Kafka clients in `billing`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: billing
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

@@ -15,15 +15,17 @@ metadata:
     app.kubernetes.io/part-of: app
 spec:
   replicas: 1
-  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
-  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
-  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
-  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  # Keep the public SSO boundary available during image rollouts. The browser synthetic
+  # proved that terminate-first creates a real 503 window: one engine can reach the old
+  # pod while the other reaches the interval before the replacement becomes Ready.
+  # The small, bounded surge is therefore part of the availability contract; a rollout
+  # that cannot schedule the additional 100m/256Mi pod must remain visibly pending,
+  # rather than deliberately taking the operator surface offline.
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: admin-ui
@@ -47,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-22d812083
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-286a10ee6-run34779166298
           ports:
             - name: http
               containerPort: 3000
@@ -78,13 +80,38 @@ spec:
                 secretKeyRef:
                   name: admin-ui-oidc
                   key: nextauth-secret
+            # BFF tracing (issue #5735 follow-up). Until this, admin-ui had ZERO Prometheus
+            # scrape targets and ZERO spans, so an operator hitting a failure on a money-path
+            # route like /api/approvals/pending produced a backend trace with nothing linking
+            # it to the request the human made — while all 39 backend services were traced.
+            #
+            # Tempo directly on 4318, not the otel-collector: the backends already export to
+            # Tempo (QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4317) and it is Tempo's
+            # metrics-generator that produces traces_spanmetrics_*, which is how admin-ui gets
+            # RED metrics out of this without a /metrics endpoint or a second change. 4318 is
+            # the HTTP port — the SDK here uses the OTLP HTTP/protobuf exporter and appends
+            # /v1/traces itself.
+            #
+            # Setting this is what TURNS TRACING ON: src/lib/telemetry/tracing.ts starts no SDK
+            # at all without it, so dev and test export nothing (same gating shape as the
+            # GlitchTip DSN, ADR-0075 inv. 2). The authenticated, same-origin browser-RUM relay
+            # uses this same runtime-only endpoint; browsers never receive this address.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://tempo.observability.svc:4318
+            - name: OTEL_SERVICE_NAME
+              value: openbank-admin-ui
             # ADR-0051: domain namespaces the discovery route enumerates. Adding a
             # new domain namespace requires THREE steps (new namespace checklist):
             #   1. Add it here. 2. Add NS_GROUP entry in src/lib/discovery.ts.
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth
+            - name: REFERRAL_SERVICE_URL
+              value: https://referral-service.referral.svc:8443
+            - name: NODE_EXTRA_CA_CERTS
+              value: /mnt/referral-ca/ca.crt
+
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env
             # directly. Unset, they fall back to localhost:8109 (the admin-ui pod
@@ -97,6 +124,11 @@ spec:
             # page renders not_deployed). The in-cluster Service lives in the platform ns.
             - name: CASE_COORDINATOR_URL
               value: http://case-coordinator-agent.platform.svc:8146
+            # The phase-3 test check is an explicitly bounded ADMIN action. It is
+            # not sent through discovery because this agent has its own namespace;
+            # the dedicated BFF route relays the operator bearer to this one URL.
+            - name: FLAKY_TEST_HUNTER_URL
+              value: http://flaky-test-hunter.flaky-test-hunter.svc:8148
             # ADR-0224 D4/D2: the staff OBO MCP channel (/api/agent/obo-mcp). The route
             # 404s unless enabled; enabling requires the whole chain in place —
             # realm permission (#2762), session store (#2843) and this flow (#2850).
@@ -139,7 +171,7 @@ spec:
             # reaches Grafana Tempo's query API in-cluster. Absent → the page
             # degrades calmly to "Tempo unreachable" (graceful-state rule).
             - name: TEMPO_URL
-              value: http://tempo.observability.svc:3100
+              value: http://tempo.observability.svc:3200
             # Onboarding funnel analytics (/onboarding/analytics): the BFF queries the ClickHouse
             # gold views over the HTTP interface. Absent → defaults to localhost:8123 and the board
             # degrades calmly to the "unavailable" state (graceful-state rule). Auth is the
@@ -185,6 +217,9 @@ spec:
             - name: sbom-drift
               mountPath: /config/sbom-drift
               readOnly: true
+            - name: referral-ca
+              mountPath: /mnt/referral-ca
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: http
@@ -207,6 +242,9 @@ spec:
           emptyDir: {}
         - name: next-cache
           emptyDir: {}
+        - name: referral-ca
+          secret:
+            secretName: admin-ui-referral-ca
         # Daily AWS Cost Explorer snapshot written by the cost-collector CronJob
         # (cost-collector.yaml). optional: tolerate its absence before the first run.
         - name: cost-report
@@ -279,6 +317,54 @@ kind: RoleBinding
 metadata:
   name: admin-ui-discovery
   namespace: accounts
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: kyb
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: wealth
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: communication
   labels:
     app.kubernetes.io/name: admin-ui
 roleRef:
@@ -765,6 +851,24 @@ kind: RoleBinding
 metadata:
   name: admin-ui-discovery
   namespace: campaign
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+# referral (MGM / ADR-0266). The catalogue BFF calls referral-service directly,
+# while discovery also reports its live workload health to operators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: referral
   labels:
     app.kubernetes.io/name: admin-ui
 roleRef:

@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.transaction.application.port.out.BalanceCoverPort
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -30,6 +31,7 @@ import java.util.UUID
  * ledger projection owns the booked balance (ADR-0039 Phase D-2).
  */
 @RegisterRestClient(configKey = "balance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/balances")
 @Produces(MediaType.APPLICATION_JSON)

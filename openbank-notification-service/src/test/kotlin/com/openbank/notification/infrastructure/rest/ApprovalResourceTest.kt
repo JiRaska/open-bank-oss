@@ -48,6 +48,33 @@ class ApprovalResourceTest {
     }
 
     @Test
+    fun `listPending returns the store's pending queue, oldest first, mapped to the response shape`(): Unit =
+        runBlocking {
+            val store = mockk<ApprovalStore>()
+            coEvery { store.findPending(50) } returns listOf(approval())
+            val resource = resourceWith(store, "checker-1")
+
+            val response = resource.listPending(50)
+
+            assertThat(response.status).isEqualTo(200)
+            @Suppress("UNCHECKED_CAST")
+            val body = response.entity as List<ApprovalResponse>
+            assertThat(body).hasSize(1)
+            assertThat(body[0].id).isEqualTo("approval-1")
+            assertThat(body[0].action).isEqualTo("opsmessage.compose")
+        }
+
+    @Test
+    fun `listPending clamps an out-of-range limit into the 1 to 200 window`(): Unit = runBlocking {
+        val store = mockk<ApprovalStore>()
+        coEvery { store.findPending(200) } returns emptyList()
+
+        resourceWith(store, "checker-1").listPending(500)
+
+        io.mockk.coVerify { store.findPending(200) }
+    }
+
+    @Test
     fun `decide passes the authenticated principal name as checker, never a body field`(): Unit = runBlocking {
         val store = mockk<ApprovalStore> {
             coEvery { decide("approval-1", "checker-1", true) } returns approval()

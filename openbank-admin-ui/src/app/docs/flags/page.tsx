@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, Flag, ShieldAlert } from 'lucide-react'
 import { loadFlagCatalog, type FlagMeta } from '@/lib/governance/flags'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,28 +40,23 @@ export default async function FlagsRegistryPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Feature flagy', 'Feature Flags')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Flag size={20} /> {t('Registr feature flagů', 'Feature Flag Registry')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Registr feature flagů', 'Feature Flag Registry')}
+        subtitle={t(
               'Flagy na všech službách, odvozené z flag-as-code v GitOpsu (ADR-0067). Zdroj pravdy je git; přepínání je změna v gitu, ne zápis z UI.',
               'Flags across the fleet, derived from flag-as-code in GitOps (ADR-0067). Git is the source of truth; flipping is a git change, not a UI write.',
             )}
-          </p>
-        </div>
-        <Link href="/docs" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        icon={<Flag aria-hidden="true" size={20} />}
+        actions={<Link href="/docs" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <ChevronLeft size={14} /> {t('Zpět', 'Back')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       {flags.length === 0 ? (
         <div className="card" style={{ padding: '24px', color: 'var(--text-secondary)' }}>

@@ -21,7 +21,7 @@ import java.util.UUID
  * D4 gives it a defined meaning for consumers — a later refinement of an earlier `SENT`. A consumer
  * written now must already tolerate it; adding it later would be the breaking change.
  */
-enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED }
+enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED }
 
 /**
  * The `openbank.notification.outcomes.v1` payload (ADR-0239 D2).
@@ -58,6 +58,9 @@ data class NotificationOutcomeEvent(
         const val REASON_NO_RECIPIENT: String = "no_deliverable_recipient"
         const val REASON_MAILER_REFUSED: String = "mailer_refused"
         const val REASON_NO_DEVICE: String = "no_active_device"
+
+        /** The original PUSH had no device; a separately persisted safe-channel request was created. */
+        const val REASON_REROUTED_NO_DEVICE: String = "rerouted_no_active_device"
         const val REASON_PUSH_REJECTED: String = "push_rejected_by_provider"
         const val REASON_PREFERENCE_MUTED: String = "channel_muted_by_preference"
 
@@ -69,6 +72,20 @@ data class NotificationOutcomeEvent(
          * outcome stream.
          */
         const val REASON_PUSH_ADAPTER_DISABLED: String = "push_adapter_disabled"
+
+        /**
+         * Issue #4737: the mailer is mocked (`quarkus.mailer.mock=true`), so nothing left the
+         * process. The EMAIL mirror of [REASON_PUSH_ADAPTER_DISABLED], and it was the same bug —
+         * a mocked `ReactiveMailer.send` completes *successfully* without opening an SMTP
+         * connection, so the send took the success branch and committed `SENT` with `sent_at` for
+         * a message that was never transmitted.
+         *
+         * SUPPRESSED rather than FAILED, for the reason the push case is: nothing was rejected and
+         * nothing is retryable — the channel is switched off. Folding a configuration state into
+         * the delivery-failure series would make that series unusable for alerting, which is the
+         * mirror image of the defect being fixed.
+         */
+        const val REASON_MAILER_MOCKED: String = "mailer_mocked"
 
         /** ADR-0219 D4: `ContactPolicyGate` reasons a MARKETING send can now also be denied for. */
         const val REASON_SEND_CAP_REACHED: String = "send_cap_reached"

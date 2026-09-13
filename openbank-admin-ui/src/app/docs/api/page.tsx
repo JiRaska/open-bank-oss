@@ -7,11 +7,17 @@ import { useEffect, useState, useCallback } from 'react'
 import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // UI short-id → Kubernetes Deployment/Service name (the BFF's canonical key).
 // All but `catalog` carry a `specId` of the form `openbank-<k8s-name>`, so we
 // derive the key from it and special-case the catalog (port 8104). See ADR-0056.
-function k8sName(svc: { specId: string | null }): string {
+// `k8sName` overrides that derivation for the one service where it does not
+// hold — `specId` names the repo module directory (so the code-derived catalog
+// lookup below can find it), and `security-scanner` deploys under a different
+// k8s workload name than its directory (see src/lib/services/registry.ts).
+function k8sName(svc: { specId: string | null; k8sName?: string }): string {
+  if (svc.k8sName) return svc.k8sName
   return svc.specId ? svc.specId.replace(/^openbank-/, '') : 'product-catalog'
 }
 
@@ -27,7 +33,19 @@ interface Service {
   version: string
   desc: string
   specId: string | null
+  k8sName?: string
   derived?: boolean
+}
+
+// A Kafka topic row, as derived by scripts/generate-events.mjs from
+// docs/asyncapi/openbank-events.yaml + each service's application.yaml.
+interface EventTopic {
+  channel: string
+  topic: string
+  description: string | null
+  publishers: string[]
+  consumers: string[]
+  color: string
 }
 
 // Title-case a k8s short name for display, e.g. `lending-service` → `Lending Service`.
@@ -60,7 +78,7 @@ const SERVICES: Service[] = [
   { id: 'aml',          name: 'AML Service',            port: 8117, group: 'Compliance',      version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)',            specId: 'openbank-aml-service' },
   { id: 'card-issuance',name: 'Card Issuance Service',  port: 8118, group: 'Cards',           version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)',            specId: 'openbank-card-issuance-service' },
   { id: 'fx',           name: 'FX Service',             port: 8119, group: 'Core Banking',    version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)',                 specId: 'openbank-fx-service' },
-  { id: 'security-scanner',name: 'Security Scanner',    port: 8120, group: 'Platform',        version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)',                    specId: 'openbank-security-scanner-service' },
+  { id: 'security-scanner',name: 'Security Scanner',    port: 8120, group: 'Platform',        version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)',                    specId: 'openbank-security-scanner', k8sName: 'security-scanner-service' },
   { id: 'standing-order',name:'Standing Order Service', port: 8121, group: 'Payments',        version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)',                specId: 'openbank-standing-order-service' },
   { id: 'swift',        name: 'SWIFT Service',          port: 8122, group: 'Payments',        version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)',                           specId: 'openbank-swift-service' },
   { id: 'sanctions',    name: 'Sanctions Service',      port: 8123, group: 'Compliance',      version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)',                specId: 'openbank-sanctions-service' },
@@ -126,7 +144,7 @@ const GROUP_COLORS: Record<string, string> = {
   'Payments':     '#7c3aed',
   'PSD2':         '#d97706',
   'Platform':     '#6b7280',
-  'Cards':        '#db2777',
+  'Cards':        '#d02571',
   'Other':        '#64748b',
 }
 
@@ -407,6 +425,7 @@ export default function ApiCatalogPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [expandedMethod, setExpandedMethod] = useState<{svc: string, path: string, method: string} | null>(null)
   const [groupFilter, setGroupFilter] = useState('all')
+  const [query, setQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'rest' | 'async'>('rest')
   // Code-derived catalog (ADR-0029 D3) — authoritative release/api versions,
   // money-path flag and governance gaps, keyed by module name. Overlays the
@@ -512,62 +531,98 @@ export default function ApiCatalogPage() {
     return () => { alive = false }
   }, [])
 
+  // Code-derived Kafka topic table (ADR-0029 D3 pattern) — derived from
+  // docs/asyncapi/openbank-events.yaml cross-referenced with each service's own
+  // application.yaml (scripts/generate-events.mjs), replacing a hand-maintained
+  // array that drifted the same way the AsyncAPI document itself drifted (#4761:
+  // 15 of ~23 topic names were fiction). Falls back to an empty, honest list.
+  const [events, setEvents] = useState<EventTopic[]>([])
+  useEffect(() => {
+    let alive = true
+    fetch('/api/events', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!alive || !data?.available || !Array.isArray(data.topics)) return
+        setEvents(data.topics)
+      })
+      .catch(() => { /* events snapshot absent — async tab shows the empty state */ })
+    return () => { alive = false }
+  }, [])
+
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
   const allServices = [...SERVICES, ...derived]
   const groups = ['all', ...Array.from(new Set(allServices.map(s => s.group)))]
-  const filtered = groupFilter === 'all' ? allServices : allServices.filter(s => s.group === groupFilter)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filtered = allServices.filter(svc => {
+    if (groupFilter !== 'all' && svc.group !== groupFilter) return false
+    if (!normalizedQuery) return true
+    const status = statuses[svc.id]
+    return [svc.name, svc.id, svc.desc, ...(status?.paths ?? [])]
+      .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
+  })
 
   // Translate a group key (kept canonical/English as the GROUP_COLORS + filter key).
   const groupLabel = (g: string) => g === 'all' ? t('Vše', 'All') : t(GROUP_LABELS_CS[g] ?? g, g)
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('API Katalog', 'API Catalog')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FileCode size={18} style={{ color: 'var(--accent)' }} />
-            {t('API Katalog', 'API Catalog')}
-          </h1>
-          <p className="page-subtitle">{t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          </>}
+        title={t('API Katalog', 'API Catalog')}
+        subtitle={t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}
+        icon={<FileCode aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+            <RefreshCw aria-hidden="true" size={13} className={loading ? 'animate-spin' : ''} />
             {t('Obnovit', 'Refresh')}
-          </button>
-        </div>
-      </div>
+          </button>}
+      />
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
+      <div role="group" aria-label={t('Typ API dokumentace', 'API documentation type')} style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
         {(['rest', 'async'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
+          <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600,
             background: 'transparent', border: 'none',
             borderBottom: activeTab === tab ? '2px solid #6366f1' : '2px solid transparent',
             color: activeTab === tab ? '#6366f1' : 'var(--text-secondary)',
             cursor: 'pointer', fontFamily: 'inherit', marginBottom: '-1px',
           }}>
-            {tab === 'rest' ? '⚡ REST APIs' : '📨 AsyncAPI / Kafka'}
+            <span aria-hidden="true">{tab === 'rest' ? '⚡' : '📨'}</span>{tab === 'rest' ? ' REST APIs' : ' AsyncAPI / Kafka'}
           </button>
         ))}
       </div>
 
       {activeTab === 'rest' && (
         <>
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'end', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <label htmlFor="api-catalog-search" style={{ flex: '1 1 280px', minWidth: '220px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {t('Hledat službu nebo endpoint', 'Search service or endpoint')}
+          <input
+            id="api-catalog-search"
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('Např. payments, /api/v1/accounts', 'e.g. payments, /api/v1/accounts')}
+            className="input"
+            style={{ display: 'block', width: '100%', marginTop: '5px' }}
+          />
+        </label>
+        <span aria-live="polite" style={{ fontSize: '12px', color: 'var(--text-tertiary)', paddingBottom: '8px' }}>
+          {t(`${filtered.length} služeb`, `${filtered.length} services`)}
+        </span>
+      </div>
       {/* Group filter */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
+      <div role="group" aria-label={t('Filtrovat podle domény', 'Filter by domain')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
         {groups.map(g => (
-          <button key={g} onClick={() => setGroupFilter(g)}
+          <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--surface)',
+              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
+              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
               color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
@@ -700,7 +755,7 @@ export default function ApiCatalogPage() {
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
                     background: '#fdf4ff', border: '1px solid #fbcfe8',
-                    borderRadius: '6px', color: '#db2777', textDecoration: 'none',
+                    borderRadius: '6px', color: '#d02571', textDecoration: 'none',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />
@@ -824,6 +879,12 @@ export default function ApiCatalogPage() {
             </div>
           )
         })}
+        {!loading && filtered.length === 0 && (
+          <div role="status" style={{ padding: '28px 18px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 'var(--r-lg)', color: 'var(--text-secondary)' }}>
+            <strong>{t('Žádná služba neodpovídá filtru', 'No services match this filter')}</strong>
+            <div style={{ marginTop: '6px', fontSize: '12px' }}>{t('Zkuste jiný název, endpoint nebo doménu.', 'Try another service name, endpoint, or domain.')}</div>
+          </div>
+        )}
       </div>
         </>
       )}
@@ -848,31 +909,15 @@ export default function ApiCatalogPage() {
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
               {t('Všechny Kafka topics a event payloady. Broker:', 'All Kafka topics and event payloads. Broker:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: 'var(--surface)', padding: '1px 4px', borderRadius: '3px' }}>kafka:9092</code>
             </p>
-            {[
-              { topic: 'openbank.accounts.account.created', publisher: 'account-service', consumers: ['audit-service', 'notification-service'], color: '#2563eb' },
-              { topic: 'openbank.accounts.account.status-changed', publisher: 'account-service', consumers: ['audit-service', 'notification-service'], color: '#2563eb' },
-              { topic: 'openbank.ledger.journal.posted', publisher: 'ledger-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.ledger.journal.reversed', publisher: 'ledger-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.payments.sepa.event', publisher: 'sepa-payment-service', consumers: ['audit-service', 'notification-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.payments.sct-inst.event', publisher: 'sepa-instant-service', consumers: ['audit-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.payments.domestic.event', publisher: 'domestic-payment-service', consumers: ['audit-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.transactions.transaction.event', publisher: 'transaction-service', consumers: ['audit-service', 'ledger-service'], color: '#7c3aed' },
-              { topic: 'openbank.balances.balance.event', publisher: 'balance-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.kyc.case.event', publisher: 'kyc-service', consumers: ['audit-service', 'notification-service', 'aml-service'], color: '#dc2626' },
-              { topic: 'openbank.aml.case.event', publisher: 'aml-service', consumers: ['audit-service', 'notification-service'], color: '#dc2626' },
-              { topic: 'openbank.parties.party.event', publisher: 'pid-service', consumers: ['audit-service', 'kyc-service'], color: '#059669' },
-              { topic: 'openbank.consents.consent.event', publisher: 'consent-service', consumers: ['audit-service', 'notification-service'], color: '#d97706' },
-              { topic: 'openbank.cards.card.event', publisher: 'card-issuance-service', consumers: ['audit-service', 'notification-service'], color: '#db2777' },
-              { topic: 'openbank.fx.conversion.completed', publisher: 'fx-service', consumers: ['audit-service', 'transaction-service'], color: '#2563eb' },
-              { topic: 'openbank.clearing.batch.event', publisher: 'clearing-service', consumers: ['audit-service'], color: '#7c3aed' },
-              { topic: 'openbank.audit.events-in', publisher: '(all services)', consumers: ['audit-service'], color: '#6b7280' },
-              { topic: 'openbank.notifications.events-in', publisher: '(all services)', consumers: ['notification-service'], color: '#6b7280' },
-              { topic: 'openbank.payments.swift.event', publisher: 'swift-service', consumers: ['audit-service', 'notification-service'], color: '#7c3aed' },
-              { topic: 'openbank.disputes.dispute.event', publisher: 'dispute-service', consumers: ['audit-service', 'notification-service'], color: '#db2777' },
-              { topic: 'openbank.interest.accrual.event', publisher: 'interest-service', consumers: ['audit-service'], color: '#059669' },
-              { topic: 'openbank.sanctions.screening.event', publisher: 'sanctions-service', consumers: ['audit-service', 'aml-service', 'notification-service'], color: '#dc2626' },
-              { topic: 'openbank.standing-orders.order.event', publisher: 'standing-order-service', consumers: ['audit-service', 'notification-service'], color: '#7c3aed' },
-            ].map(item => (
+            {events.length === 0 && (
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                {t(
+                  'Tabulka topics se generuje z docs/asyncapi/openbank-events.yaml při buildu — v tomto prostředí není k dispozici.',
+                  'The topic table is generated from docs/asyncapi/openbank-events.yaml at build time — not bundled in this environment.',
+                )}
+              </p>
+            )}
+            {events.map(item => (
               <div key={item.topic} style={{
                 display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '10px 12px',
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px',
@@ -883,11 +928,19 @@ export default function ApiCatalogPage() {
                   color: 'var(--text-primary)', flex: 1, wordBreak: 'break-all',
                 }}>{item.topic}</code>
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <span style={{
-                    fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                    background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
-                    fontWeight: 600,
-                  }}>↑ {item.publisher === '(all services)' ? t('(všechny služby)', '(all services)') : item.publisher}</span>
+                  {item.publishers.length === 0 ? (
+                    <span style={{
+                      fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                      background: '#6b728015', color: '#6b7280', border: '1px solid #6b728030',
+                      fontWeight: 600,
+                    }}>↑ {t('neznámý publisher', 'unknown publisher')}</span>
+                  ) : item.publishers.map(p => (
+                    <span key={p} style={{
+                      fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                      background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
+                      fontWeight: 600,
+                    }}>↑ {p}</span>
+                  ))}
                   {item.consumers.map(c => (
                     <span key={c} style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',

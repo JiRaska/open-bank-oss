@@ -66,6 +66,39 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     expect(screen.getByText('Jan Novák')).toBeTruthy()
   })
 
+  it('distinguishes an unavailable search from a valid empty result and retries the same query', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [PARTY] }), { status: 200 }))
+    const user = userEvent.setup()
+    renderPalette()
+
+    await user.type(screen.getByRole('textbox'), 'nov')
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'true')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/dočasně nedostupné|temporarily unavailable/i)
+    expect(screen.queryByText(/nic nenalezeno|no results/i)).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /zkusit znovu|try again/i }))
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'true')
+    expect(await screen.findByText('Jan Novák')).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('textbox')).toHaveValue('nov')
+  })
+
+  it('announces a successful empty result only after loading finishes', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    )
+    const user = userEvent.setup()
+    renderPalette()
+
+    await user.type(screen.getByRole('textbox'), 'zz')
+    expect(screen.getByRole('status')).toHaveTextContent(/hledám|searching/i)
+    expect(await screen.findByText(/nic nenalezeno|no results/i)).toBeTruthy()
+    expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'false')
+  })
+
   it('navigates with arrows and opens the active result on Enter, storing it in recents', async () => {
     const user = userEvent.setup()
     renderPalette()
@@ -109,9 +142,34 @@ describe('CommandPalette (ADR-0228 D3)', () => {
   })
 
   it('closes on Escape', async () => {
+    const user = userEvent.setup()
     const onClose = vi.fn()
     renderPalette(true, onClose)
-    fireEvent.keyDown(window, { key: 'Escape' })
+    await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('keeps focus inside the modal and restores the opener on close', async () => {
+    const user = userEvent.setup()
+    const opener = document.createElement('button')
+    opener.type = 'button'
+    document.body.appendChild(opener)
+    opener.focus()
+    const onClose = vi.fn()
+    const { rerender } = renderPalette(true, onClose)
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
+    await user.tab({ shift: true })
+    expect(screen.getByRole('button', { name: /zavřít|close/i })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('textbox')).toHaveFocus()
+    rerender(<LanguageProvider><CommandPalette open={false} onClose={onClose} /></LanguageProvider>)
+    await waitFor(() => expect(opener).toHaveFocus())
+    opener.remove()
+  })
+
+  it('exposes a labelled listbox and active descendant for assistive technology', () => {
+    renderPalette()
+    expect(screen.getByRole('listbox', { name: /výsledky|search results/i })).toBeTruthy()
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-activedescendant')
   })
 })

@@ -54,6 +54,11 @@ data class CreatePartyCommand(
     /** Onboarding consent capture (mobile app "Agreement" step). Null = not asked/answered. */
     val consentGdpr: Boolean? = null,
     val consentMarketing: Boolean? = null,
+    /** Bank-owned canary only; the REST adapter authorizes this transition to ROLE_ADMIN. */
+    val classification: PartyClassification = PartyClassification.CUSTOMER,
+    /** ADR-0284: legal-entity register facts; null for a natural person. */
+    val legalForm: String? = null,
+    val registrationCountry: String? = null,
 )
 
 /**
@@ -111,11 +116,46 @@ data class AddDocumentCommand(
 
 data class ErasePartyCommand(val id: UUID)
 
+data class SavePayeeCommand(val partyId: UUID, val name: String, val iban: String, val bic: String?)
+
+/** Mirrors the app's own MAX_PAYEES = 30 hard cap (PayeeStore.kt). */
+class PayeeLimitExceededException(partyId: UUID) :
+    RuntimeException("Party $partyId already has the maximum of 30 saved payees")
+
 /** ADR-0055 bounded name search. `q` is normalised via SearchRequest; a blank/`*`/sub-2-char term returns an empty page. */
 data class SearchPartiesQuery(val q: String?, val limit: Int = 20, val cursor: String? = null)
 
+/** ADR-0284 D3: bind a human [agentPartyId] to the legal entity [principalPartyId] they may act for. */
+data class GrantMandateCommand(
+    val principalPartyId: UUID,
+    val agentPartyId: UUID,
+    val role: MandateRole,
+    val authority: MandateAuthority,
+    val requiredSignatures: Int,
+    val source: MandateSource,
+    val evidenceRef: String?,
+    val validTo: java.time.Instant? = null,
+)
+
+data class RevokeMandateCommand(val principalPartyId: UUID, val mandateId: UUID, val reason: String)
+
+/** A profile the human may switch to: the entity party plus the mandate that grants it (ADR-0284 D4). */
+data class ActingForProfile(val party: Party, val mandate: PartyMandate)
+
+class PartyMandateRejectedException(message: String) : RuntimeException(message)
+
 interface PartyUseCase {
     suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party>
+
+    /** ADR-0284 D3. The principal must be a SOLE_TRADER/COMPANY/TRUST and the agent an INDIVIDUAL; both must exist. */
+    suspend fun grantMandate(cmd: GrantMandateCommand): PartyMandate
+
+    suspend fun revokeMandate(cmd: RevokeMandateCommand): PartyMandate
+
+    suspend fun listMandates(principalPartyId: UUID): List<PartyMandate>
+
+    /** ACTIVE mandates of [agentPartyId], each resolved to the entity party — what the edge switches profiles on. */
+    suspend fun actingFor(agentPartyId: UUID): List<ActingForProfile>
     suspend fun createParty(cmd: CreatePartyCommand): Party
     suspend fun getParty(id: UUID): Party
     suspend fun updateParty(cmd: UpdatePartyCommand): Party
@@ -190,6 +230,19 @@ interface PartyUseCase {
      * Used by the GDPR Art. 15 export endpoint to verify subject-access self-service.
      */
     suspend fun getPartyKeycloakSub(id: UUID): String?
+
+    /** Saved payees (TOP-10 #5), newest first — server side of the mobile app's device-local list. */
+    suspend fun listPayees(partyId: UUID): List<Payee>
+
+    /**
+     * Upsert by (partyId, iban). Throws [PayeeLimitExceededException] when [partyId] would exceed
+     * the 30-payee cap AND [iban] is not already one of its existing payees (a re-save of an
+     * existing IBAN is always allowed — it can never itself push the count over the limit).
+     */
+    suspend fun savePayee(cmd: SavePayeeCommand): Payee
+
+    /** No-op (not an error) if no such payee exists — matches the app's own idempotent remove(). */
+    suspend fun deletePayee(partyId: UUID, iban: String)
 }
 
 /**

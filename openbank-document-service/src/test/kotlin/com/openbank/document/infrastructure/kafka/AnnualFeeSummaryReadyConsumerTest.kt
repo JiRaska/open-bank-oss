@@ -13,8 +13,12 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.util.UUID
+
+/** Named so detekt's TooGenericExceptionThrown does not fire at the throw site. */
+private class AnnualTransientDbFailure : RuntimeException("connection refused")
 
 /** Poison-pill safety + field-presence guards for [AnnualFeeSummaryReadyConsumer] (mirrors AccountCreatedConsumerTest). */
 class AnnualFeeSummaryReadyConsumerTest {
@@ -137,7 +141,7 @@ class AnnualFeeSummaryReadyConsumerTest {
     }
 
     @Test
-    fun `swallows a downstream failure so one bad account never wedges the consumer`(): Unit = runBlocking {
+    fun `acks a DETERMINISTIC downstream failure so one bad account never wedges the consumer`(): Unit = runBlocking {
         val accountId = UUID.randomUUID()
         val partyId = UUID.randomUUID()
         coEvery { deliveryUseCase.deliverAnnualStatement(any()) } throws
@@ -147,7 +151,38 @@ class AnnualFeeSummaryReadyConsumerTest {
         // halt the stream (poison-pill safety). runBlocking would rethrow if consume() let it escape.
         consumer.consume(annualFeeSummaryPayload(accountId, partyId))
 
+        // Exactly once: a failure that fails identically on every delivery must not burn retries.
         coVerify(exactly = 1) { deliveryUseCase.deliverAnnualStatement(any()) }
+    }
+
+    /** The #5698 half the generic `catch (e: Exception)` could not express — see the sibling test. */
+    @Test
+    fun `a TRANSIENT downstream failure is retried and then RETHROWN so the connector dead-letters`(): Unit =
+        runBlocking {
+            val accountId = UUID.randomUUID()
+            val partyId = UUID.randomUUID()
+            coEvery { deliveryUseCase.deliverAnnualStatement(any()) } throws AnnualTransientDbFailure()
+
+            assertThrows<AnnualTransientDbFailure> {
+                runBlocking { consumer.consume(annualFeeSummaryPayload(accountId, partyId)) }
+            }
+
+            coVerify(exactly = 3) { deliveryUseCase.deliverAnnualStatement(any()) }
+        }
+
+    @Test
+    fun `a transient failure that recovers is retried to success, not dead-lettered`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        var calls = 0
+        coEvery { deliveryUseCase.deliverAnnualStatement(any()) } answers {
+            calls++
+            if (calls == 1) throw AnnualTransientDbFailure() else Unit
+        }
+
+        consumer.consume(annualFeeSummaryPayload(accountId, partyId))
+
+        coVerify(exactly = 2) { deliveryUseCase.deliverAnnualStatement(any()) }
     }
 
     private fun annualFeeSummaryPayload(accountId: UUID, partyId: UUID) = """

@@ -4,24 +4,25 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useRef, type CSSProperties, type ElementType } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CreditCard, ArrowLeftRight, Users, Activity, ShieldCheck, RefreshCw,
-  DollarSign, Globe, BarChart3, Server } from 'lucide-react'
+  DollarSign, Globe, BarChart3, Server, ClipboardList, ScrollText, Landmark } from 'lucide-react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { hasPermission, type Permission } from '@/lib/auth/roles'
+import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHealth'
 import styles from './Dashboard.module.css'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { FLEET_GROUPS, parseDashboardHealth, parseGovernanceFleet } from '@/lib/dashboard/clientContract'
 
 // Tri-state per fleet member. `deployed=false` is NEUTRAL (planned, not an outage) —
 // it must never be counted as an error, or the 23 not-yet-deployed services in the
 // sandbox would read as an 85% error rate. `up` is only meaningful when deployed.
 interface SvcStatus { name: string; label: string; group: string; deployed: boolean; up: boolean; latencyMs: number | null }
-
-// Shape of one entry in /api/services/health `services[]` (k8s discovery, ADR-0051).
-interface HealthEntry { name: string; port: number; label: string; group: string; container: string; status: string; latencyMs: number | null }
 
 // Canonical intended fleet (ADR-0029 governance manifest) — the authoritative roster
 // of every service the platform is designed to run, independent of what is currently
@@ -41,37 +42,53 @@ const GROUP_COLORS: Record<string, string> = {
   identity: 'var(--info)', 'open-banking': 'var(--accent)', platform: 'var(--text-tertiary)'
 }
 
+const WORKSPACE_ICONS: Record<string, ElementType> = {
+  '/accounts': CreditCard,
+  '/transactions': ArrowLeftRight,
+  '/onboarding': ClipboardList,
+  '/parties': Users,
+  '/payments': DollarSign,
+  '/standing-orders': ArrowLeftRight,
+  '/clearing': Landmark,
+  '/fx': Globe,
+  '/kyc': ShieldCheck,
+  '/aml': ShieldCheck,
+  '/sanctions': ShieldCheck,
+  '/audit': ScrollText,
+  '/system/health': Activity,
+  '/devops': Activity,
+  '/observability': Activity,
+  '/services': Server,
+}
+
 export default function DashboardPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data: session } = useSession()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [evidenceFailure, setEvidenceFailure] = useState<'governance' | 'health' | null>(null)
   const loadingRef = useRef(false)
 
   const load = useCallback(async () => {
     if (loadingRef.current) return
     loadingRef.current = true
     setLoading(true)
-    // Canonical fleet from the code-derived governance manifest (ADR-0071).
-    let fleet: { name: string; group: string }[] = []
+    setEvidenceFailure(null)
+    // Governance and live health are independent reads. Start them together so a
+    // slow health probe cannot delay the canonical roster (and vice versa).
+    const governanceRequest = fetch('/api/services/governance', { cache: 'no-store' }).catch(() => null)
+    const healthRequest = fetch('/api/services/health', { signal: AbortSignal.timeout(10000), cache: 'no-store' }).catch(() => null)
+    const [govRes, res] = await Promise.all([governanceRequest, healthRequest])
+
     try {
-      const govRes = await fetch('/api/services/governance', { cache: 'no-store' })
-      if (govRes.ok) {
-        const g = await govRes.json() as { items?: { serviceName: string; dataDomain: string }[] }
-        fleet = (g.items ?? []).map(e => ({ name: e.serviceName, group: e.dataDomain }))
-      }
-    } catch { /* fleet stays empty → roster degrades calmly, no blank crash */ }
-    try {
-      const res = await fetch('/api/services/health', { signal: AbortSignal.timeout(10000), cache: 'no-store' })
+      if (!govRes?.ok) throw new Error('governance')
+      const fleet = parseGovernanceFleet(await govRes.json())
+      if (!res?.ok) throw new Error('health')
       // Live discovery (ADR-0051) keyed by bare deployment name. Empty on failure —
-      // the fleet still renders, every member simply shows as not-deployed rather
-      // than the page going blank.
-      const discovered = new Map<string, HealthEntry>()
-      if (res.ok) {
-        const data = await res.json() as { services: HealthEntry[] }
-        for (const e of (data.services ?? [])) discovered.set(e.name, e)
-      }
+      // the fleet stays distinct from a verified not-deployed state.
+      const discovered = new Map(parseDashboardHealth(await res.json()).map(entry => [entry.name, entry]))
       // Overlay discovery on the canonical fleet: every intended service appears,
       // with deployed/healthy resolved from the cluster. A roster member absent from
       // discovery is NOT-DEPLOYED (neutral), never DOWN (which is a real outage).
@@ -87,11 +104,11 @@ export default function DashboardPage() {
         }
       })
       setStatuses(results)
-    } catch {
-      // Keep the fleet visible (all not-deployed) instead of a blank dashboard.
-      setStatuses(fleet.map(f => ({ name: f.name, label: titleCase(f.name), group: f.group, deployed: false, up: false, latencyMs: null })))
+      setLastRefresh(new Date())
+    } catch (error) {
+      setStatuses([])
+      setEvidenceFailure(error instanceof Error && error.message === 'governance' ? 'governance' : 'health')
     }
-    setLastRefresh(new Date())
     setLoading(false)
     loadingRef.current = false
   }, [])
@@ -123,30 +140,80 @@ export default function DashboardPage() {
   const healthState = fleetHealthState(health)
   const healthTone: Tone = healthState === 'healthy' ? 'success' : healthState === 'degraded' ? 'warning' : 'neutral'
   const roles = session?.user?.roles ?? []
+  const persona = personaForRoles(roles)
+  const workspace = workspaceFor(persona).filter(link => hasPermission(roles, link.permission))
+  const personaLanguage = language === 'cs' ? 'cs' : 'en'
 
-  const groups = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
+  const groups = FLEET_GROUPS
 
   return (
-    <main className={styles.dashboard}>
+    <div className={styles.dashboard}>
       <PageHeader
-        title={t('Přehled platformy', 'Platform overview')}
-        subtitle={t('Aktuální stav health-checků nasazené části platformy.', 'Current health-check state of the deployed platform.')}
+        title={t('Můj pracovní prostor', 'My workspace')}
+        subtitle={`${personaLabel(persona, personaLanguage)} · ${t('Prioritní pracovní fronty a aktuální stav platformy.', 'Priority work queues and the current platform state.')}`}
         icon={<Activity className={styles.headerIcon} size={20} aria-hidden="true" />}
         actions={
           <div className={styles.headerActions}>
           {lastRefresh && (
             <span className={styles.lastRefresh}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit přehled platformy', 'Refresh platform overview')} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
           </div>
         }
       />
 
+      <ExplorerGuide title={t('Vítejte ve svém operačním kokpitu', 'Welcome to your operations cockpit')}>
+        {t(
+          'Začněte pracovními frontami podle svých oprávnění. Červená znamená skutečný problém; šedá služba jen čeká na nasazení. Explorer nemá rád falešné poplachy — a vy je nemusíte řešit.',
+          'Start with the work queues matched to your permissions. Red means a real problem; a grey service is merely awaiting deployment. Explorer dislikes false alarms, so you do not have to chase them.',
+        )}
+      </ExplorerGuide>
+
+      <section className={`card ${styles.workspace}`} aria-labelledby="workspace-heading">
+        <div className={styles.workspaceHeading}>
+          <div>
+            <p className={styles.workspaceEyebrow}>{personaLabel(persona, personaLanguage)}</p>
+            <h2 id="workspace-heading" className={styles.workspaceTitle}>{t('Pracovní fronty', 'Work queues')}</h2>
+          </div>
+          <span className={styles.workspaceContext}>{t('Podle vašich oprávnění', 'Based on your permissions')}</span>
+        </div>
+        <div className={styles.workspaceLinks}>
+          {workspace.map(link => {
+            const Icon = WORKSPACE_ICONS[link.href] ?? Activity
+            return (
+              <Link key={link.href} href={link.href} className={styles.workspaceLink}>
+                <span className={styles.workspaceIcon}><Icon size={18} aria-hidden="true" /></span>
+                <span>{t(link.nameCs, link.nameEn)}</span>
+                <span className={styles.workspaceArrow} aria-hidden="true">→</span>
+              </Link>
+            )
+          })}
+        </div>
+      </section>
+
+      {evidenceFailure ? (
+        <section className="card" aria-label={t('Dostupnost evidence platformy', 'Platform evidence availability')}>
+          <DataUnavailable
+            kind="unreachable"
+            service={evidenceFailure === 'governance' ? t('Governance katalog', 'Governance catalogue') : t('Přehled zdraví platformy', 'Platform health overview')}
+            lang={language}
+            title={t('Aktuální stav platformy nelze ověřit', 'Current platform state cannot be verified')}
+            detail={t(
+              'Poslední odpověď nebyla úplná nebo důvěryhodná. Služby proto neoznačujeme jako zdravé ani nenasažené, dokud nezískáme novou ověřenou evidenci.',
+              'The latest response was incomplete or untrustworthy. Services are therefore not labelled healthy or not deployed until fresh verified evidence is available.',
+            )}
+          >
+            <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+              <RefreshCw size={13} aria-hidden="true" /> {t('Zkusit znovu', 'Try again')}
+            </button>
+          </DataUnavailable>
+        </section>
+      ) : <>
       {/* These are intentionally current health facts, not estimated operational or compliance metrics. */}
       <section className={styles.metrics} aria-label={t('Klíčové metriky platformy', 'Platform key metrics')}>
         <StatCard className={styles.metric} icon={<Server size={15} />} label={t('Zdravé služby', 'Healthy services')} value={`${health.healthy}/${health.deployed}`} tone={healthTone}
@@ -238,10 +305,11 @@ export default function DashboardPage() {
           )
         })}
       </section>
+      </>}
 
       {/* Only show destinations the operator can already access; dashboard shortcuts must not create 403 traps. */}
       <section className={`card ${styles.quickAccess}`} aria-labelledby="quick-access-heading">
-        <h2 id="quick-access-heading" className={styles.sectionLabel}>{t('Rychlý přístup', 'Quick Access')}</h2>
+        <h2 id="quick-access-heading" className={styles.sectionLabel}>{t('Další nástroje', 'More tools')}</h2>
         <div className={styles.quickLinks}>
           {[
             { href: '/accounts', label: t('Účty', 'Accounts'), icon: CreditCard, color: 'var(--accent)', permission: 'accounts:view' },
@@ -263,6 +331,6 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
-    </main>
+    </div>
   )
 }

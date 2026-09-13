@@ -39,6 +39,22 @@ data class Account(
     val goalName: String? = null,
     val goalTargetMinorUnits: Long? = null,
     val goalTargetDate: LocalDate? = null,
+    /**
+     * Customer-chosen label for this account ("Dovolená", "Firemní"), shown instead of the
+     * generic account-type name. Purely cosmetic — never used for routing, matching, or any
+     * authorization decision. Null means "use the account-type default name".
+     */
+    val nickname: String? = null,
+    /**
+     * Terms version this deposit was opened under (#9044) — the record a complaints/conduct
+     * review asks for first. Non-null for every TERM_DEPOSIT opened after V24 (enforced by
+     * chk_accounts_terms); null means a pre-V24 account, which has no truthful record and was
+     * deliberately NOT backfilled from openedAt (that would manufacture evidence).
+     */
+    val termsVersion: String? = null,
+    /** Snapshot of the terms document reference at opening (URL + effective-from date). */
+    val termsUrl: String? = null,
+    val termsEffectiveFrom: LocalDate? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }
@@ -66,16 +82,20 @@ data class Account(
         return copy(status = AccountStatus.ACTIVE)
     }
 
-    /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0073). */
+    /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0267). */
     fun activate(): Account {
         check(status == AccountStatus.PENDING_ACTIVATION) { "Cannot activate account in status $status" }
         return copy(status = AccountStatus.ACTIVE)
     }
+
+    /** Set or clear the customer-chosen label. Blank is treated as "clear" (revert to default). */
+    fun rename(nickname: String?): Account = copy(nickname = nickname?.trim()?.ifBlank { null })
 }
 
 enum class AccountType {
     CURRENT,
     SAVINGS,
+    TERM_DEPOSIT,
     NOSTRO,
     GL_ASSET,
     GL_LIABILITY,

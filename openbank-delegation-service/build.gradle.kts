@@ -4,6 +4,17 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
+}
+
+tasks.test {
+    // The full module suite boots multiple Quarkus/Testcontainers test profiles and replays the
+    // delegation message Pacts. Gradle's default test heap can OOM before the replay finishes,
+    // making the interactions misleadingly appear as missing. Keep this service aligned with the
+    // account/lending money-path suites, which carry the same measured 2 GiB override.
+    maxHeapSize = "2g"
 }
 
 dependencies {
@@ -52,6 +63,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contracts for the four services delegation-service calls before it will
     // mint a grant (sca, pid, account, card-issuance) — issue #2991.
@@ -83,17 +96,24 @@ kover {
     }
 }
 
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
+
+// Mutation testing (ADR-0063 / ADR-0030 D3).
+// ADR-0249 D3 spend-ceiling arithmetic (SpendCeilings.evaluate / headroom clamp,
+// SpendReservation lifecycle) is real money-movement math on BigDecimal — the criterion in
+// rules.yaml: coverage.money_path_depth. 60 branch sites across 7 domain files.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.delegation.domain.*")
+    targetTests = setOf("com.openbank.delegation.domain.*", "com.openbank.delegation.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.delegation.domain.*Kt")
 }

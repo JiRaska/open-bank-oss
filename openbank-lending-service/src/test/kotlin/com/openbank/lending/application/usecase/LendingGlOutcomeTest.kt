@@ -4,6 +4,8 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -78,6 +80,8 @@ class LendingGlOutcomeTest {
     }
     private val clock = Clock.fixed(Instant.parse("2026-04-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
+    private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
+    private val borrowerCredit = mockk<BorrowerCreditPort>()
 
     private val service = LendingService(
         applications, loans, installments, collateral, ledger,
@@ -91,6 +95,8 @@ class LendingGlOutcomeTest {
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             clock,
         ),
+        borrowerAccounts,
+        borrowerCredit,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

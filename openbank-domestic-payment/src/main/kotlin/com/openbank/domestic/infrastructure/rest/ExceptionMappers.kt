@@ -6,6 +6,7 @@ package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.application.port.`in`.PaymentNotSettledException
 import com.openbank.domestic.application.port.out.PaymentConfirmationRenderException
+import com.openbank.domestic.application.usecase.DomesticPaymentIdempotencyConflictException
 import com.openbank.domestic.application.usecase.DomesticPaymentNotFoundException
 import com.openbank.domestic.application.usecase.InvalidDomesticPaymentStateTransitionException
 import com.openbank.libs.api.error.ApiError
@@ -44,6 +45,27 @@ class InvalidDomesticPaymentStateTransitionMapper : ExceptionMapper<InvalidDomes
             ),
         )
         .build()
+}
+
+/** A key is replayable only for the exact normalized command and authenticated actor scope. */
+@Provider
+class DomesticPaymentIdempotencyConflictMapper : ExceptionMapper<DomesticPaymentIdempotencyConflictException> {
+    override fun toResponse(exception: DomesticPaymentIdempotencyConflictException): Response {
+        val detail = requireNotNull(exception.message)
+        return Response.status(Response.Status.CONFLICT)
+            .entity(
+                mapOf(
+                    "type" to "urn:openbank:error:idempotency-key-reused",
+                    "title" to "Idempotency key reused",
+                    "status" to Response.Status.CONFLICT.statusCode,
+                    "detail" to detail,
+                    "code" to "IDEMPOTENCY_KEY_REUSED",
+                    "error" to detail,
+                ),
+            )
+            .type("application/problem+json")
+            .build()
+    }
 }
 
 @Provider

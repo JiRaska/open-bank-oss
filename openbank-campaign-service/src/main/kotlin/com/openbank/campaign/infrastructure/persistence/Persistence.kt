@@ -6,6 +6,7 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.AudienceRegistry
 import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEngagementEvent
 import com.openbank.campaign.application.port.out.CampaignEngagementEventType
@@ -13,6 +14,9 @@ import com.openbank.campaign.application.port.out.CampaignEngagementMetric
 import com.openbank.campaign.application.port.out.CampaignEngagementRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignIncentiveFunnel
+import com.openbank.campaign.application.port.out.CampaignIncentiveOutcomeEvent
+import com.openbank.campaign.application.port.out.CampaignIncentiveOutcomeRepository
 import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
@@ -23,8 +27,11 @@ import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
+import com.openbank.campaign.domain.model.Audience
+import com.openbank.campaign.domain.model.AudienceState
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -37,6 +44,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -53,6 +61,8 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
@@ -70,6 +80,16 @@ class CampaignEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var goal: String
+
+    /**
+     * ADR-0269 rule 1. NOT NULL with no database default: a row that reaches here without a kind is
+     * a bug worth failing on, not one to paper over with an implicit NONE. V19 backfilled the rows
+     * that predate the column, which is a one-off statement about history, not a standing default
+     * for new writes.
+     */
+    @Column(nullable = false, length = 32)
+    @Enumerated(EnumType.STRING)
+    lateinit var productKind: CampaignProductKind
 
     @Column(nullable = false)
     lateinit var segmentName: String
@@ -118,6 +138,15 @@ class CampaignEntity : PanacheEntityBase() {
     /** Percentage assigned to the durable no-contact control cohort (V8). */
     @Column(nullable = false)
     var holdoutPercent: Int = 0
+
+    @Column
+    var incentiveOfferId: UUID? = null
+
+    @Column(length = 160)
+    var incentiveOfferName: String? = null
+
+    @Column
+    var incentiveOfferVersion: Int? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -239,6 +268,42 @@ class CampaignEngagementEventEntity : PanacheEntityBase() {
     lateinit var occurredAt: Instant
 }
 
+/** No party, promo code or digest is retained in this operator-facing projection. */
+@Entity
+@Table(name = "campaign_incentive_outcome")
+class CampaignIncentiveOutcomeEntity : PanacheEntityBase() {
+    @Id
+    @Column(nullable = false, updatable = false)
+    lateinit var eventId: UUID
+
+    @Column(nullable = false)
+    lateinit var reservationId: UUID
+
+    @Column(nullable = false)
+    lateinit var campaignId: UUID
+
+    @Column(nullable = false)
+    var stepOrder: Int = 0
+
+    @Column(nullable = false)
+    lateinit var attributionRef: UUID
+
+    @Column(nullable = false)
+    lateinit var offerId: UUID
+
+    @Column(nullable = false)
+    lateinit var offerName: String
+
+    @Column(nullable = false)
+    var offerVersion: Int = 1
+
+    @Column(nullable = false, length = 16)
+    lateinit var status: String
+
+    @Column(nullable = false)
+    lateinit var occurredAt: Instant
+}
+
 @Entity
 @Table(name = "segments")
 class SegmentEntity : PanacheEntityBase() {
@@ -258,6 +323,17 @@ class SegmentEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var createdAt: Instant
+
+    @Column(nullable = false, length = 32)
+    lateinit var state: String
+
+    @Column(nullable = false)
+    lateinit var createdBy: String
+
+    var approvedBy: String? = null
+
+    @Column(nullable = false)
+    lateinit var updatedAt: Instant
 }
 
 @ApplicationScoped
@@ -287,6 +363,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         id = this@toEntity.id
         name = this@toEntity.name
         goal = this@toEntity.goal
+        productKind = this@toEntity.productKind
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
@@ -297,6 +374,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         scheduleEndAt = this@toEntity.schedule?.endAt
         triggerEvent = this@toEntity.trigger
         holdoutPercent = this@toEntity.holdoutPercent
+        incentiveOfferId = this@toEntity.incentiveOfferRef?.id
+        incentiveOfferName = this@toEntity.incentiveOfferRef?.name
+        incentiveOfferVersion = this@toEntity.incentiveOfferRef?.version
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -308,6 +388,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         id = id,
         name = name,
         goal = goal,
+        productKind = productKind,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         decisions = decisionsJson?.let { mapper.readValue<List<CampaignDecision>>(it) } ?: emptyList(),
@@ -323,6 +404,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         approvedBy = approvedBy,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        incentiveOfferRef = incentiveOfferId?.let { offerId ->
+            IncentiveOfferRef(offerId, requireNotNull(incentiveOfferName), requireNotNull(incentiveOfferVersion))
+        },
     )
 }
 
@@ -485,6 +569,52 @@ class PanacheCampaignEngagementRepository : CampaignEngagementRepository {
 
     private companion object {
         const val EVENT_TYPE_INDEX = 3
+    }
+}
+
+@ApplicationScoped
+class PanacheCampaignIncentiveOutcomeRepository : CampaignIncentiveOutcomeRepository {
+    override suspend fun record(campaignId: UUID, stepOrder: Int, event: CampaignIncentiveOutcomeEvent): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(
+                    "INSERT INTO campaign_incentive_outcome " +
+                        "(event_id, reservation_id, campaign_id, step_order, attribution_ref, " +
+                        "offer_id, offer_name, offer_version, status, occurred_at) " +
+                        "VALUES (:eventId, :reservationId, :campaignId, :stepOrder, :attributionRef, " +
+                        ":offerId, :offerName, :offerVersion, :status, :occurredAt) " +
+                        "ON CONFLICT DO NOTHING",
+                )
+                    .setParameter("eventId", event.eventId)
+                    .setParameter("reservationId", event.reservationId)
+                    .setParameter("campaignId", campaignId)
+                    .setParameter("stepOrder", stepOrder)
+                    .setParameter("attributionRef", event.attributionRef)
+                    .setParameter("offerId", event.offerRef.id)
+                    .setParameter("offerName", event.offerRef.name)
+                    .setParameter("offerVersion", event.offerRef.version)
+                    .setParameter("status", event.status.name)
+                    .setParameter("occurredAt", event.occurredAt)
+                    .executeUpdate()
+            }
+        }.awaitSuspending() == 1
+
+    override suspend fun funnel(campaignId: UUID): CampaignIncentiveFunnel {
+        val counts = Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select e.status, count(e) from CampaignIncentiveOutcomeEntity e " +
+                        "where e.campaignId = :campaignId group by e.status",
+                    Array<Any>::class.java,
+                ).setParameter("campaignId", campaignId).resultList
+            }
+        }.awaitSuspending().associate { (it[0] as String) to (it[1] as Long) }
+        return CampaignIncentiveFunnel(
+            reserved = counts["RESERVED"] ?: 0,
+            committed = counts["COMMITTED"] ?: 0,
+            released = counts["RELEASED"] ?: 0,
+            expired = counts["EXPIRED"] ?: 0,
+        )
     }
 }
 
@@ -654,6 +784,19 @@ class PanacheSendLogRepository :
         CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
     }
 
+    override suspend fun attributionForIncentiveOutcome(interactionRef: UUID): CampaignInteractionAttribution? =
+        Panache.withSession {
+            find(
+                "id = ?1 and channel in (?2, ?3) and outcome = ?4",
+                interactionRef,
+                Channel.PUSH.name,
+                Channel.BANNER.name,
+                SendOutcome.SENT.name,
+            ).firstResult<SendLogEntity>()
+        }.awaitSuspending()?.let {
+            CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
+        }
+
     /**
      * The predecessor send's delivery status (#3585 branch conditions).
      *
@@ -729,7 +872,10 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
      * approved campaign reaches, with no version bump and no trace.
      */
     override suspend fun load(name: String, version: Int): Segment? = SegmentCatalog.find(name, version)
-        ?: Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
+        ?: Panache.withSession {
+            find("name = ?1 and version = ?2 and state = ?3", name, version, AudienceState.APPROVED.name)
+                .firstResult<SegmentEntity>()
+        }
             .awaitSuspending()?.let { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
 
     override suspend fun save(segment: Segment): Segment {
@@ -741,6 +887,10 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
                     version = segment.version
                     rulesJson = SegmentRuleSerde.write(mapper, segment.rules)
                     createdAt = Instant.now()
+                    state = AudienceState.APPROVED.name
+                    createdBy = "legacy-catalogue"
+                    approvedBy = "legacy-catalogue"
+                    updatedAt = createdAt
                 },
             )
         }.awaitSuspending()
@@ -748,10 +898,67 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
     }
 
     override suspend fun list(): List<Segment> {
-        val legacy = Panache.withSession { listAll() }.awaitSuspending()
+        val legacy = Panache.withSession { list("state", AudienceState.APPROVED.name) }.awaitSuspending()
             .map { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
         val catalogKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
         return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
+    }
+}
+
+/** Database-backed audiences are mutable only through their governed lifecycle. */
+@ApplicationScoped
+class PanacheAudienceRegistry(private val mapper: ObjectMapper) :
+    AudienceRegistry,
+    PanacheRepository<SegmentEntity> {
+
+    override suspend fun load(name: String, version: Int): Audience? =
+        SegmentCatalog.find(name, version)?.let(Audience::catalogue)
+            ?: Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
+                .awaitSuspending()?.toAudience(mapper)
+
+    override suspend fun list(): List<Audience> {
+        val stored = Panache.withSession { listAll() }.awaitSuspending().map { it.toAudience(mapper) }
+        val catalogueKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
+        return SegmentCatalog.ALL.map(Audience::catalogue) +
+            stored.filterNot { (it.segment.name to it.segment.version) in catalogueKeys }
+    }
+
+    override suspend fun nextVersion(name: String): Int {
+        val stored = Panache.withSession { list("name", name) }.awaitSuspending().map { it.version }
+        val catalogue = SegmentCatalog.ALL.filter { it.name == name }.map { it.version }
+        return (stored + catalogue).maxOrNull()?.plus(1) ?: 1
+    }
+
+    override suspend fun save(audience: Audience): Audience {
+        val existingId = Panache.withSession {
+            find("name = ?1 and version = ?2", audience.segment.name, audience.segment.version)
+                .firstResult<SegmentEntity>()
+        }.awaitSuspending()?.id
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session -> session.merge(audience.toEntity(mapper, existingId)) }
+        }.awaitSuspending()
+        return audience
+    }
+
+    private fun SegmentEntity.toAudience(mapper: ObjectMapper) = Audience(
+        segment = Segment(name, version, SegmentRuleSerde.read(mapper, rulesJson)),
+        state = AudienceState.valueOf(state),
+        createdBy = createdBy,
+        approvedBy = approvedBy,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )
+
+    private fun Audience.toEntity(mapper: ObjectMapper, existingId: UUID?) = SegmentEntity().apply {
+        id = existingId ?: Ids.newId()
+        name = segment.name
+        version = segment.version
+        rulesJson = SegmentRuleSerde.write(mapper, segment.rules)
+        state = this@toEntity.state.name
+        createdBy = this@toEntity.createdBy
+        approvedBy = this@toEntity.approvedBy
+        createdAt = this@toEntity.createdAt
+        updatedAt = this@toEntity.updatedAt
     }
 }
 

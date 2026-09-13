@@ -22,7 +22,7 @@ runbook flips settlement, in the safe order, with a stop/rollback at each gate.
 | Temporal namespace | `openbank-settlement` (settlement's own `TemporalConfig` `@WithDefault`, like fx/statements — NOT `openbank-default`) | was **missing** from the registration `NAMESPACES` list → go-live NOT_FOUND | **added** ✅ |
 | GL debit account | `SETTLEMENT_GL_DEBIT_ACCOUNT_ID` | `a0000000-…-0002` (2100 CZK deposit-control) | unchanged ✅ (correct for CZK) |
 | GL credit account | `SETTLEMENT_GL_CREDIT_ACCOUNT_ID` | `a0000000-…-0002` (same — payer/payee on subAccountId) | unchanged ✅ (correct for CZK) |
-| OPA enforcement | no `AUTHZ_ENFORCE` set ⇒ libs default (advisory) | `opa/settlement_activity.rego` deployed, advisory | `true` after validation |
+| OPA enforcement | no `AUTHZ_ENFORCE` set ⇒ libs default (advisory) | **Corrected 2026-08-20 (#6055):** `opa/settlement_activity.rego` was never deployed — it was in no bundle ConfigMap and is now deleted. The policy that IS deployed is `settlement_rest_ext.rego` (REST action `settlement.create`), in `settlement-opa-bundle.yaml`. | `true` after validation |
 
 **GL accounts — CORRECTION (verified 2026-06-23):** an earlier draft of this runbook called the
 identical debit/credit GL UUID a blocker. It is **not** — it is correct. `LedgerBookAdapter` sets
@@ -70,8 +70,13 @@ per-currency control account.
 
 ### Gate 2 — OPA enforcement (after Gate 1 is stable for ≥1 settlement cycle)
 
-1. Confirm `settlement_activity.rego` is returning `allow` for the 7 activity methods in
-   advisory logs (no would-be denials of legitimate traffic).
+1. Confirm the deployed policy allows legitimate traffic in advisory logs (no would-be denials).
+   **Corrected 2026-08-20 (#6055):** this step used to say "confirm `settlement_activity.rego` is
+   returning `allow` for the 7 activity methods" — that was unperformable, because nothing ever loaded
+   or queried that file and there is no activity-level authorization on the worker at all (threat model
+   residual risk 2, re-opened). The observable gate is the REST one: `settlement.create` on
+   `POST /api/v1/settlements`, evaluated against `data.openbank.rest.allow`. Temporal activities inside
+   the worker are not evaluated by OPA and flipping this flag does not change how they are dispatched.
 2. Patch GitOps (settlement-service env):
    ```yaml
    - name: AUTHZ_ENFORCE

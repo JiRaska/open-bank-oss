@@ -28,7 +28,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { classifyBffFailure, type BffFailure } from './bff'
 
-export type ServiceUnavailable = { kind: BffFailure | 'no_data' }
+export type ServiceUnavailable = {
+  kind: BffFailure | 'no_data'
+  /** Upstream HTTP status when this failure came from a response. */
+  status?: number
+}
 
 export interface ServiceResource<T> {
   data: T | null
@@ -82,42 +86,67 @@ export function useServiceResource<T = unknown>(
   const reload = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
-    if (!url) {
-      setLoading(false)
-      return
-    }
+    if (!url) return
     const { select, maxWakeRetries = 3, retryDelayMs = 4000, timeoutMs = 10_000 } = optsRef.current
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let activeController: AbortController | null = null
     let attempt = 0
 
-    const scheduleRetry = (kind: BffFailure) => {
+    const scheduleRetry = (kind: BffFailure, status?: number) => {
       attempt += 1
       setWaking(true)
       // Show the calm "idle / waking" panel while we keep polling.
-      setUnavailable({ kind })
+      setUnavailable({ kind, status })
       timer = setTimeout(run, retryDelayMs)
     }
 
     async function run() {
+      if (attempt === 0) {
+        setLoading(true)
+        setUnavailable(null)
+        setWaking(false)
+      }
+      const controller = new AbortController()
+      activeController = controller
+      const deadline = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const res = await fetch(url!, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' })
+        const res = await fetch(url!, { signal: controller.signal, cache: 'no-store' })
         if (cancelled) return
         if (!res.ok) {
           const kind = await classifyBffFailure(res)
           if (cancelled) return
           if (WAKE_KINDS.has(kind) && attempt < maxWakeRetries) {
-            scheduleRetry(kind)
+            scheduleRetry(kind, res.status)
             return
           }
-          setUnavailable({ kind })
+          // Never retain privileged data after the session expires or access is revoked.
+          if (kind === 'unauthorized') setData(null)
+          setUnavailable({ kind, status: res.status })
           setWaking(false)
           setLoading(false)
           return
         }
         const raw = (await res.json()) as unknown
         if (cancelled) return
-        setData((select ? select(raw) : (raw as T)))
+        // `select` runs OUTSIDE the transport catch below, deliberately. These pages parse through
+        // a strict client contract (cards is the PCI allow-list boundary), so `select` throws on a
+        // payload the upstream should not have sent. Letting that land in the transport catch
+        // classified a CONTRACT violation as a cold pod: the screen said "the service is waking
+        // up", retried three times, and then reported `unreachable` — sending the operator after
+        // a scaling problem that does not exist while the real fault, a malformed response, was
+        // never named anywhere. A parse failure is `error`: terminal, not retried.
+        let parsed: T
+        try {
+          parsed = (select ? select(raw) : (raw as T))
+        } catch {
+          if (cancelled) return
+          setUnavailable({ kind: 'error', status: res.status })
+          setWaking(false)
+          setLoading(false)
+          return
+        }
+        setData(parsed)
         setUnavailable(null)
         setWaking(false)
         setLoading(false)
@@ -131,20 +160,21 @@ export function useServiceResource<T = unknown>(
         setUnavailable({ kind: 'unreachable' })
         setWaking(false)
         setLoading(false)
+      } finally {
+        clearTimeout(deadline)
+        if (activeController === controller) activeController = null
       }
     }
 
-    setLoading(true)
-    setUnavailable(null)
-    setWaking(false)
     run()
 
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
+      activeController?.abort()
     }
     // `url` + `nonce` are the only real inputs; options are read via ref.
   }, [url, nonce])
 
-  return { data, loading, unavailable, waking, reload }
+  return { data, loading: url ? loading : false, unavailable, waking, reload }
 }

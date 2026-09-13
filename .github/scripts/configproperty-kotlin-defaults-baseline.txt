@@ -43,7 +43,6 @@ openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/KeycloakAdminClient.kt::adminClientSecret
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/KeycloakAdminClient.kt::adminRealm
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/KeycloakAdminClient.kt::adminUrl
-openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamClient.kt::allowedHostSuffixes
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamClient.kt::clientId
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamClient.kt::clientSecret
 openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamClient.kt::connectTimeoutMs

@@ -125,11 +125,49 @@ class SddMandateServiceTest {
     }
 
     @Test
+    fun `re-authorising the SAME collection (same dueDate) replays the decision with no side effects`() {
+        // #8351: an authorised collection is uniquely (mandateId, umr, dueDate) — the triple the
+        // debit consumer dedups under. A retried authorise for the same dueDate must return the
+        // same Accept WITHOUT re-stamping the mandate or re-emitting the outbox event; a
+        // different dueDate is a new collection and flows through the normal Accept branch.
+        val mandate = Fixtures.mandate(
+            sequenceType = SequenceType.RCUR,
+            lastCollectionDate = LocalDate.parse("2026-03-01"),
+        )
+        every { mandates.findByReference(any(), any()) } returns Uni.createFrom().item(mandate)
+
+        val result = service.authorise(
+            CollectionInstruction(
+                "DE98ZZZ09999999999",
+                "UMR-0001",
+                SddScheme.CORE,
+                SequenceType.RCUR,
+                BigDecimal("42.00"),
+                "EUR",
+                LocalDate.parse("2026-03-01"),
+            ),
+            DebtorControls(),
+        ).await().indefinitely()
+
+        assertThat(result).isInstanceOf(AuthorisationResult.Accept::class.java)
+        verify(exactly = 0) { mandates.save(any()) }
+        verify(exactly = 0) { outbox.append(any()) }
+    }
+
+    @Test
     fun `a refused or rejected collection neither persists nor emits`() {
         every { mandates.findByReference(any(), any()) } returns Uni.createFrom().nullItem()
 
         val result = service.authorise(
-            CollectionInstruction("DE98ZZZ09999999999", "UMR-0001", SddScheme.CORE, SequenceType.RCUR, BigDecimal("42.00"), "EUR", LocalDate.parse("2026-03-01")),
+            CollectionInstruction(
+                "DE98ZZZ09999999999",
+                "UMR-0001",
+                SddScheme.CORE,
+                SequenceType.RCUR,
+                BigDecimal("42.00"),
+                "EUR",
+                LocalDate.parse("2026-03-01"),
+            ),
             DebtorControls(),
         ).await().indefinitely()
 

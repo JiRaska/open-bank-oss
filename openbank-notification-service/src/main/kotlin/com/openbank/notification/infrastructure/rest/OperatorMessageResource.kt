@@ -68,7 +68,7 @@ class OperatorMessageResource {
                     partyId = request.partyId,
                     template = request.template,
                     recipient = request.recipient,
-                    variables = request.variables,
+                    variables = request.requireVariables(),
                 ),
             )
         } catch (e: OperatorMessageRejected) {
@@ -86,5 +86,20 @@ data class ComposeMessageRequest(
     val partyId: UUID,
     val template: OperatorMessageTemplate,
     val recipient: String,
-    val variables: Map<String, String> = emptyMap(),
-)
+    /**
+     * Declared with a NULLABLE value type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the VALUES of
+     * a map, so `{"variables": {"note": null}}` deserialises happily into a `Map<String, String>`
+     * holding a null. Writing the type honestly is what makes [requireVariables] reachable instead
+     * of dead code.
+     */
+    val variables: Map<String, String?> = emptyMap(),
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+     * no service-local mapper is added (#526).
+     */
+    fun requireVariables(): Map<String, String> = variables.mapValues { (key, value) ->
+        requireNotNull(value) { "variables[$key] must not be null" }
+    }
+}

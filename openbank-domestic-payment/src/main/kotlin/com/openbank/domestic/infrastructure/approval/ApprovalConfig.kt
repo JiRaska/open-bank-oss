@@ -12,10 +12,9 @@ import jakarta.enterprise.inject.Produces
 import java.time.Clock
 
 /**
- * Per-service producer for [ApprovalStore] (ADR-0155). Mirrors
- * [com.openbank.domestic.infrastructure.idempotency.IdempotencyConfig] — see
- * [RedisApprovalStore]'s KDoc for why this is a per-service `@Produces`
- * rather than a libs-side bean.
+ * Per-service producer for [ApprovalStore] (ADR-0155). See [RedisApprovalStore]'s KDoc for why
+ * this is a per-service `@Produces` rather than a libs-side bean. Redis is approval workflow state,
+ * never create-payment idempotency authority; that binding is durable in Postgres.
  */
 @ApplicationScoped
 class ApprovalConfig {

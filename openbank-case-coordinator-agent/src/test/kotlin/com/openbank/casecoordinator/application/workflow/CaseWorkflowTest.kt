@@ -7,7 +7,9 @@ package com.openbank.casecoordinator.application.workflow
 
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.casecoordinator.domain.model.CaseClass
+import com.openbank.casecoordinator.domain.model.CaseDeliveryMode
 import com.openbank.casecoordinator.domain.model.CaseOutcome
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.CaseStatus
 import com.openbank.casecoordinator.domain.model.ContributeSignal
@@ -48,6 +50,7 @@ class CaseWorkflowTest {
     private lateinit var worker: Worker
     private lateinit var synthesis: CaseSynthesisActivity
     private lateinit var proposals: CaseProposalActivity
+    private lateinit var deliveryProposals: CaseProposalDeliveryActivity
     private lateinit var persistence: CasePersistenceActivity
 
     companion object {
@@ -77,17 +80,18 @@ class CaseWorkflowTest {
         worker.registerWorkflowImplementationTypes(CaseWorkflowImpl::class.java)
         synthesis = mockk(relaxed = true)
         proposals = mockk(relaxed = true)
+        deliveryProposals = mockk(relaxed = true)
         persistence = mockk(relaxed = true)
         every { synthesis.synthesize(any(), any(), any()) } returns "CONVERGED: restart the ingest consumer"
-        every { proposals.emitProposal(any(), any(), any(), any()) } returns "proposal-1"
-        worker.registerActivitiesImplementations(synthesis, proposals, persistence)
+        every { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) } returns "proposal-1"
+        worker.registerActivitiesImplementations(synthesis, proposals, deliveryProposals, persistence)
         env.start()
     }
 
     @AfterEach
     fun tearDown() = env.close()
 
-    private fun start(deadlineMs: Long = TTL_MS): CaseWorkflow {
+    private fun start(deadlineMs: Long = TTL_MS, deliveryMode: CaseDeliveryMode = CaseDeliveryMode.HITL): CaseWorkflow {
         val start = CaseStart(
             caseId = "case-incident-response-ingest-1",
             caseClass = CaseClass.INCIDENT_RESPONSE,
@@ -97,6 +101,7 @@ class CaseWorkflowTest {
             deadlineEpochMs = System.currentTimeMillis() + deadlineMs,
             contestedRateThreshold = THRESHOLD,
             maxContributions = 40,
+            deliveryMode = deliveryMode,
         )
         val stub = env.workflowClient.newWorkflowStub(
             CaseWorkflow::class.java,
@@ -112,9 +117,23 @@ class CaseWorkflowTest {
     @Test
     fun `join contribute then synthesis emits exactly one proposal`() {
         val stub = start()
-        stub.join(JoinSignal("incident-responder", "investigator"))
+        stub.join(
+            JoinSignal(
+                "incident-responder",
+                "investigator",
+                "11111111-1111-1111-1111-111111111111",
+                "rollout-shadow-1",
+            ),
+        )
         stub.contribute(
-            ContributeSignal("incident-responder", "consumer lag spike after deploy", listOf("grafana/x"), false),
+            ContributeSignal(
+                "incident-responder",
+                "consumer lag spike after deploy",
+                listOf("grafana/x"),
+                false,
+                "22222222-2222-2222-2222-222222222222",
+                "rollout-shadow-1",
+            ),
         )
         stub.requestSynthesis(SynthesisRequest("case-coordinator"))
 
@@ -124,7 +143,37 @@ class CaseWorkflowTest {
         assertThat(outcome.proposalId).isEqualTo("proposal-1")
         verify(exactly = 1) { synthesis.synthesize("case-incident-response-ingest-1", "INCIDENT_RESPONSE", any()) }
         verify(exactly = 1) {
-            proposals.emitProposal("case-incident-response-ingest-1", "case-synthesis", any(), false)
+            deliveryProposals.emitProposalWithDelivery(
+                "case-incident-response-ingest-1",
+                "case-synthesis",
+                any(),
+                false,
+                false,
+            )
+        }
+        verify(exactly = 1) {
+            persistence.recordSignalEvidence(
+                match { evidence ->
+                    evidence.size == 2 &&
+                        evidence.all { it.stage == CaseSignalEvidenceStage.CONSUMED } &&
+                        evidence.map { it.signalId }.toSet() == setOf(
+                            "11111111-1111-1111-1111-111111111111",
+                            "22222222-2222-2222-2222-222222222222",
+                        )
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `shadow case never requests HITL publication`() {
+        val stub = start(deliveryMode = CaseDeliveryMode.SHADOW)
+        stub.requestSynthesis(SynthesisRequest("case-coordinator"))
+
+        result(stub)
+
+        verify(exactly = 1) {
+            deliveryProposals.emitProposalWithDelivery(any(), "case-synthesis", any(), false, true)
         }
     }
 
@@ -150,7 +199,7 @@ class CaseWorkflowTest {
                 },
             )
         }
-        verify(exactly = 1) { proposals.emitProposal(any(), any(), any(), any()) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) }
         // Both contributions — superseded draft included — are recorded history for the thread view.
         verify(exactly = 1) {
             persistence.recordContributions(any(), match { it.size == 2 })
@@ -166,7 +215,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.CONTESTED)
         verify(exactly = 0) { synthesis.synthesize(any(), any(), any()) }
-        verify(exactly = 1) { proposals.emitProposal(any(), "case-contested", any(), true) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), "case-contested", any(), true, false) }
     }
 
     @Test
@@ -177,7 +226,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.CLOSED)
         verify(exactly = 0) { synthesis.synthesize(any(), any(), any()) }
-        verify(exactly = 1) { proposals.emitProposal(any(), "case-timeout", any(), false) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), "case-timeout", any(), false, false) }
     }
 
     @Test
@@ -193,7 +242,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.SYNTHESIZED)
         assertThat(outcome.contributionCount).isEqualTo(10)
-        verify(exactly = 1) { proposals.emitProposal(any(), any(), any(), any()) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) }
         verify(exactly = 1) { persistence.recordCaseClosed(any(), "SYNTHESIZED", any()) }
     }
 }

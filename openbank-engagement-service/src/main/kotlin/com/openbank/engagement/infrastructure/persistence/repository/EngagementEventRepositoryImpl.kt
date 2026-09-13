@@ -29,7 +29,7 @@ class EngagementEventRepositoryImpl(
      * between the two would otherwise either lose the event or publish one that was never
      * actually recorded. `Ids.newId()` (UUIDv7, ADR-0106) for both — durable, indexed rows.
      */
-    override suspend fun save(event: EngagementEvent) {
+    override suspend fun save(event: EngagementEvent): UUID {
         val eventId = Ids.newId()
         Panache.withTransaction {
             persist(EngagementEventEntity.from(event, eventId)).chain { _ ->
@@ -68,6 +68,7 @@ class EngagementEventRepositoryImpl(
                 )
             }
         }.awaitSuspending()
+        return eventId
     }
 
     override suspend fun recentForPartyAndSlot(

@@ -16,9 +16,17 @@ export interface ContractVerification {
   consumer: string
   provider: string
   pactFile: string
+  /** Git SHA of the committed consumer pact version used for the broker query. */
+  consumerVersion?: string | null
+  /** Provider version whose replay produced the displayed verdict. */
+  providerVersion?: string | null
   status: 'passed' | 'failed' | 'pending'
   verifiedAt: string | null
   interactions: PactInteractionResult[]
+  /** Why `status` stayed 'pending' — see ContractUnavailableReason in test-intelligence.ts. */
+  reasonCode?: 'query-error' | 'no-provider-main-version' | 'pending-verification' | null
+  /** Safe-to-render explanation for `reasonCode` — never the broker response body or credentials. */
+  detail?: string | null
 }
 
 export interface MutationScore {
@@ -27,6 +35,8 @@ export interface MutationScore {
   targetPackage: string
   totalMutants: number
   killed: number
+  /** PIT also counts a timed-out mutant as detected. Optional for older bundled reports. */
+  timedOut?: number
   survived: number
   noCoverage: number
   /** Percentage 0–100, rounded. null when pitest has not run yet. */

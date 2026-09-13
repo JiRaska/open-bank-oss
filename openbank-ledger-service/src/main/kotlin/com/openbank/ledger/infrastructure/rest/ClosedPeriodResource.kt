@@ -99,7 +99,7 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     @POST
     @Path("/{type}/{date}")
     @RolesAllowed(Roles.OPERATOR)
-    @Authorize(action = "ledger.create", resource = "#date")
+    @Authorize(action = "ledger.close.draft", resource = "#date")
     @Operation(summary = "Create or refresh the DRAFT close from the current journal")
     suspend fun createDraft(@PathParam("type") type: String, @PathParam("date") date: String): Response {
         val record = closedPeriodUseCase.createDraft(

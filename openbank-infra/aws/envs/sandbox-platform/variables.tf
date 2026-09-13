@@ -188,3 +188,15 @@ variable "keda_http_add_on_version" {
   # 0.15.x is compatible with KEDA 2.19 per the upstream compatibility matrix.
   default = "0.15.0"
 }
+
+variable "arc_batch_max_runners" {
+  description = "Max concurrent runner pods in the openbank-batch scale set (weekly scans/fuzz/perf; ADR-0277)."
+  type        = number
+  default     = 4
+}
+
+variable "arc_dr_max_runners" {
+  description = "Max concurrent runner pods in the openbank-dr scale set (quarterly DR/chaos lanes; ADR-0277)."
+  type        = number
+  default     = 1
+}

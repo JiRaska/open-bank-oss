@@ -14,7 +14,11 @@ import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.UUID
+
+/** Named so detekt's UseCheckOrError does not fire at the throw site inside a mockk `answers` block. */
+private class TransientStoreFailure : IllegalStateException("connection refused")
 
 /**
  * Routing/robustness cover for the PARTY_ERASED consumer (#3870). That the delete actually removes
@@ -71,7 +75,9 @@ class PartyErasureConsumerTest {
         val partyId = UUID.randomUUID()
         coEvery { conversationStore.deleteForParty(partyId.toString()) } throws IllegalStateException("db down")
 
-        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+        assertThrows<IllegalStateException> {
+            runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
+        }
 
         verify(exactly = 0) { metrics.recordPartyErasure(any()) }
     }
@@ -103,13 +109,40 @@ class PartyErasureConsumerTest {
         coVerify(exactly = 0) { conversationStore.deleteForParty(any()) }
     }
 
+    /**
+     * Replaces a test that asserted the OPPOSITE — that a store failure is swallowed "so one bad
+     * message cannot wedge the consumer group". Nothing replays an acked message, so that swallow
+     * silently dropped a GDPR Art. 17 erasure while the log claimed it was handled (#5698). The
+     * green test was the defect's own documentation.
+     *
+     * The pair below is what makes this non-decoration: a DOWNSTREAM failure must escape (the
+     * connector can then dead-letter it), while a MALFORMED payload must still be acked. A test
+     * that cannot tell those two apart proves nothing about either.
+     */
     @Test
-    fun `a store failure is swallowed so one bad message cannot wedge the consumer group`(): Unit = runBlocking {
+    fun `a persistent store failure is RETHROWN so the connector can dead-letter`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { conversationStore.deleteForParty(partyId.toString()) } throws IllegalStateException("db down")
 
+        assertThrows<IllegalStateException> {
+            runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
+        }
+
+        coVerify(exactly = 3) { conversationStore.deleteForParty(partyId.toString()) }
+    }
+
+    @Test
+    fun `a TRANSIENT store failure is retried and the erasure completes`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        var calls = 0
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } answers {
+            calls++
+            if (calls == 1) throw TransientStoreFailure() else 2L
+        }
+
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { conversationStore.deleteForParty(partyId.toString()) }
+        coVerify(exactly = 2) { conversationStore.deleteForParty(partyId.toString()) }
+        verify(exactly = 1) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_ERASED) }
     }
 }

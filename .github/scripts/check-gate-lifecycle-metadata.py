@@ -136,7 +136,6 @@ DEBT = {
     "opa-sidecar-bundle-shape": DEBT_MARKER,
     "kafka-cert-reader-grant": DEBT_MARKER,
     "extension-bean-config": DEBT_MARKER,
-    "configproperty-supplied": DEBT_MARKER,
     "route-exports": DEBT_MARKER,
     "compliance-matrix": DEBT_MARKER,
     "openssf-gold-evidence": DEBT_MARKER,

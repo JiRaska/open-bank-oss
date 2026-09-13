@@ -11,93 +11,101 @@ import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
-
-interface ClearingBatch {
-  id: string; batchReference: string; paymentRail: string; status: string
-  itemCount: number; totalAmount: number; currency: string; createdAt: string; settledAt?: string
-}
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/StatCard'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { formatClearingMoney, parseClearingBatches, type ClearingBatch } from '@/lib/clearing/clearingBatchContract'
 
 export default function ClearingPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking } = useServiceResource<ClearingBatch[]>(
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
+  const { data, loading, unavailable, waking, reload } = useServiceResource<ClearingBatch[]>(
     svcUrl('clearing-service', '/api/v1/clearing/batches'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as ClearingBatch[]) : ((raw as { batches?: ClearingBatch[] }).batches ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return parseClearingBatches(raw)
+    } },
   )
   const batches = data ?? []
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = batches.filter(b =>
     b.batchReference?.toLowerCase().includes(search.toLowerCase()) ||
-    b.paymentRail?.toLowerCase().includes(search.toLowerCase()) ||
+    b.rail.toLowerCase().includes(search.toLowerCase()) ||
     b.status?.toLowerCase().includes(search.toLowerCase())
   )
 
   const settled = batches.filter(b => b.status === 'SETTLED')
-  const pending = batches.filter(b => b.status === 'PENDING' || b.status === 'PROCESSING')
-  const totalVolume = batches.reduce((s, b) => s + (b.totalAmount ?? 0), 0)
-
-  const statusColor = (s: string) => {
-    if (s === 'SETTLED') return { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' }
-    if (s === 'FAILED') return { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' }
-    return { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' }
-  }
+  const pending = batches.filter(b => b.status === 'PENDING' || b.status === 'IN_CLEARING')
+  const currencies = [...new Set(batches.map(b => b.currency))]
+  const totalDebit = currencies.length === 1 ? batches.reduce((sum, batch) => sum + batch.totalDebit, 0) : null
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="payment-rails:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Zúčtování & Vypořádání', 'Clearing & Settlement')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
-            </p>
-          </div>
-          <ServiceStatusBadge
-            label="clearing-service :8124"
-            loading={loading}
-            waking={waking}
-            unavailable={unavailable}
-            copy={{
-              up: t('clearing-service běží', 'clearing-service is up'),
-              idle: t('clearing-service spí (scale-to-zero), probouzí se…', 'clearing-service idle (scaled to zero), waking…'),
-              down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
-              checking: t('Zjišťuji stav služby…', 'Checking service…'),
-            }}
-          />
-        </div>
+        <PageHeader
+          icon={<Layers size={20} aria-hidden="true" />}
+          title={t('Zúčtování & Vypořádání', 'Clearing & Settlement')}
+          subtitle={t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ServiceStatusBadge
+              label="clearing-service :8124"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('clearing-service běží', 'clearing-service is up'),
+                idle: t('clearing-service spí (scale-to-zero), probouzí se…', 'clearing-service idle (scaled to zero), waking…'),
+                down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit clearing dávky', 'Refresh clearing batches')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            </button>
+          </div>}
+        />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('Clearing-service', 'Clearing-service')} feature={t('Aktualizace clearing dávek', 'Clearing batch refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot', 'Showing the last successful snapshot')}
+            {lastSuccessfulAt ? ` (${lastSuccessfulAt.toLocaleString(numberLocale)})` : ''}.
+            {' '}{t('Stav vypořádání i objem se od té doby mohly změnit.', 'Settlement status and volume may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji clearing dávky; poslední snapshot zůstává dostupný.', 'Refreshing clearing batches; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} />, color: 'var(--accent)' },
-            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Banknote size={16} />, color: 'var(--accent-2)' },
-          ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
-          ))}
-        </div>
+            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} aria-hidden="true" /> },
+            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, tone: 'success' as const },
+            { label: t('Čeká / V clearingu', 'Pending / In clearing'), value: pending.length, icon: <Clock size={16} aria-hidden="true" />, tone: 'warning' as const },
+            { label: t('Hrubé debety', 'Gross debits'), value: totalDebit === null ? t('Více měn', 'Multiple currencies') : formatClearingMoney(totalDebit, currencies[0] ?? 'EUR', numberLocale), icon: <Banknote size={16} aria-hidden="true" /> },
+          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat referenci, rail, status…', 'Search reference, rail, status…')}
+                aria-label={t('Hledat clearing dávky', 'Search clearing batches')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-              <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
+          {loading && !hasSnapshot ? (
+            <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+              <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('Clearing-service', 'Clearing-service')} feature={t('Clearing dávky', 'Clearing batches')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Clearing dávky', 'Clearing batches')} lang={language}
@@ -107,25 +115,25 @@ export default function ClearingPage() {
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {[t('Reference', 'Reference'), t('Rail', 'Rail'), t('Položky', 'Items'), t('Objem', 'Volume'), t('Měna', 'Currency'), t('Status', 'Status'), t('Vytvořeno', 'Created')].map(h => (
+                {[t('Reference', 'Reference'), t('Rail', 'Rail'), t('Položky', 'Items'), t('Debet / Kredit', 'Debit / Credit'), t('Čistá pozice', 'Net position'), t('Status', 'Status'), t('Vytvořeno', 'Created')].map(h => (
                   <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>{filtered.map(b => {
-                const sc = statusColor(b.status)
                 return (
                   <tr key={b.id} style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{b.batchReference}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.paymentRail}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.rail.replaceAll('_', ' ')}</td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)' }}>{b.itemCount}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(b.totalAmount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.currency}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{b.status}</span>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
+                      <div>{formatClearingMoney(b.totalDebit, b.currency, numberLocale)}</div>
+                      <div style={{ color: 'var(--text-tertiary)', marginTop: 2 }}>{formatClearingMoney(b.totalCredit, b.currency, numberLocale)}</div>
                     </td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: b.netPosition < 0 ? 'var(--danger)' : 'var(--text-primary)' }}>{formatClearingMoney(b.netPosition, b.currency, numberLocale)}</td>
+                    <td style={{ padding: '12px 16px' }}><StatusBadge status={b.status} tone={b.status === 'FAILED' ? 'danger' : b.status === 'SETTLED' ? 'success' : 'warning'} /></td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString(numberLocale) : '—'}</td>
                   </tr>
                 )
               })}</tbody>

@@ -7,6 +7,7 @@ package com.openbank.campaign.application
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -15,6 +16,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -25,6 +27,7 @@ import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -90,6 +93,7 @@ class CampaignScheduleLifecycleTest {
         id = campaignId,
         name = "winback",
         goal = "reactivate dormant parties",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("dormant-parties", 1),
         steps = listOf(
             CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
@@ -141,6 +145,10 @@ class CampaignScheduleLifecycleTest {
             },
             journeys = journeys,
             scheduler = scheduler,
+            metrics = mockk(relaxed = true),
+            consentCheck = object : ConsentCheckPort {
+                override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) = true
+            },
             explicitGraphActivationEnabled = false,
         )
     }

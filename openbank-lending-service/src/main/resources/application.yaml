@@ -61,6 +61,35 @@ quarkus:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       connect-timeout: 2000
       read-timeout: 3000
+    # A disbursement's cash leg lands in the loan book (ledger-service, above) AND has to reach
+    # the borrower's own account — transaction-service is the only path that credits a balance
+    # (#3931). account-service resolves which of the party's accounts that is.
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 3000
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+      connect-timeout: 2000
+      read-timeout: 3000
+    product-catalog:
+      url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0269 rule 1: the CREDIT_OFFERS consent read behind the credit-offer gate. Short timeouts
+    # on purpose — the gate fails CLOSED, so a slow consent-service costs a suppressed offer, never
+    # an unconsented one, and a customer waiting on a screen is the worse failure to optimise for.
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8107}
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0269 #6215: the 360 credit profile behind the distress floor. Same short timeouts and the
+    # same reasoning — an unreadable profile makes the gate refuse, never approve, so a slow
+    # analytics-sink costs a suppressed offer.
+    analytics-sink:
+      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -105,8 +134,8 @@ quarkus:
     # so the management interface (default :8086) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
-  lending:
-    origination:
+  openbank:
+    lending:
       # No real Temporal frontend in @QuarkusTest: don't register the timers worker (it would
       # fail boot on Connection refused). Workflow tests drive their own TestWorkflowEnvironment.
       worker:
@@ -121,15 +150,42 @@ openbank:
     initial-delay: 5s
     dispatch-enabled: true
   temporal:
-    # ADR-0211 D2 durable origination timers. OFF locally; sandbox/prod override via env
-    # (OPENBANK_TEMPORAL_ENABLED + the temporal-frontend NetworkPolicy edge).
+    # ADR-0211 D2 durable origination timers.
+    #
+    # ⚠ BUILD-TIME PROPERTY. TemporalOriginationWorkflowAdapter is selected with @IfBuildProperty,
+    # resolved during augmentation and frozen into the image — the losing bean's class is removed
+    # outright. A container env var is read at RUNTIME and cannot change it. That is #6085: the
+    # Rollout set OPENBANK_TEMPORAL_ENABLED=true, the image had been augmented with the `false`
+    # default below, and NoOpOriginationWorkflowPort was what shipped — so no document-SLA,
+    # offer-expiry or reflection/cooling-off timer was ever armed, while the no-op returned the
+    # real adapter's success value. What decides the shipped image is therefore the DEFAULT, per
+    # profile — hence the `%prod` override further down, which is the value that actually ships.
+    # LendingAdapterBindingVerifier refuses to boot if the two ever disagree again.
+    #
+    # Note this gates only the CLIENT half. OriginationTimersWorkerRegistrar is not build-time
+    # gated (it is switched by openbank.lending.worker.enabled), so the deployed pod has been
+    # polling the task queue all along with nothing ever starting a workflow on it.
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-lending}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-lending-origination}
+  lending:
+    # Temporal timers-worker switch (temporal-worker-switch-naming convention,
+    # rules.yaml: temporal_worker_switch_naming). Env var name unchanged.
+    worker:
+      enabled: ${LENDING_ORIGINATION_WORKER_ENABLED:true}
 
 # Ledger posting (ADR-0028 D3). `backend=rest` build-time-activates RestLedgerPostingAdapter against
 # ledger-service; left as `none` the @Default no-op stays bound and the service builds/boots offline.
+#
+# ⚠ THIS IS A BUILD-TIME PROPERTY (@IfBuildProperty, resolved during augmentation and frozen into
+# the image). Setting LENDING_LEDGER_BACKEND as a container env var CANNOT change it — the losing
+# bean's class is not in the image at all. That is #6057: the Rollout set the env var, the image had
+# been augmented with the `none` default below, and every lending general-ledger posting was
+# discarded by a no-op that returned success. What decides the shipped image is therefore the
+# DEFAULT, per profile — hence the `%prod` override further down, which is the value that actually
+# ships. The env var is kept only so a deliberately-built image can be told to disable the adapter,
+# and LendingAdapterBindingVerifier refuses to boot if the two ever disagree again.
 lending:
   ledger:
     backend: ${LENDING_LEDGER_BACKEND:none}
@@ -138,6 +194,12 @@ lending:
     # per loan currency by LendingGlChart (issue #1275), matching how transaction-service hardcodes its
     # seeded accounts. The former lending.ledger.gl.* @WithDefault placeholders were the footgun behind
     # #1275/#1720: a missing/wrong single-currency mapping booted green and 422ed at first posting.
+  # Disbursement's customer-facing leg (#3931): AccountServiceClient + BorrowerCreditClient. Was
+  # absent from this file entirely, so the @IfBuildProperty gate saw a MISSING property and disabled
+  # the real clients in every image ever built, while the Rollout set the env var (#6057). Same
+  # build-time caveat as lending.ledger.backend above; the shipping value is the `%prod` override.
+  borrower-credit:
+    backend: ${LENDING_BORROWER_CREDIT_BACKEND:none}
   compliance:
     # Fail-closed origination guard (ADR-0212 D2/D4 bootstrap). Restart-required; flip to true only
     # after the CZ reference pack is seeded and four-eyes-activated — with enforcement on and no
@@ -170,8 +232,6 @@ lending:
     # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.
     # Restart-required. MUST stay false in production — it bypasses the four-eyes gate entirely.
     auto-approve: ${LENDING_ORIGINATION_AUTO_APPROVE:false}
-    worker:
-      enabled: ${LENDING_ORIGINATION_WORKER_ENABLED:true}
     timers:
       offer-validity-days: ${LENDING_OFFER_VALIDITY_DAYS:30}
       docs-sla-days: ${LENDING_DOCS_SLA_DAYS:14}
@@ -196,6 +256,27 @@ lending:
     cycle:
       every: ${LENDING_PROVISIONING_EVERY:720h} # ~30 days; a monthly-cadence batch, not calendar-month aware
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
+
+# Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`
+# profile active, so these — not the offline defaults above — are what ArC bakes in. Kept as a
+# separate block precisely so the offline story (dev, test, `./gradlew quarkusDev`) is unchanged:
+# only the shipped artifact posts to the real ledger and pays real borrowers.
+"%prod":
+  lending:
+    ledger:
+      backend: ${LENDING_LEDGER_BACKEND:rest}
+    borrower-credit:
+      backend: ${LENDING_BORROWER_CREDIT_BACKEND:rest}
+    outbox:
+      backend: ${LENDING_OUTBOX_BACKEND:jpa}
+  openbank:
+    temporal:
+      # #6085. Binds TemporalOriginationWorkflowAdapter in the packaged image, so the durable
+      # origination timers are armed for real. This is a customer-visible change: offers begin to
+      # expire, unanswered document requests begin to time out, and the consumer-credit reflection
+      # period begins to advance on its own — behaviour ADR-0211 D2 always specified and which has
+      # never once executed in this environment.
+      enabled: ${OPENBANK_TEMPORAL_ENABLED:true}
 
 mp:
   messaging:

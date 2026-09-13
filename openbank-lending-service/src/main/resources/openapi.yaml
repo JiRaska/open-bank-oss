@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.12.0
+  version: 1.22.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -25,6 +25,26 @@ paths:
       tags: [Lending]
       operationId: applyForLoan
       summary: Submit a loan application (maker)
+      description: >-
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application, because a customer may
+        legitimately apply twice (no natural key exists).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -64,12 +84,29 @@ paths:
         neither price their own loan nor choose which ADR-0212 compliance pack judges them. Only the
         configured customer-edge service principal may call it; any other caller is refused 403.
         This is the MAKER leg only — the application still needs a human four-eyes decision.
+        Idempotent (ADR-0297): a retry carrying the same Idempotency-Key (or X-Request-ID)
+        replays the cached 201 with X-Idempotency-Replayed: true — no second application is
+        created. Without a key every POST creates a new application.
       parameters:
         - name: X-Customer-Party-Id
           in: header
           required: true
           description: The applicant's party id, set by customer-edge from the customer JWT.
           schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Caller-supplied replay key; X-Request-ID is accepted as a fallback. Scoped per party,
+            cached for 300 s.
+          schema:
+            type: string
+        - name: X-Request-ID
+          in: header
+          required: false
+          description: Request-correlation id; used as the replay key when Idempotency-Key is absent.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -85,6 +122,145 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: Refused by the origination guard (e.g. no active compliance pack)
+    get:
+      tags: [Lending]
+      operationId: listCustomerCreditJourneys
+      summary: The caller's own credit applications as customer-readable journeys (customer-edge only)
+      description: >-
+        ADR-0269 rule 3. Scoped to the party in X-Customer-Party-Id; carries no rate, instalment or
+        APRC — that is ADR-0269 rule 4, served by /quotes below. Only the configured customer-edge principal may
+        call it.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The party's credit applications (possibly empty)
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/intake/applications/{id}:
+    get:
+      tags: [Lending]
+      operationId: getCustomerCreditJourney
+      summary: One of the caller's own credit applications as a customer-readable journey
+      description: >-
+        A journey belonging to another party answers 404, not 403 — a not-found and a not-yours must
+        be indistinguishable, or the id space leaks.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: The credit application journey }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/financial-health:
+    get:
+      tags: [Lending]
+      operationId: getCustomerFinancialHealth
+      summary: The caller's four-pillar financial health (customer-edge only, no score)
+      description: >-
+        ADR-0269 rule 5. Assembled here because the pillars need the credit profile, the loan book
+        and (later) balances, all of which this service already reaches. The judgement itself is a
+        pure function in libs; this route only fetches. Any pillar may answer UNKNOWN, and one
+        unavailable upstream greys out one pillar rather than the whole view.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The four pillars
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/credit-offers/eligibility/{partyId}:
+    get:
+      tags: [Lending]
+      operationId: creditOfferEligibility
+      summary: Whether an UNPROMPTED credit offer may be surfaced to this party
+      description: >-
+        ADR-0269 rules 1 and 2, for callers OUTSIDE this service. The eligibility gate is the one
+        place a credit offer is cleared, but it had no wire surface, so every push surface the ADR
+        governs — a campaign step, a pre-approved tile, an agent nudge — had no way to ask, and the
+        distress floor was enforced nowhere on that side.
+
+        The surface is fixed to PUSH and is deliberately NOT a parameter: PULL skips the consent
+        half because a customer who asked has already spoken for themselves, and letting a caller
+        name its own surface would hand that exemption to anyone who passed the right string. A
+        caller serving a customer-initiated request wants /intake/quotes instead.
+
+        Answers 200 for BOTH outcomes. "You may not offer" is a successful answer to the question
+        asked, not a client error, and a caller distinguishing a refusal from a transport failure by
+        status code will eventually get it wrong in the permissive direction. A caller that cannot
+        reach this route must refuse to offer: not knowing whether it may market credit is answered
+        no, never "probably fine".
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The decision, allowed or suppressed with its reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditOfferEligibilityDecision'
+        '403': { description: Caller is not permitted this action }
+
+  /api/v1/lending/intake/quotes:
+    post:
+      tags: [Lending]
+      operationId: quoteCustomerCredit
+      summary: Indicative, non-binding price for a requested amount and term (customer-edge only)
+      description: >-
+        ADR-0269 rule 4 — the only place an instalment or an APRC may come from. Nothing is
+        persisted: an indicative price with an id would be one lookup away from being treated as a
+        binding offer. Price, currency and bounds are lending-side configuration; the body carries
+        only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
+        floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+        Inherently idempotent (ADR-0297): a pure computation over configuration and the body —
+        no persistence, so a retry simply recomputes the same indicative price.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerQuoteRequest'
+      responses:
+        '200':
+          description: The indicative quote (binding is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerQuote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Pricing suppressed by the distress floor; body carries the reason code
+
   /api/v1/lending/applications/{id}:
     get:
       tags: [Lending]
@@ -134,6 +310,104 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/LoanStateSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/decisions:
+    get:
+      tags: [Lending]
+      operationId: riskDecisions
+      summary: Engine-evaluated applications with decoded ADR-0213 evidence (newest first)
+      description: >-
+        The credit-risk console's primary read (ADR-0230 D1). Each row is one application the
+        deterministic engine evaluated: outcome, price band, machine-readable reason codes with the
+        rule that fired, matched rule ids, pinned policy versions, input snapshot hash and the
+        affordability ratios the engine read — decoded server-side from the evidence fields the
+        application pins (ADR-0214), never recomputed. Read-only; the console renders decisions and
+        never makes them (ADR-0227 D4).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+          description: Clamped server-side to 1..1000. A caller wanting the whole history uses the warehouse.
+      responses:
+        '200':
+          description: Newest evaluation first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CreditDecisionView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/decisions/summary:
+    get:
+      tags: [Lending]
+      operationId: riskDecisionSummary
+      summary: Book-wide engine outcome × price-band totals, grouped in the database
+      description: >-
+        The figure /risk/decisions cannot give (it is capped): how many applications the engine
+        approved, referred and declined over the whole book, per price band. Same reasoning as
+        /applications/summary (issue #3294).
+      responses:
+        '200':
+          description: One entry per (outcome, priceBand) pair
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DecisionOutcomeSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/portfolio:
+    get:
+      tags: [Lending]
+      operationId: riskPortfolio
+      summary: Loans with their latest IFRS 9 provisioning record (null where never assessed)
+      description: >-
+        Stage, DPD bucket, expected credit loss, outstanding balance and the PD/LGD model version
+        that produced them, read back from loan_provisioning (ADR-0028 Phase 3). A loan the
+        scheduled cycle has never assessed carries assessment=null — a real state the console shows
+        as such, never as Stage 1 with zero ECL.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 500 }
+      responses:
+        '200':
+          description: Newest disbursement first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanRiskView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy:
+    get:
+      tags: [Lending]
+      operationId: riskPolicy
+      summary: The credit policy bundle the engine evaluates as of a date
+      description: >-
+        Every decision table (exclusion, eligibility, affordability, pricing band) with its rules,
+        version and effective window (ADR-0213 D1). codeSeeded is true while the ADR-0213 D3
+        starter policy is the binding — i.e. before the four-eyes table store D4 describes exists —
+        so a risk committee reading the table knows whether anyone can change it and how.
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: ISO-8601 date; defaults to today. A malformed value is a 400.
+      responses:
+        '200':
+          description: The active bundle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditPolicyView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/recent:
@@ -452,6 +726,10 @@ paths:
         The registrant identity is the JWT subject. The registered collateral is PENDING and is not
         consulted by the IFRS 9 ECL calculation until a different principal approves it via
         POST /api/v1/lending/collateral/{id}/decision.
+        Idempotent (ADR-0297): while the original registration is still PENDING, a retry with an
+        identical tuple (type, description, market value, haircut) replays the ORIGINAL PENDING
+        collateral instead of stacking a duplicate a checker could approve twice. Once the
+        original is decided, an identical new registration is legitimate and persists.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       requestBody:
@@ -509,7 +787,12 @@ paths:
           required: false
           schema: { type: string, format: date }
       responses:
-        '200': { description: IFRS 9 snapshot }
+        '200':
+          description: IFRS 9 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningSnapshot'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -598,6 +881,9 @@ paths:
       description: >-
         Strict, fail-closed pack decoding (ADR-0212): an unknown key, enum value or type rejects the
         whole proposal. The pack activates only after a DIFFERENT compliance principal approves it.
+        Idempotent (ADR-0297): the pack content hash is the natural key — while an identical pack
+        proposal is still PROPOSED, a retry replays it instead of queuing a duplicate for the
+        checker. Re-proposing after a decision creates a fresh proposal.
       requestBody:
         required: true
         content:
@@ -606,6 +892,9 @@ paths:
       responses:
         '201':
           description: Proposal registered, awaiting a checker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -633,6 +922,9 @@ paths:
       responses:
         '200':
           description: Decision recorded; an approved pack is active in-memory immediately
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -647,6 +939,11 @@ paths:
       responses:
         '200':
           description: Pending proposals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/compliance-packs/active:
@@ -657,6 +954,11 @@ paths:
       responses:
         '200':
           description: Active packs with content hashes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -692,6 +994,44 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    PackActivationView:
+      type: object
+      required:
+        - id
+        - jurisdiction
+        - productType
+        - packVersion
+        - effectiveFrom
+        - contentHash
+        - state
+        - proposedBy
+        - pack
+      properties:
+        id: { type: string, format: uuid }
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        packVersion: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string, description: SHA-256 fingerprint of the exact reviewed pack }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, EXECUTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time, nullable: true }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        pack:
+          $ref: '#/components/schemas/CompliancePack'
+    CompliancePack:
+      type: object
+      description: Exact reviewed pack content, returned so operators can inspect what the hash identifies.
+      additionalProperties: true
+      required: [jurisdiction, productType, version, effectiveFrom]
+      properties:
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        version: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }
     ApiError:
       type: object
       properties:
@@ -707,6 +1047,32 @@ components:
         makerId: { type: string, nullable: true, description: Principal that created the request }
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
+    ProvisioningSnapshot:
+      type: object
+      required: [loanId, asOf, outstandingBalance, daysPastDue, bucket, stage, horizon, expectedCreditLoss, modelVersion]
+      properties:
+        loanId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        outstandingBalance:
+          $ref: '#/components/schemas/Money'
+        daysPastDue: { type: integer }
+        bucket:
+          type: string
+          enum: [CURRENT, DPD_1_30, DPD_31_60, DPD_61_90, DPD_90_PLUS]
+        stage:
+          type: string
+          enum: [STAGE_1, STAGE_2, STAGE_3]
+        horizon:
+          type: string
+          enum: [TWELVE_MONTH, LIFETIME]
+        expectedCreditLoss:
+          $ref: '#/components/schemas/Money'
+        modelVersion:
+          type: string
+          description: >-
+            The risk-parameter model version that produced this ECL figure (issue #8364) — the
+            audit trail from a provision back to the exact PD/LGD parameter set. A change to the
+            underlying parameters always ships with a new version string.
     Money:
       type: object
       required: [amount, currency]
@@ -750,6 +1116,193 @@ components:
         principal:
           type: array
           items: { $ref: '#/components/schemas/MoneyTotal' }
+    DecisionReasonView:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [INPUT_MISSING, RULE_NOT_EVALUABLE, POLICY_TABLE_MISSING, EXCLUSION_MATCHED, ELIGIBILITY_FAILED, AFFORDABILITY_FAILED, PRICING_BAND_UNMATCHED]
+        ruleId: { type: string, nullable: true }
+    AffordabilityRatios:
+      type: object
+      required: [dsti, dti, dstiIncludingExistingDebt]
+      description: >-
+        dsti is the new installment over verified income — what PolicyAttribute.DSTI carries into
+        the affordability table. dstiIncludingExistingDebt adds existingDebtServiceMonthly (the
+        CNB/EBA total-debt-service definition); it is exposed so the console can show the gap, and
+        is NOT what the engine evaluates today.
+      properties:
+        dsti: { type: number }
+        dti: { type: number }
+        dstiIncludingExistingDebt: { type: number }
+    CreditDecisionView:
+      type: object
+      required: [applicationId, partyId, status, createdAt, requestedAmount, currency, termPeriods, nominalAnnualRate, productKind, engineOutcome, reasons, matchedRuleIds, policyVersions]
+      properties:
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string, description: The current OriginationState. }
+        createdAt: { type: string, format: date-time }
+        requestedAmount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termPeriods: { type: integer }
+        nominalAnnualRate: { type: number }
+        jurisdiction: { type: string, nullable: true }
+        productType: { type: string, nullable: true }
+        productKind: { type: string }
+        packVersion: { type: integer, nullable: true }
+        engineOutcome: { type: string, enum: [APPROVE, REFER, DECLINE, UNEVALUATED] }
+        priceBand: { type: string, nullable: true }
+        reasons:
+          type: array
+          items: { $ref: '#/components/schemas/DecisionReasonView' }
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+        policyVersions:
+          type: object
+          additionalProperties: { type: integer }
+          description: Pinned table version per PolicyTableKind name.
+        inputSnapshotHash: { type: string, nullable: true }
+        decidedEngineAt: { type: string, format: date-time, nullable: true }
+        affordability:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/AffordabilityRatios' }]
+        verifiedIncomeMonthly: { type: number, nullable: true }
+        existingDebtServiceMonthly: { type: number, nullable: true }
+        ageYears: { type: integer, nullable: true }
+        residency: { type: string, nullable: true }
+        employmentTenureMonths: { type: integer, nullable: true }
+        humanDecidedBy: { type: string, nullable: true }
+        humanDecisionReason: { type: string, nullable: true }
+        humanDecidedAt: { type: string, format: date-time, nullable: true }
+    DecisionOutcomeSummary:
+      type: object
+      required: [engineOutcome, count]
+      properties:
+        engineOutcome: { type: string, enum: [APPROVE, REFER, DECLINE] }
+        priceBand: { type: string, nullable: true }
+        count: { type: integer, format: int64 }
+    LoanRiskAssessmentView:
+      type: object
+      required: [period, asOf, outstandingBalance, daysPastDue, bucket, stage, expectedCreditLoss, modelVersion]
+      properties:
+        period: { type: string, description: Reporting period key, yyyy-MM. }
+        asOf: { type: string, format: date }
+        outstandingBalance: { type: number }
+        daysPastDue: { type: integer }
+        bucket: { type: string, enum: [CURRENT, DPD_1_30, DPD_31_60, DPD_61_90, DPD_90_PLUS] }
+        stage: { type: string, enum: [STAGE_1, STAGE_2, STAGE_3] }
+        expectedCreditLoss: { type: number }
+        modelVersion: { type: string, description: The PD/LGD parameter set that produced the ECL. }
+    LoanRiskView:
+      type: object
+      required: [loanId, applicationId, partyId, status, principal, currency, nominalAnnualRate, termPeriods, disbursedAt]
+      properties:
+        loanId: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string }
+        principal: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        nominalAnnualRate: { type: number }
+        termPeriods: { type: integer }
+        disbursedAt: { type: string, format: date-time }
+        assessment:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/LoanRiskAssessmentView' }]
+    PolicyRuleView:
+      type: object
+      required: [id, attribute, operator, values, detail]
+      properties:
+        id: { type: string }
+        attribute: { type: string }
+        operator: { type: string, enum: [GT, GTE, LT, LTE, EQ, NEQ, IN, NOT_IN] }
+        threshold: { type: number, nullable: true }
+        values:
+          type: array
+          items: { type: string }
+        band: { type: string, nullable: true }
+        detail: { type: string }
+    PolicyTableView:
+      type: object
+      required: [kind, name, version, effectiveFrom, rules]
+      properties:
+        kind: { type: string, enum: [EXCLUSION, ELIGIBILITY, AFFORDABILITY, PRICING_BAND] }
+        name: { type: string }
+        version: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyRuleView' }
+    CreditPolicyView:
+      type: object
+      required: [asOf, source, codeSeeded, tables]
+      properties:
+        asOf: { type: string, format: date }
+        source: { type: string, description: The CreditPolicyPort binding's class name. }
+        codeSeeded: { type: boolean }
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyTableView' }
+    CreditOfferEligibilityDecision:
+      type: object
+      required: [allowed, policyVersion]
+      properties:
+        allowed: { type: boolean }
+        reasonCode:
+          type: string
+          nullable: true
+          description: >-
+            Null when allowed. Part of the contract rather than a log line: a caller must be able to
+            count "declined for arrears" separately from "never opted in", and a conduct review asks
+            for exactly that split. SIGNALS_UNAVAILABLE means the gate could not read what it needed
+            and refused rather than guessed.
+          enum: [CONSENT_ABSENT, SIGNALS_UNAVAILABLE, INSOLVENCY, ENFORCEMENT, ARREARS, HARDSHIP,
+                 NEGATIVE_BALANCE, AFFORDABILITY_COOLING, BUFFER_BELOW_FLOOR, FREQUENCY_CAP,
+                 NO_MATERIAL_CHANGE, HISTORY_TOO_THIN]
+        policyVersion:
+          type: integer
+          description: The version of the decision table that produced this answer (ADR-0213).
+    CustomerQuoteRequest:
+      type: object
+      required: [amount, termMonths]
+      description: >-
+        The same two fields the intake accepts, and for the same reason: a customer may choose how
+        much and how long, never at what price.
+      properties:
+        amount: { type: string, description: Decimal in the product's configured currency }
+        termMonths: { type: integer, minimum: 1 }
+
+    CustomerQuote:
+      type: object
+      required: [amount, currency, termMonths, nominalAnnualRatePercent, monthlyPayment,
+                 totalPayable, totalCostOfCredit, validUntil, binding]
+      description: >-
+        An indicative price. Structurally distinct from a binding offer: no id, no accept path.
+      properties:
+        amount: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termMonths: { type: integer }
+        nominalAnnualRatePercent: { type: string }
+        monthlyPayment: { type: string }
+        totalPayable: { type: string }
+        totalCostOfCredit: { type: string }
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must be rendered as an absent figure —
+            never as 0%, which reads to a customer as free credit.
+        validUntil: { type: string, format: date-time }
+        binding:
+          type: boolean
+          description: >-
+            Always false. Present so a client never has to infer it; an unwritten assumption is the
+            kind that gets forgotten.
+
     CustomerIntakeRequest:
       type: object
       required: [amount, termMonths]
@@ -802,6 +1355,13 @@ components:
         ageYears: { type: integer, nullable: true, description: Applicant age in years (majority floor) }
         residency: { type: string, nullable: true, description: Residency country code (e.g. CZ) }
         employmentTenureMonths: { type: integer, nullable: true }
+        catalogOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional published catalog offering. When supplied, its immutable revision sets the
+            rate, currency, tenor and amortization constraints and is retained with the application.
     DecisionRequest:
       type: object
       required: [approve]
@@ -828,7 +1388,11 @@ components:
         The acting principal is the authenticated JWT subject (server-side), never a client-supplied
         field, so only the audit reason is carried in the body.
       properties:
-        reason: { type: string, nullable: true }
+        writtenOffBy:
+          type: string
+        reason:
+          type: string
+          nullable: true
     RescheduleRequest:
       type: object
       description: >-

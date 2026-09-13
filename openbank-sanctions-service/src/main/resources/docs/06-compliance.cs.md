@@ -89,7 +89,7 @@ sequenceDiagram
 - AuthZ: `@RolesAllowed(ROLE_OPERATOR)` na všech mutujících endpointech
 - Idempotence: `idempotencyKey` povinný v screeningových požadavcích
 - TLS: mTLS in-cluster (Istio), TLS terminace na gateway
-- Secrets: BootstrapVerifier blokuje dev placeholders v prod
+- ⬜ Secrets: **`BootstrapVerifier` neexistuje** — na dev placeholder nespadne start ničemu. Credentials přicházejí přes `secretKeyRef` z ESO/OpenBao (ADR-0007); konfigurace, ne kontrola v aplikaci (#8426)
 - Audit: každé prověření a přezkum publikovány do audit-service přes Kafka
 - Maskování PII v logu (jméno, datum narození, identifikátory)
 

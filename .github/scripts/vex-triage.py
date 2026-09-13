@@ -9,7 +9,11 @@ loop that made VEX "produced but not triaged":
      (`VEX triage: <CVE>`, label `vex-triage` + `severity:<level>`); the issue's
      creation date IS the SLA clock — no repo-committed state needed
   2. severity is resolved from api.osv.dev (CVSS -> critical/high/medium/low);
-     unknown severities are conservatively treated as high
+     unknown severities are conservatively treated as high — EXCEPT when the CVE is on
+     CISA's KEV catalog (actively exploited in the wild): then it triages at the critical
+     SLA regardless of score, carries the `kev-listed` label, and shows its EPSS exploit
+     probability (FIRST.org). A CVE that enters KEV after its issue opened escalates the
+     open issue in place (ADR-0279 #11/#13)
   3. an open vex-triage issue older than rules.yaml `vuln_management.sla_days`
      for its severity fails the job (::error) — the weekly red build is the
      escalation, mirroring the gate-graduation forcing function (ADR-0144)
@@ -42,6 +46,36 @@ TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
 API = "https://api.github.com"
 LABEL = "vex-triage"
 TITLE_RE = re.compile(r"^VEX triage: (\S+)$")
+
+# ADR-0279 #11/#13: exploitability beats CVSS for prioritization. A CVE on CISA's KEV
+# catalog is actively exploited in the wild — it is triaged at the CRITICAL SLA whatever
+# its base score, and carries the `kev-listed` label so the queue sorts by it. The KEV
+# fetch is best-effort: a feed outage degrades prioritization, it must never break the
+# triage loop itself (the SLA machinery above is the control that must always run).
+KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+EPSS_URL = "https://api.first.org/data/v1/epss?cve="
+
+
+def kev_catalog() -> dict[str, str]:
+    """CVE id -> KEV remediation due date. Empty dict on any fetch/parse failure (degrade, don't die)."""
+    try:
+        with urllib.request.urlopen(KEV_URL, timeout=30) as r:
+            doc = json.loads(r.read())
+        return {v["cveID"]: v.get("dueDate", "") for v in doc.get("vulnerabilities", [])}
+    except Exception as ex:  # noqa: BLE001 — feed outage must not fail triage
+        print(f"::warning::KEV catalog fetch failed ({type(ex).__name__}) — continuing without exploitability data")
+        return {}
+
+
+def epss_score(cve: str) -> float | None:
+    """EPSS exploit-probability (0..1) from FIRST.org; None when unknown or unreachable."""
+    try:
+        with urllib.request.urlopen(EPSS_URL + cve, timeout=15) as r:
+            doc = json.loads(r.read())
+        data = doc.get("data") or []
+        return float(data[0]["epss"]) if data else None
+    except Exception:  # noqa: BLE001 — advisory enrichment only
+        return None
 
 
 def sla_days() -> dict[str, int]:
@@ -189,6 +223,7 @@ def main() -> int:
     slas = sla_days()
     queue, inventory_had_data = triage_queue()
     existing = open_triage_issues()
+    kev = kev_catalog()
     now = datetime.now(timezone.utc)
     failures = 0
 
@@ -197,11 +232,26 @@ def main() -> int:
         if cve in existing:
             continue
         sev = osv_severity(cve)
+        kev_due = kev.get(cve)
+        epss = epss_score(cve)
+        if kev_due is not None:
+            # Actively exploited in the wild: triage at the critical SLA whatever the base
+            # score said — CVSS measures theoretical impact, KEV measures current reality.
+            sev = "critical"
+        exploit_note = ""
+        if kev_due is not None:
+            exploit_note += (
+                f"\n\n**⚠️ CISA KEV-listed — actively exploited in the wild.** CISA remediation "
+                f"due date: {kev_due}. Triaged at the **critical** SLA regardless of CVSS."
+            )
+        if epss is not None:
+            exploit_note += f"\n\n**EPSS:** {epss:.2%} exploit probability (FIRST.org)."
         body = (
             f"`{cve}` is `under_investigation` in the latest release VEX of: "
             f"{', '.join(f'`{c}`' for c in comps)}.\n\n"
             f"**Severity:** {sev} → SLA **{slas.get(sev, slas['high'])} days** from this "
-            f"issue's creation (rules.yaml `vuln_management.sla_days`; this issue is the clock).\n\n"
+            f"issue's creation (rules.yaml `vuln_management.sla_days`; this issue is the clock)."
+            f"{exploit_note}\n\n"
             "## Triage verdict\n\n"
             "Add a statement to `openbank-libs/governance/vex/<component>.openvex.json` "
             "(status: `not_affected` + justification / `affected` + fix plan / `fixed`). "
@@ -214,12 +264,38 @@ def main() -> int:
         if dry:
             print(f"[dry-run] would open: VEX triage: {cve} (severity:{sev}) — {comps}")
             continue
+        labels = [LABEL, f"severity:{sev}", "governance"]
+        if kev_due is not None:
+            labels.append("kev-listed")
         gh(f"{API}/repos/{REPO}/issues", "POST", {
             "title": f"VEX triage: {cve}",
             "body": body,
-            "labels": [LABEL, f"severity:{sev}", "governance"],
+            "labels": labels,
         })
         print(f"opened: VEX triage: {cve} (severity:{sev})")
+
+    # 2b: escalate issues whose CVE entered the KEV catalog AFTER the issue opened — the
+    # severity label and the SLA are derived from it, so the escalation relabels, comments,
+    # and lets the SLA loop below re-read the new severity.
+    for cve, issue in sorted(existing.items()):
+        if cve not in kev:
+            continue
+        label_names = {lbl.get("name", "") for lbl in issue.get("labels", [])}
+        if "kev-listed" in label_names:
+            continue
+        if dry:
+            print(f"[dry-run] would escalate #{issue['number']} ({cve}) — newly KEV-listed")
+            continue
+        new_labels = sorted((label_names - {f"severity:{s}" for s in slas})
+                            | {"kev-listed", "severity:critical"})
+        gh(f"{API}/repos/{REPO}/issues/{issue['number']}", "PATCH", {"labels": new_labels})
+        gh(f"{API}/repos/{REPO}/issues/{issue['number']}/comments", "POST", {
+            "body": f"⚠️ `{cve}` entered the CISA KEV catalog (actively exploited; CISA due "
+                    f"{kev[cve]}). Escalated to `severity:critical` — the SLA clock now reads "
+                    f"the critical limit from this issue's creation date. — vex-triage.yml"
+        })
+        print(f"escalated #{issue['number']} ({cve}) — newly KEV-listed")
+        issue["labels"] = [{"name": n} for n in new_labels]
 
     # 4: close issues whose CVE left the queue — but ONLY if the inventory actually returned
     # bundles. A transiently-empty inventory must not be read as "everything triaged" and

@@ -5,8 +5,10 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
+import { LANG_COOKIE, LANG_STORAGE_KEY, parseLanguage, type Language } from './language'
 
-type Language = 'en' | 'cs'
+export { LANG_COOKIE } from './language'
+export type { Language } from './language'
 
 interface LanguageContextType {
   language: Language
@@ -16,35 +18,68 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined)
 
-// Cookie mirror so server components (e.g. /services/[name]/docs page) can
-// pick the same language as the client. Cookie expires after a year; same-site
-// Lax is sufficient — this is a cosmetic preference, not a security boundary.
-export const LANG_COOKIE = 'openbank-admin-lang'
-
+// The cookie is the shared server/client preference (server components cannot
+// read localStorage). It expires after a year; SameSite=Lax is sufficient —
+// this is a cosmetic preference, not a security boundary.
 function writeLangCookie(lang: Language) {
   if (typeof document === 'undefined') return
   const maxAge = 60 * 60 * 24 * 365
   document.cookie = `${LANG_COOKIE}=${lang}; path=/; max-age=${maxAge}; SameSite=Lax`
 }
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('en')
+export function LanguageProvider({
+  children,
+  initialLanguage = null,
+  refreshServerContent,
+}: {
+  children: React.ReactNode
+  initialLanguage?: Language | null
+  refreshServerContent?: () => void
+}) {
+  const [language, setLanguageState] = useState<Language>(initialLanguage ?? 'en')
 
   useEffect(() => {
-    const saved = localStorage.getItem('openbank-admin-lang') as Language
-    if (saved === 'en' || saved === 'cs') {
-      setLanguageState(saved)
-      writeLangCookie(saved)
+    if (initialLanguage) {
+      // The cookie is visible to both server and client, so it is authoritative
+      // when present. Keep the legacy localStorage mirror in sync instead of
+      // letting a stale browser value replace server-rendered content.
+      localStorage.setItem(LANG_STORAGE_KEY, initialLanguage)
+      return
+    }
+
+    // Migrate browsers that saved the preference before the cookie mirror was
+    // introduced. The first render remains English on both server and client;
+    // the legacy preference is applied only after hydration.
+    const saved = parseLanguage(localStorage.getItem(LANG_STORAGE_KEY))
+    if (saved) {
+      const migration = window.setTimeout(() => {
+        document.documentElement.lang = saved
+        setLanguageState(saved)
+        writeLangCookie(saved)
+        refreshServerContent?.()
+      }, 0)
+      return () => window.clearTimeout(migration)
     } else {
       // Mirror the default to cookie so the first server-rendered page picks it up.
       writeLangCookie('en')
     }
-  }, [])
+  }, [initialLanguage, refreshServerContent])
+
+  useEffect(() => {
+    document.documentElement.lang = language
+  }, [language])
 
   const setLanguage = (lang: Language) => {
+    // Keep the document truthful in the same interaction; the effect below also
+    // covers initial hydration and non-interactive state changes.
+    document.documentElement.lang = lang
     setLanguageState(lang)
-    localStorage.setItem('openbank-admin-lang', lang)
+    localStorage.setItem(LANG_STORAGE_KEY, lang)
     writeLangCookie(lang)
+    // Several documentation pages localize in Server Components by reading the
+    // cookie. Refresh their RSC payload after the synchronous cookie write so
+    // visible copy and the root language never disagree until navigation.
+    refreshServerContent?.()
   }
 
   const t = (csText: string, enText: string) => {

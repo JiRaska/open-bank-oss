@@ -37,7 +37,7 @@ graph TB
     uc[Application<br/>CardService<br/>CardUseCase]
     dom[Domain<br/>agregát Card + stavový automat<br/>CardIssued / CardStatusChanged]
     persist[Persistence<br/>CardRepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>CardOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>CardOutboxDispatcher<br/>@Scheduled každých 5s"]
     kpub[Kafka publisher<br/>KafkaCardOutboxEventPublisher<br/>fault-tolerant]
   end
 

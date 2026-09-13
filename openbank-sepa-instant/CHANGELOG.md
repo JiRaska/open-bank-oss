@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.9.0...sepa-instant-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.1...sepa-instant-v0.9.0) (2026-08-21)
+
+
+### Features
+
+* **sepa-instant:** expose pending four-eyes approvals via approval inbox ([#5694](https://github.com/JiRaska/open-bank-oss/issues/5694)) ([89c5631](https://github.com/JiRaska/open-bank-oss/commit/89c5631f9b07a4ea63383979e5ad950e1a337deb))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.0...sepa-instant-v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-instant:** add sourceService to published events for audit attribution ([#5389](https://github.com/JiRaska/open-bank-oss/issues/5389)) ([6069ce0](https://github.com/JiRaska/open-bank-oss/commit/6069ce0fd301e4aba5d36ad1fd418e2d027225b5))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.7...sepa-instant-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.6...sepa-instant-v0.7.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **sepa-instant:** emit paymentProcessingDuration on terminal transitions ([#5213](https://github.com/JiRaska/open-bank-oss/issues/5213)) ([6c04bec](https://github.com/JiRaska/open-bank-oss/commit/6c04bec1bfaf5b35cbeff011a8a62c8d5423add4)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.5...sepa-instant-v0.7.6) (2026-08-02)
 
 

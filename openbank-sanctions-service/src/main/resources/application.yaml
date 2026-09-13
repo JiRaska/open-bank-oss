@@ -74,6 +74,13 @@ quarkus:
       level: DEBUG
     oidc:
       enabled: false
+  openbank:
+    sanctions:
+      eu:
+        # Local dev has no business downloading the ~25 MB first-party feed on every refresh —
+        # run on the Flyway-seeded sample entries instead, explicitly labelled non-production by
+        # the reported import outcome (seed_fallback_non_production, issue #8362).
+        source: ${SANCTIONS_EU_SOURCE:seed}
 "%test":
   quarkus:
     oidc:
@@ -141,3 +148,12 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
     dispatch-enabled: true
+  sanctions:
+    # Issue #8362: the EU consolidated list imports from the first-party EU FSF XML endpoint by
+    # default; `opensanctions` selects the OpenSanctions CSV mirror (rollback), `seed` keeps the
+    # Flyway V6 sample entries — NON-PRODUCTION, local dev only (the import reports outcome
+    # seed_fallback_non_production so a dashboard can never confuse it with a working provider).
+    eu:
+      source: ${SANCTIONS_EU_SOURCE:eu-fsf}
+    eu-fsf:
+      url: ${SANCTIONS_EU_FSF_URL:https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw}

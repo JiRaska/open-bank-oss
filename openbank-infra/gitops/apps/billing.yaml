@@ -1,7 +1,10 @@
 # ArgoCD app for billing-service (ADR-0143 phase 2c: runtime fee assessment).
-# Postgres-backed (billing-db.yaml, single-owner CNPG cluster) — no Kafka. Reads
-# product, account, and balance state via REST to compute fee assessments; ledger
-# posting (outbox) is the phase 2c-ii follow-up gated behind a four-eyes OPA decision.
+# Postgres-backed (billing-db.yaml, single-owner CNPG cluster). Reads product, account,
+# and balance state via REST to compute fee assessments; publishes
+# billing.fee.post-intent.v1 to its own openbank.billing.fee.event Kafka topic via a
+# transactional outbox (ADR-0248) — kafka-billing-mtls.yaml provisions that identity
+# (issue #4701; the topic existed before this app's Deployment ever supplied the
+# connection to reach it).
 # The OIDC_CLIENT_SECRET Secret is delivered by ESO (billing-service-oidc).
 apiVersion: argoproj.io/v1alpha1
 kind: Application

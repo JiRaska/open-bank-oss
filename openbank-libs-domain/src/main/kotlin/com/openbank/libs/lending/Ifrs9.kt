@@ -37,18 +37,26 @@ enum class EclHorizon { TWELVE_MONTH, LIFETIME }
  * @param pdLifetime lifetime probability of default, in [0,1] (used in Stages 2/3; 1.0 for defaulted).
  * @param lgd        loss given default, in [0,1].
  * @param exposureAtDefault  EAD — outstanding exposure expected at the point of default.
+ * @param modelVersion identifies the risk-parameter model these values came from (issue #8364 —
+ *        PD/LGD calibration governance). Persisted onto every provisioning record so an ECL figure
+ *        can always be traced back to the exact parameter set that produced it; a change to the
+ *        underlying values MUST ship with a new version string (see
+ *        `ConservativeRiskParameterSource.MODEL_VERSION` for the convention), which is what makes
+ *        a parameter change a reviewed, logged event rather than a silent edit.
  */
 data class EclInputs(
     val pd12Month: BigDecimal,
     val pdLifetime: BigDecimal,
     val lgd: BigDecimal,
     val exposureAtDefault: Money,
+    val modelVersion: String,
 ) {
     init {
         requireProbability(pd12Month, "pd12Month")
         requireProbability(pdLifetime, "pdLifetime")
         requireProbability(lgd, "lgd")
         require(exposureAtDefault.isNonNegative()) { "EAD cannot be negative: $exposureAtDefault" }
+        require(modelVersion.isNotBlank()) { "modelVersion cannot be blank" }
     }
 
     private fun requireProbability(v: BigDecimal, name: String) =

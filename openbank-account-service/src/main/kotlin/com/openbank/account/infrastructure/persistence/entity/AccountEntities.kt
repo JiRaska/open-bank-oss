@@ -82,12 +82,27 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "goal_target_date")
     var goalTargetDate: LocalDate? = null
 
+    /** Customer-chosen display label (V20). Null means "use the account-type default name". */
+    @Column(name = "nickname", length = 60)
+    var nickname: String? = null
+
+    /** Terms version this TERM_DEPOSIT was opened under (V24, #9044). Null = pre-V24 account. */
+    @Column(name = "terms_version")
+    var termsVersion: String? = null
+
+    /** Snapshot of the terms document URL at opening — evidence of what was shown (V24, #9044). */
+    @Column(name = "terms_url")
+    var termsUrl: String? = null
+
+    @Column(name = "terms_effective_from")
+    var termsEffectiveFrom: LocalDate? = null
+
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }
 
 @Entity
@@ -126,10 +141,10 @@ class AccountPocketEntity : PanacheEntityBase {
 
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }
 
 /**
@@ -150,5 +165,5 @@ class AccountIdempotencyEntity : PanacheEntityBase {
     lateinit var accountId: UUID
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }

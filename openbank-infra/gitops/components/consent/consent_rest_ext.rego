@@ -114,6 +114,27 @@ allowed_reasons contains "service-consent-m2m-marketing" if {
 	input.resource.id == "party-service:marketing-comms"
 }
 
+# ADR-0269 rule 1: the customer switches CREDIT_OFFERS / CREDIT_PROFILE_USE / CREDIT_AI_AGENT
+# on and off through the edge's own PUT /credit/consents — there is no operator or customer
+# console step in that path, only the edge's M2M identity. Found live 2026-09-03: the switch
+# had no OPA path at all, so every grant 403'd and the consent stayed permanently off
+# regardless of what the customer chose — the exact silent-failure shape "operator-consent-write"
+# above warns a role-only check would produce, except here it was under-grant instead of
+# over-grant.
+#
+# Same resource-scoping discipline as service-consent-m2m-marketing: the edge's client
+# (`service-account-openbank-edge`) is otherwise excluded from every consent.* write (see
+# operator-consent-write's HUMAN-non-service-account guard above), so this rule is the only
+# door, and it opens only for the edge's own first-party grantee — `BANK_GRANTEE = "openbank"`
+# in CustomerEdgeResource — never for a TPP grantee a customer might one day consent into
+# through the same client identity.
+allowed_reasons contains "service-consent-m2m-credit" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {"consent.grant", "consent.revoke"}
+	input.resource.id == "openbank"
+}
+
 # ADR-0219 D3 suppression administration (#3656 slice 2). Writes (suppression.manage) are
 # HUMAN-only — operators on the preference-centre / complaints / RM surfaces; no M2M writer
 # exists yet, and the shared-M2M exclusion mirrors operator-consent-write for the same reason

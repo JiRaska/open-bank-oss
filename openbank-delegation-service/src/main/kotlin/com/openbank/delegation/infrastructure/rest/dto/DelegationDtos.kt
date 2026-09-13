@@ -54,6 +54,23 @@ data class OfferDelegationRequest(
     val note: String? = null,
 )
 
+data class PreviewDelegationRequest(
+    val grantorPartyId: UUID,
+    val granteePartyId: UUID,
+    val resourceType: DelegationResourceType,
+    val resourceId: UUID,
+    val capabilities: Set<DelegationCapability>,
+    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    val requiredApprovals: Int? = null,
+    val perTransactionLimit: MoneyDto? = null,
+    val dailyLimit: MoneyDto? = null,
+    val monthlyLimit: MoneyDto? = null,
+    val exposure: ExposureDto? = null,
+    val validTo: OffsetDateTime? = null,
+)
+
+data class DelegationPreviewResponse(val valid: Boolean = true)
+
 data class RevokeDelegationRequest(val reason: String)
 
 data class SuspendDelegationRequest(val reason: String)

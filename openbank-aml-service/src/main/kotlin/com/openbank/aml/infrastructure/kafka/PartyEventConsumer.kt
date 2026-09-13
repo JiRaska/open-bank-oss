@@ -12,6 +12,7 @@ import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -19,10 +20,11 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Opens an onboarding AML screening case when a party is created (ADR-0073), and — in the
- * sandbox — auto-clears it so the party clears the AML key of the activation gate without an
- * analyst. Emits aml.case.status_changed.v1 (CLEARED) on openbank.aml.events, which
- * party-service consumes for its KYC+AML two-key gate.
+ * Opens an onboarding AML screening case when a party is created (ADR-0267 §2 — the AML
+ * outcome is the second key of the party activation gate), and — in the sandbox — auto-clears
+ * it so the party clears the AML key of that gate without an analyst. Emits
+ * aml.case.status_changed.v1 (CLEARED) on openbank.aml.events, which party-service consumes
+ * for its KYC+AML two-key gate.
  *
  * Idempotent: the case idempotency key is "<partyId>:CUSTOMER_ONBOARDING", so a redelivered
  * PARTY_CREATED reuses the existing case; the auto-clear is skipped once the case is terminal.
@@ -31,10 +33,16 @@ import java.util.UUID
  * The case row itself is retained for audit/SAR obligations; only the personal data fields are
  * nulled and customerReference is replaced with "ERASED-<partyId>".
  *
- * Poison-pill safe: failures are logged and acked.
+ * Failure handling (#5698): an UNPARSEABLE payload is logged and acked — a genuine poison pill,
+ * since replaying it fails identically forever. A failure of aml-db is the opposite case: the event
+ * is fine, the screening must still happen, so it is retried and then RETHROWN for the connector to
+ * dead-letter. Acking it would leave an onboarding party with no AML screening at all and nothing
+ * anywhere saying so.
  *
  * Auto-clear is sandbox-only (openbank.aml.auto-clear, default false). Production keeps the
- * four-eyes decision endpoint as the only path to CLEARED/BLOCKED.
+ * four-eyes decision endpoint as the only path to CLEARED/BLOCKED. No ADR decides this flag:
+ * ADR-0116 §4 decides only the KYC equivalent (openbank.kyc.auto-approve); the AML side is
+ * recorded in this service's docs/ only (#5785).
  */
 @ApplicationScoped
 class PartyEventConsumer(
@@ -70,7 +78,7 @@ class PartyEventConsumer(
             log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        EventRetry.withRetry(log, "PARTY_CREATED AML screening", partyId) {
             val case = amlUseCase.createCase(
                 CreateAmlCaseCommand(
                     idempotencyKey = "$partyId:CUSTOMER_ONBOARDING",
@@ -99,8 +107,6 @@ class PartyEventConsumer(
                 )
                 log.infof("[party-events-in] Auto-cleared AML case %s for party %s", case.id, partyId)
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to handle PARTY_CREATED for party %s", partyId)
         }
     }
 
@@ -109,15 +115,15 @@ class PartyEventConsumer(
             log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        // An acked-but-failed erasure is worse than a stalled workflow: the PII stays, and the log
+        // line says it went. anonymizeByPartyId is idempotent, so retry and redelivery are safe.
+        EventRetry.withRetry(log, "PARTY_ERASED AML anonymisation", partyId) {
             val count = amlCaseRepository.anonymizeByPartyId(partyId)
             log.infof(
                 "[party-events-in] GDPR Art. 17: anonymised PII in %d AML case(s) for erased party %s",
                 count,
                 partyId,
             )
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to anonymise AML PII for party %s", partyId)
         }
     }
 }

@@ -41,12 +41,12 @@ graph LR
 graph TB
   subgraph "openbank-notification-service (Quarkus)"
     direction TB
-    consumer[Consumer<br/>NotificationConsumer<br/>@Incoming notification-events-in]
+    consumer["Consumer<br/>NotificationConsumer<br/>@Incoming notification-events-in"]
     rest[REST<br/>NotificationResource<br/>DeviceResource<br/>DispatchControlResource]
     app[Application<br/>DispatchControlService<br/>OversightWebhook]
     dom[Doména<br/>Notification / DeviceToken<br/>DispatchControlSnapshot]
     persist[Perzistence<br/>repozitáře Notification/DeviceToken/Outbox<br/>Hibernate Reactive Panache]
-    outbox[Outbox<br/>NotificationOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>NotificationOutboxDispatcher<br/>@Scheduled každých 5s"]
     pushrt[Push<br/>PushSenderRouter → Fcm/Apns]
     webhook[Webhook<br/>SlackOversightWebhookPublisher]
   end
@@ -113,7 +113,7 @@ sequenceDiagram
   else kanál = PUSH
     C->>DB: SELECT ACTIVE device_tokens pro party
     C->>M: rozeslání FCM/APNs na každý token
-    C->>DB: invalidace odmítnutých tokenů; status = SENT pokud aspoň jeden doručen, jinak FAILED
+    C->>DB: invalidace odmítnutých tokenů#59; status = SENT pokud aspoň jeden doručen, jinak FAILED
   else SMS / IN_APP
     Note over C: logovaný stub (žádný egress)
   end

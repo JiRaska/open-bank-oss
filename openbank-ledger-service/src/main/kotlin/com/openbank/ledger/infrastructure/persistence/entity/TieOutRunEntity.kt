@@ -26,7 +26,7 @@ class TieOutRunEntity : PanacheEntityBase {
     var asOf: LocalDate = LocalDate.EPOCH
 
     @Column(name = "run_at", nullable = false)
-    var runAt: Instant = Instant.EPOCH
+    var runAt: Instant = Instant.now()
 
     @Column(name = "status", nullable = false)
     var status: String = "OK"

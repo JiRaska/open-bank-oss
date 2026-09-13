@@ -43,6 +43,14 @@ data class Transaction(
     val merchantCategory: String? = null,
     /** Rail payment that triggered this transaction; null for operator/system postings (ADR-0108). */
     val originatingPaymentId: UUID? = null,
+    /**
+     * The transaction this one reverses (#8841). Set only on REVERSAL transactions created by
+     * `reverseTransaction`; the V2 compliance column existed unpopulated for the whole life of
+     * the service, so a reversal could not say WHAT it reversed except by parsing `description`.
+     */
+    val reversalOf: UUID? = null,
+    /** True iff this transaction was created as a reversal of another (#8841). */
+    val isReversal: Boolean = false,
 ) {
     fun complete(clock: Clock): Transaction {
         check(status == TransactionStatus.PENDING || status == TransactionStatus.PROCESSING) {

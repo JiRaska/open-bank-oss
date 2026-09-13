@@ -79,12 +79,24 @@ class ClickHouseAnalyticsSinkTest {
         assertThat(node.get("source_service").asText()).isEqualTo("openbank-account-service")
         assertThat(node.get("schema_version").asInt()).isEqualTo(3)
         assertThat(node.get("ingest_source").asText()).isEqualTo("STREAM")
+        assertThat(node.get("synthetic").asBoolean()).isFalse()
         // ClickHouse DateTime64(3,'UTC') literal format, in UTC.
         assertThat(node.get("occurred_at").asText()).isEqualTo("2026-01-01 00:00:00.000")
         assertThat(node.get("ingested_at").asText()).isEqualTo("2026-01-02 03:04:05.678")
         // F1: hash matches the canonical primitive, so tamper-evidence is identical to the libs view.
         assertThat(node.get("record_hash").asText()).isEqualTo(AnalyticsIntegrity.recordHash(env))
     }
+
+    @Test
+    fun `bronze row persists synthetic provenance`() {
+        val node = mapper.readTree(sinkRow(envelope().copy(synthetic = true)))
+
+        assertThat(node.get("synthetic").asBoolean()).isTrue()
+    }
+
+    private fun sinkRow(env: AnalyticsEnvelope): String = ClickHouseAnalyticsSink().apply {
+        mapper = this@ClickHouseAnalyticsSinkTest.mapper
+    }.bronzeRowJson(env)
 
     @Test
     fun `payload column is an embedded JSON string, not a nested object`() {

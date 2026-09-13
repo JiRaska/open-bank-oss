@@ -1,0 +1,89 @@
+{
+  "consumer": {
+    "name": "openbank-lending-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the published priced loan offering for origination",
+      "providerStates": [
+        {
+          "name": "a published priced loan revision exists for lending originations"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/products/20000000-0000-0000-0000-000000000011"
+      },
+      "response": {
+        "body": {
+          "checkerId": "pact-loan-checker",
+          "content": {
+            "attributes": {
+              "accrualBasis": "ACT_365",
+              "allocationOrder": [
+                "INTEREST",
+                "PRINCIPAL"
+              ],
+              "amortizationMethod": "ANNUITY",
+              "currency": "EUR",
+              "maxPrincipalAmount": "50000",
+              "minPrincipalAmount": "1000",
+              "nominalAnnualRate": "0.0699",
+              "productType": "INSTALLMENT_LOAN",
+              "tenorMonths": 12
+            },
+            "documentCodes": [
+
+            ],
+            "eligibility": [
+
+            ],
+            "name": {
+              "en": "Lending pact loan"
+            },
+            "prices": [
+
+            ],
+            "relationships": [
+
+            ]
+          },
+          "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "createdAt": "2026-01-01T00:00:00Z",
+          "effectiveFrom": "2026-01-01T00:00:00Z",
+          "effectiveTo": null,
+          "id": "30000000-0000-0000-0000-000000000011",
+          "makerId": "pact-loan-author",
+          "number": 1,
+          "offeringId": "20000000-0000-0000-0000-000000000011",
+          "reason": "published priced loan fixture",
+          "revision": 0,
+          "schemaRef": {
+            "id": "org.openbank.banking.loan",
+            "version": 2
+          },
+          "state": "PUBLISHED",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

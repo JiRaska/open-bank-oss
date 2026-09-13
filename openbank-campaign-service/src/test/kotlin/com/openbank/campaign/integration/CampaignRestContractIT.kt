@@ -4,10 +4,17 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
+import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
 import io.agroal.api.AgroalDataSource
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -17,9 +24,11 @@ import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.hamcrest.Matchers.containsInAnyOrder
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.nullValue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -49,6 +58,20 @@ class CampaignRestContractIT {
     @Inject
     lateinit var dataSource: AgroalDataSource
 
+    private val audienceJwt = mockk<JsonWebToken>()
+    private val segmentEvaluator = mockk<SilverSegmentEvaluator>()
+    private val incentiveRegistry = mockk<LiveIncentiveOfferRegistry>()
+
+    @BeforeEach
+    fun installAudiencePrincipal() {
+        every { audienceJwt.name } returns "maker@openbank.test"
+        every { audienceJwt.subject } returns "maker@openbank.test"
+        QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
+        coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
+        QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
+        QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
+    }
+
     /**
      * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
      * would let this test go red for reasons that say nothing about the HTTP contract.
@@ -67,9 +90,20 @@ class CampaignRestContractIT {
     }
 
     private fun draftBody(name: String, segmentName: String = "actives") = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
+        {"name":"$name","goal":"prove the HTTP contract","productKind":"NONE","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+    """.trimIndent()
+
+    private fun draftBodyWithIncentive(name: String, ref: IncentiveOfferRef) = """
+        {"name":"$name","goal":"prove immutable incentive selection","productKind":"NONE","segmentName":"actives","segmentVersion":1,
+         "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                   "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+         "incentiveOfferRef":{"id":"${ref.id}","name":"${ref.name}","version":${ref.version}}}
+    """.trimIndent()
+
+    private fun audienceBody(name: String) = """
+        {"name":"$name","rules":[{"type":"PARTY_STATUS_IS","status":"ACTIVE"}]}
     """.trimIndent()
 
     private fun createDraft(name: String = "it-${UUID.randomUUID()}"): String = Given {
@@ -81,6 +115,38 @@ class CampaignRestContractIT {
         statusCode(201)
     } Extract {
         path<String>("id")
+    }
+
+    private fun assertAudienceCannotBeCampaignTargeted(name: String) {
+        Given {
+            contentType("application/json")
+            body(draftBody("before-approval-${UUID.randomUUID()}", name))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $name@1 not found"))
+        }
+    }
+
+    private fun approveAudienceAsIndependentChecker(name: String) {
+        When {
+            post("/api/v1/audiences/$name/1/approve")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("maker/checker: the approver must differ from the creator"))
+        }
+
+        every { audienceJwt.name } returns "checker@openbank.test"
+        every { audienceJwt.subject } returns "checker@openbank.test"
+
+        When {
+            post("/api/v1/audiences/$name/1/approve")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("APPROVED"))
+            body("approvedBy", equalTo("checker@openbank.test"))
+        }
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
@@ -152,6 +218,49 @@ class CampaignRestContractIT {
     }
 
     @Test
+    fun `campaign pins and reloads the exact published incentive revision`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "summer-current-account", 3)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns ref
+
+        val id = Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("incentive-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        } Extract {
+            path<String>("id")
+        }
+
+        When { get("/api/v1/campaigns/$id") } Then {
+            statusCode(200)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        }
+    }
+
+    @Test
+    fun `campaign rejects an incentive revision that is not published exactly`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "retired-reward", 1)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns null
+
+        Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("rejected-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("published incentive offer ${ref.name}@${ref.version} (${ref.id}) not found"))
+        }
+    }
+
+    @Test
     fun `operator can reuse a reviewed definition as an independent draft through the HTTP contract`() {
         val sourceName = "source-${UUID.randomUUID()}"
         val sourceId = createDraft(sourceName)
@@ -163,9 +272,7 @@ class CampaignRestContractIT {
             statusCode(201)
             body("name", equalTo("Copy of $sourceName"))
             body("state", equalTo("DRAFT"))
-            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
-            // falls back to `unknown` rather than trusting a browser-provided maker field.
-            body("createdBy", equalTo("unknown"))
+            body("createdBy", equalTo("maker@openbank.test"))
             body("approvedBy", nullValue())
         } Extract {
             path<String>("id")
@@ -202,6 +309,53 @@ class CampaignRestContractIT {
         } Then {
             statusCode(409)
             body("error", equalTo("segment $staleSegment@1 not found"))
+        }
+    }
+
+    @Test
+    fun `approved audience lifecycle is a campaign source only after an independent HTTP approval`() {
+        val audienceName = "audience-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(audienceBody(audienceName))
+        } When {
+            post("/api/v1/audiences")
+        } Then {
+            statusCode(201)
+            body("name", equalTo(audienceName))
+            body("version", equalTo(1))
+            body("state", equalTo("DRAFT"))
+            body("createdBy", equalTo("maker@openbank.test"))
+        }
+
+        When {
+            post("/api/v1/audiences/$audienceName/1/submit")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+
+        assertAudienceCannotBeCampaignTargeted(audienceName)
+        approveAudienceAsIndependentChecker(audienceName)
+
+        When {
+            get("/api/v1/audiences/$audienceName/1/preview")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(audienceName))
+            body("version", equalTo(1))
+        }
+
+        Given {
+            contentType("application/json")
+            body(draftBody("after-approval-${UUID.randomUUID()}", audienceName))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("segmentRef.name", equalTo(audienceName))
+            body("segmentRef.version", equalTo(1))
         }
     }
 
@@ -280,27 +434,39 @@ class CampaignRestContractIT {
      * /api/v1/campaigns/planning` — then answers 400 for the entire portfolio because of one row the
      * HTTP API could never have created (#4825).
      */
-    private fun insertCampaignForSendLog(campaignId: UUID) {
+    private fun insertCampaignForSendLog(campaignId: UUID, incentiveOfferRef: IncentiveOfferRef? = null) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO campaigns (
-                    id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
-                    state, created_by, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, name, goal, product_kind, segment_name, segment_version, steps_json,
+                    holdout_percent, state, created_by, created_at, updated_at,
+                    incentive_offer_id, incentive_offer_name, incentive_offer_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, campaignId)
                 statement.setString(2, "interaction validation fixture")
                 statement.setString(3, "prove private ownership validation")
-                statement.setString(4, "actives")
-                statement.setInt(5, 1)
-                statement.setString(6, FIXTURE_STEPS_JSON)
-                statement.setInt(7, 0)
-                statement.setString(8, "ACTIVE")
-                statement.setString(9, "fixture")
-                statement.setObject(10, OffsetDateTime.now())
+                // The column is NOT NULL with no database default, on purpose: a direct insert has
+                // to state the kind rather than inherit a silent "not credit". This fixture is a
+                // non-credit campaign, so it says so.
+                statement.setString(4, "NONE")
+                statement.setString(5, "actives")
+                statement.setInt(6, 1)
+                statement.setString(7, FIXTURE_STEPS_JSON)
+                statement.setInt(8, 0)
+                statement.setString(9, "ACTIVE")
+                statement.setString(10, "fixture")
                 statement.setObject(11, OffsetDateTime.now())
+                statement.setObject(12, OffsetDateTime.now())
+                statement.setObject(13, incentiveOfferRef?.id)
+                statement.setString(14, incentiveOfferRef?.name)
+                if (incentiveOfferRef == null) {
+                    statement.setNull(15, java.sql.Types.INTEGER)
+                } else {
+                    statement.setInt(15, incentiveOfferRef.version)
+                }
                 statement.executeUpdate()
             }
         }
@@ -332,6 +498,31 @@ class CampaignRestContractIT {
         }
     }
 
+    private fun insertIncentiveOutcome(campaignId: UUID, status: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_incentive_outcome (
+                    event_id, reservation_id, campaign_id, step_order, attribution_ref,
+                    offer_id, offer_name, offer_version, status, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, campaignId)
+                statement.setInt(4, 0)
+                statement.setObject(5, UUID.randomUUID())
+                statement.setObject(6, UUID.randomUUID())
+                statement.setString(7, "term-deposit-welcome")
+                statement.setInt(8, 2)
+                statement.setString(9, status)
+                statement.setObject(10, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -339,7 +530,8 @@ class CampaignRestContractIT {
         // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
         // rather than borrowing an operator token to create a draft.
         val campaignId = UUID.randomUUID()
-        insertCampaignForSendLog(campaignId)
+        val offer = IncentiveOfferRef(UUID.randomUUID(), "term-deposit-welcome", 2)
+        insertCampaignForSendLog(campaignId, offer)
         val owner = UUID.randomUUID()
         val interactionRef = insertPushSend(campaignId, owner)
 
@@ -360,15 +552,37 @@ class CampaignRestContractIT {
             body("campaignId", equalTo(campaignId.toString()))
             body("stepOrder", equalTo(0))
             body("channel", equalTo("PUSH"))
+            body("incentiveOfferRef.id", equalTo(offer.id.toString()))
+            body("incentiveOfferRef.name", equalTo(offer.name))
+            body("incentiveOfferRef.version", equalTo(offer.version))
             body("partyId", nullValue())
         }
 
         Given {
             header("X-Customer-Party-Id", UUID.randomUUID().toString())
         } When {
-            get("/api/v1/campaigns/interactions/$interactionRef")
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `legacy campaign attribution keeps an explicit null incentive reference`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("incentiveOfferRef", nullValue())
         }
     }
 
@@ -387,6 +601,24 @@ class CampaignRestContractIT {
             body("[0].surface", equalTo("STORIES"))
             body("[0].type", equalTo("IMPRESSION"))
             body("[0].count", equalTo(1))
+        }
+    }
+
+    @Test
+    fun `campaign incentive funnel distinguishes held inventory from redemption`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertIncentiveOutcome(campaignId, "RESERVED")
+        insertIncentiveOutcome(campaignId, "COMMITTED")
+
+        When {
+            get("/api/v1/campaigns/$campaignId/incentives")
+        } Then {
+            statusCode(200)
+            body("reserved", equalTo(1))
+            body("committed", equalTo(1))
+            body("released", equalTo(0))
+            body("expired", equalTo(0))
         }
     }
 
@@ -466,7 +698,7 @@ class CampaignRestContractIT {
     @Test
     fun `a step can be created on PUSH and reads back as PUSH`() {
         val body = """
-            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP",
+            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
                        "variables":{"offerTitle":"T"},"delaySeconds":0}]}
@@ -504,7 +736,7 @@ class CampaignRestContractIT {
     @Test
     fun `a template that renders on EMAIL is rejected on a PUSH step`() {
         val body = """
-            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP",
+            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"PUSH",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -539,7 +771,7 @@ class CampaignRestContractIT {
     @Test
     fun `two decision paths can name the same explicit source step`() {
         val body = """
-            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[
                {"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -578,7 +810,7 @@ class CampaignRestContractIT {
     @Test
     fun `an explicit decision graph survives the campaign HTTP contract`() {
         val body = """
-            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP",
+            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[
                {"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -641,7 +873,7 @@ class CampaignRestContractIT {
     @Test
     fun `holdout is durable and its experiment compares two independently counted cohorts`() {
         val body = """
-            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening",
+            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED","holdoutPercent":20,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -686,7 +918,7 @@ class CampaignRestContractIT {
     @Test
     fun `a campaign can be created with a cadence and reads it back`() {
         val body = """
-            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip",
+            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "schedule":{"cadence":"WEEKLY_MONDAY_MORNING","endAt":"2026-12-31T00:00:00Z"},
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -723,7 +955,7 @@ class CampaignRestContractIT {
     @Test
     fun `an unknown cadence is rejected rather than stored`() {
         val body = """
-            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text",
+            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "schedule":{"cadence":"*/5 * * * *"},
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -853,7 +1085,7 @@ class CampaignRestContractIT {
     @Test
     fun `a campaign can declare a trigger and reads it back`() {
         val body = """
-            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip",
+            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"trigger":"ACCOUNT_OPENED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -887,7 +1119,7 @@ class CampaignRestContractIT {
     @Test
     fun `an unknown trigger is rejected rather than stored`() {
         val body = """
-            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers",
+            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"trigger":"CUSTOMER_SNEEZED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -922,7 +1154,7 @@ class CampaignRestContractIT {
     @Test
     fun `a path experiment keeps both declared arms and exposes its empty measurement`() {
         val body = """
-            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
+            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
@@ -965,7 +1197,7 @@ class CampaignRestContractIT {
     @Test
     fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
         val body = """
-            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
                        "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
@@ -1071,13 +1303,47 @@ class CampaignRestContractIT {
     }
 
     /**
+     * ADR-0269 rule 1 on the wire: an omitted product kind is NONE, and NONE is not credit.
+     *
+     * This started as the opposite test — that an omitted kind is REFUSED — and the api-contract
+     * gate rejected that design: a newly required request property is breaking and would demand
+     * /api/v2. What is pinned instead is the property that actually protects the customer, and it
+     * is the stronger half anyway: a client that never heard of this field cannot produce a
+     * campaign that delivers credit marketing. The failure direction is "no credit campaign", not
+     * "credit campaign to someone who never asked".
+     *
+     * The requirement that a HUMAN state it is enforced in admin-ui, which offers no
+     * pre-selection — a UI guard, pinned by its own test, not by this one.
+     */
+    @Test
+    fun `a create body that omits the product kind is a non-credit campaign, never an unstated one`() {
+        val body = """
+            {"name":"it-no-kind-${UUID.randomUUID()}","goal":"absent kind reads as non-credit",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("productKind", org.hamcrest.Matchers.equalTo("NONE"))
+        }
+    }
+
+    /**
      * The template catalogue rejects by construction, but the operator only benefits if the reason
      * survives the trip out through the exception mapper — "400" alone does not say what to change.
      */
     @Test
     fun `an unknown template is a 400 whose message names the template`() {
         val body = """
-            {"name":"it-bad-template","goal":"must fail","segmentName":"actives","segmentVersion":1,
+            {"name":"it-bad-template","goal":"must fail","productKind":"NONE","segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"WINBACK_CS","variables":{},"delaySeconds":0}]}
         """.trimIndent()
 
@@ -1095,7 +1361,7 @@ class CampaignRestContractIT {
     @Test
     fun `a variable the template does not declare is a 400 that names the variable`() {
         val body = """
-            {"name":"it-bad-variable","goal":"must fail","segmentName":"actives","segmentVersion":1,
+            {"name":"it-bad-variable","goal":"must fail","productKind":"NONE","segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go","bodyHtml":"<b>no</b>"},
                        "delaySeconds":0}]}
@@ -1118,7 +1384,7 @@ class CampaignRestContractIT {
             contentType("application/json")
             body(
                 """
-                {"name":"it-stop-condition","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+                {"name":"it-stop-condition","goal":"prove the HTTP contract","productKind":"NONE","segmentName":"actives","segmentVersion":1,
                  "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                            "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
                  "stopCondition":{"maxSendsPerParty":2}}
@@ -1150,6 +1416,62 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("stopCondition", org.hamcrest.Matchers.nullValue())
+        }
+    }
+
+    /**
+     * Jackson's Kotlin module null-checks a data class's CONSTRUCTOR PARAMETERS; it does not check
+     * the ELEMENTS of a collection, so a null array element used to reach the mapping code and be
+     * dereferenced there — answering 500 where 400 belongs. Driven over real HTTP because the
+     * defect lives in deserialisation, which a direct call to the resource never performs.
+     */
+    @Test
+    fun `a null steps element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"null-step-${UUID.randomUUID()}","goal":"reject a null array element","productKind":"NONE",
+                 "segmentName":"actives","segmentVersion":1,
+                 "steps":[null]}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `a null decisions element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"null-decision-${UUID.randomUUID()}","goal":"reject a null array element","productKind":"NONE",
+                 "segmentName":"actives","segmentVersion":1,
+                 "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                           "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+                 "decisions":[null]}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `a null audience rules element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body("""{"name":"null-rule-${UUID.randomUUID()}","rules":[null]}""")
+        } When {
+            post("/api/v1/audiences")
+        } Then {
+            statusCode(400)
         }
     }
 

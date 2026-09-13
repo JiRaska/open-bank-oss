@@ -33,10 +33,18 @@ class CopilotChatServiceTest {
     private val tools = mockk<CopilotToolRegistry>(relaxed = true)
     private val actionTools = mockk<ActionToolRegistry>(relaxed = true)
     private val policyGate = mockk<CopilotPolicyGate>()
+
+    // relaxed = false would be better here, but every test that does not care about content safety
+    // must still get a definite answer: default to "nothing blocked" and let the safety-specific
+    // tests override. The guard's own fail-open/fail-closed logic is tested in ContentSafetyGuardTest.
+    private val contentSafety = mockk<ContentSafetyGuard> {
+        coEvery { checkUserInput(any(), any()) } returns false
+        coEvery { checkAssistantOutput(any(), any()) } returns false
+    }
     private val conversations = InMemoryConversationStore(Clock.systemUTC())
 
     private fun service(enabled: Boolean) =
-        CopilotChatService(gateway, guard, tools, actionTools, policyGate, conversations, enabled)
+        CopilotChatService(gateway, guard, contentSafety, tools, actionTools, policyGate, conversations, enabled)
 
     @Test
     fun `disabled by default returns Disabled and never calls the model`() {

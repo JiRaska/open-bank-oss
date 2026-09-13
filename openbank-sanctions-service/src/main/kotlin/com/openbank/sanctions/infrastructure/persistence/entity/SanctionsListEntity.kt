@@ -43,15 +43,19 @@ class SanctionsListEntity {
     var cronDays: String = "MON,TUE,WED,THU,FRI"
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @field:Column(name = "updated_at")
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
+
+    /** #9048: operator asked for a refresh off-request; the scheduler does the work. */
+    @field:Column(name = "refresh_requested_at")
+    var refreshRequestedAt: Instant? = null
 
     fun toDomain() = SanctionsList(
         id = id, listType = listType, displayName = displayName, sourceUrl = sourceUrl,
         enabled = enabled, lastUpdatedAt = lastUpdatedAt, lastEntryCount = lastEntryCount,
         cronHour = cronHour, cronMinute = cronMinute, cronDays = cronDays,
-        createdAt = createdAt, updatedAt = updatedAt,
+        createdAt = createdAt, updatedAt = updatedAt, refreshRequestedAt = refreshRequestedAt,
     )
 }

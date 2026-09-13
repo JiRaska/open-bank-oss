@@ -89,6 +89,11 @@ class ReplayBookedChangesService(
         return OutboxMessage(
             aggregateId = delta.accountId,
             eventType = event.eventType,
+            // "Identical to the original post's emission" has to include the taint: a replay that
+            // dropped it would re-emit a canary's movements as real ones, laundering exactly the
+            // activity ADR-0252 exists to keep out of the aggregates. Readable only since the
+            // dimension landed on journal_entries (V26); before that the entry could not say.
+            synthetic = entry.synthetic,
             payload = objectMapper.writeValueAsString(event),
         )
     }

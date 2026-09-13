@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test
  *
  * This guards the two config seams the GitOps manifest drives:
  *  - `AGENT_MODEL_ENDPOINT` overrides the `llama-3.3-70b-versatile` entry's base URL (it is
- *    `${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}` in the committed config). Without the
+ *    `${AGENT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}` in the committed config). Without the
  *    placeholder the endpoint is baked into the image and repointing is impossible from GitOps.
  *  - `AGENT_MODEL_API_KEY` overrides `agent.model.openai.api-key`, which is
  *    `${AGENT_MODEL_API_KEY:${GROQ_API_KEY:}}` — a *nested* default, so a deploy still on a

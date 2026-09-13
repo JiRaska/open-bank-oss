@@ -36,14 +36,11 @@ class LivenessSentinelResource(
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<LivenessFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<LivenessFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): LivenessFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): LivenessFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }

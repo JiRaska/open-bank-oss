@@ -97,7 +97,7 @@ class StandingOrderExecutionSweepIT {
         return dueEventCount(orderId)
     }
 
-    private fun dueOnceOrder(id: UUID, due: LocalDate): StandingOrder {
+    private fun dueDailyOrder(id: UUID, due: LocalDate): StandingOrder {
         val now = Instant.now(clock)
         return StandingOrder(
             id = id,
@@ -111,7 +111,11 @@ class StandingOrderExecutionSweepIT {
             creditorBic = null,
             amountMinorUnits = 4_200,
             currency = "EUR",
-            frequency = Frequency.ONCE,
+            // A ONCE order intentionally stays due until its payment is confirmed. With the
+            // dispatcher disabled and this profile's two-second cron, that fixture can be picked
+            // up again between the outbox assertion and the reload below. DAILY advances beyond
+            // today's sweep while exercising the same scheduler, transaction and outbox path.
+            frequency = Frequency.DAILY,
             paymentType = PaymentType.SEPA_CREDIT,
             remittanceInfo = null,
             startDate = due,
@@ -130,7 +134,7 @@ class StandingOrderExecutionSweepIT {
     fun `the scheduled sweep executes a due order and writes its outbox event`() {
         val id = Ids.newId()
         val today = LocalDate.now(clock)
-        onEventLoop { repository.save(dueOnceOrder(id, today)) }
+        onEventLoop { repository.save(dueDailyOrder(id, today)) }
 
         assertThat(awaitDueEvent(id))
             .describedAs(
@@ -145,11 +149,16 @@ class StandingOrderExecutionSweepIT {
             .describedAs("the due order must be executed exactly once by the sweep")
             .isEqualTo(1)
         assertThat(reloaded.status)
-            .describedAs("a ONCE order is COMPLETED after its single execution")
-            .isEqualTo(StandingOrderStatus.COMPLETED)
+            .describedAs(
+                "the recurring order remains active after its due occurrence is scheduled",
+            )
+            .isEqualTo(StandingOrderStatus.ACTIVE)
         assertThat(reloaded.lastExecutionDate)
             .describedAs("the execution is stamped with the date it was due")
             .isEqualTo(today)
+        assertThat(reloaded.nextExecutionDate)
+            .describedAs("the fixture must advance beyond this sweep so the fast cron cannot reschedule it")
+            .isEqualTo(today.plusDays(1))
     }
 
     private companion object {

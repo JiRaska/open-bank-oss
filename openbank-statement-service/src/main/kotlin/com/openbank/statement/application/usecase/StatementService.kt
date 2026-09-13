@@ -293,6 +293,14 @@ class StatementService(
      * renderer takes its timestamps from ("determinism is load-bearing", see the service's
      * CLAUDE.md), so it is the one instant a statement is already defined by. A close replayed or
      * re-emitted later must carry the same `occurredAt`, which a serialisation-time clock would not.
+     *
+     * `sourceService` (issue #3994/#5256) is the strongest (EVENT-sourced) attribution
+     * `AuditConsumer.resolveSourceService` reads. `EventAttribution.TopicAttribution` already maps
+     * `openbank.statement.event` -> `statement-service` correctly, but only as TOPIC-sourced, not
+     * the producer's own claim, and audit-service subscribes to this topic today
+     * (`openbank-audit-service/src/main/resources/application.yaml`'s consumed-topics list), so
+     * this is a live attribution upgrade. This payload is a hand-built JSON template string, not a
+     * serialised data class, so the key is a literal here rather than a Kotlin property name.
      */
     private fun periodClosedEvent(account: PocketAccountInfo, period: StatementPeriod): StatementOutboxMessage {
         val payload = """
@@ -310,7 +318,8 @@ class StatementService(
             "closedAt":"${period.closedAt}",
             "occurredAt":"${period.closedAt}",
             "actorId":"${StatementEventActors.PERIOD_CLOSE}",
-            "actorType":"${EventActor.TYPE_SYSTEM}"}
+            "actorType":"${EventActor.TYPE_SYSTEM}",
+            "sourceService":"statement-service"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
             eventId = UUID.randomUUID(),

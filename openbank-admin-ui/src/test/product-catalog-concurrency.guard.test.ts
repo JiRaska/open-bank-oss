@@ -20,7 +20,7 @@ describe('product catalog optimistic-concurrency path', () => {
     expect(page).toContain("if (p.status === 'ACTIVE')")
     expect(page).toContain("disabled={p.status === 'ACTIVE'}")
     expect(page).toContain('Deactivate the active product before editing.')
-    expect(page).toContain('<select className="input" disabled value={formData.status')
+    expect(page).toContain('<select id="catalog-status" className="input" disabled value={formData.status')
   })
 
   it('carries the strong precondition through the BFF and exposes the next ETag', () => {

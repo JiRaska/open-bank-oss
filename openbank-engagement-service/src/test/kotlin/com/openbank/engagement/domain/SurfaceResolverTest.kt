@@ -36,7 +36,8 @@ class SurfaceResolverTest {
     @Test
     fun `a slot with no catalogue entries resolves empty for an eligible party too`() {
         // Distinguishes "nothing catalogued" from "excluded" — both are empty, but for a different
-        // reason, and neither is a bug: rewards_hub has no first-slice content yet.
-        assertThat(SurfaceResolver.resolve(SurfaceSlot.REWARDS_HUB, snapshot())).isEmpty()
+        // reason, and neither is a bug: STORIES has no content yet. (REWARDS_HUB is no longer this
+        // case as of ADR-0220 D3's gamification slice — see SurfaceCatalogTest.)
+        assertThat(SurfaceResolver.resolve(SurfaceSlot.STORIES, snapshot())).isEmpty()
     }
 }

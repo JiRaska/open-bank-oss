@@ -205,6 +205,20 @@ class LedgerServiceTest {
         }
 
         @Test
+        fun `persists trusted synthetic taint on posting outbox messages`(): Unit = runBlocking {
+            mockGlAccounts()
+            coEvery { journalRepository.nextEntryNumber() } returns 1L
+            val messages = slot<List<OutboxMessage>>()
+            coEvery { journalRepository.save(any(), any(), capture(messages)) } answers { firstArg() }
+
+            service.postJournal(postCommand().copy(synthetic = true))
+
+            assertThat(messages.captured).isNotEmpty().allSatisfy { message ->
+                assertThat(message.synthetic).isTrue()
+            }
+        }
+
+        @Test
         fun `replays original entry on idempotency hit without re-posting`(): Unit = runBlocking {
             val command = postCommand()
             val existing = postedEntry(command.transactionId)

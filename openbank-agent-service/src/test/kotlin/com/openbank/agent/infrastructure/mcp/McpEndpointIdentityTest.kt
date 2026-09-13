@@ -20,6 +20,7 @@ import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.agent.domain.policy.EnforcementMode
 import com.openbank.agent.domain.policy.GateOutcome
 import com.openbank.agent.domain.policy.PolicyDecision
+import com.openbank.agent.infrastructure.security.InMemoryNonceStore
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import io.mockk.coVerify
@@ -100,7 +101,7 @@ class McpEndpointIdentityTest {
             this.auditPublisher = this@McpEndpointIdentityTest.auditPublisher
             this.svid = if (svidResult == SvidResult.Disabled) {
                 // Use the real disabled verifier for the existing D3a tests (unchanged).
-                AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
+                AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60, nonceStore = InMemoryNonceStore())
             } else {
                 svidMock
             }
@@ -273,7 +274,8 @@ class McpEndpointIdentityTest {
                         Principal { "op" }
                 }
             this.auditPublisher = this@McpEndpointIdentityTest.auditPublisher
-            this.svid = AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
+            this.svid =
+                AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60, nonceStore = InMemoryNonceStore())
             this.svidEnforced = false
             this.headers =
                 mockk {

@@ -49,6 +49,13 @@ PACTS = ROOT / "pacts"
 # files. The list belongs next to the code that reads it.
 KNOWN_UNCOVERED: set[str] = set()
 
+# Providers with committed pacts but no @PactBroker-sourced class, i.e. nothing publishes a
+# verification result and no provider version is ever created. EMPTY: #7738 and #7834 closed the last
+# three (case-coordinator-agent, flaky-test-hunter, incentive-service). Keep it that way — an entry
+# here is a deploy that can never be proven safe, and the checks below fail on a stale entry in
+# either direction, so it cannot outlive the problem.
+KNOWN_NO_BROKER_PUBLICATION: set[str] = set()
+
 # Annotations that can stop a test class from running. @EnabledIf* is the live one here; the others
 # are listed so a future "temporarily disabled" class cannot be read as coverage either.
 GATING = (
@@ -83,6 +90,16 @@ class VerificationClass:
     @property
     def runs_on_pr(self) -> bool:
         return self.source == "folder" and not self.gates and not self.excluded_by_build
+
+    @property
+    def publishes_to_broker(self) -> bool:
+        """A @PactBroker class publishes a verification result and creates a provider version.
+
+        Its `@EnabledIfSystemProperty(pactbroker.url)` gate is CORRECT rather than a defect — the PR
+        lane has no broker (ADR-0056) and the class runs on main-push. What disqualifies it is the
+        build excluding it outright, which stops it running anywhere.
+        """
+        return self.source == "broker" and not self.excluded_by_build
 
     def why_not(self) -> str:
         if self.source == "broker":
@@ -203,6 +220,54 @@ def check_allowlist_is_live(pacts: dict[str, str], allow: set[str]) -> None:
             fail(f"KNOWN_UNCOVERED lists {pact}, which is not a committed pact — drop the stale entry")
 
 
+def check_broker_publication(
+    pacts: dict[str, str], classes: list[VerificationClass], allow: set[str]
+) -> None:
+    """The complementary direction: a provider whose pacts gate a deploy must also PUBLISH.
+
+    `check_coverage` above asks whether a pact is replayed before merge. It cannot ask whether the
+    result of that replay ever reaches the broker, and `@PactFolder` never sends one: it reads pacts
+    off disk, publishes no verification result, and creates no provider version.
+
+    A provider with only that half is invisible to `can-i-deploy`. Worse than invisible — a broker
+    version row carrying ZERO pacts makes the question *unanswerable* rather than negative, so every
+    consumer paired with it resolves UNVERIFIABLE. Measured 2026-08-31: document-service's newest
+    broker version was 24 days old, the commit actually running in sandbox was absent from the broker
+    entirely, and three consumers were blocked, two of them money-path (#7621, fixed by #7738).
+
+    Nothing enforced this direction, which is why it went unnoticed for 24 days.
+    """
+    publishing = {c.provider for c in classes if c.publishes_to_broker}
+    for provider in sorted(set(pacts.values())):
+        published = provider in publishing
+        if published and provider in allow:
+            fail(
+                f"{provider} is listed in KNOWN_NO_BROKER_PUBLICATION but now has a @PactBroker "
+                "class — delete the stale entry"
+            )
+            continue
+        if published or provider in allow:
+            continue
+        candidates = [c for c in classes if c.provider == provider]
+        detail = "; ".join(f"{c.path} ({c.source}-sourced)" for c in candidates) or "none"
+        fail(
+            f"{provider} has committed pacts but no @PactBroker-sourced verification class, so no "
+            f"verification result or provider version ever reaches the broker. Classes: {detail}. "
+            "Add one alongside the @PactFolder class — openbank-ledger-service and "
+            "openbank-document-service both carry that pair."
+        )
+
+
+def check_broker_allowlist_is_live(pacts: dict[str, str], allow: set[str]) -> None:
+    named = set(pacts.values())
+    for provider in sorted(allow):
+        if provider not in named:
+            fail(
+                f"KNOWN_NO_BROKER_PUBLICATION lists {provider}, which no committed pact names — "
+                "drop the stale entry"
+            )
+
+
 def selftest() -> int:
     """Feed every check an input it MUST flag. A gate whose failure path never ran is unfalsified.
 
@@ -237,6 +302,32 @@ def selftest() -> int:
     run("covered pact still in KNOWN_UNCOVERED", lambda: check_coverage(one_pact, [folder], {"pacts/c-p.json"}))
     run("KNOWN_UNCOVERED names a pact that no longer exists", lambda: check_allowlist_is_live(one_pact, {"pacts/gone.json"}))
     run("@Provider name matches no pact", lambda: check_no_orphan_providers(one_pact, [VerificationClass("a/T.kt", "typo", "folder")]))
+    # --- broker-publication direction (#7621) ---
+    broker_ok = VerificationClass("a/BrokerTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
+    broker_excluded = VerificationClass(
+        "a/BrokerTest.kt", "p", "broker", excluded_by_build='exclude("**/BrokerTest*")'
+    )
+    run(
+        "provider whose only class is @PactFolder — nothing reaches the broker",
+        lambda: check_broker_publication(one_pact, [folder], set()),
+    )
+    run(
+        "provider with no verification class at all",
+        lambda: check_broker_publication(one_pact, [], set()),
+    )
+    run(
+        "broker class excluded by build.gradle.kts — it runs nowhere",
+        lambda: check_broker_publication(one_pact, [broker_excluded], set()),
+    )
+    run(
+        "provider now publishing but still in KNOWN_NO_BROKER_PUBLICATION",
+        lambda: check_broker_publication(one_pact, [folder, broker_ok], {"p"}),
+    )
+    run(
+        "KNOWN_NO_BROKER_PUBLICATION names a provider no pact declares",
+        lambda: check_broker_allowlist_is_live(one_pact, {"ghost"}),
+    )
+
     # The parser itself, both directions. Detect the artifact, never the prose (#2291): grepping
     # src/test for the word "contract" once scored three services as verified off comment lines.
     def assert_(name: str, ok: bool, good: str, bad: str) -> None:
@@ -268,6 +359,22 @@ def selftest() -> int:
         "ignored", "a fixture would count as coverage!",
     )
 
+    # Positive control. A gate that rejects everything is as useless as one that rejects nothing:
+    # the sanctioned pair — an always-running @PactFolder class plus a broker class gated on
+    # `pactbroker.url` — must be ACCEPTED. Without this, tightening the rule could quietly make every
+    # correctly-wired provider fail and still look like a working gate.
+    global errors
+    saved, errors = errors, []
+    try:
+        check_broker_publication(one_pact, [folder, broker_ok], set())
+        accepted = not errors
+    finally:
+        errors = saved
+    assert_(
+        "correctly-wired pair (folder + gated broker) is accepted",
+        accepted, "accepted", "the correct configuration was rejected!",
+    )
+
     ok = all(flagged for _, flagged in results)
     print()
     print("selftest: ALL CHECKS CAN FAIL" if ok else "selftest: SOME CHECK IS UNFALSIFIED")
@@ -284,12 +391,19 @@ def main() -> int:
     check_coverage(pacts, classes, KNOWN_UNCOVERED)
     check_no_orphan_providers(pacts, classes)
     check_allowlist_is_live(pacts, KNOWN_UNCOVERED)
+    check_broker_publication(pacts, classes, KNOWN_NO_BROKER_PUBLICATION)
+    check_broker_allowlist_is_live(pacts, KNOWN_NO_BROKER_PUBLICATION)
 
     replaying = {c.provider for c in classes if c.runs_on_pr}
     covered = sum(1 for p in pacts.values() if p in replaying)
     print(f"Committed pacts: {len(pacts)}")
     print(f"Replayed on a PR by an always-running @PactFolder class: {covered}")
     print(f"Declared uncovered (backlog, #2327): {len(KNOWN_UNCOVERED)}")
+    publishing = {c.provider for c in classes if c.publishes_to_broker}
+    providers = set(pacts.values())
+    print(f"Providers publishing verification results to the broker: "
+          f"{len(providers & publishing)}/{len(providers)} "
+          f"(declared exceptions: {len(KNOWN_NO_BROKER_PUBLICATION)})")
     print()
     for c in sorted(classes, key=lambda c: c.path):
         print(f"  {'RUNS ' if c.runs_on_pr else 'SKIP '} {c.provider:38s} {c.path}  [{c.why_not()}]")

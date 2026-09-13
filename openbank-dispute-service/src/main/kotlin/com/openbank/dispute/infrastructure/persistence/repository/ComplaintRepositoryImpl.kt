@@ -78,6 +78,7 @@ private fun applyUpdate(e: ComplaintEntity, c: Complaint) {
 /** Map a transactional-outbox message to its persisted entity (PENDING, shared dispute_outbox table). */
 private fun OutboxMessage.toEntity() = DisputeOutboxEntity().also {
     it.eventId = eventId
+    it.synthetic = synthetic
     it.aggregateId = aggregateId
     it.eventType = eventType
     it.payload = payload

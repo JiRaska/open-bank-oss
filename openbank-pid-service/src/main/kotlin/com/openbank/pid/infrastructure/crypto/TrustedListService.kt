@@ -5,10 +5,13 @@
 package com.openbank.pid.infrastructure.crypto
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.logging.Log
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.common.annotation.Blocking
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -54,7 +57,10 @@ class TrustedListService(
     private val trustStore: RefreshableTrustStore,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) {
+    private var liveness: WorkflowLivenessRecorder? = null
+
     private val anchor: JsonWebKeySet? = anchorJwksJson
         .map { it.trim() }
         .filter { it.isNotEmpty() && it != "{}" }
@@ -74,6 +80,11 @@ class TrustedListService(
     @Suppress("UnusedParameter") // the StartupEvent is the CDI trigger; its value is not needed
     fun onStart(@Observes startup: StartupEvent) = refresh()
 
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     @Scheduled(every = "\${openbank.pid.eudi.trusted-list.refresh:1h}", delayed = "30s")
     @Blocking
     fun refresh() {
@@ -84,6 +95,7 @@ class TrustedListService(
         }
         val issuersJson = verifyAndExtract(source) ?: return // failure already logged; keep current trust
         trustStore.replaceDynamicTrust(issuersJson)
+        liveness?.recordSuccess()
         Log.info("EUDI Trusted List: trust store refreshed from the signed list")
     }
 
@@ -146,5 +158,7 @@ class TrustedListService(
         const val CLOCK_SKEW_SECONDS = 120L
         const val HTTP_OK_MIN = 200
         const val HTTP_OK_MAX = 299
+        const val WORKFLOW_NAME = "pid-trusted-list-refresh"
+        val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
     }
 }

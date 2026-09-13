@@ -2,6 +2,15 @@
 # Availability is derived from span-metrics (traces_spanmetrics_calls_total) so it
 # needs no extra instrumentation. The SLO target and rail filter are dashboard
 # variables. Burn-rate panels mirror the multi-window alerts in the PrometheusRule.
+# `or (denominator * 0)` (added 2026-08-16), NOT a bare `or vector(0)`: these panels are
+# `sum by (service)(...)`, grouped, and PromQL vector division matches by label set. An unlabeled
+# `vector(0)` fallback has no `service` label, so it cannot match the per-service denominator in
+# the division below it — the empty numerator problem (see the sibling dashboards' `or vector(0)`
+# note) would still leave the RATIO empty even after "fixing" the numerator alone. Falling back to
+# the denominator's own grouped result, zeroed, preserves the per-service labels the division
+# needs. Verified live: before, all four rails (sepa-payment/domestic-payment/sepa-instant/fx)
+# returned zero series on this query during a genuinely zero-error 14d window; after, all four
+# return their real (here: 100%) availability, matched by label.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -36,7 +45,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.99 }, { "color": "green", "value": 0.999 } ] } }, "overrides": [] },
           "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
           "targets": [
-            { "expr": "1 - ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) )", "legendFormat": "{{service}}", "refId": "A" }
+            { "expr": "1 - ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) )", "legendFormat": "{{service}}", "refId": "A" }
           ]
         },
         {
@@ -48,7 +57,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 0.25 }, { "color": "green", "value": 0.5 } ] } }, "overrides": [] },
           "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } },
           "targets": [
-            { "expr": "1 - ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) ) / (1 - $slo) )", "legendFormat": "{{service}}", "refId": "A" }
+            { "expr": "1 - ( ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) ) / (1 - $slo) )", "legendFormat": "{{service}}", "refId": "A" }
           ]
         },
         {
@@ -60,8 +69,8 @@ data:
           "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 5 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 6 }, { "color": "red", "value": 14.4 } ] } }, "overrides": [] },
           "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
           "targets": [
-            { "expr": "( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[1h])) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])), 0.001) ) / (1 - $slo)", "legendFormat": "1h burn {{service}}", "refId": "A" },
-            { "expr": "( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[6h])) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])), 0.001) ) / (1 - $slo)", "legendFormat": "6h burn {{service}}", "refId": "B" }
+            { "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])), 0.001) ) / (1 - $slo)", "legendFormat": "1h burn {{service}}", "refId": "A" },
+            { "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[6h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])), 0.001) ) / (1 - $slo)", "legendFormat": "6h burn {{service}}", "refId": "B" }
           ]
         }
       ]

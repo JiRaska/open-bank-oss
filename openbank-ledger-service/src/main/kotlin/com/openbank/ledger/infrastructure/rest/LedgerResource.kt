@@ -19,11 +19,13 @@ import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -33,6 +35,8 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -81,10 +85,20 @@ class LedgerResource(
     @Path("/trial-balance")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
-    @Operation(summary = "Trial balance — debit/credit totals per GL account (must net to zero)")
-    suspend fun trialBalance(@QueryParam("asOf") asOf: String?): Response {
+    @Operation(
+        summary = "Trial balance — debit/credit totals per GL account (must net to zero)",
+        description = "scope selects the population (ADR-0252): REAL_ONLY (default), " +
+            "SYNTHETIC_ONLY or ALL. Omitting it excludes bank-owned canary activity, which is the " +
+            "answer a regulatory reader needs; the response echoes the scope it counted.",
+    )
+    suspend fun trialBalance(
+        @QueryParam("asOf") asOf: String?,
+        // Nullable, not @DefaultValue: absent means REAL_ONLY, which LedgerScope.parse owns
+        // alongside the rejection of an unrecognised value (a typo must not silently answer real).
+        @QueryParam("scope") scope: String?,
+    ): Response {
         val date = asOf?.let { LocalDate.parse(it) } ?: LocalDate.now(clock)
-        val trialBalance = ledgerUseCase.getTrialBalance(GetTrialBalanceQuery(date))
+        val trialBalance = ledgerUseCase.getTrialBalance(GetTrialBalanceQuery(date, LedgerScope.parse(scope)))
         return Response.ok(trialBalance.toResponse()).build()
     }
 
@@ -130,15 +144,26 @@ class LedgerResource(
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
-    suspend fun postJournal(request: PostJournalRequest): Response {
+    suspend fun postJournal(
+        // Nullable on purpose: JAX-RS injects null for an absent body, and a `suspend fun` emits no
+        // `Intrinsics.checkNotNullParameter`, so a non-nullable declaration would let that null flow
+        // into the body and NPE at the first dereference -- a 500 for what is a malformed request.
+        request: PostJournalRequest?,
+        @Context
+        requestContext: ContainerRequestContext,
+    ): Response {
+        requireNotNull(request) { "a request body is required" }
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.lines.map { it.toCommand() },
+            lines = request.requireLines().map { it.toCommand() },
             postedBy = request.createdBy,
+            // The filter sets this property only after authenticating a configured canary
+            // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
+            synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
         val entry = ledgerUseCase.postJournal(command)
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))
@@ -209,8 +234,27 @@ data class PostJournalRequest(
     val valueDate: String,
     val description: String? = null,
     val createdBy: UUID,
-    val lines: List<PostJournalLineRequest>,
-)
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     *
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection. So `"lines": [null]` deserialises happily into a `List<PostJournalLineRequest>`
+     * holding a null, and Kotlin's non-null element type is a compile-time promise nothing keeps.
+     * Writing the type honestly is what makes [requireLines] reachable instead of dead code.
+     */
+    val lines: List<PostJournalLineRequest?>,
+) {
+    /**
+     * The lines, with every element proven present.
+     *
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`, so no
+     * service-local mapper is needed or wanted (two mappers for one type are selected at random per
+     * request, #526).
+     */
+    fun requireLines(): List<PostJournalLineRequest> = lines.mapIndexed { index, line ->
+        requireNotNull(line) { "lines[$index] must not be null" }
+    }
+}
 
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
 
@@ -236,6 +280,8 @@ data class JournalEntryResponse(
     val status: String,
     val lines: List<JournalLineResponse>,
     val createdAt: String,
+    /** ADR-0252: posted by a bank-owned canary, so excluded from the regulatory aggregates. */
+    val synthetic: Boolean,
 )
 
 private fun JournalLine.toResponse() = JournalLineResponse(
@@ -260,6 +306,7 @@ private fun JournalEntry.toResponse() = JournalEntryResponse(
     status = status.name,
     lines = lines.map { it.toResponse() },
     createdAt = createdAt.toString(),
+    synthetic = synthetic,
 )
 
 private fun CursorPage<JournalEntry>.toResponse() =
@@ -278,6 +325,8 @@ data class TrialBalanceLineResponse(
 
 data class TrialBalanceResponse(
     val asOf: String,
+    /** Which population these totals were computed over (ADR-0252); REAL_ONLY unless asked. */
+    val scope: String,
     val totalDebit: BigDecimal,
     val totalCredit: BigDecimal,
     val balanced: Boolean,
@@ -304,6 +353,7 @@ private fun SubLedgerBalance.toResponse() = SubLedgerBalanceResponse(
 
 private fun TrialBalance.toResponse() = TrialBalanceResponse(
     asOf = asOf.toString(),
+    scope = scope.name,
     totalDebit = totalDebit,
     totalCredit = totalCredit,
     balanced = isBalanced,

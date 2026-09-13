@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.SurfaceSlot
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -22,11 +23,24 @@ class CampaignBannerPlacementConsumer(
     private val log = Logger.getLogger(CampaignBannerPlacementConsumer::class.java)
 
     @Incoming("campaign-banner-placements-in")
-    @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
+        // Parse first, and ack a malformed command: campaign's send log remains the durable audit
+        // trail, and a replay of an unparseable command fails identically forever.
+        val placement = parse(payload) ?: return
+
+        // The write is the opposite case — a DB failure here is transient and the placement must
+        // still land once it recovers, so it is retried and then rethrown for the DLQ (#5698).
+        EventRetry.withRetry(log, "campaign banner placement for interaction ${placement.interactionRef}", null) {
+            placements.save(placement)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // any parse/field failure on an untrusted payload is the
+    // same unretryable poison pill, whatever Jackson or the enum lookup happens to throw.
+    private fun parse(payload: String): CampaignBannerPlacement? =
         try {
             val node = mapper.readTree(payload)
-            val placement = CampaignBannerPlacement(
+            CampaignBannerPlacement(
                 interactionRef = UUID.fromString(node.requiredText("interactionRef")),
                 partyId = UUID.fromString(node.requiredText("partyId")),
                 campaignId = UUID.fromString(node.requiredText("campaignId")),
@@ -43,13 +57,12 @@ class CampaignBannerPlacementConsumer(
                         ?: error("unknown inAppSurface")
                 } ?: SurfaceSlot.HOME_BANNER,
             )
-            placements.save(placement)
         } catch (e: Exception) {
             // A malformed command cannot wedge the consumer group; campaign's send log remains
             // the durable audit trail and the error is visible for reconciliation.
-            log.errorf(e, "Failed to place campaign banner: %.300s", payload)
+            log.errorf(e, "Failed to parse campaign banner placement command: %.300s", payload)
+            null
         }
-    }
 
     private fun com.fasterxml.jackson.databind.JsonNode.requiredText(name: String): String =
         required(name).asText().takeIf { it.isNotBlank() } ?: error("$name is required")

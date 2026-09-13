@@ -11,6 +11,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
+import java.util.Optional
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
 
@@ -33,6 +34,8 @@ class TestScanAdapterTest {
         override fun githubApiUrl() = "https://api.github.com"
 
         override fun githubRepo() = "JiRaska/open-bank-oss"
+
+        override fun githubToken() = Optional.empty<String>()
 
         override fun llmGatewayUrl() = "http://litellm.ai-platform:4000"
 

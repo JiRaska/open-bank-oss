@@ -43,6 +43,15 @@ import sys
 
 MIGRATION_RE = re.compile(r"/src/main/resources/db/migration/.+\.sql$")
 
+# ClickHouse warehouse migrations (#6253). They are applied ONCE — by the init ConfigMap on an empty
+# data dir, or by an operator — and nothing re-applies them (#7645), so an edit to one that already
+# ran never reaches the live warehouse: repo and warehouse diverge with no error anywhere. That is
+# rule 1's premise exactly, so rule 1 (never edit a committed migration) applies here too. Measured
+# on main: V2 and V6 were each edited in a later PR (#2125, #4577) after first merging.
+# Rule 2 (rollback note) deliberately does NOT: 0 of 17 ClickHouse migrations carry one, so requiring
+# it would be a new convention for that directory, which is a separate decision, not a scope fix.
+CLICKHOUSE_MIGRATION_RE = re.compile(r"/src/main/resources/clickhouse/V\d+__[^/]+\.sql$")
+
 # `-- Rollback` / `--Rollback:` / `-- ROLLBACK -` … the marker, however it is punctuated.
 ROLLBACK_MARKER_RE = re.compile(r"^\s*--\s*rollback\b[:\s-]*(?P<inline>.*)$", re.IGNORECASE)
 COMMENT_LINE_RE = re.compile(r"^\s*--\s?(?P<body>.*)$")
@@ -52,6 +61,45 @@ def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], check=True, capture_output=True, text=True
     ).stdout
+
+
+def version_of(path: str) -> "int | None":
+    m = re.search(r"/V(\d+)__", path)
+    return int(m.group(1)) if m else None
+
+
+def resolves_a_duplicate_version(base: str, old_path: str, new_path: str) -> bool:
+    """True when a rename exists ONLY to undo a duplicate version inside one service.
+
+    The rule this narrows is right about the ordinary case and wrong about this one. Its premise
+    is "Flyway checksums an APPLIED migration, so renaming it breaks startup" — but a migration
+    whose version collides with another in the same directory can never have been applied:
+    Flyway refuses to resolve the set (`Found more than one migration with version N`) and the
+    service does not boot. There is no checksum to invalidate, so renumbering is the only fix
+    and it is safe. Measured on notification-service 2026-09-06 (two V14s merged 13 days apart).
+
+    Deliberately narrow, so it cannot become a way to edit history in general: the OLD name's
+    version must still be claimed by a DIFFERENT migration in the same directory at `base`, the
+    new version must be free there, and the file's CONTENT must be untouched by the rename.
+    """
+    old_v, new_v = version_of(old_path), version_of(new_path)
+    if old_v is None or new_v is None or old_v == new_v:
+        return False
+    old_dir, new_dir = old_path.rsplit("/", 1)[0], new_path.rsplit("/", 1)[0]
+    if old_dir != new_dir:
+        return False
+    try:
+        siblings = git("ls-tree", "--name-only", f"{base}:{old_dir}").splitlines()
+    except Exception:
+        return False
+    others = [n for n in siblings if n != old_path.rsplit("/", 1)[1]]
+    collides = any(version_of(f"{old_dir}/{n}") == old_v for n in others)
+    free = all(version_of(f"{old_dir}/{n}") != new_v for n in others)
+    if not (collides and free):
+        return False
+    # Content must be identical — a rename that also edits the SQL is an edit, whatever it
+    # renames. `git diff` between the two blobs is empty for a pure rename.
+    return git("diff", f"{base}:{old_path}", f"HEAD:{new_path}").strip() == ""
 
 
 def changed_migrations(base: str) -> tuple[list[str], list[str]]:
@@ -68,11 +116,35 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
             continue
         # A rename (R) of a migration is an edit of its identity — Flyway keys on the version
         # in the filename, so renaming V3 to V4 is not "adding V4", it is rewriting history.
+        # The one exception is a rename that UNDOES a duplicate version; see
+        # resolves_a_duplicate_version for why the checksum premise does not hold there.
+        if status.startswith("R") and len(parts) >= 3 and resolves_a_duplicate_version(
+            base, parts[1], parts[-1],
+        ):
+            print(f"check-db-migration: {path} renumbers a DUPLICATE version — permitted, "
+                  f"because a colliding migration cannot have been applied and so has no "
+                  f"checksum to invalidate.")
+            continue
         if status.startswith("A"):
             added.append(path)
         else:
             modified.append(path)
     return added, modified
+
+
+def changed_clickhouse_migrations(base: str) -> list[str]:
+    """ClickHouse migrations EDITED (modified or renamed) in the diff against `base`.
+
+    Added ones are not returned: a new V<n+1> is the correct shape, and rule 2's rollback note is
+    not applied to this directory (see CLICKHOUSE_MIGRATION_RE).
+    """
+    edited = []
+    out = git("diff", "--name-status", "--diff-filter=MR", base, "HEAD")
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and CLICKHOUSE_MIGRATION_RE.search(parts[-1]):
+            edited.append(parts[-1])
+    return edited
 
 
 def has_rollback_note(text: str) -> bool:
@@ -156,12 +228,25 @@ def self_test() -> int:
         if got != want:
             fails.append(f"MIGRATION_RE({path!r}) = {got}, expected {want}")
 
+    # --- which files are ClickHouse migrations (#6253) ------------------------------------
+    for path, want in (
+        ("openbank-analytics-sink/src/main/resources/clickhouse/V2__onboarding_funnel.sql", True),
+        # Not ClickHouse migrations: a Flyway one (rule 1 covers it via MIGRATION_RE), a test copy,
+        # and a non-versioned file in the same directory.
+        ("openbank-x/src/main/resources/db/migration/V1__init.sql", False),
+        ("openbank-analytics-sink/src/test/resources/clickhouse/V2__onboarding_funnel.sql", False),
+        ("openbank-analytics-sink/src/main/resources/clickhouse/README.sql", False),
+    ):
+        got = bool(CLICKHOUSE_MIGRATION_RE.search(path))
+        if got != want:
+            fails.append(f"CLICKHOUSE_MIGRATION_RE({path!r}) = {got}, expected {want}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: db-migration rollback note is falsifiable (15 cases)")
+    print("self-test ok: db-migration rollback note is falsifiable (19 cases)")
     return 0
 
 
@@ -179,9 +264,10 @@ def main() -> int:
 
     level = "error" if args.enforce else "warning"
     added, modified = changed_migrations(args.base)
+    ch_edited = changed_clickhouse_migrations(args.base)
 
-    if not added and not modified:
-        print("check-db-migration: no Flyway migration touched — nothing to check.")
+    if not added and not modified and not ch_edited:
+        print("check-db-migration: no Flyway or ClickHouse migration touched — nothing to check.")
         return 0
 
     findings = 0
@@ -193,6 +279,16 @@ def main() -> int:
             "(rules.yaml: db_change requires a forward migration). Flyway checksums the whole "
             "file — comments included — so once it has been applied to any live DB, an edit "
             "fails startup with `checksum mismatch`. Add a new V<n+1> migration instead."
+        )
+
+    for path in ch_edited:
+        findings += 1
+        print(
+            f"::{level} file={path}::This ClickHouse migration is already committed and must not be "
+            "edited. ClickHouse migrations are applied once (init ConfigMap on an empty data dir, or "
+            "by hand) and nothing re-applies them (#7645), so an edit to one that already ran never "
+            "reaches the live warehouse — the repo and the warehouse silently diverge. Add a new "
+            "V<n+1> migration instead."
         )
 
     for path in added:
@@ -211,7 +307,7 @@ def main() -> int:
                 "and say what the recovery is instead (e.g. restore from backup)."
             )
 
-    checked = len(added) + len(modified)
+    checked = len(added) + len(modified) + len(ch_edited)
     if findings == 0:
         print(
             f"check-db-migration: {checked} migration change(s) checked — "

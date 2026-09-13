@@ -108,8 +108,9 @@ check "push + no version → still latest/main (unchanged)" "--latest main" no p
 check "no EVENT_NAME + no version → latest/main" "--latest main" no
 
 # 8. A dispatch is only refused when the version is genuinely absent. With the version present
-#    the precise question is still the right one, dispatch or not.
-check "dispatch + version present → ask about THIS commit" "--version ${SHA}" yes workflow_dispatch
+#    the precise question is still the right one, dispatch or not. Co-deploy reuses this exact
+#    selector for every member: `--latest main` would instead ask about a later, unrelated image.
+check "dispatch/co-deploy + version present → ask about THIS commit" "--version ${SHA}" yes workflow_dispatch
 
 # 9. A dispatch with an inconclusive probe must NOT be refused: an unreachable broker is not
 #    evidence that the version is missing, and turning a probe outage into a hard stop would

@@ -33,6 +33,16 @@ data class InitiateTransactionCommand(
     val scaExemption: String? = null,
     /** Rail payment that triggered this booking (ADR-0108); null for operator/system commands. */
     val originatingPaymentId: UUID? = null,
+    /**
+     * The transaction this booking reverses (#8841). Set only by `reverseTransaction`, which
+     * already holds the original's id — without this parameter the id was available at the call
+     * site and dropped one line later, leaving the V2 compliance column `reversal_of` NULL on
+     * every row ever written. Deliberately no ledger-style unique index: `transactions` is
+     * PARTITION BY RANGE (booking_date), and Postgres requires every partitioning column in a
+     * unique constraint — the COMPLETED→REVERSED status transition stays the sole guard against
+     * a double reversal, and the decision is recorded here rather than left by default.
+     */
+    val reversalOf: UUID? = null,
     /** Which scheme carried the money (ADR-0103 D2). Null until stamped at origination. */
     val rail: PaymentRail? = null,
     /** How the movement was instructed (ADR-0103 D2) — orthogonal to [rail]. */

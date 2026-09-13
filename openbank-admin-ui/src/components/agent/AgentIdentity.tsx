@@ -8,6 +8,7 @@ import {
   ChartNoAxesCombined, ClipboardCheck, GitPullRequest, KeyRound,
   LifeBuoy, MessageCircleQuestion, Network, Radar, Scale, SearchCheck,
   ShieldCheck, TestTubeDiagonal,
+  CreditCard,
 } from 'lucide-react'
 import styles from './AgentIdentity.module.css'
 
@@ -148,12 +149,47 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Hledání vzorců selhání', en: 'Failure patterning' }, { cs: 'Ověření opakováním', en: 'Reproduction checks' }, { cs: 'Návrh stabilizace', en: 'Stabilisation proposals' }],
     accent: '#be123c', glow: '#fecdd3', shell: '#fff1f2', variant: 'lens', icon: TestTubeDiagonal,
   },
+  'card-scheme-bulletin-agent': {
+    name: { cs: 'Karel', en: 'Karel' }, role: { cs: 'Čtenář karetních bulletinů', en: 'Card bulletin reader' },
+    purpose: { cs: 'Sleduje mandatorní oznámení Visy a Mastercardu a hlásí, co se banky skutečně týká.', en: 'Tracks Visa and Mastercard mandate bulletins and reports what actually concerns this bank.' },
+    value: { cs: 'Zkracuje cestu od zveřejněného mandátu k rozhodnutí, místo aby ho někdo objevil až po termínu.', en: 'Shortens the path from a published mandate to a decision, instead of it being noticed after the deadline.' },
+    talents: [{ cs: 'Čtení bulletinů', en: 'Bulletin reading' }, { cs: 'Posouzení dopadu', en: 'Impact assessment' }, { cs: 'Návrh termínu', en: 'Deadline proposals' }],
+    accent: '#1d4ed8', glow: '#bfdbfe', shell: '#eff6ff', variant: 'guide', icon: CreditCard,
+  },
+  // ADR-0283 phase 4. The charter ships enabled:false — no dispute feed is wired yet — but the
+  // console renders every governed agent, so a chartered agent with no persona shows up as
+  // "Nový kolega", which reads as an oversight rather than as a deliberate pre-registration.
+  'card-dispute-evidence-agent': {
+    name: { cs: 'Vera', en: 'Vera' }, role: { cs: 'Sběratelka důkazů ke sporům', en: 'Dispute evidence gatherer' },
+    purpose: { cs: 'Skládá podklady ke karetnímu sporu — transakci, autorizaci, doručení a komunikaci — do jednoho spisu ve lhůtě schématu.', en: 'Assembles a card dispute file — the transaction, its authorisation, delivery and correspondence — within the scheme deadline.' },
+    value: { cs: 'Banka odpovídá na spor úplným spisem; o samotném sporu rozhoduje člověk.', en: 'The bank answers a dispute with a complete file; a human decides the dispute itself.' },
+    talents: [{ cs: 'Sběr podkladů', en: 'Evidence collection' }, { cs: 'Hlídání lhůty schématu', en: 'Scheme deadline tracking' }, { cs: 'Příprava spisu', en: 'Case-file preparation' }],
+    accent: '#15803d', glow: '#bbf7d0', shell: '#f0fdf4', variant: 'lens', icon: SearchCheck,
+  },
   'case-coordinator': {
     name: { cs: 'Kord', en: 'Chord' }, role: { cs: 'Koordinátor případu', en: 'Case coordinator' },
     purpose: { cs: 'Svolává správné agenty ke složitému případu, hlídá rozpočet a hledá shodu.', en: 'Brings the right agents into a complex case, watches the budget and seeks convergence.' },
     value: { cs: 'Dává multiagentní práci jedno vlákno, jasný cíl a kontrolovatelný konec.', en: 'Gives multi-agent work one thread, a clear objective and a reviewable end.' },
     talents: [{ cs: 'Sestavení týmu', en: 'Team assembly' }, { cs: 'Řízení rozpočtu', en: 'Budget control' }, { cs: 'Vyhodnocení shody', en: 'Convergence checks' }],
     accent: '#0f766e', glow: '#99f6e4', shell: '#f0fdfa', variant: 'guide', icon: ClipboardCheck,
+  },
+  // ADR-0284 D9. Both charters are enabled:false and have no runtime yet; the persona exists
+  // because this console renders every governed agent, and a chartered agent with no persona
+  // shows up as "Nový kolega" — which reads as an oversight rather than as a deliberate
+  // pre-registration.
+  'kyb-analyst': {
+    name: { cs: 'Rejda', en: 'Ledger' }, role: { cs: 'Analytik firemního onboardingu', en: 'Business onboarding analyst' },
+    purpose: { cs: 'Přečte případ, který skončil na ručním posouzení, a navrhne rozhodnutí s doloženými podklady.', en: 'Reads a case that landed in manual review and proposes a disposition with its evidence cited.' },
+    value: { cs: 'Připraví spis, rozhoduje člověk — agent nemá právo do případu zapsat.', en: 'Prepares the file; a human decides — the agent has no write path into a case.' },
+    talents: [{ cs: 'Čtení rejstříku', en: 'Register reading' }, { cs: 'Způsob jednání', en: 'Representation rules' }, { cs: 'Skuteční majitelé', en: 'Beneficial owners' }],
+    accent: '#7c3aed', glow: '#ddd6fe', shell: '#f5f3ff', variant: 'lens', icon: BadgeCheck,
+  },
+  'business-copilot': {
+    name: { cs: 'Firm', en: 'Firm' }, role: { cs: 'Firemní průvodce v aplikaci', en: 'In-app business copilot' },
+    purpose: { cs: 'Odpovídá za firmu, za kterou klient právě jedná, a akce vrací jako návrh do SCA toku.', en: 'Answers for the entity the customer is acting for, and returns actions as a proposal into the SCA flow.' },
+    value: { cs: 'Jedna firma na jedno sezení — nikdy ne další firmy ani osobní účet.', en: 'One entity per session — never their other companies, never their personal party.' },
+    talents: [{ cs: 'Firemní zůstatky', en: 'Business balances' }, { cs: 'Návrh platby', en: 'Payment proposals' }, { cs: 'Kontext mandátu', en: 'Mandate context' }],
+    accent: '#c2410c', glow: '#fed7aa', shell: '#fff7ed', variant: 'guide', icon: Scale,
   },
 }
 

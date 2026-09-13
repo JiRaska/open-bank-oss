@@ -22,6 +22,7 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
+import com.openbank.transaction.domain.settlement.SettlementDateResolver
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -37,6 +38,7 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 class TransactionServiceTest {
@@ -49,7 +51,27 @@ class TransactionServiceTest {
 
     private lateinit var service: TransactionService
 
-    private val clock: Clock = Clock.systemUTC()
+    /**
+     * FIXED, and that is the whole point. Six tests below build a requested value date as
+     * `today.plusMonths(1)`, and [SettlementDateResolver] rolls a requested date to a business day
+     * (FOLLOWING). Under a system clock this file is a calendar time-bomb in two directions:
+     *
+     *  - the two tests that assert the requested date survives verbatim fail whenever today + 1
+     *    month lands on a weekend or holiday — on 2026-08-19 that was Saturday 2026-09-19, and
+     *    `a SEPA settlement booked as TRANSFER still honours the requested value date` and
+     *    `a domestic payment leaving the bank still honours the resolver` both went red;
+     *  - the four that assert the same-day branch (`isEqualTo(today)`) are exposed whenever
+     *    *today itself* is not a business day, i.e. every weekend run.
+     *
+     * Nothing here was wrong on the day it was written; the test simply asked the calendar a
+     * different question each morning. Path-scoped CI hid it — the module builds only when
+     * something touches it, so the failure surfaced on an unrelated docs-only PR.
+     *
+     * 2026-01-06 is a Tuesday, 09:00Z = 10:00 Europe/Prague (before the 16:00 cut-off), and
+     * 2026-02-06 is a Friday. Both ends of every `plusMonths(1)` below are business days by
+     * construction, on every future run.
+     */
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-01-06T09:00:00Z"), ZoneOffset.UTC)
     private var lastSaved: Transaction? = null
 
     @BeforeEach
@@ -64,12 +86,16 @@ class TransactionServiceTest {
         every {
             workflowClient.newWorkflowStub(PaymentWorkflow::class.java, any<WorkflowOptions>())
         } returns workflowStub
+        // The clock is passed EXPLICITLY: the @Inject constructor defaults to Clock.systemUTC(),
+        // so a fixed clock held only by the test would describe a different day from the one the
+        // service resolves settlement dates against — expectations and subject must share it.
         service = TransactionService(
             transactionRepository,
             eventPublisher,
             fxRatePort,
             temporalConfig,
             workflowClient,
+            clock,
         )
     }
 
@@ -141,6 +167,180 @@ class TransactionServiceTest {
 
         assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
         verify(exactly = 1) { workflowStub.execute(result.id) }
+    }
+
+    /**
+     * A savings-to-checking pocket move, reported directly: it looked like it went through, then
+     * reverted a few seconds later. Root cause — TRANSFER (own-account) was routed through
+     * SettlementDateResolver's cutoff/business-day rules, meant for a payment that leaves the bank
+     * on an external rail. A transfer submitted after the 16:00 cutoff (or on a Friday evening at
+     * all) got value-dated on the next business day; the optimistic UI showed the money moved, but
+     * balance-service's effectiveAvailable() correctly would not count it as spendable until then,
+     * so the very next transfer attempting to move it back out failed 422 insufficient-funds and the
+     * UI reverted. TRANSFER must book same-day, always — it never touches a clearing calendar.
+     */
+    @Test
+    fun `own-account transfer books and values same-day, ignoring any requested date and the cutoff`(): Unit =
+        runBlocking {
+            // Same zone the production code reads "today" in (ADR-0207 D1) — a UTC "today" would be
+            // flaky near midnight Prague time, exactly the class of bug that zone owns.
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            // A date far in the future is deliberately requested — proving TRANSFER does not defer
+            // to it, unlike every other payment type (see the settlement-date resolver tests).
+            val command = initiateCommand().copy(valueDate = today.plusMonths(1))
+
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+            every { eventPublisher.initiatedPayload(any()) } returns "{}"
+            stubWorkflowCommitted(TransactionStatus.COMPLETED)
+            every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+            val result = service.initiateTransaction(command)
+
+            assertThat(result.valueDate).isEqualTo(today)
+            assertThat(result.bookingDate).isEqualTo(today)
+        }
+
+    /**
+     * The other half of the rule above, and the reason the discriminator is not the type alone.
+     *
+     * `openbank-sepa-payment` books its settlement leg as **type=TRANSFER with rail=SEPA_CT** — the
+     * other three rails (domestic-payment, sepa-instant, swift) book DEBIT, so SEPA is the odd one
+     * out. Keyed on the type alone, the own-account same-day branch would swallow every SEPA credit
+     * transfer and bypass precisely the cutoff and business-day rules that exist because that money
+     * really does leave the bank on an external rail with a clearing calendar.
+     *
+     * A requested value date one month out must therefore still be honoured here — the assertion is
+     * that this transaction did NOT take the same-day branch.
+     */
+    @Test
+    fun `a SEPA settlement booked as TRANSFER still honours the requested value date`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val requested = today.plusMonths(1)
+        // sepa-payment's real settlement request carries no targetAccountId (it never resolves an
+        // internal payee) — the fixture must match that, or this test cannot tell "external SEPA"
+        // apart from "internal transfer that happens to be tagged SEPA_CT".
+        val command = initiateCommand().copy(valueDate = requested, rail = PaymentRail.SEPA_CT, targetAccountId = null)
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate)
+            .describedAs("a railed TRANSFER must keep going through SettlementDateResolver")
+            .isNotEqualTo(today)
+        assertThat(result.valueDate).isEqualTo(requested)
+    }
+
+    /**
+     * The original guard (`type == TRANSFER && rail == null`) covered an own-account transfer but
+     * missed everything else that also never leaves the bank. domestic-payment books its in-house
+     * settlement leg as **type=DEBIT, rail=DOMESTIC** — the rail is real (a scheme exists), but a
+     * `targetAccountId` is set because the payee is one of our own accounts, per its own comment:
+     * "External transfers keep a null target (the money genuinely leaves the bank)."
+     *
+     * Verified live in the sandbox ledger before this fix: an in-house "Interní převod" debit at
+     * 21:11 on a Thursday booked value_date the next day, and one made on a Saturday booked two
+     * days out — on a CERTIS calendar the money never touched.
+     */
+    @Test
+    fun `an in-house domestic payment with a resolved payee books same-day despite rail=DOMESTIC`(): Unit =
+        runBlocking {
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            val command = initiateCommand().copy(
+                type = TransactionType.DEBIT,
+                rail = PaymentRail.DOMESTIC,
+                valueDate = today.plusMonths(1),
+            )
+
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+            every { eventPublisher.initiatedPayload(any()) } returns "{}"
+            stubWorkflowCommitted(TransactionStatus.COMPLETED)
+            every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+            val result = service.initiateTransaction(command)
+
+            assertThat(result.valueDate).isEqualTo(today)
+            assertThat(result.bookingDate).isEqualTo(today)
+        }
+
+    /**
+     * The counterpart: a domestic DEBIT with no resolved payee (the ordinary case — money genuinely
+     * leaving the bank) must keep going through the resolver. Proves the discriminator is the payee
+     * leg, not the transaction type.
+     */
+    @Test
+    fun `a domestic payment leaving the bank still honours the resolver`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val requested = today.plusMonths(1)
+        val command = initiateCommand().copy(
+            type = TransactionType.DEBIT,
+            rail = PaymentRail.DOMESTIC,
+            targetAccountId = null,
+            valueDate = requested,
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate)
+            .describedAs("a domestic payment with no internal payee must keep going through the resolver")
+            .isNotEqualTo(today)
+        assertThat(result.valueDate).isEqualTo(requested)
+    }
+
+    /**
+     * The welcome bonus (account-service, `type=CREDIT`, no rail) and a reversal credit both hit
+     * this same shape: a payee of ours, no rail. Verified live — a bonus granted 08:31 on a Saturday
+     * booked on the Monday.
+     */
+    @Test
+    fun `a welcome-bonus-shaped credit with no rail books same-day`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val command = initiateCommand().copy(
+            type = TransactionType.CREDIT,
+            sourceAccountId = null,
+            rail = null,
+            valueDate = today.plusMonths(1),
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate).isEqualTo(today)
+        assertThat(result.bookingDate).isEqualTo(today)
+    }
+
+    /**
+     * A rail honestly stamped INTERNAL, FEE or INTEREST must never roll, whatever the type — this is
+     * the guard against the exact regression the audit warned about: the old check was keyed on
+     * `rail == null`, so stamping rail correctly on an own-account move would have silently
+     * re-introduced the bug it fixed.
+     */
+    @Test
+    fun `a rail honestly stamped INTERNAL never rolls`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val command = initiateCommand().copy(rail = PaymentRail.INTERNAL, valueDate = today.plusMonths(1))
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate).isEqualTo(today)
+        assertThat(result.bookingDate).isEqualTo(today)
     }
 
     @Test
@@ -265,10 +465,12 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         coEvery {
-            transactionRepository.update(match { it.status == TransactionStatus.REVERSED })
+            transactionRepository.update(match { it.status == TransactionStatus.REVERSED }, any())
         } answers { firstArg() }
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany listOf(null, null)
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        // #8745: the COMPLETED -> REVERSED transition now carries an outbox event.
+        every { eventPublisher.reversedPayload(any(), any()) } returns "{\"event\":\"reversed\"}"
         stubWorkflowCommitted(TransactionStatus.COMPLETED)
         // The original is read by id too; the reversal credit's own reload comes from the stub above.
         coEvery { transactionRepository.findById(original.id) } returns original
@@ -279,7 +481,15 @@ class TransactionServiceTest {
         assertThat(result.type).isEqualTo(TransactionType.REVERSAL)
         assertThat(result.targetAccountId).isEqualTo(originalSourceId)
         assertThat(result.sourceAccountId).isNull()
-        coVerify { transactionRepository.update(match { it.status == TransactionStatus.REVERSED }) }
+        // #8841: the reversal must say WHAT it reversed — the id is available at the call site.
+        assertThat(result.reversalOf).isEqualTo(original.id)
+        assertThat(result.isReversal).isTrue()
+        coVerify {
+            transactionRepository.update(
+                match { it.status == TransactionStatus.REVERSED },
+                match { it.eventType == "openbank.transactions.transaction.reversed" },
+            )
+        }
     }
 
     @Test

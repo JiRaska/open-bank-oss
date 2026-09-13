@@ -35,27 +35,161 @@ data:
           input_cost_per_token: 0.00000026
           output_cost_per_token: 0.00000038
       # agent-service's admin-UI assistant model (#1919). It sends `model-gateway.models[].id`
-      # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — that is what repointing
-      # agent-service at this gateway costs: an endpoint + key change, nothing else. The Groq key
-      # is projected here from the SAME OpenBao path agent-service used to read it from, so the
-      # provider credential moves into this pod rather than being duplicated (ADR-0175).
+      # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — the caller-facing id is
+      # part of the contract with agent-service and the admin-UI model picker, and only the
+      # PROVIDER behind it moves.
+      #
+      # PROVIDER IS DEEPINFRA, NOT GROQ, AND THAT WAS MEASURED (#5736). Groq has decommissioned
+      # `llama-3.3-70b-versatile`. Its live catalogue is 13 models and does not contain it; asked
+      # for it anyway, Groq answers 404:
+      #   {"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not
+      #    have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+      # This is the SECOND time a Groq id in this file died under us — the llama-guard route below
+      # went the same way — so read a Groq model id here as a claim about someone else's catalogue
+      # with a shelf life, never as a constant. The discriminator that matters: a dead KEY answers
+      # 401/403 on every model, a dead MODEL answers 404 on one while its siblings still return
+      # 200. Both were probed from inside this pod before this line changed.
+      #
+      # DeepInfra serves the same weights as `meta-llama/Llama-3.3-70B-Instruct-Turbo` (confirmed
+      # present in its 185-model catalogue), on the DeepInfra key already projected here — so this
+      # is a provider move, not a model substitution, and it adds no new secret.
       - model_name: llama-3.3-70b-versatile
         litellm_params:
-          model: groq/llama-3.3-70b-versatile
-          api_key: os.environ/GROQ_API_KEY
+          model: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
+          api_key: os.environ/DEEPINFRA_API_KEY
           # Lower ceiling: this route serves only agent-service's admin-UI assistant, a single
           # interactive surface, where the ops models serve every scheduled agent. A shared ceiling
           # would let a runaway ops loop starve the interactive one, or vice versa.
           max_budget: 5
           budget_duration: 1d
-          # Declared for the same reason, even though LiteLLM's built-in map DOES currently price
-          # this model correctly (it reported 5.9e-07 / 7.9e-07, matching Groq's published
-          # $0.59 / $0.79 per million tokens). Relying on that is relying on a table inside a
-          # pinned dependency: a version bump that drops or renames the entry silently returns to
-          # costing every call $0 — the same failure as above, and equally silent. In git the
-          # number is auditable and a gate can check it.
-          input_cost_per_token: 0.00000059
-          output_cost_per_token: 0.00000079
+          # Declared, not inherited — the same reasoning as DeepSeek above, and now with a second
+          # reason: the price that used to sit here was GROQ's, and it survived the provider being
+          # dead. A price map keyed by a model id cannot notice that the id no longer resolves, so
+          # it would have kept costing a route that returned nothing but 404s.
+          # DeepInfra's own published price for this model
+          # (api.deepinfra.com/models/meta-llama/Llama-3.3-70B-Instruct-Turbo:
+          # cents_per_input_token 1e-05, cents_per_output_token 3.2e-05), cents -> USD per token.
+          input_cost_per_token: 0.0000001
+          output_cost_per_token: 0.00000032
+      # Content-safety classifier (ADR-0031 guardrails). Groq serves Llama Guard 4 on the same key
+      # already projected here, so this adds a route and no new provider, no new secret and no GPU.
+      # Callers send `meta-llama/llama-guard-4-12b` verbatim (copilot `content-safety.model`).
+      #
+      # Its budget is deliberately NOT shared with the chat routes above. A guardrail that stops
+      # classifying because a chat loop burned the day's ceiling is a control outage caused by
+      # unrelated traffic — and it degrades to `unavailable`, which on a fail-open surface means
+      # every message afterwards is unclassified. Small ceiling, but its own.
+      #
+      # PROVIDER IS DEEPINFRA, NOT GROQ, AND THAT WAS MEASURED. Groq has DECOMMISSIONED every Llama
+      # Guard model — asked for one, its API answers:
+      #   {"message":"The model `meta-llama/llama-guard-4-12b` has been decommissioned and is no
+      #    longer supported", "code":"model_decommissioned"}
+      # and its live model list offers only `llama-prompt-guard-2-*` (an injection classifier that
+      # returns a label, not `safe`/`unsafe\nS2`) and `gpt-oss-safeguard-20b` (a policy-reasoning
+      # model that needs a system prompt this adapter deliberately never sends). Neither is a
+      # drop-in. DeepInfra serves `meta-llama/Llama-Guard-4-12B` — note the CASE, its API is
+      # case-sensitive — and returns exactly the expected shape, verified against the live provider
+      # from inside this pod before the route was written:
+      #   safe input   -> '\n\nsafe'
+      #   unsafe input -> '\n\nunsafe\nS2'
+      # Had this shipped as declared, the guardrail would have reported `unavailable` for every
+      # message, which on the fail-open help surface means silently unclassified traffic.
+      - model_name: meta-llama/llama-guard-4-12b
+        litellm_params:
+          model: deepinfra/meta-llama/Llama-Guard-4-12B
+          api_key: os.environ/DEEPINFRA_API_KEY
+          max_budget: 3
+          budget_duration: 1d
+          # DeepInfra's published price for Llama-Guard-4-12B ($0.18 per million tokens both
+          # directions). Declared rather than inherited, for the reason the routes above document:
+          # a version bump that drops the built-in entry silently costs every call $0 and every
+          # budget below stops biting, with nothing going red.
+          input_cost_per_token: 0.00000018
+          output_cost_per_token: 0.00000018
+      # Embedding route for the copilot's pgvector retrieval (ADR-0183 §3 / ADR-0265 slice 4).
+      # Embeddings go through the SAME gateway as chat, deliberately: routing them direct to the
+      # provider would open a second, un-audited egress next to the one ADR-0175 exists to control.
+      #
+      # bge-m3 on DeepInfra: 1024 dimensions, which is what the copilot migration's `vector(1024)`
+      # column is sized for. Changing this model to one of a different width needs a migration and a
+      # re-index — the adapter refuses a batch whose width disagrees rather than letting Postgres
+      # reject rows one at a time.
+      - model_name: BAAI/bge-m3
+        litellm_params:
+          # `openai/` + api_base, NOT `deepinfra/`. LiteLLM has no embeddings mapping for the
+          # deepinfra provider prefix — measured in this pod, `litellm.embedding(model=
+          # 'deepinfra/BAAI/bge-m3')` raises "Unmapped LLM provider for this endpoint" while the
+          # CHAT routes above work fine under the same prefix. The OpenAI-compatible route to the
+          # same endpoint returns 1024-dim vectors with their `index` fields intact, which is what
+          # both the migration's vector(1024) column and the adapter's order check require.
+          model: openai/BAAI/bge-m3
+          api_base: https://api.deepinfra.com/v1/openai
+          api_key: os.environ/DEEPINFRA_API_KEY
+          # Small ceiling and its own budget: indexing the help corpus is a few dozen chunks, and
+          # query embeddings are one short call per help search. If this ever burns 2 USD/day
+          # something is re-indexing in a loop, and the ceiling is the thing that catches it.
+          max_budget: 2
+          budget_duration: 1d
+          # DeepInfra's published price for bge-m3 ($0.010 per million input tokens). Declared, not
+          # inherited: an unpriced model costs every call $0, and a budget whose meter never moves
+          # cannot bite — measured on the DeepSeek route, which shipped exactly that way.
+          input_cost_per_token: 0.00000001
+          # Priced identically rather than zero. An embedding call returns no completion tokens, so
+          # this number never actually applies — but a literal 0.0 is indistinguishable from "no
+          # price declared", which is the state that made every DeepSeek call cost $0 and quietly
+          # voided three nested budgets. The gate rejects a zero for that reason, and it is right to.
+          output_cost_per_token: 0.00000001
+      # ── Paid chat models for the admin-UI assistant ──────────────────────────────────────
+      #
+      # The picker in AgentDock has always existed; it only ever had one real model — Groq's free
+      # llama-3.3-70b-versatile, whose 12k tokens/min tier is what makes the assistant answer
+      # "I'm being rate-limited" under a burst of clicks. These two are paid, on a provider this
+      # gateway already holds a key for, and both were MEASURED against a real Czech prompt from
+      # inside this pod before being added — the same probe that caught Groq decommissioning
+      # Llama Guard:
+      #
+      #   openai/gpt-oss-120b          1-3s, clean Czech   <- fastest, ~35x cheaper per output token
+      #   deepseek-ai/DeepSeek-V4-Pro  2.6-9.6s, clean Czech <- strongest
+      #   zai-org/GLM-5.2              6.9s, clean Czech    <- viable, simply not needed as a third
+      #   moonshotai/Kimi-K3          44.7s                 -> rejected on LATENCY alone
+      #   meta-llama/Llama-4-Maverick  HTTP 429 "Model busy, retry later" -> rejected
+      #
+      # CORRECTION, kept here because the first version of this comment was wrong and the reason is
+      # worth more than the conclusion: GLM-5.2 and Kimi-K3 were first measured at max_tokens=120
+      # and looked BROKEN — empty content, and Kimi's chain of thought appearing where the answer
+      # should be. Both are REASONING models: the token budget is spent on reasoning first, so a
+      # small cap truncates before any answer is emitted, and a truncated reasoning-prefixed stream
+      # is what surfaced as "leaked chain of thought". At the 512 the callers actually use, both
+      # answer cleanly. Measuring a reasoning model at a small max_tokens measures the cap, not the
+      # model.
+      #
+      # gpt-oss-120b is a reasoning model too, and the same budget rule applies to it in
+      # production: at max_tokens=40 its `content` is EMPTY (finish_reason=length, the whole budget
+      # went to reasoning), at 128 it is truncated mid-sentence, and at 512 it finishes normally in
+      # 189 tokens. Callers here send 512 (agent-service MAX_OUTPUT_TOKENS), so this is fine — but
+      # anything that lowers that cap silently turns answers into blanks rather than short answers.
+      - model_name: openai/gpt-oss-120b
+        litellm_params:
+          model: deepinfra/openai/gpt-oss-120b
+          api_key: os.environ/DEEPINFRA_API_KEY
+          max_budget: 5
+          budget_duration: 1d
+          # DeepInfra rate card, read from api.deepinfra.com/models/<id>: cents_per_input_token
+          # 3.7e-06, cents_per_output_token 1.7e-05 — converted from cents to USD per token.
+          input_cost_per_token: 0.000000037
+          output_cost_per_token: 0.00000017
+      - model_name: deepseek-ai/DeepSeek-V4-Pro
+        litellm_params:
+          model: deepinfra/deepseek-ai/DeepSeek-V4-Pro
+          api_key: os.environ/DEEPINFRA_API_KEY
+          # Lower ceiling than the cheap route above, deliberately: this one costs ~15x more per
+          # output token, so an equal budget would buy a very unequal number of runs before the
+          # cap bites.
+          max_budget: 3
+          budget_duration: 1d
+          # cents_per_input_token 0.00013, cents_per_output_token 0.00026.
+          input_cost_per_token: 0.0000013
+          output_cost_per_token: 0.0000026
     general_settings:
       # Virtual keys and every budget below persist here. Injected from the CNPG litellm-db-app
       # secret (components/ai-platform/postgres.yaml) — see the DATABASE_URL note in litellm.yaml
@@ -65,6 +199,17 @@ data:
       # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
       master_key: os.environ/LITELLM_MASTER_KEY
     litellm_settings:
+      # LLM observability (ADR-0031 D7). Server-side, so every caller already routed through this
+      # gateway is traced with no application change and no second SDK in ~34 services — and a
+      # service that bypasses the gateway is absent from the traces, which is itself the signal
+      # ADR-0175 wants. Prompts and completions land in the in-cluster Langfuse; nothing is sent to
+      # a SaaS.
+      #
+      # `failure_callback` is not a duplicate of `success_callback`: without it a provider outage is
+      # invisible in Langfuse, and the trace view then shows a quiet, healthy-looking gateway during
+      # exactly the incident someone is opening it to investigate.
+      success_callback: ["langfuse"]
+      failure_callback: ["langfuse"]
       # Fail fast to the caller's deterministic fallback rather than hanging an agent's Temporal
       # activity; the agents already treat a null/again response as "no model".
       request_timeout: 60

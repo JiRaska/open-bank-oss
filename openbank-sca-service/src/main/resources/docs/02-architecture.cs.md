@@ -50,8 +50,10 @@
 ## Tok outbox → Kafka
 
 ```
-zápis zařízení ──► EnrolledDeviceRepository.save (txn A)
-               └─► ScaOutboxRepository.save(DEVICE_ENROLLED)  (txn B, oddělená)
+zápis zařízení ──► EnrolledDeviceRepository.saveWithOutbox(device, DEVICE_ENROLLED)
+                     └─ JEDNA Panache.withTransaction: řádek zařízení a jeho outbox řádek
+                        commitnou společně, nebo vůbec (#8679; oba řádky sdílejí jeden `xmin`,
+                        ověřeno v ScaEnrollOutboxAtomicityIT)
 
    každých 5s (odloženo 5s, SKIP pokud běží):
    ScaOutboxDispatcher.dispatchScheduledBatch()

@@ -138,6 +138,39 @@ the user consents, Keycloak fires the `openbank-rum` audience mapper, adding
 `audience=openbank-rum`; tokens with only `aud=openbank-app` are rejected 401 —
 server-side enforcement without custom OTel processors.
 
+### `roles.realm[CATALOG_SCOPE_*]` — removed, deliberately
+
+`realm-template.json` declared `CATALOG_SCOPE_READ`, `CATALOG_SCOPE_AUTHOR` and
+`CATALOG_SCOPE_PUBLISH` as realm roles. They are gone as of 2026-08-16 and must not come
+back. They are **runtime-derived internal roles, not grantable realm roles**:
+`CatalogScopeIdentityAugmentor` in openbank-product-catalog synthesises them per request
+from the token's OAuth `scope` claim (`catalog:read` / `catalog:author` /
+`catalog:publish`), and its own KDoc says why — *"without trusting a tenant claim or
+OPA"*. The scope-to-role mapping is meant to be the only path to those roles.
+
+Declaring them in the realm makes them assignable in the Keycloak admin console, so an
+operator could grant `CATALOG_SCOPE_PUBLISH` to a user directly and reach every
+`@RolesAllowed(CATALOG_SCOPE_PUBLISH)` endpoint with a token carrying no catalog scope
+at all. That is the exact bypass the augmentor exists to prevent, which makes "create the
+role" the wrong half of the parity checker's own remediation hint (*"Create the role …
+or delete the declaration"*) — here it is always the delete.
+
+Removing them also clears three `check-realm-role-parity` findings that had been failing
+the `keycloak-realm-drift` CronJob (`declaredNotLive` + `namedByCodeButNotLive`, 9/1/15
+`@RolesAllowed` sites respectively).
+
+**Separate and still open — the reason those 25 sites are unreachable is NOT these
+roles.** `catalog:read|author|publish` is not declared as a client scope in either realm
+template: `realm-template.json` has `clientScopes: []`, and `customers-realm-template.json`
+carries `profile`, `accounts:read`, `payments:initiate`, `statements:read`,
+`sca:enroll-device`, `sca:decide`, `telemetry:rum` — no catalog scope. So no token from a
+cold-started realm can carry the scope the augmentor reads, and the augmentor returns the
+identity unchanged. Whether the *live* realm has such a scope is unverified here on
+purpose: `check-realm-role-parity` states its own blind spot (`doesNotVerify:
+"client-role assignments; group membership; …"`) and client scopes are outside it, so
+nothing in this repo currently measures it. Wiring the scope is an authorization design
+decision (default vs optional scope, and which clients may request it), not a drift fix.
+
 ### `clients[openbank-edge-webauthn].description`
 
 Shortened to fit Keycloak's 255-char cap. In full: service-account client for

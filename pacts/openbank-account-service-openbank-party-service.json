@@ -143,6 +143,126 @@
           "name": "a party has been updated"
         }
       ]
+    },
+    {
+      "contents": {
+        "eventType": "PARTY_MANDATE_REVOKED",
+        "mandateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "a PARTY_MANDATE_REVOKED event",
+      "generators": {
+        "body": {
+          "$.mandateId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.mandateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a party mandate has been revoked"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "agentPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "authority": "SOLE",
+        "eventType": "PARTY_MANDATE_GRANTED",
+        "mandateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "requiredSignatures": 1,
+        "status": "ACTIVE"
+      },
+      "description": "a PARTY_MANDATE_GRANTED event",
+      "generators": {
+        "body": {
+          "$.agentPartyId": {
+            "type": "Uuid"
+          },
+          "$.mandateId": {
+            "type": "Uuid"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.agentPartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.mandateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.requiredSignatures": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a sole party mandate has been granted"
+        }
+      ]
     }
   ],
   "metadata": {

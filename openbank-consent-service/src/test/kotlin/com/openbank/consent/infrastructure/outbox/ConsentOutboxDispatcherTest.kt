@@ -28,8 +28,12 @@ class ConsentOutboxDispatcherTest {
     private val outboxRepository = mockk<ConsentOutboxRepository>(relaxed = true)
     private val eventPublisher = mockk<OutboxEventPublisher>(relaxed = true)
 
-    private fun dispatcher(enabled: Boolean = true): ConsentOutboxDispatcher =
-        ConsentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = enabled)
+    private fun dispatcher(enabled: Boolean = true): ConsentOutboxDispatcher = ConsentOutboxDispatcher(
+        outboxRepository,
+        eventPublisher,
+        dispatchEnabled = enabled,
+        metrics = mockk(relaxed = true),
+    )
 
     @Test
     fun `dispatch publishes and marks each processable row sent`(): Unit = runBlocking {

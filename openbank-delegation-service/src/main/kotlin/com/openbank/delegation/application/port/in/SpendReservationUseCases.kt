@@ -5,6 +5,7 @@
 package com.openbank.delegation.application.port.`in`
 
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.libs.domain.money.Money
 import java.util.UUID
 
@@ -17,6 +18,7 @@ data class ReserveSpendCommand(
     val delegationId: UUID,
     val amount: Money,
     val idempotencyKey: String,
+    val operationType: SpendReservationOperationType = SpendReservationOperationType.UNSPECIFIED,
 )
 
 /** [replayed] is true when the idempotency key had already produced this reservation. */

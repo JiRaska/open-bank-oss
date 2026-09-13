@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.2...swift-service-v0.11.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **swift:** guard swift_outbox created_at plausibility at INSERT ([#9295](https://github.com/JiRaska/open-bank-oss/issues/9295)) ([8ab87a9](https://github.com/JiRaska/open-bank-oss/commit/8ab87a93d4a29f91e1c14b505c40cadbcc09cc7d))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.1...swift-service-v0.11.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **swift:** give the test JVM the same 2g ceiling account and lending already run ([#8934](https://github.com/JiRaska/open-bank-oss/issues/8934)) ([f7020af](https://github.com/JiRaska/open-bank-oss/commit/f7020aff16bc108706cfc548030763ca0feb3800))
+* **swift:** publish COMPLETED, the terminal status the pact already asserts ([#6016](https://github.com/JiRaska/open-bank-oss/issues/6016)) ([65b5110](https://github.com/JiRaska/open-bank-oss/commit/65b5110575c4d896e39fc2d0a48f397d81aea7e5))
+* **swift:** publish operator acknowledge and reject through the outbox ([#8752](https://github.com/JiRaska/open-bank-oss/issues/8752)) ([cf193f0](https://github.com/JiRaska/open-bank-oss/commit/cf193f04c637156debb573b78d1e4d2b3e0f8514))
+* **swift:** raise test-worker heap to 3g — 2g still OOMs the full suite on CI ([#8970](https://github.com/JiRaska/open-bank-oss/issues/8970)) ([1ee7280](https://github.com/JiRaska/open-bank-oss/commit/1ee7280a8db300cbf63b4ac16655238ac584ee98)), closes [#8916](https://github.com/JiRaska/open-bank-oss/issues/8916)
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.0...swift-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.10.0...swift-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.9.0...swift-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.8.0...swift-service-v0.9.0) (2026-08-19)
+
+
+### Features
+
+* **swift:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5696](https://github.com/JiRaska/open-bank-oss/issues/5696)) ([9824471](https://github.com/JiRaska/open-bank-oss/commit/98244714c936eae8f713cbe6c3b462dc19e5b573))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.6...swift-service-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.5...swift-service-v0.7.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **swift:** add sourceService for AuditConsumer attribution ([#5349](https://github.com/JiRaska/open-bank-oss/issues/5349)) ([2c6975c](https://github.com/JiRaska/open-bank-oss/commit/2c6975c09a13c8a5d3454fc6ef5ecf277f30000a)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.4...swift-service-v0.7.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.3...swift-service-v0.7.4) (2026-08-02)
 
 

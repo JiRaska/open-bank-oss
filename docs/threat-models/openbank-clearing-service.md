@@ -30,7 +30,7 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
 - The prior class-level `@PermitAll` was replaced with per-operation least-privilege roles (K7 /
   ADR-0018): submit is service/payment-ops, reads are payment-ops/viewer/operator, and **settle +
   cycle/trigger are restricted to `@RolesAllowed(PAYMENTS, ADMIN)`** (locked by
-  `ClearingResourceSecurityTest`). `settle` additionally carries `@Authorize(clearingBatch.settle)`
+  `ClearingSecurityContractTest`). `settle` additionally carries `@Authorize(clearingBatch.settle)`
   (OPA, ADR-0034) in **advisory** mode, graduating to enforce in Phase 5.
 - Four-eyes approval-decide endpoint: same role set as the gated `settle` action, plus a
   domain-level segregation-of-duties check (checker id != maker id) — see §4a.
@@ -65,8 +65,10 @@ follow-up flip, not bundled here (see ADR-0155; also note `rules.yaml`'s `cleari
 | **R**epudiation | No record of who approved a gated settlement | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals batch/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
 | **D**oS | Flooding `POST /batches/{id}/settle` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/clearing/approvals` lists every pending four-eyes request with its `makerId` and age | Same role gate as `decide` (`@RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)` + OPA `@Authorize(action="clearingBatch.approval.read")`); verified with a real `opa eval` that `clearingBatch.approval.read` resolves `allow=true` for ROLE_OPERATOR/ROLE_ADMIN/ROLE_PAYMENTS via the existing `operator-clearing-write` prefix rule and `allow=false` for ROLE_VIEWER — no rules.yaml change needed. The payload carries approval metadata only — action, resource id and who asked — never batch contents. Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/clearing/approvals/{id} → Redis
+**DFD update:** adds `Operator (checker) → GET /api/v1/clearing/approvals → Redis
+(approval:*)` and `Operator (checker) → PATCH /api/v1/clearing/approvals/{id} → Redis
 (approval:*)` alongside the existing `settle` edge; the maker's retry reuses the existing DFD
 edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
@@ -84,6 +86,15 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-02** — Doc correction, no behavior change: §3 credited the role-gating regression guard
+  to `ClearingResourceSecurityTest`, a class that is in no Kotlin source in this repository. **The
+  guard is real** and is `ClearingSecurityContractTest`, which asserts by reflection that
+  `ClearingResource` carries no class-level `@PermitAll`, that every HTTP endpoint on it is
+  `@RolesAllowed` and never `@PermitAll`, and — matching the claim in §3 exactly — that `settleBatch`
+  and `triggerCycle` resolve to exactly `ROLE_PAYMENTS` + `ROLE_ADMIN`. Only the name was wrong; the
+  access-control contract described in §3 is in place and locked. The same stale name is corrected in
+  the `ClearingResource` KDoc in this change. No DB, schema, endpoint or policy change.
+
 - **2026-05-30** — Added `clearing_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
@@ -95,3 +106,40 @@ not change any existing request's outcome until explicitly flipped.
   request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
   TTL-bounded); rollback = revert the commit (or leave `authz.four-eyes.enforce=false`, its
   default).
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `clearingBatch.settle`/`clearingBatch.triggerCycle` four-eyes decision parked at 202 was
+  discoverable only by whoever had been handed its approval id out of band — the ceremony
+  completed only if the two operators were already talking, and the 24h Redis TTL then expired
+  the request silently otherwise (issue #5679, mirroring sanctions #3472, lending, ledger and
+  balance). Added `GET /api/v1/clearing/approvals` (§4a new I row); no new trust boundary
+  crossed — same `RedisApprovalStore`, same role gate shape as the existing decide endpoint,
+  additive-only OpenAPI change (1.2.0 -> 1.3.0, ADR-0048). Verified with a real `opa eval`
+  against the regenerated `clearing-opa-bundle.yaml` that the existing `operator-clearing-write`
+  prefix rule (ROLE_OPERATOR/ROLE_ADMIN/ROLE_PAYMENTS) already covers the new
+  `clearingBatch.approval.read` action with no `rules.yaml` change — unlike balance-service
+  (#5690), which needed a `role_action_matrix` entry because its authz shape is matrix-based
+  rather than prefix-based.
+- **2026-09-04** — ADR-0281 net-settlement ledger leg (issue #8361). `settleBatch` now commits a
+  second outbox row (`openbank.clearing.net_settlement.post`) atomically with the batch flip, and
+  `NetSettlementPostingConsumer` posts the balanced DEBIT cash-clearing / CREDIT scheme-settlement
+  journal to ledger-service with idempotency key `clearing-net-settlement-{batchId}`. New trust
+  boundary crossed: clearing-service -> ledger-service `POST /api/v1/journals` (OidcC client-
+  credentials, SyntheticTaint header filter) — journal content is server-derived from the settled
+  batch row, not caller input, so the injection surface is the batch's own validated amounts.
+  Failure mode by design: retry with backoff, then DLQ
+  `openbank.dlq.clearing-service.clearing-net-settlement-in` (nested-YAML topic + KafkaTopic CR +
+  KafkaUser Write ACL in the same change — a rethrow without any of the three wedges the channel,
+  #5745). A DLQ record means "batch SETTLED, journal not booked" — reconciliation alert, manual
+  re-drive; the ledger idempotency key makes replay collapse onto the one journal. Reversal of a
+  settled batch stays a manual reversing journal (documented limit, ADR-0281). No DB schema change
+  in clearing-service; ledger gains V26 seed accounts (additive). Rollback: revert the commit —
+  unsettled batches post nothing; already-committed outbox rows drain or dead-letter harmlessly.
+- **2026-09-09** — Submit idempotency (ADR-0298, burn-down #8351): `POST /api/v1/clearing/submit`
+  dedups on the payment natural key — a retry replays the existing item check-first, and V9's
+  `uq_clearing_items_payment` unique index backstops the true-concurrency race (the loser
+  re-reads the winner). The closed threat is a double-settlement reachable from one transport
+  retry: previously a retried submit stacked a second PENDING row that the clearing cycle swept
+  into a batch. No new caller, route, role or endpoint shape; the response for a retry is the
+  original item, so nothing downstream can distinguish replay from first submit. Rollback:
+  revert the commit and `DROP INDEX IF EXISTS uq_clearing_items_payment` — pre-duplicate data
+  must be cleaned before V9 (detection query in the migration).

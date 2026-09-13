@@ -30,7 +30,7 @@ triaging an incident that starts on `anacredit`.
 
 ## Health & probes
 
-- Readiness: `GET :8137/q/health/ready` · Liveness: `GET :8137/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `anacredit`); dashboards in Grafana.
 - Logs: `kubectl logs -n anacredit deploy/anacredit-service -f`, or Loki
   `{namespace="anacredit"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `anacredit`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/anacredit-service -n anacredit` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/anacredit-service -n anacredit --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/anacredit-service -n anacredit --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

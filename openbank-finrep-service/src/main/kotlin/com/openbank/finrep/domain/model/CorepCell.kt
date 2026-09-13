@@ -11,7 +11,7 @@ import java.math.BigDecimal
  * Row references use the EBA COREP C 01.00 notation (e.g., r010, r020).
  *
  * [isDataGap] marks a cell whose value could NOT be honestly derived from data available in
- * this platform today (e.g. no capital-structure GL accounts exist yet) — it is reported as an
+ * the source trial balance (e.g. no recognised capital account has a balance) — it is reported as an
  * explicit, flagged zero rather than a computed value, and MUST NOT be confused with a real
  * attested zero balance. Regulatory reports must never have silent gaps (ADR-0097): a missing
  * input is always a visible, documented cell, never an omitted row.

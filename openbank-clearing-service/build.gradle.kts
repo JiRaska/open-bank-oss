@@ -21,6 +21,8 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // ADR-0281: service bearer token on the outbound net-settlement journal post to ledger-service.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
@@ -33,6 +35,9 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
+    // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
+    // `trace` evidence) without exporting trace ids, attribute values or payloads.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)

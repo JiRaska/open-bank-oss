@@ -116,6 +116,7 @@ class SavingsGoalDelegationIT {
         """
         {
           "eventType": "$type",
+          "lifecycleRevision": ${if (type == "DelegationActivated") 1 else 2},
           "aggregateId": "$grantId",
           "grantorPartyId": "$ownerParty",
           "granteePartyId": "$delegateParty",

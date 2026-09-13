@@ -4,6 +4,8 @@
 
 package com.openbank.libs.persistence.outbox
 
+import com.openbank.libs.synthetic.SyntheticTaint
+
 /**
  * Canonical broker addressing for a relayed outbox row (ADR-0003 N3 / ADR-0050 N2-N3).
  *
@@ -27,6 +29,9 @@ object OutboxKafkaHeaders {
     const val HEADER_IDEMPOTENCY_KEY: String = "idempotency-key"
     const val HEADER_EVENT_TYPE: String = "ce-type"
 
+    /** ADR-0252: emitted only for tainted records; absence means real activity. */
+    const val HEADER_SYNTHETIC: String = SyntheticTaint.KAFKA_HEADER
+
     /** N2: partition key = aggregate id, so one aggregate's events keep their order. */
     fun partitionKey(entry: OutboxEntry): String = entry.aggregateId.toString()
 
@@ -37,6 +42,8 @@ object OutboxKafkaHeaders {
             HEADER_EVENT_ID to eventId,
             HEADER_IDEMPOTENCY_KEY to eventId,
             HEADER_EVENT_TYPE to entry.eventType,
-        )
+        ).also { headers ->
+            if (entry.synthetic) headers[HEADER_SYNTHETIC] = SyntheticTaint.headerValue()
+        }
     }
 }

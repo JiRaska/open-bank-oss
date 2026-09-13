@@ -41,6 +41,7 @@ class JournalEntryTest {
         amount: String = "1000.00",
         status: JournalStatus = JournalStatus.PENDING,
         lines: List<JournalLine>? = null,
+        synthetic: Boolean = false,
     ): JournalEntry {
         val journalId = UUID.randomUUID()
         val entryLines = lines ?: listOf(
@@ -59,6 +60,7 @@ class JournalEntryTest {
             createdAt = Instant.now(),
             createdBy = userId,
             version = 0L,
+            synthetic = synthetic,
         )
     }
 
@@ -286,6 +288,29 @@ class JournalEntryTest {
 
     @Nested
     inner class Reverse {
+
+        @Test
+        fun `a reversal inherits the synthetic taint of the entry it reverses`() {
+            // ADR-0252 (#8615). Dropping the taint here puts the compensating half inside the real
+            // population while the original sits outside it, so a real-only trial balance would
+            // carry the reversal's legs alone and be skewed by exactly the original's net. The
+            // reversal is internally balanced, so `balanced` stays true and says nothing — the same
+            // shape as the #939 status-filter defect, which is why this needs its own assertion.
+            val posted = balancedEntry(status = JournalStatus.POSTED, synthetic = true)
+
+            val reversal = posted.reverse(UUID.randomUUID(), UUID.randomUUID())
+
+            assertThat(reversal.synthetic).isTrue()
+        }
+
+        @Test
+        fun `a reversal of a real entry stays real`() {
+            val posted = balancedEntry(status = JournalStatus.POSTED)
+
+            val reversal = posted.reverse(UUID.randomUUID(), UUID.randomUUID())
+
+            assertThat(reversal.synthetic).isFalse()
+        }
 
         @Test
         fun `creates reversal entry with flipped sides`() {

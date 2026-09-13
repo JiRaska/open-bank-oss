@@ -49,6 +49,20 @@ open class DiagnoseAndProposeActivityImpl(
             return@runOnVertxContext anomaly
         }
         val prUrl = githubProposal.openProposalPr(anomaly, iacDiff)
+        if (prUrl == null) {
+            // NOTHING was created, so the anomaly must NOT read as proposed. It stays DIAGNOSED
+            // with no proposalPrUrl, which is what keeps it out of FinOpsWorkflowImpl's
+            // `anomaliesProposed` count and out of the HITL queue as a delivered proposal. The
+            // predecessor of this branch returned a fabricated `pending-finops-<id>` URL and moved
+            // the anomaly to PROPOSED — a no-op that shared its shape with a real result (#5897).
+            log.warnf(
+                "No proposal PR was created for anomaly %s (%s) — leaving it DIAGNOSED; nothing " +
+                    "is awaiting a human.",
+                anomaly.id,
+                anomaly.detector,
+            )
+            return@runOnVertxContext anomaly
+        }
         val proposed = anomaly.copy(
             proposedIacDiff = iacDiff,
             proposalPrUrl = prUrl,

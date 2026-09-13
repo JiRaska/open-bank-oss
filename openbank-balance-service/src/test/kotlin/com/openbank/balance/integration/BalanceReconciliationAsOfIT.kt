@@ -75,6 +75,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("1000.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.minusDays(1),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
             projection.applyBookedDelta(
                 journalEntryId = UUID.randomUUID(),
@@ -83,6 +84,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("500.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.plusDays(2),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
             // EUR 200, all effective — no future tail.
             projection.applyBookedDelta(
@@ -92,6 +94,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("200.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.minusDays(1),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
         }
 
@@ -128,6 +131,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("1000.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.minusDays(1),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
             projection.applyBookedDelta(
                 journalEntryId = UUID.randomUUID(),
@@ -136,6 +140,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("500.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.plusDays(2),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
             projection.applyBookedDelta(
                 journalEntryId = UUID.randomUUID(),
@@ -144,6 +149,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("250.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.plusDays(5),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
             // EUR: entirely effective — must NOT appear in the pipeline at all.
             projection.applyBookedDelta(
@@ -153,6 +159,7 @@ class BalanceReconciliationAsOfIT {
                 delta = BigDecimal("200.00"),
                 transactionId = UUID.randomUUID(),
                 entryDate = asOf.minusDays(1),
+                actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
             )
         }
 

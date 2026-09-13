@@ -280,6 +280,17 @@ spec:
               # The edge does NOT strip /tools/grafana (no rewrite-target on the
               # Ingress), so Grafana must serve from the sub-path itself.
               serve_from_sub_path: true
+            security:
+              # ADR-0286: the Admin UI /reporting page embeds the business-warehouse
+              # dashboard in a same-origin iframe (admin.open-bank.tech framing
+              # admin.open-bank.tech/tools/grafana). The default allow_embedding=false
+              # makes Grafana answer X-Frame-Options: deny, which the browser renders
+              # as "refused to connect" — measured on the sandbox 2026-09-07. The
+              # admin-ui-tools ingress deliberately sets no X-Frame-Options of its own,
+              # so with this enabled the same-origin frame passes; cross-origin framing
+              # remains blocked by the browser only as far as SSO redirects allow, and
+              # the gate (auth-url /api/gate) still authenticates every request first.
+              allow_embedding: true
             auth.generic_oauth:
               enabled: true
               name: OpenBank SSO
@@ -291,6 +302,12 @@ spec:
               api_url: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/userinfo
               use_pkce: true
               use_refresh_token: true
+              # ADR-0286 / #9216: without auto_login the /reporting iframe first
+              # renders Grafana's login page and makes the operator click through
+              # SSO by hand; with it, the embed bounces straight to Keycloak and
+              # back (transparent with an existing portal SSO session, and the
+              # realm CSP allowlists admin.open-bank.tech as a frame ancestor).
+              auto_login: true
               login_attribute_path: preferred_username
               name_attribute_path: name
               email_attribute_path: email

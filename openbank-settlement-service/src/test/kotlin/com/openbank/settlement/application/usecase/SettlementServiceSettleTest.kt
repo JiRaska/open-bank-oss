@@ -28,7 +28,7 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle throws when the settlement does not exist`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, temporalConfig, workflowClient)
+        val service = SettlementService(repo, temporalConfig, workflowClient, mockk(relaxed = true))
         val id = UUID.randomUUID()
         coEvery { repo.findById(id) } returns null
 

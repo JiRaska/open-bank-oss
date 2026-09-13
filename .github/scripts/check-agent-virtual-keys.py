@@ -120,6 +120,11 @@ def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
     enforce = "--enforce" in sys.argv
+    # Measured 2026-09-03: with COMPONENTS renamed away this gate printed
+    # "OK — no agent sources the shared LiteLLM master key" and exited 0 — green about a tree
+    # it never read. Emit the count so run-gates' min_subjects floor can see a scope collapse.
+    gatelib.subjects(sum(1 for _ in gatelib.rglob(COMPONENTS, "*.yaml")),
+                     "gitops component manifests scanned")
     findings = audit()
     if not findings:
         print("check-agent-virtual-keys: OK — no agent sources the shared LiteLLM master key.")

@@ -17,8 +17,8 @@ import org.testcontainers.utility.DockerImageName
  * Both are needed for [com.openbank.psd2.integration.Psd2BootSmokeIT] to reach a green
  * `/q/health/ready`: Hibernate Reactive + Flyway need a real Postgres (the V1/V2 migrations run
  * on boot), and the redis-client extension contributes a readiness health check, so a real
- * Valkey is needed too. The single `@Outgoing("psd2-events-out")` Kafka emitter is switched to
- * the in-memory connector in the IT, so no broker container is required.
+ * Valkey is needed too. The service declares no outgoing Kafka channel since #8510 (the dead
+ * outbox apparatus was deleted), so no broker or in-memory swap is required.
  *
  * Docker Hub coords -> served by the in-cluster registry-mirror; Ryuk is disabled fleet-wide ->
  * stop() tears the containers down.

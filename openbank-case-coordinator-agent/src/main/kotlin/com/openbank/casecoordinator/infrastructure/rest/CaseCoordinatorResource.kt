@@ -8,6 +8,8 @@ package com.openbank.casecoordinator.infrastructure.rest
 import com.openbank.casecoordinator.application.CaseCapabilityGate
 import com.openbank.casecoordinator.application.CaseOpenResult
 import com.openbank.casecoordinator.application.CaseOpenService
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
 import com.openbank.casecoordinator.application.workflow.CaseWorkflow
 import com.openbank.casecoordinator.domain.model.CaseClass
@@ -47,6 +49,7 @@ class CaseCoordinatorResource(
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
     private val identity: SecurityIdentity,
+    private val signalAuthorization: CaseSignalAuthorizationService,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -122,6 +125,12 @@ class CaseCoordinatorResource(
         // the header only names which.
         val callerPrincipal = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "anonymous"
 
+        // …and the identity it may CLAIM is decided against the roles it proved, before any
+        // capability decision runs on the claim (#4834). `canOpenCase(openedBy)` asks whether the
+        // named agent holds `case.open`; it cannot ask whether the caller is that agent, so on its
+        // own it tests an assertion. Deny-by-default, and the value is not echoed back.
+        if (!gate.permitsAssertedIdentity(identity.roles, openedBy)) return assertedIdentityDenied()
+
         return when (
             val result = openService.open(callerPrincipal, openedBy, caseClass, subjectRef, dispositionTarget)
         ) {
@@ -144,14 +153,40 @@ class CaseCoordinatorResource(
 
     @POST
     @Path("/cases/{caseId}/signals")
+    @Blocking
     @RolesAllowed("ROLE_ADMIN", "ROLE_OPERATOR")
     fun signal(@PathParam("caseId") caseId: String?, request: SignalRequest?): Response {
         val id = requireNotNull(caseId) { "caseId path parameter is required" }
         requireNotNull(request) { "request body is required" }
         val type = requireNotNull(request.type) { "type is required" }
         val agentId = requireNotNull(request.agentId) { "agentId is required" }
+        // Authorisation before availability, deliberately ahead of the Temporal check (#4834). The
+        // claimed agentId is carried into the workflow as the AUTHOR of the contribution, which is
+        // the guarantee ADR-0244 rests on — "who detected is never who coordinated" — so it must be
+        // one the caller proved it may act as, not one it named. Answering 503 first would also
+        // make the decision unobservable wherever Temporal is off.
+        if (!gate.permitsAssertedIdentity(identity.roles, agentId)) return assertedIdentityDenied()
+        val capability = when (type) {
+            "join" -> "case.join"
+            "contribute" -> "case.contribute"
+            "supersede", "request-synthesis" -> null
+            else -> throw IllegalArgumentException("unknown signal type '$type'")
+        }
+        val collaborationAuthorization = capability?.let {
+            when (val result = signalAuthorization.authorize(id, agentId, it)) {
+                is CaseSignalAuthorizationResult.Authorized -> result
+                CaseSignalAuthorizationResult.Denied -> return Response.status(Response.Status.FORBIDDEN)
+                    .entity(errorBody("signal '$type' denied for the requested agent")).build()
+                CaseSignalAuthorizationResult.UnknownCase -> return Response.status(Response.Status.NOT_FOUND)
+                    .entity(errorBody("no running case with id '$id'")).build()
+                CaseSignalAuthorizationResult.PolicyUnavailable -> return Response.status(
+                    Response.Status.SERVICE_UNAVAILABLE,
+                )
+                    .entity(errorBody("case collaboration policy is unavailable")).build()
+            }
+        }
         if (!temporalConfig.enabled()) return temporalUnavailable()
-        if (!capable(type, agentId)) {
+        if (capability == null && !capable(type, agentId)) {
             return Response.status(Response.Status.FORBIDDEN)
                 // agentId is NOT echoed (#4834), matching the openCase denial. It is free-form
                 // request-body input, and reflecting it verbatim tells the caller nothing it did
@@ -159,7 +194,7 @@ class CaseCoordinatorResource(
                 // it against the four known signal literals, so it is a bounded server-side value.
                 .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
-        return deliver(id, type, agentId, request)
+        return deliver(id, type, agentId, request, capability, collaborationAuthorization)
     }
 
     private fun capable(type: String, agentId: String): Boolean = when (type) {
@@ -170,17 +205,33 @@ class CaseCoordinatorResource(
         else -> throw IllegalArgumentException("unknown signal type '$type'")
     }
 
-    private fun deliver(id: String, type: String, agentId: String, request: SignalRequest): Response {
+    private fun deliver(
+        id: String,
+        type: String,
+        agentId: String,
+        request: SignalRequest,
+        capability: String?,
+        authorization: CaseSignalAuthorizationResult.Authorized?,
+    ): Response {
         val stub = workflowClient.newWorkflowStub(CaseWorkflow::class.java, id)
         return try {
             when (type) {
-                "join" -> stub.join(JoinSignal(agentId, request.role ?: "participant"))
+                "join" -> stub.join(
+                    JoinSignal(
+                        agentId,
+                        request.role ?: "participant",
+                        requireNotNull(authorization).signalId,
+                        authorization.rolloutId,
+                    ),
+                )
                 "contribute" -> stub.contribute(
                     ContributeSignal(
                         agentId = agentId,
                         summary = requireNotNull(request.summary) { "summary is required for contribute" },
                         evidenceRefs = request.evidenceRefs ?: emptyList(),
                         contested = request.contested ?: false,
+                        signalId = requireNotNull(authorization).signalId,
+                        rolloutId = authorization.rolloutId,
                     ),
                 )
                 "supersede" -> stub.supersede(
@@ -194,6 +245,9 @@ class CaseCoordinatorResource(
                 )
                 else -> stub.requestSynthesis(SynthesisRequest(agentId))
             }
+            if (capability != null && authorization != null) {
+                signalAuthorization.recordInvoked(id, agentId, capability, authorization)
+            }
             Response.accepted().build()
         } catch (e: WorkflowNotFoundException) {
             log.debugf(e, "signal '%s' for unknown case %s", type, id)
@@ -201,6 +255,15 @@ class CaseCoordinatorResource(
                 .entity(errorBody("no running case with id '$id'")).build()
         }
     }
+
+    /**
+     * The asserted agent identity is not one this caller's roles may act as. The requested id is
+     * NOT echoed, for the same reason the other denials stopped echoing it (#4215): it is
+     * free-form request input, and repeating it back tells the caller nothing it did not send.
+     */
+    private fun assertedIdentityDenied(): Response = Response.status(Response.Status.FORBIDDEN)
+        .entity(errorBody("the authenticated caller may not act as the requested agent identity"))
+        .build()
 
     private fun temporalUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
         .entity(errorBody("Temporal case workflows are disabled (openbank.temporal.enabled=false)"))

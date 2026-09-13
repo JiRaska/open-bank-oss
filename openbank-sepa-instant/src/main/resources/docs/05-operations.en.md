@@ -70,8 +70,8 @@ Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) come from the environment; t
 ### Payments stuck in PENDING
 A surge of `PENDING` means the screening gate is holding payments — either genuine REVIEW outcomes or, more likely, **sanctions-service is unreachable** (fail-closed, ADR-0032 §C). Check sanctions-service health and the circuit-breaker state. Each held payment has an open AML case (`AML_HOLD` or `SCREENING_UNAVAILABLE`); resolve via aml-service / compliance ops. Payments are persisted, never lost.
 
-### Outbox backlog
-If `openbank.sepa.instant.events` lags, inspect `sct_inst_outbox` for rows with `status != SENT` and rising `attempt_count` / `last_error`. The dispatcher runs every 5 s (batch 25, `concurrentExecution = SKIP`). Check the Kafka emitter / broker health.
+### Event publish lag
+Events publish directly and synchronously from `SctInstPaymentService` via `KafkaSctInstEventPublisher` — there is no outbox or dispatcher on this path (an earlier outbox pipeline was removed as dead code, issue #1034). If `openbank.sepa.instant.events` lags, check the Kafka emitter / broker health and producer-side logs on the publish call itself; a stuck payment transition (rather than a stuck backlog table) is the signal to look for.
 
 ### Flyway checksum mismatch on startup
 Caused by a rewritten applied migration. Temporary fix: set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in the GitOps env, then remove once the DB is settled. Never rewrite an applied migration.

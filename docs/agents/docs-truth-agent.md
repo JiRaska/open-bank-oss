@@ -77,11 +77,18 @@ closing a gap none of this repo's other control-plane agents cover.
   wrong-attribution case but is still a proximity-based text scan, not a structural YAML parse — a
   `rules.yaml` restructuring that moves `enforced:` more than `SEARCH_WINDOW` (15) lines from its
   `gate:` key would silently stop matching.
-- The `LlmDiagnosisPort` and `GitHubProposalPort` adapters are stubs pending the shared LiteLLM
-  gateway and GitHub App installation-token wiring, the same bootstrap state finops-agent/devops-
-  agent/control-liveness-sentinel/governance-auditor/release-steward shipped with. Until that
-  lands, a finding produces a tracking ticket with a placeholder summary rather than an
-  LLM-drafted root-cause note, and `proposeFixDiff` never yet returns a real diff.
+- The `LlmDiagnosisPort` adapter is a stub pending the shared LiteLLM gateway, so `proposeFixDiff`
+  never yet returns a real diff.
+- **`GitHubProposalPort` is unwired and REFUSES — no finding of this agent reaches GitHub today**
+  (#5897). Both methods return `null`, and `DiagnoseAndProposeActivityImpl` then leaves the finding
+  `DIAGNOSED` with a null `proposalUrl`: it is never counted in a run's `findingsProposed` and never
+  presented as awaiting a human. It previously returned a fabricated
+  `https://github.com/openbank/openbank/pulls/pending-docs-truth-agent-<id>` URL and moved the
+  finding to `PROPOSED` — a no-op sharing its shape with a real result, on a host that is not even
+  this repository. This follows `openbank-mcp-service`'s `UnwiredProposalPort` (#3900).
+  The charter already grants `tier: write_proposal` on `github-pr`, so wiring it needs no charter
+  change — but unlike `flaky-test-hunter` this service has no `github-token` config, so there is no
+  token path to fail closed on yet. `flaky-test-hunter`'s adapter is the template.
 - `repo-root` (`DOCS_TRUTH_AGENT_REPO_ROOT`) must point at a mounted, up-to-date checkout of `main`
   for the `RepoScanPort`/`GovernanceRulesPort` checks to be meaningful — the deployment-side
   checkout-mount wiring (a sidecar or init-container `git pull`) is tracked separately and not yet

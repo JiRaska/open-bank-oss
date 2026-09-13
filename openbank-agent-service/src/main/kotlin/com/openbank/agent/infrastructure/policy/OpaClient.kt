@@ -6,6 +6,7 @@
 package com.openbank.agent.infrastructure.policy
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -20,6 +21,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * OPA Data API: POST /v1/data/<path> with `{ "input": {...} }` -> `{ "result": {...} }`.
  */
 @RegisterRestClient(configKey = "opa")
+@SyntheticTaintExternalBoundary("OPA policy sidecar is not a banking persistence or event edge")
 @Path("/v1/data/openbank/agents")
 interface OpaClient {
 

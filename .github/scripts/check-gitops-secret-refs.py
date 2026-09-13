@@ -216,8 +216,14 @@ def main():
         print(f"ERROR: {GITOPS} not found -- run from the repo root.", file=sys.stderr)
         return 2
 
+    # Measured 2026-09-03: with GITOPS/components renamed away this printed
+    # "OK: every referenced Secret/ConfigMap is declared" and exited 0. The count lets
+    # run-gates' min_subjects floor tell an empty scan from a clean one.
+    manifests = list(gatelib.rglob(GITOPS, "*.yaml"))
+    gatelib.subjects(len(manifests), "gitops manifests scanned")
+
     declared, consumed = set(), []
-    for path in gatelib.rglob(GITOPS, "*.yaml"):
+    for path in manifests:
         try:
             docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
         except yaml.YAMLError as exc:

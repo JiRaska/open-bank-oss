@@ -5,6 +5,7 @@
 package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.WelcomeBonusPort
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -28,6 +29,7 @@ import java.util.UUID
  * [OidcClientRequestReactiveFilter] (oidc-client openbank-services → ROLE_OPERATOR).
  */
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)

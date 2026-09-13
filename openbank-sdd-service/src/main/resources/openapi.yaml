@@ -8,7 +8,7 @@ info:
     Debtor-side SEPA Direct Debit (ADR-0036): mandate vault keyed by (creditorIdentifier, UMR),
     lifecycle, fail-closed collection authorisation and refund-window assessment. v1 never moves
     money — an authorised collection is emitted for the ledger/payment path.
-  version: 1.1.0
+  version: 1.1.1
 tags:
   - name: SEPA Direct Debit
 paths:
@@ -34,6 +34,11 @@ paths:
     post:
       tags: [SEPA Direct Debit]
       summary: Register a debtor mandate (idempotent on creditorIdentifier+UMR)
+      description: >-
+        Natural-key idempotency (ADR-linked exception in the #8351 inventory): the SDD scheme
+        makes (creditorIdentifier, UMR) unique per mandate, and re-registering the same pair
+        returns the stored mandate unchanged — no synthetic Idempotency-Key is required and
+        none is read. A retry can never double-create.
       requestBody:
         required: true
         content:
@@ -137,6 +142,12 @@ paths:
     post:
       tags: [SEPA Direct Debit]
       summary: Fail-closed authorisation of an inbound collection
+      description: >-
+        Natural-key idempotency (ADR-linked exception in the #8351 inventory): a collection is
+        uniquely identified by (mandateId, UMR, dueDate) — the same triple the downstream debit
+        consumer dedups under (`so-sdd-{mandateId}-{umr}-{dueDate}`). Re-authorising the same
+        triple replays the stored decision with no state change and no re-emitted event, so a
+        retry can never double-debit. No synthetic Idempotency-Key is required and none is read.
       requestBody:
         required: true
         content:

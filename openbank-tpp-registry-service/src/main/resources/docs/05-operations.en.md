@@ -73,7 +73,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 1. `POST /api/v1/tpp-registry/{tppId}/blacklist` with `{ "reason": "<incident ref>" }` and an `Idempotency-Key`.
 2. Verify `GET /check` now returns `403`. PSD2 surfaces will reject the TPP on next call.
 
-### Outbox not draining (once events are wired)
+### Outbox not draining
 1. Query `tpp_outbox WHERE status='PENDING' ORDER BY created_at` for backlog.
 2. Inspect `last_error` / `attempt_count` on `FAILED` rows; check Kafka connectivity (`tpp-events-out`).
 3. The dispatcher runs every 5 s (`@Scheduled`, batch 25); a wedged scheduler is restored by a pod restart.

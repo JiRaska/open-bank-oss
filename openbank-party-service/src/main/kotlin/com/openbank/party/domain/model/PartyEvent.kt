@@ -105,6 +105,15 @@ object PartyEvents {
      * self-service erasure is the data subject's own Keycloak subject — putting that on a
      * broadcast topic would re-publish an identifier for the person the event exists to erase.
      * Zero rows of the live unattributed set are `PARTY_ERASED`, so nothing is lost by leaving it.
+     *
+     * The narrowing is about IDENTIFIERS, and `occurredAt` is not one (#8352). Every sibling
+     * builder projects the event instant into the envelope under that key; this one projected the
+     * same value under `erasedAt` instead, and `AuditConsumer.eventTime` reads `occurredAt` and
+     * only `occurredAt` — so the audit row for a GDPR Art. 17 erasure recorded the audit
+     * consumer's ingest clock as the moment the subject's data was erased. That is the one row in
+     * this service where "when did this happen" is itself the regulatory artefact. `erasedAt`
+     * stays exactly where it is: additive, no existing key changes name, place or form, and a
+     * consumer reading `erasedAt` is unaffected.
      */
     fun erased(partyId: UUID, at: Instant): PartyEvent = PartyEvent(
         eventType = "PARTY_ERASED",
@@ -114,6 +123,8 @@ object PartyEvents {
             "eventType" to "PARTY_ERASED",
             "partyId" to partyId,
             "erasedAt" to at,
+            "occurredAt" to at,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
 
@@ -133,8 +144,43 @@ object PartyEvents {
             "occurredAt" to at,
             EventActor.FIELD_ACTOR_ID to actor.id,
             EventActor.FIELD_ACTOR_TYPE to actor.type,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
+
+    /**
+     * ADR-0284 D3. Aggregate = the PRINCIPAL (entity) party: a consumer projecting "who may act
+     * for this company" keys on it, and the customer edge invalidates its acting-for cache on it.
+     */
+    fun mandateGranted(mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        mandateEvent("PARTY_MANDATE_GRANTED", mandate, at, actor)
+
+    fun mandateRevoked(mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        mandateEvent("PARTY_MANDATE_REVOKED", mandate, at, actor)
+
+    private fun mandateEvent(eventType: String, mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        PartyEvent(
+            eventType = eventType,
+            aggregateId = mandate.principalPartyId,
+            occurredAt = at,
+            envelope = linkedMapOf(
+                "eventType" to eventType,
+                "partyId" to mandate.principalPartyId,
+                "mandateId" to mandate.id,
+                "agentPartyId" to mandate.agentPartyId,
+                "role" to mandate.role,
+                "authority" to mandate.authority,
+                "requiredSignatures" to mandate.requiredSignatures,
+                "source" to mandate.source,
+                "status" to mandate.status,
+                "validFrom" to mandate.validFrom,
+                "validTo" to mandate.validTo,
+                "occurredAt" to at,
+                EventActor.FIELD_ACTOR_ID to actor.id,
+                EventActor.FIELD_ACTOR_TYPE to actor.type,
+                "sourceService" to SOURCE_SERVICE,
+            ),
+        )
 
     private fun lifecycle(eventType: String, party: Party, at: Instant, actor: PartyActor): PartyEvent = PartyEvent(
         eventType = eventType,
@@ -144,6 +190,7 @@ object PartyEvents {
             "eventType" to eventType,
             "partyId" to party.id,
             "partyType" to party.partyType,
+            "classification" to party.classification,
             "status" to party.status,
             "kycStatus" to party.kycStatus,
             "legalName" to party.legalName,
@@ -151,6 +198,15 @@ object PartyEvents {
             "occurredAt" to at,
             EventActor.FIELD_ACTOR_ID to actor.id,
             EventActor.FIELD_ACTOR_TYPE to actor.type,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
+
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — issue #3994/#5256. Value matches the fleet's audit
+     * convention: the module directory without the `openbank-` prefix, the same spelling
+     * `TopicAttribution` already maps `openbank.party.events` to.
+     */
+    private const val SOURCE_SERVICE = "party-service"
 }

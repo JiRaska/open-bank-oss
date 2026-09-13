@@ -41,8 +41,10 @@ import java.util.concurrent.TimeUnit
 class SpendReservationConcurrencyIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "spend-reservation-state-out",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -141,6 +143,31 @@ class SpendReservationConcurrencyIT {
 
     @Test
     @TestSecurity(user = "svc", roles = ["ROLE_API"])
+    fun `domestic reservation fails closed while its durable state stream is disabled`() {
+        val grantId = seedGrant()
+
+        val status = RestAssured.given()
+            .contentType(ContentType.JSON)
+            .header(CUSTOMER_PARTY_HEADER, grantee.toString())
+            .body(
+                """
+                {
+                  "amount": 100.00,
+                  "currency": "CZK",
+                  "idempotencyKey": "domestic-disabled",
+                  "operationType": "DOMESTIC_PAYMENT"
+                }
+                """.trimIndent(),
+            )
+            .post("/api/v1/delegations/$grantId/reservations")
+            .then().extract().statusCode()
+
+        assertThat(status).isEqualTo(HTTP_SERVICE_UNAVAILABLE)
+        assertThat(reservedRows(grantId)).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = "svc", roles = ["ROLE_API"])
     fun `releasing a reservation gives the headroom back`() {
         val grantId = seedGrant()
         val reservationId = RestAssured.given()
@@ -170,5 +197,6 @@ class SpendReservationConcurrencyIT {
         const val HTTP_OK = 200
         const val HTTP_CREATED = 201
         const val HTTP_CONFLICT = 409
+        const val HTTP_SERVICE_UNAVAILABLE = 503
     }
 }

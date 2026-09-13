@@ -77,7 +77,13 @@ configurations.all {
     }
 }
 
-tasks.test {
+// Shared config for EVERY Test task in the module — `test` plus the `providerPactTest` task
+// registered below (ADR-0250 Phase 2). Deliberately `withType<Test>().configureEach` rather
+// than `tasks.test { ... }`: the pact rootDir/broker-forwarding block used to be hand-copied
+// into 36 individual build.gradle.kts files (issue #4414) purely so it would also apply to a
+// service's own extra Test tasks — putting it here once, on every Test task fleet-wide, is what
+// makes per-service copies removable at all.
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
@@ -93,6 +99,17 @@ tasks.test {
         providers.environmentVariable("DOCKER_HOST").orElse("unix:///var/run/docker.sock").get(),
     )
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+    // A shared Testcontainers resource emits a deliberately secret-free lifecycle
+    // observation here. The CI envelope is evidence, not a container inventory:
+    // ports, hosts, credentials and ids must never leave the test runner.
+    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime")
+    environment("OPENBANK_TEST_EVIDENCE_DIR", testIntelligenceRuntimeDir.get().asFile.absolutePath)
+    // Recorder output is append-only within one test task so concurrently managed resources do
+    // not lose transitions. Reset only this generated task directory before each invocation:
+    // otherwise a local re-run mixes prior lifecycle evidence into the next envelope.
+    doFirst {
+        project.delete(testIntelligenceRuntimeDir)
+    }
 
     // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
     // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
@@ -105,13 +122,116 @@ tasks.test {
     // tampered text is gone. Set here (not per module) so the 21 services that write pacts cannot
     // drift apart on it.
     systemProperty("pact.writer.overwrite", "true")
+
+    // Pact rootDir + Pact Broker property forwarding (ADR-0092/ADR-0250 Phase 2, issue #4414).
+    // Was hand-copied, with real per-service drift, into 36 build.gradle.kts files — a rolled-up
+    // hash check of those blocks found 5 distinct shapes (not 1), each diffed individually before
+    // this centralisation: a `maxHeapSize` override (account/lending/product-catalog), a JUnit
+    // timeout + CI-only jvmArgs (swift), presence/absence of the rootDir line depending on whether
+    // the service only PROVIDES or only CONSUMES pacts (finrep/copilot vs clearing-simulator/
+    // tpp-registry-service), and a `tasks.test { }`-scoped copy (party-service) instead of
+    // `tasks.withType<Test>`. None of those differences is expressed here — they stay in each
+    // service's own build.gradle.kts — this block only carries the part that was byte-identical
+    // (or a harmless no-op superset) everywhere it appeared.
+    //
+    // Set on the test JVM fork, not the Gradle daemon — System.setProperty at config time would
+    // not propagate into the forked test process.
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
+
+// ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set
+// to run against the broker, and that `-D` is a tracked INPUT of whatever Test task runs it — so
+// invoking the ordinary `test` task with a broker URL set (the main-push "contract" build) is
+// ALWAYS a different Gradle cache key from invoking it without one (the "build" job on every
+// other event), even when `--tests` filters which classes execute. That forces a full test-suite
+// re-run on every main push. `--tests` was never going to fix this: it changes what runs, not
+// what the task's inputs are.
+//
+// The fix is a SEPARATE Test task/source set so provider verification has its own task identity
+// and its own cache key, decoupled from `test`'s. It deliberately reuses `test`'s own source
+// directory (`src/test/kotlin`) rather than requiring every service to physically move its
+// `*ProviderVerificationTest.kt` files into a new `src/providerPactTest/kotlin` tree — issue #4414
+// finding 1 established that EVERY provider-verification class in the fleet already ends in
+// `ProviderVerificationTest`, so an include filter on the existing directory selects exactly the
+// right classes with zero fleet-wide file moves. Classes outside that filter (test helpers like a
+// `*TestResource`, referenced by the provider-verification class via `@QuarkusTestResource`) are
+// pulled in via the `test` source set's COMPILED output on the classpath, not recompiled — so
+// running `providerPactTest` triggers `compileTestKotlin` (a compile task, whose inputs are just
+// source files and is therefore cache-stable regardless of `-Dpactbroker.url`) but never EXECUTES
+// the rest of `test`'s suite.
+val providerPactTestSourceSet =
+    sourceSets.create("providerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*ProviderVerificationTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath += sourceSets.main.get().output +
+            sourceSets.test.get().output +
+            configurations.testCompileClasspath.get()
+        runtimeClasspath += output + compileClasspath + sourceSets.test.get().runtimeClasspath
+    }
+
+val providerPactTest =
+    tasks.register<Test>("providerPactTest") {
+        description = "Runs Pact provider-verification tests only, isolated from `test` " +
+            "(ADR-0250 Phase 2, issue #4414) — invoke with -Dpactbroker.url=... to verify " +
+            "against the broker."
+        group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+        testClassesDirs = providerPactTestSourceSet.output.classesDirs
+        classpath = providerPactTestSourceSet.runtimeClasspath
+        // Independent of `check`/`test` — a service with no provider-verification classes at all
+        // (the include filter above matches nothing) still gets the task registered, and it
+        // reports 0 tests rather than failing; JUnit5's default `failOnNoTests` behaviour on an
+        // EMPTY discovered set is "pass", not "fail", which is exactly what an unfiltered `test`
+        // invocation of the same module already relies on for services with no tests of a kind.
+        shouldRunAfter(tasks.named("test"))
+    }
+// Deliberately NOT wired into `check`/`build` (unlike koverVerify below): the whole point of
+// this task is that a main-push "build" job (:service:build, which depends on `check`) must be
+// able to run WITHOUT it, so it never becomes an input the hosted "build" job pays for. Invoke it
+// explicitly: `./gradlew :service:providerPactTest -Dpactbroker.url=...`.
 
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setIncludeConfigs(listOf("runtimeClasspath"))
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+}
+
+// Reproducible archives (issue #8355, OpenSSF Silver build_reproducible): jar entries carry
+// mtimes by default, so two builds of the SAME commit differ byte-for-byte and no supply-chain
+// comparison (rebuild-and-compare, attestation verification) can ever say "identical". Gradle
+// ships the normalization as opt-in; set it fleet-wide here so every service jar is byte-
+// reproducible for identical inputs. Remaining drift sources (Quarkus-augmented runner jars,
+// generated build-metadata) are exactly what the rebuild-and-compare job exists to surface —
+// it reports WHICH zip entries differ instead of a bare checksum mismatch.
+tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
+// Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
+// Testcontainers is third-party test infrastructure, never part of this module's coverage
+// denominator; attempting to transform its shaded classes has produced invalid frames and a
+// missing XML report while the advisory CI step still looked green.  Exclude it at the
+// instrumentation boundary (rather than report filtering) so application classes remain
+// measured and a Testcontainers-heavy integration suite can still publish its evidence.
+kover {
+    currentProject {
+        instrumentation {
+            excludedClasses.add("org.testcontainers.*")
+        }
+    }
 }
 
 // Coverage gate (ADR-0020, ratchet-only — sweep #466). koverVerify is wired into
@@ -121,6 +241,36 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
 // per-service re-enable boilerplate; that made "ungated" and "gated with floor 0"
 // indistinguishable from a real gate in a green build. Floors live in each module's
 // build.gradle.kts and only ever go up.
+// A service's coverage number must be about the SERVICE (issue #6384). Kover measures every
+// class the module's tests load, and the shared libraries (`com.openbank.libs.*`, i.e.
+// openbank-libs-domain / -runtime / -temporal / -testing) are on every service's classpath —
+// so a service's report mixed its own sources with whatever slice of the libraries its tests
+// happened to touch. That made each floor a function of shared-library SIZE: PR #5719 added 13
+// uncovered lines to libs-runtime's EventRetry, touched no fx-service file, and reddened
+// `build (openbank-fx-service)` (60.504200% against a floor of 65). The pressure that creates is
+// to lower a floor on a service the PR never looked at, which is the one move that makes the
+// ratchet meaningless — and fx's floor was in fact lowered 65 -> 60 for exactly that reason.
+//
+// The libraries are not left unmeasured: openbank-libs-domain and openbank-libs-runtime each
+// carry their own koverVerify floor (30 and 50), enforced by their own tests, which is the only
+// place a library's coverage can honestly be judged.
+//
+// Trade-off, stated plainly: each service's recorded floor now compares against a SMALLER, and
+// for most services a lower, number — its own sources alone. Floors that had to move down to
+// match were re-baselined in this change from the figure CI measured, and that is a re-baseline,
+// not a relaxation: the old number was never that service's coverage. What the gate protects is
+// unchanged in the direction that matters — a regression in a service's own sources still moves
+// its own number down and still reddens its build.
+kover {
+    reports {
+        filters {
+            excludes {
+                classes("com.openbank.libs.*")
+            }
+        }
+    }
+}
+
 tasks.named("check") {
     dependsOn("koverVerify")
 }

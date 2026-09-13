@@ -40,6 +40,12 @@ dependencies {
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.redis.client)
 
+    // ADR-0248: billing's first Kafka publisher — the `billing.annual-fee-summary.ready` event
+    // that triggers document-service's PAD Art. 5 annual-statement render. Every prior outbox row
+    // in this service posts to ledger-service over REST (LedgerOutboxEventPublisher's own class
+    // KDoc), so this dependency did not exist before.
+    implementation(libs.quarkus.smallrye.kafka)
+
     // The shared fee-waiver engine (ADR-0138 phase 1b) + outbox/approval primitives (ADR-0013/0155).
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
@@ -51,11 +57,14 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Admin UI pending-approval contract: generated consumer pact + live HTTP provider replay.
+    testImplementation(libs.pact.provider)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — issue #321: billing was the only money-path
@@ -95,17 +104,7 @@ kover {
 // Pact: write the generated consumer contract to pacts/ and forward broker config, matching
 // transaction-service/lending-service/settlement-service's tasks.withType<Test> block
 // (ADR-0063 P1/P2).
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.

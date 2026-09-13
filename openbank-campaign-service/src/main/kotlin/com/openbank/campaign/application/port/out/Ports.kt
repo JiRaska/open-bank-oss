@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application.port.out
 
+import com.openbank.campaign.domain.model.Audience
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
@@ -11,6 +12,7 @@ import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -31,6 +33,11 @@ interface CampaignRepository {
      * guard in the service — a DRAFT campaign has not passed four-eyes and must not enrol anyone.
      */
     suspend fun findActiveByTrigger(trigger: String): List<Campaign>
+}
+
+/** Resolve only immutable published offers; reservation and redemption never cross this port. */
+interface IncentiveOfferRegistry {
+    suspend fun resolvePublished(ref: IncentiveOfferRef): IncentiveOfferRef?
 }
 
 interface EnrolmentRepository {
@@ -109,6 +116,28 @@ interface CampaignEngagementRepository {
     suspend fun metrics(campaignId: UUID): List<CampaignEngagementMetric>
 }
 
+/** Authoritative incentive lifecycle outcomes; only [COMMITTED] is a redeemed reward. */
+enum class CampaignIncentiveOutcomeStatus { RESERVED, COMMITTED, RELEASED, EXPIRED }
+
+/** No-PII evidence projected from the Incentive Service's attributed v2 events. */
+data class CampaignIncentiveOutcomeEvent(
+    val eventId: UUID,
+    val reservationId: UUID,
+    val attributionRef: UUID,
+    val offerRef: IncentiveOfferRef,
+    val status: CampaignIncentiveOutcomeStatus,
+    val occurredAt: Instant,
+)
+
+data class CampaignIncentiveFunnel(val reserved: Long, val committed: Long, val released: Long, val expired: Long)
+
+interface CampaignIncentiveOutcomeRepository {
+    /** False means the event or lifecycle transition was already projected. */
+    suspend fun record(campaignId: UUID, stepOrder: Int, event: CampaignIncentiveOutcomeEvent): Boolean
+
+    suspend fun funnel(campaignId: UUID): CampaignIncentiveFunnel
+}
+
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
 data class StepOutcomeCount(val stepOrder: Int, val outcome: SendOutcome, val count: Long)
 
@@ -129,7 +158,13 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
 /** Server-owned campaign context for one opaque app interaction reference. */
-data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+data class CampaignInteractionAttribution(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: Channel,
+    /** Immutable treatment selected on the reviewed campaign; null means the campaign has no reward. */
+    val incentiveOfferRef: IncentiveOfferRef? = null,
+)
 
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
@@ -147,6 +182,12 @@ interface SendLogRepository {
      */
     suspend fun attributionForAppInteraction(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
         null
+
+    /**
+     * Resolve a server-produced interaction for an internal outcome event. No party is returned or
+     * stored; callers must additionally match the immutable campaign offer before projecting it.
+     */
+    suspend fun attributionForIncentiveOutcome(interactionRef: UUID): CampaignInteractionAttribution? = null
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
@@ -229,6 +270,18 @@ interface SegmentRegistry {
     suspend fun load(name: String, version: Int): Segment?
     suspend fun save(segment: Segment): Segment
     suspend fun list(): List<Segment>
+}
+
+/**
+ * Lifecycle store for marketer-authored audiences. Its approved projection is intentionally kept
+ * separate from [SegmentRegistry]: campaign execution must not accidentally load a draft merely
+ * because it has a valid typed rule shape.
+ */
+interface AudienceRegistry {
+    suspend fun load(name: String, version: Int): Audience?
+    suspend fun list(): List<Audience>
+    suspend fun nextVersion(name: String): Int
+    suspend fun save(audience: Audience): Audience
 }
 
 /** ADR-0210: evaluates a segment against the silver layer and returns matching party ids. */
@@ -333,3 +386,35 @@ interface CampaignScheduler {
     /** Removes the schedule entirely. Called when a campaign closes; safe when none exists. */
     fun delete(campaignId: UUID)
 }
+
+/**
+ * ADR-0269 rule 2: may the bank surface an unprompted credit offer to this party RIGHT NOW?
+ *
+ * Separate from [ConsentCheckPort] because it answers a different question. Consent asks whether
+ * the customer agreed to hear about credit; this asks whether telling them is harmful today —
+ * arrears, an overdrawn balance, a hardship arrangement, an insolvency marker. A customer can
+ * consent and still be someone the bank must not market credit to, which is the whole of rule 2.
+ *
+ * Consulted at DELIVERY, not at enrolment. A journey runs for days, so a party enrolled while
+ * healthy can be in arrears by the third step — an enrolment-time answer expires the moment it is
+ * given, and unlike consent there is no revocation signal to terminate the journey mid-flight.
+ */
+fun interface CreditOfferGatePort {
+    /**
+     * True when an offer may be surfaced, false when the floor refuses.
+     *
+     * Throws [CreditOfferGateUnavailableException] when it cannot answer at all. That distinction
+     * is not pedantry and it is the same one this codebase already draws for the contact gate:
+     * "a gate outage is retriable infrastructure state, never a customer-policy suppression."
+     * Folding an outage into `false` would write a distress suppression against a party who may be
+     * perfectly healthy, burn the step permanently instead of retrying it, and corrupt the one
+     * metric that has to answer "how many people did we decline to offer credit to, and why".
+     *
+     * Nothing is sent in either case — the difference is whether the journey may try again.
+     */
+    suspend fun mayOffer(partyId: UUID): Boolean
+}
+
+/** The credit floor could not be reached. Retriable infrastructure state, not a policy answer. */
+class CreditOfferGateUnavailableException(message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)

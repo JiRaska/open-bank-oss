@@ -22,10 +22,13 @@ private data class DelegationEvent(
     val resourceType: String,
     val resourceId: UUID?,
     val capabilities: Set<String>,
+    val approvalPolicy: String,
+    val requiredApprovals: Int?,
     val perTxLimitAmount: java.math.BigDecimal?,
     val perTxLimitCurrency: String?,
     val validFrom: OffsetDateTime?,
     val validTo: OffsetDateTime?,
+    val lifecycleRevision: Long?,
 )
 
 /**
@@ -75,34 +78,40 @@ class DelegationEventConsumer(
             resourceType = node.path("resourceType").asText(""),
             resourceId = resourceId,
             capabilities = caps,
+            approvalPolicy = node.path("approvalPolicy").asText(DelegatedAccessGrant.APPROVAL_POLICY_SOLO),
+            requiredApprovals = node.path("requiredApprovals").takeIf { it.isIntegralNumber }?.intValue(),
             perTxLimitAmount = node.path("perTransactionLimit").path("amount").asText(null)?.toBigDecimalOrNull(),
             perTxLimitCurrency = node.path("perTransactionLimit").path("currency").asText(null),
             validFrom = node.path("validFrom").asText(null)?.let {
                 runCatching { OffsetDateTime.parse(it) }.getOrNull()
             },
             validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+            lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
         )
     }
 
     private suspend fun dispatch(event: DelegationEvent) {
         if (event.resourceType !in PROJECTED_RESOURCE_TYPES && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
-            "DelegationActivated", "DelegationReinstated" -> upsert(event)
+            "DelegationActivated", "DelegationReinstated" ->
+                if (event.lifecycleRevision != null) upsert(event) else Unit
             "DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired" ->
-                projectionRepository.closeById(event.grantId)
+                projectionRepository.applyClosed(event.grantId, event.lifecycleRevision)
             else -> Unit // OFFERED/DECLINED/unknown: nothing enforceable to do, ack.
         }
     }
 
     private suspend fun upsert(event: DelegationEvent) {
         val accountId = event.resourceId ?: return
-        projectionRepository.upsertActive(
+        projectionRepository.applyActive(
             DelegatedAccessGrant(
                 id = event.grantId,
                 accountId = accountId,
                 grantorPartyId = event.grantorPartyId,
                 granteePartyId = event.granteePartyId,
                 capabilities = event.capabilities,
+                approvalPolicy = event.approvalPolicy,
+                requiredApprovals = event.requiredApprovals,
                 resourceType = event.resourceType,
                 perTransactionLimitAmount = event.perTxLimitAmount,
                 perTransactionLimitCurrency = event.perTxLimitCurrency,
@@ -110,6 +119,7 @@ class DelegationEventConsumer(
                 validTo = event.validTo,
                 active = true,
             ),
+            requireNotNull(event.lifecycleRevision),
         )
     }
 

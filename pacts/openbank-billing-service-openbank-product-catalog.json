@@ -1,0 +1,117 @@
+{
+  "consumer": {
+    "name": "openbank-billing-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the fee schedule for a fee-bearing product",
+      "providerStates": [
+        {
+          "name": "a product with fees exists for code CURRENT_PERSONAL"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/products/3f20a53e-5ea4-307a-8a0f-9605728381ba/fees"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 3.99,
+            "currency": "EUR",
+            "id": "string",
+            "name": "Monthly Fee",
+            "type": "MONTHLY",
+            "waivable": true
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].waivable": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

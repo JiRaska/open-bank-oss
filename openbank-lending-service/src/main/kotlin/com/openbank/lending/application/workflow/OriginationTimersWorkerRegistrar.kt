@@ -15,12 +15,12 @@ import org.jboss.logging.Logger
 /**
  * Registers the origination-timers worker (ADR-0211 D2), mirroring the
  * domestic-payment registrar: gated separately from dispatch by
- * `lending.origination.worker.enabled` (default true) so `@QuarkusTest` runs with no
+ * `openbank.lending.worker.enabled` (default true) so `@QuarkusTest` runs with no
  * real Temporal frontend can set it false and boot clean.
  */
 @ApplicationScoped
 class OriginationTimersWorkerRegistrar(
-    @param:ConfigProperty(name = "lending.origination.worker.enabled", defaultValue = "true")
+    @param:ConfigProperty(name = "openbank.lending.worker.enabled", defaultValue = "true")
     private val workerEnabled: Boolean,
     @param:ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-lending-origination")
     private val taskQueue: String,
@@ -33,7 +33,7 @@ class OriginationTimersWorkerRegistrar(
     @Suppress("UnusedParameter")
     fun onStart(@Observes event: StartupEvent) {
         if (!workerEnabled) {
-            log.info("Temporal origination worker disabled (lending.origination.worker.enabled=false)")
+            log.info("Temporal origination worker disabled (openbank.lending.worker.enabled=false)")
             return
         }
         log.infof("Registering Temporal worker on task queue '%s'", taskQueue)

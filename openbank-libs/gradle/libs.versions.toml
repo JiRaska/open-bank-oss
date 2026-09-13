@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.3.20"
+kotlin = "2.4.10"
 quarkus = "3.38.0"
 quarkus-plugin = "3.38.0"
 coroutines = "1.8.1"
@@ -22,7 +22,7 @@ junit = "5.11.0"
 # 3.27.7 (issue #461): closes GHSA-rqfh-9r24-8c9r. Test-only dependency.
 assertj = "3.27.7"
 mockk = "1.13.12"
-kover = "0.9.1"
+kover = "0.9.9"
 wiremock = "3.9.2"
 avro = "1.11.3"
 apicurio-registry = "2.6.2.Final"
@@ -144,6 +144,7 @@ pact-provider = { module = "au.com.dius.pact.provider:junit5", version.ref = "pa
 # service build.gradle.kts by this ADR — only openbank-libs-runtime compiles against it
 # (compileOnly, see its build.gradle.kts comment); a consuming service opts in itself.
 aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+aws-sdk-kms = { module = "software.amazon.awssdk:kms", version.ref = "aws-sdk" }
 
 # Logic-less HTML template engine (ADR-0162 D2) — openbank-document-service only.
 handlebars = { module = "com.github.jknack:handlebars", version.ref = "handlebars" }

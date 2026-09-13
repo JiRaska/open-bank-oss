@@ -29,6 +29,9 @@ enum class CaseStatus {
     CLOSED,
 }
 
+/** Delivery is explicit in the workflow input so replay cannot depend on mutable deployment config. */
+enum class CaseDeliveryMode { HITL, SHADOW }
+
 /** Start parameters for a case workflow run. */
 data class CaseStart(
     val caseId: String,
@@ -39,15 +42,18 @@ data class CaseStart(
     val deadlineEpochMs: Long,
     val contestedRateThreshold: Double,
     val maxContributions: Int,
+    val deliveryMode: CaseDeliveryMode = CaseDeliveryMode.HITL,
 )
 
-data class JoinSignal(val agentId: String, val role: String)
+data class JoinSignal(val agentId: String, val role: String, val signalId: String = "", val rolloutId: String = "")
 
 data class ContributeSignal(
     val agentId: String,
     val summary: String,
     val evidenceRefs: List<String>,
     val contested: Boolean,
+    val signalId: String = "",
+    val rolloutId: String = "",
 )
 
 /**
@@ -65,6 +71,23 @@ data class Contribution(
     val evidenceRefs: List<String>,
     val contested: Boolean,
     val draftVersion: Int,
+    val signalId: String = "",
+    val rolloutId: String = "",
+)
+
+enum class CaseSignalEvidenceStage { AUTHORIZED, DENIED, INVOKED, CONSUMED, PERSISTED }
+
+/** Metadata-only collaboration evidence; summaries and evidence contents never enter this trail. */
+data class CaseSignalEvidence(
+    val signalId: String,
+    val caseId: String,
+    val agentId: String,
+    val capability: String,
+    val stage: CaseSignalEvidenceStage,
+    val observedAtEpochMs: Long,
+    val rolloutId: String = "",
+    val policyDecisionId: String = "",
+    val policyReason: String = "",
 )
 
 /** Read model exposed via the workflow query method — the Phase 2 API projects this. */

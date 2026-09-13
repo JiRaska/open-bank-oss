@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
@@ -20,20 +21,30 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
     private var redpanda: RedpandaContainer? = null
     private var redis: GenericContainer<*>? = null
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
+        const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
+    }
+
     override fun start(): Map<String, String> {
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank").withPassword("openbank_secret").withDatabaseName("openbank_ledger_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         val rp = RedpandaContainer(
-            DockerImageName.parse("redpandadata/redpanda:v24.1.2")
+            DockerImageName.parse(REDPANDA_IMAGE)
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         rp.start()
         redpanda = rp
-        val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
         rd.start()
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         val bootstrap = rp.bootstrapServers
@@ -49,8 +60,17 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
         )
     }
     override fun stop() {
-        redis?.stop()
-        redpanda?.stop()
-        postgres?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
+        redpanda?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        }
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 }

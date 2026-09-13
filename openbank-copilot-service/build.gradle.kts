@@ -56,16 +56,31 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // The custom pgvector lifecycle resources emit the same secret-free runtime evidence as the
+    // shared Testcontainers kit; this remains strictly on the test classpath.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract with customer-edge (ADR-0063, issue #2322).
     testImplementation(libs.pact.consumer)
 }
 
+// Package the live ADR-0148 registry prompts onto the classpath (mirrors openbank-agent-service's
+// identical processResources block) — currently just customer-copilot/style.v1, the git-registered
+// baseline PublishedStyleProvider falls back to (ADR-0285 D5). This copy is derived from
+// openbank-libs/governance/prompts/ — never hand-edit it here.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file("openbank-libs/governance/prompts/customer-copilot")) {
+        include("style.v1.md")
+        into("governance-prompts/customer-copilot")
+    }
+}
+
 // Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 kover {
     reports {

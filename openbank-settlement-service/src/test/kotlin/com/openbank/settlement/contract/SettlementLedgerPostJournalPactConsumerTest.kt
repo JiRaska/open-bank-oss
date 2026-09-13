@@ -5,6 +5,7 @@
 package com.openbank.settlement.contract
 
 import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonArray
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
@@ -49,6 +50,9 @@ class SettlementLedgerPostJournalPactConsumerTest {
     private val transactionId = UUID.fromString("55555555-5555-5555-5555-555555555555")
     private val payerAccountId = UUID.fromString("66666666-6666-6666-6666-666666666666")
     private val payeeAccountId = UUID.fromString("77777777-7777-7777-7777-777777777777")
+
+    /** A settlement the ledger has never booked — the LEDGER_NOT_POSTED case of #6410. */
+    private val unknownTransactionId = UUID.fromString("99999999-9999-9999-9999-999999999999")
 
     // Both lines target the SAME GL account (...-002, 2100 Customer Deposit Control): a settlement
     // moves money between two of the bank's own customer sub-accounts, so neither leg touches
@@ -98,6 +102,49 @@ class SettlementLedgerPostJournalPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    /**
+     * The read the ledger compensation depends on (issue #6410).
+     *
+     * `SettlementActivitiesImpl.reverseBookToLedger` asks the ledger whether a journal exists for
+     * the settlement before deciding whether the general ledger owes a correcting entry, and the
+     * whole design rests on the ledger answering **`200` with an empty array** — not `404` — for a
+     * transaction it has never seen. That is a fact about someone else's service, so it is pinned
+     * here and replayed by `LedgerPactProviderVerificationTest` rather than assumed: a client
+     * pointed at a route the provider does not serve leaves every consumer-side test green (the
+     * pact mock server answers whatever path it is asked for), and only the provider replay goes
+     * red. That is exactly how finrep-service shipped a call to a ledger path that never existed.
+     *
+     * The path here is a LITERAL, deliberately. Deriving both the expectation and the request from
+     * the client's `@Path` annotation would make them move together, and the test would stay green
+     * against a route that does not exist — the asymmetry IS the test.
+     */
+    @Pact(consumer = "openbank-settlement-service", provider = "openbank-ledger-service")
+    fun journalsForUnknownTransactionPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has no journal entries")
+        .uponReceiving("GET journals for a transaction the ledger has never seen")
+        .path("/api/v1/journals/transaction/$unknownTransactionId")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(newJsonArray { }.build())
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "journalsForUnknownTransactionPact")
+    fun `an unposted settlement resolves to an empty journal list, not a 404`(mockServer: MockServer) {
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .get("/api/v1/journals/transaction/$unknownTransactionId")
+            .then()
+            // 200-with-empty-array, not 404, is what lets the compensation record
+            // LEDGER_NOT_POSTED instead of treating an absent journal as a lookup failure.
+            .statusCode(200)
+            .extract().jsonPath()
+
+        assertThat(body.getList<Any>("")).isEmpty()
+    }
 
     @Test
     @PactTestFor(pactMethod = "postSettlementJournalPact")

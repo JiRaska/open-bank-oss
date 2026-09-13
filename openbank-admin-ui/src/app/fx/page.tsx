@@ -15,6 +15,8 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { CURRENCY_META } from '@/lib/currency-meta'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { FxTrendChart } from '@/components/fx/FxTrendChart'
 
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
@@ -87,6 +89,9 @@ const INITIAL_SCHEDULES: ScheduleEntry[] = [
 
 const ECB_CURRENCIES = ['USD', 'GBP', 'JPY', 'CHF', 'PLN', 'HUF', 'RON', 'SEK', 'NOK', 'DKK', 'AUD', 'CAD', 'CNY']
 const DEFAULT_PUBLISHED = ['USD', 'EUR', 'GBP', 'CHF', 'JPY', 'PLN', 'HUF', 'SEK', 'NOK', 'DKK']
+// FX persistence endpoints for bank-sheet configuration are not part of the current
+// service contract. Keep the browser preview honest until a durable backend exists.
+const FX_CONFIGURATION_WRITABLE = false
 
 // fx-service is on the FinOps scaledown allowlist, so "not reachable" usually means
 // "intentionally idle", not "broken". Map the /api/fx/rates status to a calm badge:
@@ -134,6 +139,7 @@ function MidCell({ mid, symbol }: { mid: number; symbol?: string }) {
 
 export default function FxPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   // Typed unavailable reason for a failed aggregate fetch → renders the calm
@@ -193,15 +199,12 @@ export default function FxPage() {
       setFxStatus((data.fxService?.status as FxStatus | undefined) ?? (data.fxService?.up ? 'up' : 'down'))
       setConversions(data.fxService?.conversions ?? [])
 
-      const nowStr = new Date().toISOString()
-      const snap: Array<{ timestamp: string; source: string; pair: string; rate: number }> = []
-      ;(data.cnb?.rates ?? []).slice(0, 5).forEach((r: CnbRate) => {
-        snap.push({ timestamp: nowStr, source: 'CNB', pair: `${r.currencyCode}/CZK`, rate: r.rate / r.amount })
-      })
-      ;(data.ecb?.rates ?? []).slice(0, 5).forEach((r: EcbRate) => {
-        snap.push({ timestamp: nowStr, source: 'ECB', pair: `EUR/${r.currency}`, rate: r.rate })
-      })
-      setHistory(prev => [...snap, ...prev].slice(0, 50))
+      // NOTE (issue #7735): this used to fabricate fake "history" rows here by re-labelling
+      // the CURRENT rate-sheet snapshot with `now` as its timestamp on every refresh — a
+      // client-memory illusion of a time series, never persisted, never a real observation.
+      // The real three-calendar-month CNB trend is owned by the shared FxTrendChart above.
+      // `history` here is now only ever a genuine admin-action
+      // log (margin edits, overrides), appended at the moment those actions actually happen.
     } catch {
       // Timeout / abort / network — the FX aggregate endpoint didn't answer.
       setUnavailable({ kind: 'unreachable' })
@@ -291,10 +294,10 @@ export default function FxPage() {
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
-    border: 'none',
+    border: `1px solid ${activeTab === tab ? 'var(--accent-border)' : 'transparent'}`,
     borderRadius: '6px',
-    background: activeTab === tab ? 'var(--accent)' : 'transparent',
-    color: activeTab === tab ? '#fff' : 'var(--text-secondary)',
+    background: activeTab === tab ? 'var(--accent-bg)' : 'transparent',
+    color: activeTab === tab ? 'var(--accent-text)' : 'var(--text-secondary)',
     transition: 'all 0.15s',
   } as React.CSSProperties)
 
@@ -302,19 +305,14 @@ export default function FxPage() {
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              {t('Devizové operace', 'Foreign Exchange')}
-              <button onClick={loadData} disabled={loading} style={{ background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}>
-                <RefreshCw size={18} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-              </button>
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}</p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-              <Download size={13} style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
+        <PageHeader
+          icon={<Globe size={20} aria-hidden="true" />}
+          title={t('Devizové operace', 'Foreign Exchange')}
+          subtitle={t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button type="button" onClick={loadData} disabled={loading} aria-busy={loading} aria-label={t('Obnovit kurzy FX', 'Refresh FX rates')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
+            <button type="button" onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} aria-busy={refreshing === 'all'} aria-label={t('Stáhnout všechny kurzy FX', 'Fetch all FX rates')} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+              <Download size={13} aria-hidden="true" style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
               {t('Stáhnout vše', 'Fetch All')}
             </button>
             {(() => {
@@ -328,8 +326,8 @@ export default function FxPage() {
                 </span>
               )
             })()}
-          </div>
-        </div>
+          </div>}
+        />
 
         {unavailable && (
           <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
@@ -368,8 +366,8 @@ export default function FxPage() {
           <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
             <AlertCircle size={11} style={{ verticalAlign: '-1px', marginRight: '4px' }} />
             {t(
-              'Referenční kurzy ČNB/ECB jsou dostupné i bez interních služeb. Bankovní lístek (marže, override, plán) je zatím počítán v prohlížeči — persistence ve fx-service je plánovaná.',
-              'ČNB/ECB reference rates are available without internal services. The bank sheet (margins, overrides, schedule) is still computed in the browser — fx-service persistence is planned.'
+              'Referenční kurzy ČNB/ECB jsou dostupné i bez interních služeb. Bankovní lístek (marže, override, plán) je pouze náhled — uložení zatím není nakonfigurované.',
+              'ČNB/ECB reference rates are available without internal services. The bank sheet (margins, overrides, schedule) is preview-only — persistence is not configured.'
             )}
           </span>
         </div>
@@ -379,7 +377,7 @@ export default function FxPage() {
             { label: t('CNB Páry', 'CNB Pairs'), value: cnbRates.length, icon: <Banknote size={16} />, color: 'var(--accent)' },
             { label: t('ECB Páry', 'ECB Pairs'), value: ecbRates.length, icon: <Globe size={16} />, color: 'var(--info)' },
             { label: t('Publikované měny', 'Published Currencies'), value: Object.values(overrides).filter(o => o.published).length, icon: <Eye size={16} />, color: 'var(--success)' },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume > 0 ? totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }) : '—', icon: <TrendingUp size={16} />, color: 'var(--warning)' },
+            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume > 0 ? totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }) : '—', icon: <TrendingUp size={16} />, color: 'var(--warning)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
@@ -392,7 +390,14 @@ export default function FxPage() {
         <div className="card" style={{ marginBottom: '24px' }}>
           <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             {(['bank', 'cnb', 'ecb'] as const).map(tab => (
-              <button key={tab} style={tabStyle(tab)} onClick={() => setActiveTab(tab)}>
+              <button
+                key={tab}
+                type="button"
+                style={tabStyle(tab)}
+                aria-pressed={activeTab === tab}
+                aria-label={tab === 'bank' ? t('Bankovní lístek', 'Bank rate sheet') : tab === 'cnb' ? t('Kurzy ČNB', 'CNB rates') : t('Kurzy ECB', 'ECB rates')}
+                onClick={() => setActiveTab(tab)}
+              >
                 {tab === 'bank' ? `🏦 ${t('Bankovní lístek', 'Bank Rate Sheet')}` : tab === 'cnb' ? `🇨🇿 ${t('ČNB Kurzy', 'CNB Rates')}` : `🇪🇺 ${t('ECB Kurzy', 'ECB Rates')}`}
               </button>
             ))}
@@ -403,7 +408,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('Střed kurzu z ČNB · Nákup/Prodej = střed ±', 'CNB mid rate · Buy/Sell = mid ±')} {cnbSpread}% {t('(orientační)', '(indicative)')}
-                  {cnbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(cnbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
+                  {cnbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(cnbSyncedAt).toLocaleTimeString(numberLocale)}`}
                   {cnbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {cnbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('cnb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -452,7 +457,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('ECB referenční kurzy (EUR base) · Nákup/Prodej = střed ±', 'ECB reference rates (EUR base) · Buy/Sell = mid ±')} {margin.buyPct}%/{margin.sellPct}%
-                  {ecbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(ecbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
+                  {ecbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(ecbSyncedAt).toLocaleTimeString(numberLocale)}`}
                   {ecbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {ecbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('ecb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--info)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -501,19 +506,19 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--success-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.buyPct}
+                        <input type="number" aria-label={t('Nákupní marže v procentech', 'Buy margin percent')} step="0.1" min="0" max="20" value={marginDraft.buyPct}
                           onChange={e => setMarginDraft(p => ({ ...p, buyPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--danger-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.sellPct}
+                        <input type="number" aria-label={t('Prodejní marže v procentech', 'Sell margin percent')} step="0.1" min="0" max="20" value={marginDraft.sellPct}
                           onChange={e => setMarginDraft(p => ({ ...p, sellPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
-                      <button onClick={saveMargin} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600 }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={saveMargin} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600 }}>
                         <Save size={11} /> {t('Uložit', 'Save')}
                       </button>
                       <button onClick={() => setEditingMargin(false)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px' }}>
@@ -530,7 +535,7 @@ export default function FxPage() {
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         +{margin.sellPct}%
                       </span>
-                      <button onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                         <Settings size={11} /> {t('Upravit marži', 'Edit margin')}
                       </button>
                     </div>
@@ -558,7 +563,7 @@ export default function FxPage() {
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>
-                          <button onClick={() => togglePublished(r.code)} title={r.published ? t('Skrýt z lístku', 'Hide from rate sheet') : t('Publikovat na lístek', 'Publish to rate sheet')}
+                          <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => togglePublished(r.code)} title={r.published ? t('Skrýt z lístku', 'Hide from rate sheet') : t('Publikovat na lístek', 'Publish to rate sheet')}
                             style={{ background: r.published ? 'var(--success-bg)' : 'var(--surface-3)', border: `1px solid ${r.published ? 'var(--success-border)' : 'var(--border)'}`, borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: r.published ? 'var(--success-text)' : 'var(--text-tertiary)', fontSize: '10px', fontWeight: 600 }}>
                             {r.published ? <Eye size={11} /> : <EyeOff size={11} />}
                             {r.published ? t('Ano', 'Yes') : t('Ne', 'No')}
@@ -568,7 +573,7 @@ export default function FxPage() {
                         <td style={{ padding: '8px 16px' }}><MidCell mid={r.mid} /></td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
+                            <input type="number" aria-label={t(`Override nákupního kurzu ${r.code}`, `Buy rate override ${r.code}`)} step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, buyOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--success-border)', borderRadius: '4px', color: 'var(--success-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -580,7 +585,7 @@ export default function FxPage() {
                         </td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
+                            <input type="number" aria-label={t(`Override prodejního kurzu ${r.code}`, `Sell rate override ${r.code}`)} step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, sellOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--danger-border)', borderRadius: '4px', color: 'var(--danger-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -593,19 +598,19 @@ export default function FxPage() {
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
                             <div style={{ display: 'flex', gap: '5px' }}>
-                              <button onClick={() => saveOverride(r.code)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                              <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => saveOverride(r.code)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
                                 <Save size={10} /> OK
                               </button>
                               <button onClick={() => setEditingOverride(null)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>✕</button>
                             </div>
                           ) : (
                             <div style={{ display: 'flex', gap: '5px' }}>
-                              <button onClick={() => { setEditingOverride(r.code); setOverrideDraft({ buyOverride: overrides[r.code]?.buyOverride ?? null, sellOverride: overrides[r.code]?.sellOverride ?? null }) }}
+                              <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setEditingOverride(r.code); setOverrideDraft({ buyOverride: overrides[r.code]?.buyOverride ?? null, sellOverride: overrides[r.code]?.sellOverride ?? null }) }}
                                 style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                 <Edit3 size={10} /> {t('Upravit', 'Fix')}
                               </button>
                               {r.hasOverride && (
-                                <button onClick={() => setOverrides(prev => ({ ...prev, [r.code]: { ...prev[r.code], buyOverride: null, sellOverride: null } }))}
+                                <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => setOverrides(prev => ({ ...prev, [r.code]: { ...prev[r.code], buyOverride: null, sellOverride: null } }))}
                                   title={t('Zrušit override', 'Clear override')}
                                   style={{ background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                   <Unlock size={10} /> {t('Reset', 'Reset')}
@@ -653,7 +658,7 @@ export default function FxPage() {
                   </div>
                   <div style={{ textAlign: 'right', minWidth: '110px' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Poslední spuštění', 'Last run')}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{s.lastRun ? new Date(s.lastRun).toLocaleTimeString('cs-CZ') : '—'}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{s.lastRun ? new Date(s.lastRun).toLocaleTimeString(numberLocale) : '—'}</div>
                   </div>
                   <div style={{ minWidth: '80px', textAlign: 'center' }}>
                     {s.lastStatus === 'ok' && (
@@ -673,10 +678,12 @@ export default function FxPage() {
                       <Play size={11} style={{ animation: isRefreshing(s.source.toLowerCase()) ? 'spin 1s linear infinite' : 'none' }} />
                       {t('Spustit', 'Run')}
                     </button>
-                    <button onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
-                      style={{ background: editingSchedule === s.id ? 'var(--accent)' : 'var(--surface-3)', color: editingSchedule === s.id ? '#fff' : 'var(--text-secondary)', border: `1px solid ${editingSchedule === s.id ? 'var(--accent)' : 'var(--border)'}`, padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                      <Edit3 size={11} />
-                      {editingSchedule === s.id ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                    <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} aria-expanded={editingSchedule === s.id}
+                      aria-label={editingSchedule === s.id ? t(`Zavřít úpravu plánu ${s.source}`, `Close ${s.source} schedule editor`) : t(`Upravit plán ${s.source}`, `Edit ${s.source} schedule`)}
+                      onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
+                      style={{ background: editingSchedule === s.id ? 'var(--accent-bg)' : 'var(--surface-3)', color: editingSchedule === s.id ? 'var(--accent-text)' : 'var(--text-secondary)', border: `1px solid ${editingSchedule === s.id ? 'var(--accent-border)' : 'var(--border)'}`, padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                      <Edit3 size={11} aria-hidden="true" />
+                      {editingSchedule === s.id ? <ChevronUp size={11} aria-hidden="true" /> : <ChevronDown size={11} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
@@ -686,7 +693,7 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Čas:', 'Time:')}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <select value={scheduleDraft.hour ?? s.hour}
+                        <select aria-label={t(`Hodina plánu ${s.id}`, `Schedule hour ${s.id}`)} value={scheduleDraft.hour ?? s.hour}
                           onChange={e => setScheduleDraft(p => ({ ...p, hour: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {Array.from({ length: 24 }, (_, i) => (
@@ -694,7 +701,7 @@ export default function FxPage() {
                           ))}
                         </select>
                         <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)' }}>:</span>
-                        <select value={scheduleDraft.minute ?? s.minute}
+                        <select aria-label={t(`Minuta plánu ${s.id}`, `Schedule minute ${s.id}`)} value={scheduleDraft.minute ?? s.minute}
                           onChange={e => setScheduleDraft(p => ({ ...p, minute: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
@@ -709,12 +716,12 @@ export default function FxPage() {
                         {ALL_DAYS.map(day => {
                           const active = (scheduleDraft.days ?? s.days).includes(day)
                           return (
-                            <button key={day}
+                            <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} key={day}
                               onClick={() => setScheduleDraft(p => {
                                 const days = p.days ?? [...s.days]
                                 return { ...p, days: active ? days.filter(d => d !== day) : [...days, day] }
                               })}
-                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
+                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-strong)' : 'var(--border)'}`, background: active ? 'var(--accent-strong)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
                               {t(DAY_LABELS_CS[day], DAY_LABELS_EN[day])}
                             </button>
                           )
@@ -722,7 +729,7 @@ export default function FxPage() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                      <button onClick={() => saveSchedule(s.id)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => saveSchedule(s.id)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <Save size={12} /> {t('Uložit', 'Save')}
                       </button>
                       <button onClick={() => setEditingSchedule(null)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>
@@ -736,11 +743,15 @@ export default function FxPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div style={{ marginBottom: '20px' }}>
+          <FxTrendChart bases={cnbRates.map(rate => rate.currencyCode)} quote="CZK" lang={language} />
+        </div>
+
+        <div>
           <div className="card">
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <History size={14} style={{ color: 'var(--text-primary)' }} />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historizace (Snapshoty)', 'Rate History (Snapshots)')}</span>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
             <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -752,9 +763,9 @@ export default function FxPage() {
                 <tbody>
                   {history.map((h, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString('cs-CZ')}</td>
+                      <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString(numberLocale)}</td>
                       <td style={{ padding: '6px 16px', fontSize: '11px', fontWeight: 600 }}>
-                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
+                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent-strong)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
                       </td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{h.pair}</td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{h.rate.toFixed(4)}</td>
@@ -791,7 +802,7 @@ export default function FxPage() {
                     <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString(numberLocale) : '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '14px' }}>{CURRENCY_META[c.fromCurrency]?.flag ?? '🏳️'}</span>
@@ -801,8 +812,8 @@ export default function FxPage() {
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600 }}>{c.toCurrency}</span>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.fromAmount?.toLocaleString('cs-CZ')}</td>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>{c.toAmount?.toLocaleString('cs-CZ')}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.fromAmount?.toLocaleString(numberLocale)}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>{c.toAmount?.toLocaleString(numberLocale)}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
                           background: c.status === 'COMPLETED' ? 'var(--success-bg)' : 'var(--warning-bg)',

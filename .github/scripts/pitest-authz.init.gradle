@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: Apache-2.0
+// Targeted authz mutation testing (ADR-0279 #7) — init-script application.
+// The plugins DSL cannot add ANY external versioned plugin to openbank-libs-runtime:
+// it splits the plugin classloaders and kordamp jandex then loads twice
+// (Banner$Inject_ ClassCastException, measured 2026-09-05 across plugin choices and
+// jandex 2.0.0/2.3.0). An init script carries its own classpath, so pitest loads
+// without touching the module's plugin resolution.
+initscript {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'info.solidsoft.gradle.pitest:gradle-pitest-plugin:1.19.0'
+    }
+}
+
+gradle.projectsLoaded { g ->
+    g.rootProject { root ->
+        def target = root.findProject(':openbank-libs-runtime')
+        if (target == null) {
+            return  // included builds (e.g. build-logic) don't have the module
+        }
+        target.with { p ->
+            p.afterEvaluate { proj ->
+                proj.apply(plugin: info.solidsoft.gradle.pitest.PitestPlugin)
+                def ext = proj.extensions.getByName('pitest')
+                ext.junit5PluginVersion = '1.2.3'
+                ext.targetClasses = ['com.openbank.libs.authz.*'] as Set
+                ext.targetTests = ['com.openbank.libs.authz.*'] as Set
+                // 0 = advisory locally; the pitest.yml pitest-authz job enforces its ratchet
+                // via -Ppitest.mutationThreshold=<n>. Read it explicitly — the plugin's own
+                // project-property resolution loses to an explicitly set extension value.
+                def thresholdProp = proj.findProperty('pitest.mutationThreshold')
+                ext.mutationThreshold = thresholdProp != null ? thresholdProp.toString().toInteger() : 0
+                ext.outputFormats = ['XML', 'HTML'] as Set
+                ext.timestampedReports = false
+                ext.threads = 4
+                ext.excludedClasses = ['com.openbank.libs.authz.*Kt'] as Set
+            }
+        }
+    }
+}

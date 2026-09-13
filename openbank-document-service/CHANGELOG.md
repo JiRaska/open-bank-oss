@@ -1,5 +1,96 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.3...document-service-v0.14.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **document:** guard document_outbox created_at plausibility at INSERT ([#9306](https://github.com/JiRaska/open-bank-oss/issues/9306)) ([9350475](https://github.com/JiRaska/open-bank-oss/commit/93504754bdeeed4b7b291a3eee5c6affe84c1b51))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.2...document-service-v0.14.3) (2026-09-08)
+
+
+### Bug Fixes
+
+* **document:** bound the party document browse and put it behind the PDP ([#8479](https://github.com/JiRaska/open-bank-oss/issues/8479)) ([be8c178](https://github.com/JiRaska/open-bank-oss/commit/be8c1783ff47bae36c2a83b555d37fbc3a8d1e18)), closes [#8082](https://github.com/JiRaska/open-bank-oss/issues/8082)
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.1...document-service-v0.14.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **document:** createdAt defaults to now(), never Instant.EPOCH ([#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)) ([#8504](https://github.com/JiRaska/open-bank-oss/issues/8504)) ([5d875d4](https://github.com/JiRaska/open-bank-oss/commit/5d875d48d4379faa543ec44e6985e01d4cf208a4))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.0...document-service-v0.14.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **document:** reject a null array element with 400 instead of 500 ([#8010](https://github.com/JiRaska/open-bank-oss/issues/8010)) ([49de0d8](https://github.com/JiRaska/open-bank-oss/commit/49de0d8c1e2f781bb01c586d3a051f1a5ab03a77)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.13.0...document-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.3...document-service-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.2...document-service-v0.12.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.1...document-service-v0.12.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.0...document-service-v0.12.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.3...document-service-v0.12.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.2...document-service-v0.11.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **document-service:** add sourceService to outbox events for audit attribution ([#5391](https://github.com/JiRaska/open-bank-oss/issues/5391)) ([e89923a](https://github.com/JiRaska/open-bank-oss/commit/e89923acc9d091fb397eec3fe2a57742ff603fe1)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.1...document-service-v0.11.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.0...document-service-v0.11.1) (2026-08-13)
 
 

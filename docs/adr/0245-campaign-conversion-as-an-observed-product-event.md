@@ -1,7 +1,8 @@
 ---
 date: 2026-08-07
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "A campaign goal becomes a machine-checkable rule over product events t
 ---
 
 # ADR-0245 — Campaign conversion as an observed product event
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **9 production Kotlin file(s)** across `openbank-campaign-service`, `openbank-engagement-service` cite this ADR, naming its decision clause(s) `D1`, `D2`, `D5` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
 
 ## Context
 

@@ -32,6 +32,9 @@ data class DelegatedAccessGrant(
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val capabilities: Set<String>,
+    /** Owner-selected workflow policy, projected verbatim; unknown values are never enforced. */
+    val approvalPolicy: String = APPROVAL_POLICY_SOLO,
+    val requiredApprovals: Int? = null,
     val resourceType: String = RESOURCE_TYPE_ACCOUNT,
     val perTransactionLimitAmount: java.math.BigDecimal? = null,
     val perTransactionLimitCurrency: String? = null,
@@ -76,6 +79,8 @@ data class DelegatedAccessGrant(
         const val CAP_SAVINGS_DEPOSIT = "SAVINGS_DEPOSIT"
         const val CAP_SAVINGS_WITHDRAW = "SAVINGS_WITHDRAW"
         const val CAP_SAVINGS_PROPOSE_WITHDRAW = "SAVINGS_PROPOSE_WITHDRAW"
+
+        const val APPROVAL_POLICY_SOLO = "SOLO"
 
         val READ_CAPABILITIES = setOf(CAP_READ_BALANCES, CAP_READ_TRANSACTIONS)
         val FULL_ACCESS_CAPABILITIES = setOf(CAP_READ_BALANCES, CAP_READ_TRANSACTIONS, CAP_INITIATE_PAYMENT)

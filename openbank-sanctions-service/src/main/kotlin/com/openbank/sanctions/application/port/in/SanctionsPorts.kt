@@ -11,12 +11,20 @@ data class ScreenEntityCommand(
     val idempotencyKey: String,
     val entityType: EntityType,
     val name: String,
-    val aliases: List<String> = emptyList(),
+    // Nullable element ON PURPOSE (#7867): Jackson null-checks constructor parameters but not
+    // collection elements, so `{"aliases": [null]}` arrives holding a null. Only a nullable
+    // element type lets SanctionsService reject it with a 400 instead of an NPE-driven 500.
+    val aliases: List<String?> = emptyList(),
     val dateOfBirth: String? = null,
     val nationality: String? = null,
     val identifiers: Map<String, String> = emptyMap(),
-    /** Restrict screening to these list types (null/empty = all enabled lists). */
-    val listTypes: List<String>? = null,
+    /**
+     * Restrict screening to these list types (null/empty = all enabled lists).
+     * Nullable element for the same reason as [aliases] (#7867): `{"listTypes": [null]}`
+     * arrives holding a null despite the Kotlin element type — fleet fuzz run 34017868446
+     * turned exactly that into an NPE-driven 500.
+     */
+    val listTypes: List<String?>? = null,
 )
 
 data class ReviewCommand(

@@ -1,5 +1,115 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/v0.39.0...v0.40.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/v0.38.2...v0.39.0) (2026-09-08)
+
+
+### Features
+
+* **admin-ui:** link browser failure diagnostics ([#7049](https://github.com/JiRaska/open-bank-oss/issues/7049)) ([5409645](https://github.com/JiRaska/open-bank-oss/commit/5409645c46285ffe5483d745aaf89eed02810acf))
+* **campaign:** a campaign must say whether it sells credit ([#8773](https://github.com/JiRaska/open-bank-oss/issues/8773)) ([#8862](https://github.com/JiRaska/open-bank-oss/issues/8862)) ([c7f8d97](https://github.com/JiRaska/open-bank-oss/commit/c7f8d977b159a975a215ace8f6d9987e47323a76))
+* **campaign:** check the ADR-0269 distress floor before every credit send ([#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)) ([#8986](https://github.com/JiRaska/open-bank-oss/issues/8986)) ([75bcc9b](https://github.com/JiRaska/open-bank-oss/commit/75bcc9befab4b3c9b194edafb3a4003dfb245ddd))
+* **campaign:** HasAccount works — the reason it was disabled was already stale ([#8885](https://github.com/JiRaska/open-bank-oss/issues/8885)) ([e845f26](https://github.com/JiRaska/open-bank-oss/commit/e845f264412c1eff000ee69536499e25cacdfc4b))
+* **campaign:** HasActiveConsentScope works — and it is still not the consent control ([#8886](https://github.com/JiRaska/open-bank-oss/issues/8886)) ([540dcd1](https://github.com/JiRaska/open-bank-oss/commit/540dcd10199c007d1bdf65b09722b2d43d2d2266))
+* **campaign:** refuse credit enrolment without CREDIT_OFFERS consent ([#8770](https://github.com/JiRaska/open-bank-oss/issues/8770)) ([#8883](https://github.com/JiRaska/open-bank-oss/issues/8883)) ([9913fa3](https://github.com/JiRaska/open-bank-oss/commit/9913fa398eaf242a43fdb04a66f964021a5c73ec))
+
+
+### Bug Fixes
+
+* **campaign:** ask for credit consent under the grantee the customer granted it to ([#9104](https://github.com/JiRaska/open-bank-oss/issues/9104)) ([2c9f222](https://github.com/JiRaska/open-bank-oss/commit/2c9f222b85a68c5105325e31847b86f190ec66ec)), closes [#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)
+* **campaign:** configure REST client URLs under quarkus.rest-client ([#9095](https://github.com/JiRaska/open-bank-oss/issues/9095)) ([6534aeb](https://github.com/JiRaska/open-bank-oss/commit/6534aeb38279449846c8e88f4aa8db6fb4d9d39d)), closes [#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)
+* **campaign:** resolve HasAccount through the shared party-accounts view ([#8902](https://github.com/JiRaska/open-bank-oss/issues/8902)) ([9f0f992](https://github.com/JiRaska/open-bank-oss/commit/9f0f9928e693e886fcccb140c3557945a1d0dab1)), closes [#8792](https://github.com/JiRaska/open-bank-oss/issues/8792)
+
+## [0.38.2](https://github.com/JiRaska/open-bank-oss/compare/v0.38.1...v0.38.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **campaign:** reject a null array element with 400 instead of 500 ([#7995](https://github.com/JiRaska/open-bank-oss/issues/7995)) ([5f01839](https://github.com/JiRaska/open-bank-oss/commit/5f01839622eb2388ca6e644de9a4e7b577e5802a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.38.1](https://github.com/JiRaska/open-bank-oss/compare/v0.38.0...v0.38.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **campaign:** document CONVERTED in SendRecord.outcome ([#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)) ([#7573](https://github.com/JiRaska/open-bank-oss/issues/7573)) ([35c82f9](https://github.com/JiRaska/open-bank-oss/commit/35c82f92b1375850adffb5a20be54f5c07d8be61))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/v0.37.0...v0.38.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** project incentive outcomes ([#7289](https://github.com/JiRaska/open-bank-oss/issues/7289)) ([3a89e9a](https://github.com/JiRaska/open-bank-oss/commit/3a89e9a2c4c809f1bc6edfb155bf3c67bbcebb73))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/v0.36.0...v0.37.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** expose trusted incentive attribution ([#7271](https://github.com/JiRaska/open-bank-oss/issues/7271)) ([b2ac0cc](https://github.com/JiRaska/open-bank-oss/commit/b2ac0cc004e875171c5ae65d808d39611db2d446))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/v0.35.0...v0.36.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** pin immutable incentive offers ([#7254](https://github.com/JiRaska/open-bank-oss/issues/7254)) ([fb31090](https://github.com/JiRaska/open-bank-oss/commit/fb31090f44a50bb685d082c7814594dd21c9574a))
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/v0.34.1...v0.35.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/v0.34.0...v0.34.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/v0.33.3...v0.34.0) (2026-08-20)
+
+
+### Features
+
+* **campaign:** emit domain metrics and alert on them ([#5705](https://github.com/JiRaska/open-bank-oss/issues/5705)) ([#5744](https://github.com/JiRaska/open-bank-oss/issues/5744)) ([e27ad1b](https://github.com/JiRaska/open-bank-oss/commit/e27ad1b1663ec00d2af0ae613bd285fe63af6bcd))
+
+## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/v0.33.2...v0.33.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **campaign,onboarding:** stop swallowing transient consumer failures as an ack ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5757](https://github.com/JiRaska/open-bank-oss/issues/5757)) ([4f2d6e5](https://github.com/JiRaska/open-bank-oss/commit/4f2d6e5eb84bf3435c393d5c2fc0be79db20817e))
+
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/v0.33.1...v0.33.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **campaign:** bind audience approval to version ([#4915](https://github.com/JiRaska/open-bank-oss/issues/4915)) ([b2b6f05](https://github.com/JiRaska/open-bank-oss/commit/b2b6f05e25e9355b88dea836797e2c2d22029861))
+
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/v0.33.0...v0.33.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/v0.32.0...v0.33.0) (2026-08-15)
+
+
+### Features
+
+* **campaign:** add governed audience composer ([#4888](https://github.com/JiRaska/open-bank-oss/issues/4888)) ([7b3b056](https://github.com/JiRaska/open-bank-oss/commit/7b3b05692b2f1c21d9184f03d53255197a5f4939))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/v0.31.0...v0.32.0) (2026-08-15)
 
 

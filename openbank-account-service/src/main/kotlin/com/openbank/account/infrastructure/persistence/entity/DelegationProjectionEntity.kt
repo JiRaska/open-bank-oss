@@ -43,6 +43,12 @@ class DelegationProjectionEntity : PanacheEntityBase() {
     @Column(name = "capability")
     var capabilities: MutableSet<String> = mutableSetOf()
 
+    @Column(name = "approval_policy", nullable = false)
+    lateinit var approvalPolicy: String
+
+    @Column(name = "required_approvals")
+    var requiredApprovals: Int? = null
+
     @Column(name = "per_tx_limit_amount", precision = 20, scale = 6)
     var perTxLimitAmount: BigDecimal? = null
 
@@ -67,6 +73,8 @@ class DelegationProjectionEntity : PanacheEntityBase() {
         grantorPartyId = grantorPartyId,
         granteePartyId = granteePartyId,
         capabilities = capabilities.toSet(),
+        approvalPolicy = approvalPolicy,
+        requiredApprovals = requiredApprovals,
         resourceType = resourceType,
         perTransactionLimitAmount = perTxLimitAmount,
         perTransactionLimitCurrency = perTxLimitCurrency,
@@ -84,6 +92,8 @@ class DelegationProjectionEntity : PanacheEntityBase() {
                 granteePartyId = g.granteePartyId
                 resourceType = g.resourceType
                 capabilities = g.capabilities.toMutableSet()
+                approvalPolicy = g.approvalPolicy
+                requiredApprovals = g.requiredApprovals
                 perTxLimitAmount = g.perTransactionLimitAmount
                 perTxLimitCurrency = g.perTransactionLimitCurrency
                 validFrom = g.validFrom

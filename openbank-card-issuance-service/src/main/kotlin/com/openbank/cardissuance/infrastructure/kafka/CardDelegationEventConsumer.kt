@@ -25,6 +25,7 @@ private data class DelegationEvent(
     val capabilities: Set<String>,
     val validFrom: OffsetDateTime?,
     val validTo: OffsetDateTime?,
+    val lifecycleRevision: Long?,
 )
 
 /**
@@ -75,6 +76,7 @@ class CardDelegationEventConsumer(
                 runCatching { OffsetDateTime.parse(it) }.getOrNull()
             },
             validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+            lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
         )
     }
 
@@ -86,20 +88,24 @@ class CardDelegationEventConsumer(
         // filter below drops every non-CARD lifecycle event, so putting this after it would mean
         // the exact revocation that has to kill the card is the one event we never see. The card is
         // found by its own stored delegation_grant_id, which is why no resourceType is needed here.
-        if (event.type in ENDING_TYPES) {
-            cardUseCase.blockCardsForRevokedGrant(event.grantId, "$REVOCATION_REASON_PREFIX${event.type}")
+        if (event.type in CLOSING_TYPES) {
+            val accepted = projectionRepository.applyClosed(event.grantId, event.lifecycleRevision)
+            if (accepted && event.type in ENDING_TYPES) {
+                cardUseCase.blockCardsForRevokedGrant(event.grantId, "$REVOCATION_REASON_PREFIX${event.type}")
+            }
         }
         if (event.resourceType != RESOURCE_CARD && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
-            "DelegationActivated", "DelegationReinstated" -> upsert(event)
-            in CLOSING_TYPES -> projectionRepository.closeById(event.grantId)
+            "DelegationActivated", "DelegationReinstated" ->
+                if (event.lifecycleRevision != null) upsert(event) else Unit
+            in CLOSING_TYPES -> Unit
             else -> Unit
         }
     }
 
     private suspend fun upsert(event: DelegationEvent) {
         val cardId = event.resourceId ?: return
-        projectionRepository.upsertActive(
+        projectionRepository.applyActive(
             DelegatedCardGrant(
                 id = event.grantId,
                 cardId = cardId,
@@ -110,6 +116,7 @@ class CardDelegationEventConsumer(
                 validTo = event.validTo,
                 active = true,
             ),
+            requireNotNull(event.lifecycleRevision),
         )
     }
 

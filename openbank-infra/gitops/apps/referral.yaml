@@ -1,0 +1,32 @@
+# Referral/MGM domain bootstrap. The workload is deliberately declared at replicas=0
+# until auto-deploy has produced a signed, attested image and a separate reviewed
+# activation change records live health evidence.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: referral
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/referral
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: referral
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

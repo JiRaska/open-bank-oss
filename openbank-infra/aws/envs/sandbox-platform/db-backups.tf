@@ -179,6 +179,11 @@ locals {
     # claiming "all remaining clusters" was simply untrue; check-db-backup-associations.py now
     # asserts it instead of trusting it.
     sdd          = { namespace = "sdd", sa = "sdd-db" }
+    # ADR-0301. Declared from the first commit rather than after the fact: a CNPG cluster whose
+    # barmanObjectStore has no matching association archives to NOWHERE and says it succeeded —
+    # archived_count rises, failed_count stays 0, ContinuousArchiving reads True, and the bucket
+    # is empty. Only `aws s3 ls` can tell the two apart.
+    wealth       = { namespace = "wealth", sa = "wealth-db" }
     tpp-registry = { namespace = "tpp-registry", sa = "tpp-registry-db" }
     vop          = { namespace = "payments", sa = "vop-db" }
     # Added by #1444 (second wave). These 11 declared NO backup at all — they never even
@@ -204,6 +209,8 @@ locals {
     # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
     # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
     campaign         = { namespace = "campaign", sa = "campaign-db" }
+    communication    = { namespace = "communication", sa = "communication-db" }
+    referral         = { namespace = "referral", sa = "referral-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
     document-service = { namespace = "documents", sa = "document-service-db" }
@@ -232,6 +239,7 @@ locals {
     # backups" has no judgement left to exercise, so advisory just made it mergeable. The gate
     # is now enforced.
     delegation = { namespace = "delegation", sa = "delegation-db" }
+    kyb        = { namespace = "kyb", sa = "kyb-db" }
     # Added by #3555 with their barmanObjectStore + ScheduledBackup in the same change — the two
     # clusters that still declared NO backup at all, out of 55. Both are `instances: 1`, so they
     # had neither a replica nor a recovery point: a lost EBS volume was total data loss.
@@ -245,12 +253,29 @@ locals {
     # DBs a barmanObjectStore each. Two different kinds of false statement, one effect.
     mcp     = { namespace = "platform", sa = "mcp-db" }
     litellm = { namespace = "ai-platform", sa = "litellm-db" }
+    # langfuse-db arrives with the self-hosted LLM-observability store (ADR-0265). Same reason as
+    # every entry above: its Cluster declares a barmanObjectStore into this bucket, and without the
+    # association here every WAL archive fails with "Unable to locate credentials" while the pod
+    # stays Ready — a cluster with no recovery point and nothing anywhere going red about it. The
+    # `db-backup-association` gate is what caught this one before it merged.
+    langfuse = { namespace = "ai-platform", sa = "langfuse-db" }
     # copilot-db arrives with the durable conversation-history store (#3710). Its gitops
     # manifest declares a barmanObjectStore into this bucket, so without the association here
     # every WAL archive would fail with "Unable to locate credentials" and the cluster would
     # have no recovery point at all — the #1444 failure mode, caught this time by
     # check-db-backup-associations.py before the cluster ever existed rather than days after.
     copilot = { namespace = "platform", sa = "copilot-db" }
+    # engagement-db was the last cluster in the fleet with NO backup at all — no
+    # barmanObjectStore, therefore no archive attempt, therefore no alert. The loud version of
+    # this (campaign-db, above) failed for ~48h and was visible the whole time; the silent
+    # version is worse and had been true since the cluster was created. Enumerated from the
+    # `kind: Cluster` manifests rather than from the rollout comments in this file, which have
+    # asserted "all remaining clusters" incorrectly three times now (#1444).
+    engagement = { namespace = "engagement", sa = "engagement-db" }
+    # Reserve the Pod Identity association before the reviewed Incentive CNPG Cluster is synced.
+    # The future Cluster uses barmanObjectStore under incentive-db; declaring its service account
+    # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
+    incentive = { namespace = "incentive", sa = "incentive-db" }
   }
 }
 

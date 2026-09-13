@@ -70,7 +70,26 @@ import yaml
 
 import gatelib
 
-IMAGE_SVC = re.compile(r"openbank-([a-z0-9-]+-service)\b")
+# The app container's module, taken from its image. This used to require a literal `-service`
+# suffix (`openbank-([a-z0-9-]+-service)`), which is a NAMING CONVENTION standing in for the set
+# of deployed modules — and five modules do not follow it. Three of those are money-path
+# (openbank-sepa-payment, openbank-domestic-payment, openbank-sepa-instant, plus
+# openbank-customer-edge and openbank-product-catalog), and every one carries @Authorize in
+# src/main. A workload the regex did not match hit `continue`, so it was neither checked NOR
+# listed as skipped: measured on origin/main, deleting the whole `opa` sidecar from the
+# openbank-sepa-payment Rollout left the gate printing "40 workload(s) checked … 0
+# enforce-without-PDP violation(s)" and exiting 0 — the exact #1797 defect, on a money-path
+# service, invisible. The set is now DERIVED: any `openbank-<name>` image whose `<name>` is a
+# real module directory in this repo. An unmatched workload is reported, never dropped.
+IMAGE_SVC = re.compile(r"openbank-([a-z0-9][a-z0-9-]*)\b")
+
+# An `openbank-*` image that is deliberately NOT a module in this repo. Declared with a reason,
+# and stale in BOTH directions: an entry no longer seen in any workload is an error, so this
+# cannot quietly become the place unmatched workloads go to die.
+NON_MODULE_IMAGES = {
+    "openbank-keycloak": "our own Keycloak build (upstream image + realm), not a Quarkus module; "
+                         "it has no src/main and therefore no @Authorize surface",
+}
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
 # `@Authorize` as an annotation use-site: the identifier must not be part of a longer word
@@ -304,16 +323,33 @@ def main() -> int:
     violations: list[tuple[str, str, str]] = []
     checked = 0
     unannotated: list[str] = []
+    unresolved: list[tuple[str, str]] = []
+    seen_non_module: set[str] = set()
 
     for path, workload in iter_workloads(components):
         containers = pod_containers(workload)
         if not containers:
             continue
-        # The app container is the one running an openbank-<svc>-service image.
-        app = next((c for c in containers if IMAGE_SVC.search(str(c.get("image", "")))), None)
+        # The app container is the one whose image names a module directory that exists here.
+        app, svc_full = None, None
+        for c in containers:
+            m = IMAGE_SVC.search(str(c.get("image", "")))
+            if m and (root / f"openbank-{m.group(1)}").is_dir():
+                app, svc_full = c, m.group(1)
+                break
         if app is None:
+            # Not a repo-module workload (an upstream image, a sidecar-only pod). Record any
+            # `openbank-*` image we could not resolve, so a renamed or new module surfaces as an
+            # UNRESOLVED line rather than vanishing the way the five above did.
+            for c in containers:
+                m = IMAGE_SVC.search(str(c.get("image", "")))
+                if m:
+                    image = f"openbank-{m.group(1)}"
+                    if image in NON_MODULE_IMAGES:
+                        seen_non_module.add(image)
+                    else:
+                        unresolved.append((image, str(path.relative_to(root))))
             continue
-        svc_full = IMAGE_SVC.search(str(app.get("image", ""))).group(1)  # e.g. "kyc-service"
         service_dir = f"openbank-{svc_full}"
         checked += 1
 
@@ -347,13 +383,38 @@ def main() -> int:
 
     # Print the skipped set, so "0 violations" is never mistaken for "everything was examined" —
     # the reader can see exactly which workloads the annotation predicate took out of scope.
+    # An `openbank-*` image with no module directory is a THIRD state next to checked and
+    # skipped. It is not silently dropped, because that is exactly how five modules — three of
+    # them money-path — stayed outside this gate while it printed a clean count.
+    # The staleness half only means anything over the REAL tree. `--root` is also pointed at
+    # synthetic fixture trees by check_authz_pdp_parity_test.py, where every declared entry is
+    # legitimately absent; reporting it there turns the falsification suite red about nothing.
+    # `openbank-libs` is the marker: no fixture builds one.
+    real_tree = (root / "openbank-libs").is_dir()
+    stale_declared = sorted(set(NON_MODULE_IMAGES) - seen_non_module) if real_tree else []
+    for image in stale_declared:
+        print(
+            f"::{'error' if args.enforce else 'warning'}::authz-pdp-parity: NON_MODULE_IMAGES "
+            f"declares `{image}` ({NON_MODULE_IMAGES[image]}) but no workload runs it any more — "
+            f"remove the entry, or the exclusion outlives the thing it excused."
+        )
+
+    for image, rel in sorted(set(unresolved)):
+        print(
+            f"::{'error' if args.enforce else 'warning'} file={rel}::authz-pdp-parity: workload runs image `{image}` but no such "
+            f"module directory exists in this repo, so its @Authorize surface cannot be read. "
+            f"Rename the module or the image so the two agree."
+        )
+
     print(
         f"check-authz-pdp-parity: {checked} workload(s) checked; "
         f"{len(unannotated)} skipped (no @Authorize in src/main: "
         f"{', '.join(sorted(set(unannotated))) or 'none'}); "
+        f"{len(set(unresolved))} unresolved image(s); "
+        f"{len(stale_declared)} stale NON_MODULE_IMAGES entr(ies); "
         f"{len(violations)} enforce-without-PDP violation(s)."
     )
-    return 1 if (violations and args.enforce) else 0
+    return 1 if ((violations or unresolved or stale_declared) and args.enforce) else 0
 
 
 if __name__ == "__main__":

@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.0...billing-service-v0.13.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **billing:** guard billing_outbox created_at plausibility at INSERT ([#9300](https://github.com/JiRaska/open-bank-oss/issues/9300)) ([fa44aa2](https://github.com/JiRaska/open-bank-oss/commit/fa44aa2ad8483db20cf4dc68b7a4c54207332857))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.12.0...billing-service-v0.13.0) (2026-09-01)
+
+
+### Features
+
+* **billing:** expose pending approvals in unified inbox ([#7034](https://github.com/JiRaska/open-bank-oss/issues/7034)) ([234f53f](https://github.com/JiRaska/open-bank-oss/commit/234f53f7fe84db29ab40b5ed9d25b9439f99f273))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.11.0...billing-service-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.2...billing-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.1...billing-service-v0.10.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **card-issuance:** alert on dead-lettered outbox rows and add an operator requeue path ([#4308](https://github.com/JiRaska/open-bank-oss/issues/4308)) ([c666a4d](https://github.com/JiRaska/open-bank-oss/commit/c666a4deae12d1025722647e4813e9ccd0d86944))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.0...billing-service-v0.10.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **billing:** escape billing_outbox JSON payloads via Jackson, not string concat ([#5642](https://github.com/JiRaska/open-bank-oss/issues/5642)) ([acb86e6](https://github.com/JiRaska/open-bank-oss/commit/acb86e6a72a3fd59a87066846d781e10f140e206)), closes [#4701](https://github.com/JiRaska/open-bank-oss/issues/4701)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.9.1...billing-service-v0.10.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.9.0...billing-service-v0.9.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.3...billing-service-v0.9.0) (2026-08-16)
+
+
+### Features
+
+* **billing-service:** add annual fee-summary aggregation for PAD Art. 5 statements ([#4129](https://github.com/JiRaska/open-bank-oss/issues/4129)) ([4bd9985](https://github.com/JiRaska/open-bank-oss/commit/4bd99857de524920066b99201c216476d1255408))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.2...billing-service-v0.8.3) (2026-08-02)
 
 

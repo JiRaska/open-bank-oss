@@ -7,7 +7,7 @@
 | **AMLD** (Anti-Money Laundering Directive) | Account = kandidát pro screening, freeze workflow pro suspicious activity | freeze/unfreeze API, event `account.frozen.v1` s `reason=AML_HOLD` |
 | **GDPR** | IBAN je PII, owner_party_id pseudonymized | PiiMask v lozích, 10-letá AML-driven retence (overrides GDPR erasure) |
 | **PSD2** | Account info accessible přes Open Banking | `consent-service` validuje TPP přístup; account-service serves account info |
-| **DORA** | Operational resilience | health probes, BootstrapVerifier, audit eventy, SLO, runbooks |
+| **DORA** | Operational resilience | health probes, audit eventy, SLO, runbooks. `BootstrapVerifier` byl uveden zde a neexistuje (#8426) — secrets místo něj drží injektáž přes ESO/OpenBao `secretKeyRef` (ADR-0007) |
 | **NIS2** | Network & info security | mTLS přes Istio, network policies, audit log |
 | **ČNB Vyhláška 163/2014** | Vedení účtů, IBAN per ISO 13616 | `libs.domain.account.Iban` validátor s mod-97 checksum |
 
@@ -114,6 +114,6 @@ Endpoint pro audit query: `audit-service /api/v1/audit/events?aggregateId=acc-..
 - ✅ Rate limiting: `libs.web.RateLimitFilter` (100 req/min per token)
 - ✅ Idempotency: required on mutations
 - ✅ TLS: mTLS in-cluster (Istio), TLS termination at gateway
-- ✅ Secrets: BootstrapVerifier blocks dev placeholders in prod (ADR 0017 Vault)
+- ⬜ Secrets: **žádný `BootstrapVerifier` neexistuje** — na dev placeholder nespadne start ničemu. Vlastnost drží to, že `POSTGRES_PASSWORD` přichází v nasazeném manifestu přes `secretKeyRef` z ESO/OpenBao (ADR-0007) a placeholder v něm není. Konfigurace, ne boot-time kontrola (#8426)
 - ✅ Audit: every state change → audit-service via event
 - ⚠️ Tokenization (PCI-like for IBAN): not implemented yet, tracked as risk in regulatory audit

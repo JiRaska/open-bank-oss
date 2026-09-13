@@ -107,19 +107,32 @@ class DisputeService(
                     resolution = request.resolution ?: dispute.resolution,
                     chargebackAmount = request.chargebackAmount ?: dispute.chargebackAmount,
                     resolvedBy = request.resolvedBy ?: dispute.resolvedBy,
-                    resolvedAt = if (request.status in listOf(
-                            DisputeStatus.RESOLVED_CUSTOMER,
-                            DisputeStatus.RESOLVED_MERCHANT,
-                            DisputeStatus.WITHDRAWN,
-                        )
-                    ) {
+                    resolvedAt = if (request.status in TERMINAL_STATUSES) {
                         OffsetDateTime.now(clock)
                     } else {
                         dispute.resolvedAt
                     },
                     updatedAt = OffsetDateTime.now(clock),
                 )
-                disputeRepo.update(updated).flatMap { saved ->
+                // #8745 finding 2: this endpoint knowingly handles the three terminal statuses
+                // (it stamps resolvedAt for them), so the same terminal state emitted
+                // dispute.resolved through resolveRemediation and NOTHING through here — an
+                // ADR-0220 exclusion applied on dispute.opened would never lift for a dispute
+                // resolved on this path. Mirror doResolve: the transition INTO a terminal
+                // status carries the event, committed atomically with the row.
+                val messages =
+                    if (updated.status in TERMINAL_STATUSES && dispute.status !in TERMINAL_STATUSES) {
+                        listOf(resolvedOutboxMessage(updated))
+                    } else {
+                        emptyList()
+                    }
+                val write =
+                    if (messages.isEmpty()) {
+                        disputeRepo.update(updated)
+                    } else {
+                        disputeRepo.update(updated, messages)
+                    }
+                write.flatMap { saved ->
                     val event = DisputeTimelineEvent(
                         disputeId = saved.id,
                         eventType = "STATUS_CHANGED",
@@ -256,6 +269,20 @@ class DisputeService(
      * where that lookup is exactly what the ADR-0220 eligibility snapshot exists to avoid. Paired
      * with the existing `dispute.resolved`, the two bracket the window during which a customer is
      * in dispute, so a consumer can both apply and lift the exclusion.
+     *
+     * `occurredAt` is the OPENING instant — `dispute.createdAt`, the same value `openedAt` already
+     * carries — converted with `.toInstant()` (#8352). Two separate points, and the second is the
+     * one a rename alone would have missed:
+     *  - `openedAt` is not a spelling `AuditConsumer.eventTime` accepts. It reads `occurredAt` and
+     *    only `occurredAt`, so every `dispute.opened` row in the ten-year audit trail recorded the
+     *    consumer's ingest clock as the moment a customer disputed a payment.
+     *  - `createdAt` is an `OffsetDateTime`, and this file's two sibling builders both spell
+     *    `.toInstant()` for that reason. `openedAt` is left exactly as it was — additive, no
+     *    existing field changes name, place or form.
+     *
+     * Why this one builder was missed by the #3914/#3926 sweep that patched its two siblings:
+     * `dispute.opened` was introduced by #4087, which merged about three hours BEFORE that sweep
+     * did — so the sweep's branch, cut earlier, could not see the sibling it was about to acquire.
      */
     private fun openedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
         aggregateId = dispute.id,
@@ -263,7 +290,9 @@ class DisputeService(
         payload = """{"eventType":"dispute.opened","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
             """"disputeType":"${dispute.disputeType}","status":"${dispute.status}",""" +
-            """"openedAt":"${dispute.createdAt}"}""",
+            """"openedAt":"${dispute.createdAt}",""" +
+            """"occurredAt":"${dispute.createdAt.toInstant()}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -284,9 +313,15 @@ class DisputeService(
         // would never lift. Additive, and `dispute.remediation_requested` already carries one.
         payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
-            """"outcome":"${dispute.remediationOutcome}",""" +
+            // WITHDRAWN reaches this builder with no remediation outcome (`update` does not set
+            // one, and the domain default is null), so interpolating it inside quotes puts the
+            // four-character string "null" in the field. Only THIS builder can see a null:
+            // `remediationRequestedOutboxMessage` is reached solely from doResolve, where
+            // `remediationOutcome = request.outcome` is non-null by type.
+            """"outcome":${dispute.remediationOutcome?.let { "\"$it\"" } ?: "null"},""" +
             """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
-            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -310,7 +345,8 @@ class DisputeService(
             // same transaction and describes the remediation that resolution warrants. It has no
             // separate business instant of its own, and inventing one (a fresh clock read) would
             // put two different "when"s on one indivisible state change.
-            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -329,6 +365,18 @@ class DisputeService(
     companion object {
         private val BANK_TIME: ZoneId = ZoneId.of("Europe/Prague")
 
+        /**
+         * The states in which a dispute is over. Declared once because [update] needs it twice --
+         * for the `resolvedAt` stamp and for the `dispute.resolved` emission -- and the two
+         * disagreeing about what "terminal" means is precisely how a terminal transition once
+         * stamped a resolution time while announcing nothing (#8745 finding 2).
+         */
+        internal val TERMINAL_STATUSES = setOf(
+            DisputeStatus.RESOLVED_CUSTOMER,
+            DisputeStatus.RESOLVED_MERCHANT,
+            DisputeStatus.WITHDRAWN,
+        )
+
         /** States from which a remediation resolution may be recorded (evidence-gathering states). */
         internal val RESOLVABLE_FROM = setOf(
             DisputeStatus.OPEN,
@@ -336,5 +384,16 @@ class DisputeService(
             DisputeStatus.PENDING_CUSTOMER,
             DisputeStatus.PENDING_MERCHANT,
         )
+
+        /**
+         * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+         * (EVENT-sourced) attribution — issue #3994/#5256. Before this field, `TopicAttribution`
+         * already resolves `openbank.dispute.events` -> `dispute-service` correctly, but only as
+         * TOPIC-sourced — and audit-service DOES subscribe to this topic today (it is in
+         * `application.yaml`'s consumed-topics list), so this is a live attribution improvement.
+         * Value matches the fleet's audit convention: the module directory without the
+         * `openbank-` prefix, the same spelling `TopicAttribution` already maps this topic to.
+         */
+        internal const val SOURCE_SERVICE = "dispute-service"
     }
 }

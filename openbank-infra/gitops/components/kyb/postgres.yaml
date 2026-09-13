@@ -1,0 +1,76 @@
+# Single-owner Postgres for kyb-service, reconciled by the cluster-wide CNPG operator. CNPG
+# generates the `kyb-db-app` secret (username/password for the `openbank` owner) and a
+# `kyb-db-rw` Service — both consumed by the kyb-service Deployment for the reactive
+# datasource and Flyway migrations. One instance for sandbox FinOps; prod should raise to 3.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: kyb-db
+  namespace: kyb
+spec:
+  monitoring:
+    enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_kyb
+      owner: openbank
+  # WAL archiving + base backups to S3. A case row is the evidence of WHO signed for a company
+  # and on what register extract — the AML/KYB audit trail (ADR-0284), retained 5 years.
+  # Credentials from EKS Pod Identity on the kyb-db ServiceAccount.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/kyb-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: kyb-db-daily
+  namespace: kyb
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 50 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: kyb-db

@@ -4,16 +4,18 @@
 
 import type { Metadata } from 'next'
 import './globals.css'
-import { headers } from 'next/headers'
-import { Toaster } from 'sonner'
-import { SessionProvider } from '@/components/auth/SessionProvider'
-import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { AgentDock } from '@/components/agent/AgentDock'
+import { cookies, headers } from 'next/headers'
+import { AppProviders } from '@/components/layout/AppProviders'
+import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
 
 export const metadata: Metadata = {
   title: 'OpenBank Admin',
   description: 'OpenBank Operations Portal',
 }
+
+// The operator console uses the platform font stack. The remote font loader fetches at build time,
+// which makes a production artifact depend on public DNS even though runtime CSP forbids it.
+// System fonts cover the bilingual UI and keep CI, air-gapped review, and sandbox builds identical.
 
 // ADR-0080 P1 (nonce CSP fix): reading headers() here forces dynamic (per-request) rendering so
 // that Next.js injects the per-request nonce from middleware into the bootstrap <script> tags.
@@ -22,20 +24,13 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Calling headers() opts the layout out of static pre-rendering (side-effect only).
   await headers()
+  const persistedLanguage = parseLanguage((await cookies()).get(LANG_COOKIE)?.value)
+  const initialLanguage = persistedLanguage ?? 'en'
+
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      </head>
+    <html lang={initialLanguage} suppressHydrationWarning>
       <body>
-        <SessionProvider>
-          <LanguageProvider>
-            {children}
-            <AgentDock />
-            <Toaster richColors position="top-right" />
-          </LanguageProvider>
-        </SessionProvider>
+        <AppProviders initialLanguage={persistedLanguage}>{children}</AppProviders>
       </body>
     </html>
   )

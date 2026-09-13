@@ -4,17 +4,28 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
+import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityException
+import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityUnavailableException
+import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalConflict
+import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalNotFound
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
+import com.openbank.delegation.application.usecase.DelegationPortfolioAccessDenied
+import com.openbank.delegation.application.usecase.DelegationPortfolioNotFound
+import com.openbank.delegation.application.usecase.DelegationPortfolioOwnershipUnavailable
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
+import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
 import com.openbank.delegation.application.usecase.DelegationUnsupportedConstraintException
+import com.openbank.delegation.application.usecase.SpendReservationIdempotencyConflictException
 import com.openbank.delegation.application.usecase.SpendReservationNotFoundException
 import com.openbank.delegation.application.usecase.SpendReservationRefusedException
 import com.openbank.delegation.application.usecase.SpendReservationStateException
+import com.openbank.delegation.application.usecase.SpendReservationStateStreamUnavailableException
 import com.openbank.delegation.infrastructure.rest.dto.SpendRefusalResponse
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -29,6 +40,64 @@ private fun errorBody(status: Int, message: String?): Map<String, Any?> = mapOf(
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {
     override fun toResponse(exception: DelegationNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(errorBody(404, exception.message)).build()
+}
+
+/** A stale lifecycle command is safe to retry from a fresh representation, never to overwrite. */
+@Provider
+class DelegationConcurrentTransitionExceptionMapper : ExceptionMapper<DelegationConcurrentTransitionException> {
+    override fun toResponse(exception: DelegationConcurrentTransitionException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationLifecycleApprovalNotFoundMapper : ExceptionMapper<DelegationLifecycleApprovalNotFound> {
+    override fun toResponse(exception: DelegationLifecycleApprovalNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationLifecycleApprovalConflictMapper : ExceptionMapper<DelegationLifecycleApprovalConflict> {
+    override fun toResponse(exception: DelegationLifecycleApprovalConflict): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationRolePresetNotFoundMapper : ExceptionMapper<DelegationRolePresetNotFound> {
+    override fun toResponse(exception: DelegationRolePresetNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioNotFoundMapper : ExceptionMapper<DelegationPortfolioNotFound> {
+    override fun toResponse(exception: DelegationPortfolioNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioAccessDeniedMapper : ExceptionMapper<DelegationPortfolioAccessDenied> {
+    override fun toResponse(exception: DelegationPortfolioAccessDenied): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationPortfolioOwnershipUnavailableMapper : ExceptionMapper<DelegationPortfolioOwnershipUnavailable> {
+    override fun toResponse(exception: DelegationPortfolioOwnershipUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message))
+            .build()
 }
 
 @Provider
@@ -56,6 +125,34 @@ class DelegationEligibilityExceptionMapper : ExceptionMapper<DelegationEligibili
 }
 
 @Provider
+class DelegationGrantorAuthorityExceptionMapper : ExceptionMapper<DelegationGrantorAuthorityException> {
+    override fun toResponse(exception: DelegationGrantorAuthorityException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(
+                mapOf(
+                    "error" to (exception.message ?: "Grantor authority rejected"),
+                    "code" to "GRANTOR_AUTHORITY_REJECTED",
+                ),
+            )
+            .build()
+}
+
+@Provider
+class DelegationGrantorAuthorityUnavailableExceptionMapper :
+    ExceptionMapper<DelegationGrantorAuthorityUnavailableException> {
+    override fun toResponse(exception: DelegationGrantorAuthorityUnavailableException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(
+                mapOf(
+                    "error" to (exception.message ?: "Grantor authority unavailable"),
+                    "code" to "GRANTOR_AUTHORITY_UNAVAILABLE",
+                ),
+            )
+            .build()
+}
+
+@Provider
 class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCallerMismatchException> {
     override fun toResponse(exception: DelegationCallerMismatchException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
@@ -65,7 +162,8 @@ class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCaller
  * 400, not 422: the field is not merely unacceptable in this instance, it is not a field this
  * version of the API supports at all — no value of it would be accepted, so there is nothing for
  * the caller to retry with different content. Carries a machine-readable `code` so a client can
- * distinguish "you sent a ceiling we do not enforce" from every other 400 on this route.
+ * distinguish an unsupported constraint (including an unenforceable exposure request) from every
+ * other 400 on this route.
  */
 @Provider
 class DelegationUnsupportedConstraintExceptionMapper : ExceptionMapper<DelegationUnsupportedConstraintException> {
@@ -98,6 +196,39 @@ class SpendReservationRefusedExceptionMapper : ExceptionMapper<SpendReservationR
         val status = Response.Status.CONFLICT
         return Response.status(status).entity(SpendRefusalResponse.from(status.statusCode, exception.decision)).build()
     }
+}
+
+@Provider
+class SpendReservationIdempotencyConflictExceptionMapper :
+    ExceptionMapper<SpendReservationIdempotencyConflictException> {
+    override fun toResponse(exception: SpendReservationIdempotencyConflictException): Response {
+        val detail = requireNotNull(exception.message)
+        return Response.status(Response.Status.CONFLICT)
+            .entity(
+                mapOf(
+                    "type" to "urn:openbank:error:idempotency-key-reused",
+                    "title" to "Idempotency key reused",
+                    "status" to Response.Status.CONFLICT.statusCode,
+                    "detail" to detail,
+                    "code" to "IDEMPOTENCY_KEY_REUSED",
+                    "error" to detail,
+                ),
+            )
+            .type("application/problem+json")
+            .build()
+    }
+}
+
+@Provider
+class SpendReservationStateStreamUnavailableExceptionMapper :
+    ExceptionMapper<SpendReservationStateStreamUnavailableException> {
+    override fun toResponse(exception: SpendReservationStateStreamUnavailableException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity(
+                errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message) +
+                    ("code" to "RESERVATION_STATE_STREAM_UNAVAILABLE"),
+            )
+            .build()
 }
 
 @Provider

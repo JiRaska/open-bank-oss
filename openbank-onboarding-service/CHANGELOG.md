@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.10.0...onboarding-service-v0.10.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **onboarding:** recognised event with unparseable status dead-letters, never silently dropped ([#9424](https://github.com/JiRaska/open-bank-oss/issues/9424)) ([4cf0f9d](https://github.com/JiRaska/open-bank-oss/commit/4cf0f9de8e7095c3fed7869b9b7ac778cfb7e997)), closes [#9038](https://github.com/JiRaska/open-bank-oss/issues/9038)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.9.0...onboarding-service-v0.10.0) (2026-09-08)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **onboarding:** an APPROVED kyc no longer moves the funnel board backwards ([#9080](https://github.com/JiRaska/open-bank-oss/issues/9080)) ([1f74997](https://github.com/JiRaska/open-bank-oss/commit/1f74997577890c2cdcc324267af0943422504221)), closes [#8951](https://github.com/JiRaska/open-bank-oss/issues/8951)
+* **onboarding:** reject an unparseable ?stage= with 400 instead of returning every record ([#8710](https://github.com/JiRaska/open-bank-oss/issues/8710)) ([8e4cc9c](https://github.com/JiRaska/open-bank-oss/commit/8e4cc9c1b0aa5d31d4ec7a359397ceae8b0b2ce2)), closes [#8699](https://github.com/JiRaska/open-bank-oss/issues/8699)
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.4...onboarding-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.3...onboarding-service-v0.8.4) (2026-08-23)
+
+
+### Bug Fixes
+
+* **onboarding:** SCA enrolments are seeded, not dropped, and device_count is derived ([#6617](https://github.com/JiRaska/open-bank-oss/issues/6617)) ([2c50318](https://github.com/JiRaska/open-bank-oss/commit/2c503183bafbff66fed399e43de8222470beb57e)), closes [#6248](https://github.com/JiRaska/open-bank-oss/issues/6248)
+
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.2...onboarding-service-v0.8.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.1...onboarding-service-v0.8.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **onboarding:** stop counting a dropped projection as a success ([#6258](https://github.com/JiRaska/open-bank-oss/issues/6258)) ([488eea6](https://github.com/JiRaska/open-bank-oss/commit/488eea6cfb85370f242421d2691e3835275b8645))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.0...onboarding-service-v0.8.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **campaign,onboarding:** stop swallowing transient consumer failures as an ack ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5757](https://github.com/JiRaska/open-bank-oss/issues/5757)) ([4f2d6e5](https://github.com/JiRaska/open-bank-oss/commit/4f2d6e5eb84bf3435c393d5c2fc0be79db20817e))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.3...onboarding-service-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.2...onboarding-service-v0.7.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **observability:** track gauge refresh liveness ([#5087](https://github.com/JiRaska/open-bank-oss/issues/5087)) ([86904fa](https://github.com/JiRaska/open-bank-oss/commit/86904faa8ae0fdfd7e085b4c4f175691ae07c865))
+
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.1...onboarding-service-v0.7.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.0...onboarding-service-v0.7.1) (2026-08-14)
 
 

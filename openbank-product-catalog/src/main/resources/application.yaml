@@ -1,6 +1,17 @@
 quarkus:
   application:
     name: openbank-product-catalog
+  # CatalogPackSeeder.register loads these via javaClass.getResourceAsStream at RUNTIME
+  # (#4797). Native-image excludes classpath resources by default -- only what is
+  # explicitly registered gets bundled into the binary -- so the plain-JVM build ships
+  # them for free and the native one silently drops them, failing at first boot with
+  # "catalog pack resource ... is missing" rather than at build time. Scoped to exactly
+  # the directory the seeder reads; a broader "**" include would work but would also
+  # bundle files (openapi.yaml, application.yaml itself) with no reason to ship inside
+  # a native binary.
+  native:
+    resources:
+      includes: "catalog-packs/**"
   http:
     port: 8104
     limits:

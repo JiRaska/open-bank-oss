@@ -3,7 +3,7 @@
 # Extends openbank.rest with balance-store allow reasons.
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
-# Actions gated (BalanceResource / ReconciliationResource):
+# Actions gated (BalanceResource / ReconciliationResource / ApprovalResource):
 #   balance.read                — get one/all currency balances (#accountId)
 #   balance.hold                — place a hold on funds (#accountId)
 #   balance.holdRelease         — release a hold (#holdId)
@@ -13,12 +13,25 @@
 #   balance.overdraftLimit      — set the arranged overdraft limit (#accountId, supervisor-only)
 #   balance.reconciliation.read — latest control-account tie-out report
 #   balance.reconciliation.run  — on-demand tie-out re-run
+#   balance.approval.decide     — a DIFFERENT operator decides a paused credit/debit four-eyes
+#                                 approval (#id, ADR-0155). Granted via rules.yaml's
+#                                 role_action_matrix (ROLE_OPERATOR/ROLE_ADMIN) + base rest.rego's
+#                                 matrix-allows — same mechanism as sanctions.approval.decide /
+#                                 lending.approval.decide, no dedicated allowed_reasons rule
+#                                 needed here. It DOES need the edge veto below (matrix-allows is
+#                                 role-only and would otherwise also admit the customer-facing
+#                                 edge M2M identity, which carries ROLE_OPERATOR in the deployed
+#                                 realm template) — same reasoning as every other write action in
+#                                 this file.
 #
 # balance-service is the most-called money-primitive in the fleet: ledger/settlement/transaction
-# all post through balance.credit/balance.debit. None of the verbs above is in rules.yaml's
-# four_eyes.verbs list (transfer/post/reverse/freeze/release/flip) — the four-eyes gate lives on
-# the payment RAILS (domestic-payment.transitionStatus etc.), not on this shared primitive, so no
-# four-eyes logic belongs here.
+# all post through balance.credit/balance.debit. None of the credit/debit/hold/etc verbs above is
+# in rules.yaml's four_eyes.verbs list (transfer/post/reverse/freeze/release/flip) — the four-eyes
+# gate on THOSE lives on the payment RAILS (domestic-payment.transitionStatus etc.), not on this
+# shared primitive. balance.approval.decide is a different mechanism: ApprovalResource is the
+# checker-facing side of ApprovalStore's own maker/checker four-eyes gate (ADR-0155), separate
+# from OPA's four_eyes_required attribute, so no allowed_reasons rule for it belongs here — only
+# the matrix grant plus the edge prohibition.
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for *.read (covers
 # balance.read + balance.reconciliation.read for OPERATOR/ADMIN/COMPLIANCE).
@@ -168,5 +181,6 @@ prohibited if {
 		"balance.initialize",
 		"balance.reconciliation.run",
 		"balance.overdraftLimit",
+		"balance.approval.decide",
 	}
 }

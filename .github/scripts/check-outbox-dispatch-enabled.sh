@@ -11,15 +11,18 @@
 # documented in CLAUDE.md but was, until this script, purely tribal
 # knowledge: nothing caught it.
 #
-# NOT every dispatcher uses the gated pattern: openbank-sepa-instant and
-# openbank-security-scanner ship a hand-rolled @Scheduled dispatcher that
-# runs unconditionally and never reads the flag at all — for them, a
-# missing/false config key is a no-op, not a bug, and flagging it would be a
-# false positive (confirmed by reading both classes directly, not just their
-# application.yaml). So this script only checks a service whose dispatcher
-# source references the config property in the first place; the two
-# unconditional dispatchers above are correctly out of scope, not "skipped
-# because non-compliant."
+# NOT every dispatcher uses the gated pattern: openbank-sepa-instant ships a
+# hand-rolled @Scheduled dispatcher that runs unconditionally and never reads
+# the flag at all — for it, a missing/false config key is a no-op, not a bug,
+# and flagging it would be a false positive (confirmed by reading the class
+# directly, not just its application.yaml). So this script only checks a
+# service whose dispatcher source references the config property in the first
+# place; the unconditional dispatcher above is correctly out of scope, not
+# "skipped because non-compliant."
+#
+# openbank-security-scanner used to be the second such case. Its outbox was
+# deleted in #4709 — the whole pipeline existed with no writer, so it had
+# nothing to dispatch — and it is now out of scope for having no outbox at all.
 #
 # Scope: any RELEASED component (sibling version.txt present, same scoping rule
 # as check-app-version-override.sh) that has at least one *OutboxDispatcher.kt

@@ -1,0 +1,739 @@
+# SPDX-License-Identifier: Apache-2.0
+# Dead-letter topics for every SmallRye `failure-strategy: dead-letter-queue` incoming channel
+# in the monorepo (#5745, follow-up to #5698).
+#
+# WHY THIS FILE EXISTS AT ALL
+#   The #5698 sweep converted ~21 event consumers from swallow-and-ack to rethrow, on the stated
+#   basis that "the connector dead-letters". SmallRye's DEFAULT failure-strategy is `fail`, which
+#   STOPS the channel — only four channels in the whole fleet configured a DLQ. So for most of the
+#   sweep the rethrow traded silent data loss for a wedged consumer, the exact outcome the original
+#   swallow comments were written to avoid. Wiring the DLQ is what makes the consumers' KDocs true
+#   by effect rather than by assertion.
+#
+# WHY ONE FILE AND NOT ONE PER COMPONENT
+#   Several in-flight PRs append documents at the EOF of the per-component kafka-topic.yaml files,
+#   and git reports a merge CLEAN when two sides add neighbouring documents while keeping only one.
+#   A single dedicated file keeps this change out of those files entirely, and makes the DLQ
+#   inventory countable in one place. This directory is synced by the `kafka` ArgoCD Application
+#   (directory recursion, ServerSideApply, prune deliberately OFF) in namespace `messaging`.
+#
+# NAMING: openbank.dlq.<service>.<channel>, ALWAYS explicit.
+#   SmallRye's implicit default is `dead-letter-topic-<channel>`, derived from the channel name
+#   alone — and channel names repeat across services (`party-events-in` exists in eight). Left
+#   implicit, eight services would dead-letter into one topic, and the existing
+#   AccountPartyEventDeadLettered alert would misattribute every record in it.
+#
+# A CR IS REQUIRED, NOT OPTIONAL: this cluster does not auto-create topics, so without it the DLQ
+# send itself fails and the consumer wedges on the very failure it was meant to park. The matching
+# KafkaUser `Write` grant is in each service's own kafka-*-mtls.yaml, for the same reason.
+#
+# RETENTION is 30d, longer than the 7d typical of the source topics: a dead-lettered record is a
+# real incident that may outlive a 7-day window before someone replays it. No consumer by design —
+# these are quarantines, and they are invisible to the event-consumer-liveness gate (which reads
+# declared `outgoing:` channels; the connector's DLQ producer is not one).
+---
+# openbank-account-service :: channel `delegation-events-in`
+# #5752: account-service and card-issuance-service both consume `delegation-events-in`, so both
+# were dead-lettering into the single implicit `dead-letter-topic-delegation-events-in`. This
+# names account-service's half. The old topic and its Write ACL are RETAINED so an existing
+# backlog stays drainable.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.delegation-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-account-service :: channel `party-events-in`
+# #5752. `party-events-in` is declared by eight services; account-service was the last one still
+# on the implicit `dead-letter-topic-party-events-in`. The AccountPartyEventDeadLettered alert in
+# prometheus-rules-onboarding.yaml matches BOTH names for the length of the rollout — under an
+# Argo Rollout old and new pods run side by side, and the old topic still holds whatever was
+# parked before the cutover.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-agent-service :: channel `oversight-events`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.agent.oversight-events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-audit-service :: channel `agent-audit-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.audit.agent-audit-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-aml-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.aml.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-anacredit-service :: channel `lending-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.anacredit.lending-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-analytics-sink :: channel `analytics-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.analytics-sink.analytics-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-audit-service :: channel `audit-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.audit.audit-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-balance-service :: channel `balance-init-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.balance.balance-init-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-balance-service :: channel `ledger-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.balance.ledger-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `account-conversions-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.account-conversions-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `account-triggers-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.account-triggers-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `card-conversions-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.card-conversions-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `card-triggers-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.card-triggers-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `consent-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.consent-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `engagement-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.engagement-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `incentive-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.incentive-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-campaign-service :: channel `notification-outcomes-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.notification-outcomes-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-card-issuance-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.card-issuance.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-copilot-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.copilot.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-customer-edge :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.customer-edge.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-delegation-service :: channel `domestic-payment-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.delegation.domestic-payment-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-document-service :: channel `account-created-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.document.account-created-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-document-service :: channel `billing-outbox-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.document.billing-outbox-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-engagement-service :: channel `campaign-banner-placements-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.engagement.campaign-banner-placements-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-engagement-service :: channel `dispute-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.engagement.dispute-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-engagement-service :: channel `fraud-hold-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.engagement.fraud-hold-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-engagement-service :: channel `lending-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.engagement.lending-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-engagement-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.engagement.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-fraud-service :: channel `transaction-signal`
+# #5745 requirement 5, the one part of the four this channel was missing. The other three have
+# been in place since before #5745: `failure-strategy: dead-letter-queue` in the service's
+# application.yaml, an EXPLICIT topic name in components/fraud-service/fraud-service-msg-override.yaml
+# (a .properties source, because `dead-letter-queue.topic` is a dotted leaf key that SmallRye's YAML
+# source would quote and the connector would never read — #686), and a matching [Write, Describe]
+# ACL in components/fraud-service/kafka-fraud-mtls.yaml. No CR existed for the name anywhere, and
+# this cluster does not auto-create topics, so the DLQ send itself would have failed and wedged
+# TransactionSignalConsumer on the very failure the DLQ exists to park (#5715 made it rethrow).
+#
+# NAME: this is the one entry in this file NOT of the form openbank.dlq.<service>.<channel>. The
+# name below is the one already configured and already granted in the ACL; renaming it would be a
+# three-place change to a live channel for cosmetics, so the CR is made to match the configuration
+# rather than the configuration to match the CR. It is not the implicit SmallRye default either
+# (`dead-letter-topic-transaction-signal`), so the collision the naming convention exists to prevent
+# does not apply — `transaction-signal` is declared by this service alone.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.transactions.transaction.initiated.fraud.dlq
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-interest-service :: channel `interest-withholding-remitted-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.interest.interest-withholding-remitted-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-kyc-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.kyc.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-onboarding-service :: channel `kyc-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.onboarding.kyc-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-onboarding-service :: channel `party-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.onboarding.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-onboarding-service :: channel `sca-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.onboarding.sca-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-party-service :: channel `aml-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.party.aml-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-party-service :: channel `consent-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.party.consent-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-party-service :: channel `kyc-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.party.kyc-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-sdd-service :: channel `sdd-collection-authorised-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.sdd.sdd-collection-authorised-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-standing-order-service :: channel `standing-order-due-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.standing-order.standing-order-due-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-statement-service :: channel `account-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.statement.account-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-domestic-payment :: channel `delegated-spend-reservation-state-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-clearing-service :: channel `clearing-net-settlement-in` (ADR-0281)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.clearing-service.clearing-net-settlement-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-onboarding-service :: channel `kyb-events-in` (ADR-0284 D6)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.onboarding.kyb-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-notification-service :: channel `delegation-events-in`
+# #8346 (tail of #5745). Not a rename and not a migration: this channel had NO dead-letter wiring
+# at all, so nothing is parked anywhere to strand. It is the third writer of `delegation-events-in`
+# after account-service (already on `openbank.dlq.account.delegation-events-in`, #5752) and
+# card-issuance-service (still on the implicit `dead-letter-topic-delegation-events-in`), which is
+# why the name is explicit from the first day rather than left to SmallRye's channel-derived
+# default. Named in openbank-notification-service/src/main/resources/application.yaml (nested
+# form, issue #686); Write granted in components/notifications/kafka-notification-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.notification.delegation-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

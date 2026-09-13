@@ -40,7 +40,7 @@ import java.util.UUID
  * roles: submission is for the payment-ops/service identity; reads are open to payment-ops, viewers
  * and operators; **settlement and cycle triggering are restricted to payment-ops/admin** (these are
  * the high-blast-radius actions — four-eyes via ADR-0034 MakerChecker is a tracked follow-up).
- * Enforced by Quarkus OIDC and locked by ClearingResourceSecurityTest.
+ * Enforced by Quarkus OIDC and locked by `ClearingSecurityContractTest`.
  *
  * ADR-0034 Phase 5 (issue #266): every endpoint now also carries `@Authorize` under the
  * `clearingBatch.*` action namespace — the pre-existing convention from `settleBatch`

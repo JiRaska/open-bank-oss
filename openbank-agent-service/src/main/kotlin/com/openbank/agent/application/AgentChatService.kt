@@ -55,6 +55,8 @@ class AgentChatService {
 
     @Inject lateinit var injectionGuard: PromptInjectionGuard
 
+    @Inject lateinit var contentSafety: AgentContentSafetyGuard
+
     // D7 (ADR-0031): one OTel span per governed run, exported to the existing Tempo backend.
     // Field-injected by Quarkus; defaults to the global tracer (a no-op when no SDK is installed,
     // e.g. in unit tests) so the loop never depends on tracing being wired.
@@ -230,6 +232,28 @@ class AgentChatService {
         // D6 guardrail: scan user-supplied input for known injection phrasings BEFORE the model
         // sees anything. In block mode a hit ends the run here (audited as DENIED); the charter
         // filter + OPA gate below still bound whatever a missed phrasing could reach.
+        // Model-based classifier AFTER the deterministic one, on the same messages: the regex set is
+        // free and cannot be talked out of a match, so it runs first and the network call only
+        // happens for what it lets through. Only the LAST user message is classified — the earlier
+        // turns were classified when they arrived, and re-classifying the whole history would pay
+        // for every turn again on every turn.
+        history.lastOrNull { it.role == ChatRole.USER }?.let { msg ->
+            if (contentSafety.checkUserInput(identity, msg.content)) {
+                return LoopResult(
+                    outcome = ChatOutcome(
+                        reply = UNSAFE_REFUSAL,
+                        model = modelId ?: gateway.defaultModelId(),
+                        toolCalls = emptyList(),
+                    ),
+                    promptHash = AgentRunAuditor.promptHash(
+                        listOf(ChatMessage(ChatRole.SYSTEM, systemPrompt)) + history,
+                    ),
+                    totalTokens = 0,
+                    auditResult = AuditResult.DENIED,
+                    detail = "content_safety",
+                )
+            }
+        }
         history.filter { it.role == ChatRole.USER }.forEach { msg ->
             val detection = injectionGuard.scanUserInput(identity, msg.content)
             if (detection != null && injectionGuard.blocks()) {
@@ -322,6 +346,18 @@ class AgentChatService {
                     log.infof(
                         "D4: proposal detected in assistant reply for agent=%s",
                         ASSISTANT_IDENTITY.agentId,
+                    )
+                }
+                // Output side: an unsafe completion is not predictable from a safe-looking
+                // question, and an assistant that renders unsafe content into an admin screen has
+                // laundered it through a trusted UI. Checked before the reply leaves the loop.
+                if (contentSafety.checkAssistantOutput(identity, finalReply)) {
+                    return LoopResult(
+                        outcome = ChatOutcome(reply = UNSAFE_REFUSAL, model = lastModel, toolCalls = record),
+                        promptHash = promptHash,
+                        totalTokens = totalTokens,
+                        auditResult = AuditResult.DENIED,
+                        detail = "content_safety_output",
                     )
                 }
                 return LoopResult(
@@ -430,6 +466,10 @@ class AgentChatService {
         const val INSTRUMENTATION_NAME = "openbank-agent-service"
         const val RUN_SPAN = "agent.run"
         const val MAX_ITERATIONS = 5
+
+        /** Deliberately says nothing about WHICH rule matched — that detail is in the audit trail. */
+        const val UNSAFE_REFUSAL =
+            "I can't help with that. If you believe this is a mistake, the decision is in the audit trail."
 
         // Kept small to stay well under the free Groq tier's 12k tokens/min budget: a tool round
         // is 2+ completions, each carrying the prompt + tool schemas + (capped) results.

@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.0...clearing-service-v0.10.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **clearing:** guard clearing_outbox created_at plausibility at INSERT ([#9294](https://github.com/JiRaska/open-bank-oss/issues/9294)) ([13e6ee0](https://github.com/JiRaska/open-bank-oss/commit/13e6ee0e4e3180c903e7119414b2169cf90828b4))
+* **clearing:** replay-safe payment submit + ADR-0298 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9402](https://github.com/JiRaska/open-bank-oss/issues/9402)) ([21b8066](https://github.com/JiRaska/open-bank-oss/commit/21b8066308339c86b5dce67d0a44f87110b2d99c))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.1...clearing-service-v0.10.0) (2026-09-08)
+
+
+### Features
+
+* **clearing:** post net-settlement journal per settled batch via the transactional outbox ([#8723](https://github.com/JiRaska/open-bank-oss/issues/8723)) ([5e38f44](https://github.com/JiRaska/open-bank-oss/commit/5e38f445e4169f24a4f0871ca748c22debf9e384))
+
+
+### Bug Fixes
+
+* **clearing:** announce an empty clearing cycle instead of settling it silently ([#8844](https://github.com/JiRaska/open-bank-oss/issues/8844)) ([38239b2](https://github.com/JiRaska/open-bank-oss/commit/38239b242e37e4a3f3c83b218cd982414fdd126d)), closes [#8745](https://github.com/JiRaska/open-bank-oss/issues/8745)
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.0...clearing-service-v0.9.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **clearing:** settle commits batch, items and outbox row in one transaction ([#8509](https://github.com/JiRaska/open-bank-oss/issues/8509)) ([#8621](https://github.com/JiRaska/open-bank-oss/issues/8621)) ([bae4b49](https://github.com/JiRaska/open-bank-oss/commit/bae4b498a37b78ab1f6ee38f49c8e967a6bd2547))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.1...clearing-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.0...clearing-service-v0.8.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.10...clearing-service-v0.8.0) (2026-08-19)
+
+
+### Features
+
+* **clearing:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5693](https://github.com/JiRaska/open-bank-oss/issues/5693)) ([dc25d40](https://github.com/JiRaska/open-bank-oss/commit/dc25d40b3de7f3f0460800c05e50eb24347a17ad))
+
+## [0.7.10](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.9...clearing-service-v0.7.10) (2026-08-18)
+
+
+### Bug Fixes
+
+* **clearing:** add sourceService for AuditConsumer attribution ([#5351](https://github.com/JiRaska/open-bank-oss/issues/5351)) ([0a6d67d](https://github.com/JiRaska/open-bank-oss/commit/0a6d67d0be73249cf4f81df430432dcc3c742cdb)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.7.9](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.8...clearing-service-v0.7.9) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.7.8](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.7...clearing-service-v0.7.8) (2026-08-10)
 
 

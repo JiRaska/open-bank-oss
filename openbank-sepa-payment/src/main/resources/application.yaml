@@ -76,6 +76,11 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
       scope: jakarta.inject.Singleton
+    # #8505: resolves debtorAccountId → owning party for the AML case's party_id (the SEPA
+    # rail's port of the domestic #3274 fix). Read by AccountServiceClient via @ConfigProperty.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
     document-service:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
       scope: jakarta.inject.Singleton

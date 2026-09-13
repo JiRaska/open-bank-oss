@@ -18,7 +18,9 @@ import com.openbank.sca.application.usecase.ScaChallengeNotAwaitingException
 import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
 import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
 import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
+import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
+import com.openbank.sca.domain.model.ScaMethod
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -50,6 +52,13 @@ class ScaExceptionMapperTest {
     @Test
     fun `expired maps to 422 VALIDATION_ERROR`() {
         val response = ScaExpiredMapper().toResponse(ScaChallengeExpiredException(id))
+        assertThat(response.status).isEqualTo(422)
+        assertThat(bodyOf(response).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+    }
+
+    @Test
+    fun `method-not-deliverable maps to 422 VALIDATION_ERROR`() {
+        val response = ScaMethodNotDeliverableMapper().toResponse(ScaMethodNotDeliverableException(ScaMethod.TOTP))
         assertThat(response.status).isEqualTo(422)
         assertThat(bodyOf(response).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
     }

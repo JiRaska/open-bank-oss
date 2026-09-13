@@ -28,13 +28,30 @@
   supplychain` both passed and `gates (lint)` failed on two of the three. Both meta-gates had landed
   on `main` while the branch was open, which is the normal case, not bad luck. The full run is ~340 s
   CPU / ~50 s wall on 8 jobs; that is cheaper than one CI round trip.
-  **Six failures are environmental — know them or you will read them as your regression.** Five
-  diff-scoped gates (`api-contract`, `release-scope-mismatch`, `db-migration`, `schema-compat`,
-  `threat-model-updated-on-trust-boundary-change`) print `PR_DIFF_BASE is empty but this gate
-  requires it — refusing to run vacuously`, and `loki-rule-load-test` reports UNFALSIFIED on
-  `BASE_REF: unbound variable`. Both are variables only CI sets. Confirm rather than assume: run the
-  same ids in a throwaway `git worktree add --detach <tmp> origin/main` and check they fail
-  identically there. Anything that fails on your branch and passes on that control IS yours.
+  **A dozen-ish failures are environmental — and the count is not the thing to remember, because it
+  grows every time a diff-scoped gate is added.** Each one now SAYS SO in its own output: `<VAR> is
+  empty but this gate requires it — refusing to run vacuously` (`PR_DIFF_BASE` for the diff-scoped
+  gates; `BASE_REF`, `GITHUB_REPOSITORY`, `PR_BODY`, `PR_NUMBER` for the few that read the runner's
+  own context). Read the output, never the count — this bullet said **six** on 2026-09-12 when the
+  true number was eleven, and the five it did not name were read as "pre-existing red on `main`" and
+  published as such in a PR body. They were not; `main` was fine.
+  To run the whole manifest locally as CI sees it, supply what they ask for. Measured 2026-09-12
+  against `origin/main`: the bare `--all` gave **11 FAIL**, and this gave **0** — `220 gates
+  PASS=217 WARN=2 UNFALSIFIED=1`, the remaining three being a genuine advisory warning and a
+  network-bound gate, not environment.
+  ```
+  PR_DIFF_BASE=$(git rev-parse HEAD~1) BASE_REF=$(git rev-parse HEAD~1) \
+    GITHUB_REPOSITORY=JiRaska/open-bank-oss PR_NUMBER=<n> \
+    PR_BODY="$(gh pr view <n> --json body -q .body)" \
+    python3 .github/scripts/run-gates.py --all
+  ```
+  Leave one out and the gate needing it says which — that is the point; do not memorise the list.
+  **A control run answers "is this mine?", never "is this real?".** Running the same ids in a
+  throwaway `git worktree add --detach <tmp> origin/main` tells you only about authorship —
+  anything that fails on your branch and passes there IS yours, and anything that fails on BOTH is
+  merely *unclassified*. To classify it, make it PASS: give it the missing variable, credential or
+  input and watch it go green. Confirming a shared failure is a defect takes that second step, and
+  skipping it is how a false "main is red" gets published.
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
@@ -43,6 +60,37 @@
   plain red while having silently left half the fleet unlinted — 455 actionable findings against a
   true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
   its exit code.
+- **A rate-limited SARIF UPLOAD loses a real finding and reads as a scan failure.** On 2026-09-05
+  the installation limit hit CodeQL and Trivy in the same hour, and in both the analysis RAN — the
+  log shows queries interpreted and `Exported results to SARIF` — before
+  `##[error]API rate limit exceeded for installation` on the upload step. So the check goes red
+  having found nothing anyone can read, and a genuine alert in that SARIF is simply gone. Two
+  consequences worth carrying: a red security check is not evidence of a finding OR of cleanliness
+  until you read which STEP failed, and a green run earlier in the same hour does not clear a later
+  red one. The same hour's `dependency-review` failed with
+  `Dependency review is not supported on this repository. Please ensure that Dependency graph is
+  enabled` — which is NOT what it means when the graph is on (measured: the `dependency-graph/sbom`
+  endpoint answered with 2373 packages, and the same workflow passed on other branches minutes
+  later). That message is what the action prints when its API call fails for any reason, so it sends
+  you into the repository settings for a problem that is not there.
+- **"I could not READ the corpus" is a third state, and a gate that renders it as a failure
+  turns someone else's rate limit into your red PR.** On 2026-08-21 ~18:25 UTC one installation
+  rate limit hit two gates in the same run and they disagreed:
+  `check-stale-comment-references.py` printed `::notice:: … UNRESOLVED … Not a pass and not a
+  failure` and stayed green, while `ruleset-context-parity` exited 1 and reddened #5896 — a PR
+  touching only admin-ui, `openbank-infra/scripts`, docs and a `CLAUDE.md`. "The ruleset requires
+  X and no job emits X" and "the rulesets API did not answer" are different facts; only the first
+  is a finding. The pattern to copy is the notice + exit 0, with the transient family named
+  explicitly (rate limit, secondary rate limit, timeout, DNS/connection, 5xx) so a NON-transient
+  failure still goes red — on GitHub a rate limit and a permission denial are both HTTP 403 and
+  are told apart only by the message text (`API rate limit exceeded` vs `Resource not accessible
+  by integration` / `Must have admin rights`), so distinguish on that, and where a probe cannot
+  tell them apart, say so rather than degrading both. **The floor undoes this one layer up if you
+  let it**: `min_subjects:` sees 0 subjects and fails a run that examined nothing by definition,
+  so the gate prints `SUBJECTS=UNRESOLVED` (`gatelib.subjects_unresolved`) and run-gates.py skips
+  the floor for that run only, saying so in the output — a silent pass there is indistinguishable
+  from a gate that really looked.
+
 - **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
   mode is what removes the pressure to check it.** The repo already knows a gate that has only ever
   passed is unfalsified; the sharper form is that a gate can fire CORRECTLY and have its *triage* be
@@ -365,6 +413,63 @@
   and dump `.jobs.<job>.steps[<n>].run` to a file, then run that. When the step calls something
   destructive (`gh run rerun`, a deploy, a delete), stub the binary on `PATH` — **and validate
   the stub against a known-positive first**, or a silent passthrough runs the real thing.
+
+- **A new Kafka channel is TWO deploys, not one, and doing it in one is a hard boot failure.**
+  The msg-override ConfigMap that supplies `group.id` / `auto.offset.reset` (the #686 apparatus) is
+  applied by Argo BEFORE auto-deploy bumps the image, so a channel named there that the RUNNING
+  image has no `connector:` for is SRMSG00071 — SmallRye refuses to start, so the whole service
+  stops rather than the one consumer degrading. `msg-channel-image-parity` compares the ConfigMap
+  against the `application.yaml` inside the image that is actually deployed and blocks it at PR
+  time. Order: (1) code + `application.yaml` channel + the ACLs, merge, let the image ship;
+  (2) the ConfigMap lines. In between, the consumer runs on the fallback group id
+  (`quarkus.application.name`), so grant the KafkaUser Read on **both** group names or every poll
+  answers `GroupAuthorizationException` — which is silent, because a consumer that cannot join a
+  group looks exactly like a topic with nothing on it (#8877, #8882).
+
+### A watch about ONE lane must read ONE lane
+- **`auto-deploy-red-watch` ran green through 27 hours of red — its population was every lane.**
+  auto-deploy has three triggers; only `schedule` deploys the whole fleet, and `push` runs (the
+  services one merge touched) land green between scheduled ticks. The watch read the three newest
+  completed runs of any event: `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` was `stuck =
+  false`, ten times over, and the not-stuck branch would have CLOSED an open issue on that push
+  green. Filter the population server-side (`event=schedule`), close only on the same lane's
+  green, bound the query (it paginated ~2 300 runs to look at three, and was failing on the
+  installation rate limit the same morning), and keep the decision in a script with a
+  `--self-test` whose known-positive is the interleaved fixture
+  (`detect-auto-deploy-stuck.py`, gate `auto-deploy-red-watch-declaration`, rules.yaml
+  `ci_watches.lane_scoped_population`). Whether the other watches share the class is a thing to
+  measure per watch, not assert.
+- **A tokenless `gh` on a recovery path is red only on the day you need it.** `gh pr list` in
+  admin-ui-deploy's deploy-source guard ran only when a deploy branch already existed and had no
+  `GH_TOKEN`; `set -e` ended the step there. Gate `workflow-gh-token-declared` matches the
+  COMMAND position, not the substring — an echoed `gh workflow run …` remediation is not a call.
+
+### main-protection: the bypass has two halves, and only one had a reader
+- **`rulesets/rule-suites` (the bypass LOG) is private and rejects fine-grained tokens;
+  `rulesets/{id}` (the bypass CONFIG) is world-readable.** Same feature, opposite access, and it
+  decides what kind of control each half can carry. The log needs a **classic** PAT with `repo`
+  (or a GitHub App token with Administration:read) — a fine-grained token holding
+  `Read access to administration and metadata` still answers `403 Resource not accessible by
+  personal access token`, and the 403 names no permission, so it reads like a scope problem
+  forever (#4791). A workflow `GITHUB_TOKEN` can never read it: `permissions:` has no
+  `administration:` key, and declaring one makes GitHub refuse to parse the whole workflow (zero
+  jobs, every push). Because of that the log half can only ever be a scheduled watch
+  (`merged-past-red-check-watch.yml`, #4240) — never a required check. The config half needs no
+  token at all and therefore can be one (`ruleset-bypass-actors`, Refs #4828).
+- **Detection and prevention are different halves, and the fleet had only detection.** The watch
+  names a merge that already went past a failing required check, up to twelve hours late. Who is
+  *permitted* to do that is one field, `bypass_actors` — today a single entry, RepositoryRole#5
+  (`admin`), `bypass_mode: pull_request`. Nothing in CI can stop that override: GitHub evaluates
+  the bypass at merge time, after every check has reported. What CI *can* do is notice the surface
+  being widened — a bot, a team, or an existing entry flipped to `always` (which additionally
+  permits a **direct push** to `main`) — which otherwise produces no diff, no PR and no red check
+  anywhere. Widening it is a Settings edit; after the gate it is a reviewed commit.
+- **`bypass_mode` must be compared, not just the actor id.** `pull_request` -> `always` keeps the
+  same `actor_id` and is the difference between "can merge a PR past a red check" and "can push
+  straight to main". A comparison keyed on the id alone calls that clean.
+- **Every agent here runs as an identity that CAN bypass.** `current_user_can_bypass` reads
+  `pull_requests_only`, not `never`, for the owner credentials `gh` is authenticated with — which
+  is why the prompt-level prohibition on override flags is load-bearing rather than belt-and-braces.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces

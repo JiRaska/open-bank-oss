@@ -1,5 +1,85 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.12.0...sanctions-service-v0.13.0) (2026-09-13)
+
+
+### Features
+
+* **sanctions:** answer 202 on refresh-all and defer imports to the scheduler ([#9184](https://github.com/JiRaska/open-bank-oss/issues/9184)) ([056d5e7](https://github.com/JiRaska/open-bank-oss/commit/056d5e774a16702e590030c6d6b74295b9920c15))
+
+
+### Bug Fixes
+
+* **sanctions:** guard sanctions_outbox created_at plausibility at INSERT ([#9319](https://github.com/JiRaska/open-bank-oss/issues/9319)) ([33d0d87](https://github.com/JiRaska/open-bank-oss/commit/33d0d87f81cf5434db710f3c7374b189b8385ec6))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.2...sanctions-service-v0.12.0) (2026-09-08)
+
+
+### Features
+
+* **sanctions:** import EU consolidated list from the first-party FSF feed with named import outcomes ([#8689](https://github.com/JiRaska/open-bank-oss/issues/8689)) ([f24c887](https://github.com/JiRaska/open-bank-oss/commit/f24c887227697e9c94925a53eca030590fd6d233))
+
+
+### Bug Fixes
+
+* **sanctions,party,libs-runtime,ci:** fleet-fuzz findings — null listTypes 500, malformed multipart 500, fuzz-env pepper ([#8942](https://github.com/JiRaska/open-bank-oss/issues/8942)) ([4b9687f](https://github.com/JiRaska/open-bank-oss/commit/4b9687f93cefe73517c9f75b8de41c7d70a9ac60))
+* **sanctions:** publish PEP_GLOBAL, the seeded list the spec omitted ([#6015](https://github.com/JiRaska/open-bank-oss/issues/6015)) ([9736f9d](https://github.com/JiRaska/open-bank-oss/commit/9736f9d5c9e42a2247a107d0d32cb348d333e010))
+* **sanctions:** reject an unrecognised listTypes entry instead of silently narrowing the screen ([#8715](https://github.com/JiRaska/open-bank-oss/issues/8715)) ([de2bb9a](https://github.com/JiRaska/open-bank-oss/commit/de2bb9a0f423554bac11e34b46e40e8c357d5e8d))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.1...sanctions-service-v0.11.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **sanctions:** drop EPOCH defaults from SanctionsEntry and entity timestamps ([#8405](https://github.com/JiRaska/open-bank-oss/issues/8405)) ([ade55c6](https://github.com/JiRaska/open-bank-oss/commit/ade55c616772265852edea8c0e9f1b61565604d0))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.0...sanctions-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **psd2,sanctions:** a null JSON array element is a 400, not a 500 ([#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)) ([#8003](https://github.com/JiRaska/open-bank-oss/issues/8003)) ([28eb8a3](https://github.com/JiRaska/open-bank-oss/commit/28eb8a3dee81237b6f07b5bf9e6e0f4dbe4e8f0f))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.10.1...sanctions-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.10.0...sanctions-service-v0.10.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.2...sanctions-service-v0.10.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.1...sanctions-service-v0.9.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sanctions:** add sourceService to audit-attribution outbox payload ([#5343](https://github.com/JiRaska/open-bank-oss/issues/5343)) ([74b609f](https://github.com/JiRaska/open-bank-oss/commit/74b609f52ab65c13aa7ec591a0136729b5e11fb2)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.0...sanctions-service-v0.9.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.3...sanctions-service-v0.9.0) (2026-08-13)
 
 

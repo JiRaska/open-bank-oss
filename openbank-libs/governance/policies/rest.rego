@@ -231,6 +231,43 @@ allowed_reasons contains "operator-decide-message-approval" if {
 	input.action == "opsmessage.approval.decide"
 }
 
+# ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
+# not `ROLE_OPERATOR` — the checker of the bank's VOICE is a distinct job function from an
+# operator's account/payment writes, and D6 declares the roles separately for exactly that
+# reason. commstyle.publish is ALSO gated at the application layer (a draft's own maker can
+# never be the caller here — CommunicationStyleService.publish, D3's literal "the maker can
+# never approve their own version"), which is a second, independent check on top of the pause
+# below: this rule only says WHO may attempt the call, not whether that specific draft is
+# theirs.
+allowed_reasons contains "commstyle-publish" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+	input.action == "commstyle.publish"
+}
+
+# Checker side of the same four-eyes flow. Identical shape to operator-decide-message-approval
+# above, gated to the comms-specific role rather than ROLE_OPERATOR — a lone ROLE_COMMS_APPROVER
+# with no ROLE_OPERATOR grant must still be able to decide a commstyle approval, which the
+# generic operator-read-any rule below (keyed to ROLE_OPERATOR/ROLE_ADMIN only) would not admit.
+allowed_reasons contains "commstyle-decide-publish-approval" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+	input.action == "commstyle.approval.decide"
+}
+
+# Read side of the same queue (ADR-0227 D2 unified inbox). Same role gate as the decide rule
+# above, for the same reason operator-read-any alone would not admit a lone ROLE_COMMS_APPROVER.
+allowed_reasons contains "commstyle-read-publish-approval" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "commstyle.approval.read"
+}
+
 # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
 # devices, register, etc.). The JWT `sub` equals the partyId in the customer realm
 # (ADR-0065/0066). Per-handler IDOR guards (e.g. debtorAccountId ownership in
@@ -413,6 +450,7 @@ four_eyes_required if {
 	startswith(input.action, sprintf("%s.", [scope]))
 	some verb in data.rules.four_eyes.verbs
 	endswith(input.action, sprintf(".%s", [verb]))
+	not four_eyes_exempt
 }
 
 # Feature-flag flip (ADR-0067 / issue #419): flipping a money-path flag is four-eyes-gated.
@@ -431,6 +469,19 @@ four_eyes_required if {
 # collection simply does not fire.
 four_eyes_required if {
 	input.action in data.rules.four_eyes.actions
+	not four_eyes_exempt
+}
+
+# Caller-aware exemption (ADR-0280, issue #8360): four_eyes_required is computed by action name
+# alone, so an action with a verified M2M caller used to be UNGATEABLE without pausing that
+# automation — the sca-service stalemate. data.rules.four_eyes.exemptions maps an exact action
+# name to the principal ids of its verified automation callers; for those identities the flag
+# does not fire, while every other caller (the human ops-console path) is still flagged.
+# Undefined — not an error — for any bundle whose rules.yaml predates the key, and for any
+# action with no entry: membership over an undefined collection does not fire, so `not
+# four_eyes_exempt` holds and the clauses above behave exactly as before.
+four_eyes_exempt if {
+	input.principal.id in data.rules.four_eyes.exemptions[input.action]
 }
 
 # ---------------------------------------------------------------------------------------

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.6.0...release-steward-v0.6.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **agents:** refuse instead of returning a fabricated proposal URL ([#7596](https://github.com/JiRaska/open-bank-oss/issues/7596)) ([f180c2b](https://github.com/JiRaska/open-bank-oss/commit/f180c2bce5ea27e7d38ec277de26b81551cffbf3)), closes [#5897](https://github.com/JiRaska/open-bank-oss/issues/5897)
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.5.0...release-steward-v0.6.0) (2026-08-06)
 
 

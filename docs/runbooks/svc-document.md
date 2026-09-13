@@ -30,7 +30,7 @@ triaging an incident that starts on `document`.
 
 ## Health & probes
 
-- Readiness: `GET :8143/q/health/ready` · Liveness: `GET :8143/q/health/live`
+- Readiness: `GET :8088/q/health/ready` · Liveness: `GET :8088/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `documents`); dashboards in Grafana.
 - Logs: `kubectl logs -n documents deploy/document-service -f`, or Loki
   `{namespace="documents"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `document`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/document-service -n documents` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/document-service -n documents --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/document-service -n documents --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

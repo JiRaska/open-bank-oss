@@ -34,6 +34,40 @@ class ApprovalResourceTest {
     }
 
     @Test
+    fun `listPending returns the store's pending queue, oldest first, mapped to the response shape`(): Unit =
+        runBlocking {
+            val approval = PendingApproval(
+                id = "appr-3",
+                action = "transaction.reverse",
+                resourceId = "txn-3",
+                makerId = "maker",
+                status = ApprovalStatus.PENDING,
+                createdAt = OffsetDateTime.parse("2026-08-19T00:00:00Z"),
+            )
+            val store = mockk<ApprovalStore>()
+            coEvery { store.findPending(50) } returns listOf(approval)
+
+            val response = resourceWith(store, "checker").listPending(50)
+
+            assertThat(response.status).isEqualTo(200)
+            @Suppress("UNCHECKED_CAST")
+            val body = response.entity as List<ApprovalResponse>
+            assertThat(body).hasSize(1)
+            assertThat(body[0].id).isEqualTo("appr-3")
+            assertThat(body[0].makerId).isEqualTo("maker")
+        }
+
+    @Test
+    fun `listPending clamps an out-of-range limit into the 1 to 200 window`(): Unit = runBlocking {
+        val store = mockk<ApprovalStore>()
+        coEvery { store.findPending(200) } returns emptyList()
+
+        resourceWith(store, "checker").listPending(500)
+
+        io.mockk.coVerify { store.findPending(200) }
+    }
+
+    @Test
     fun `decide resolves the checker id from the security identity and returns the mapped response`(): Unit =
         runBlocking {
             val decidedAt = OffsetDateTime.parse("2026-07-12T00:00:00Z")

@@ -6,8 +6,8 @@
 #
 # party-service ACL surface:
 #   Write + Describe: openbank.party.events    (own domain event output + outbox relay)
-#   Read  + Describe: openbank.kyc.events      (KYC case-lifecycle gate, ADR-0073)
-#   Read  + Describe: openbank.aml.events      (AML case-lifecycle gate, ADR-0073)
+#   Read  + Describe: openbank.kyc.events      (KYC case-lifecycle gate, ADR-0267 §2)
+#   Read  + Describe: openbank.aml.events      (AML case-lifecycle gate, ADR-0267 §2)
 #   Read  + Describe: openbank.consent.events  (marketing-consent projection, ADR-0205 D4)
 #   Read:             group openbank-party-service
 #
@@ -62,6 +62,36 @@ spec:
           name: openbank-party-service
           patternType: literal
         operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `aml-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.party.aml-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `consent-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.party.consent-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `kyc-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.party.kyc-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 # Keystore for party-service projected from `messaging` into `party`.

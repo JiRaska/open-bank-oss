@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.1...tpp-registry-service-v0.9.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **tpp-registry:** guard tpp_outbox created_at plausibility at INSERT ([#9323](https://github.com/JiRaska/open-bank-oss/issues/9323)) ([516c3e6](https://github.com/JiRaska/open-bank-oss/commit/516c3e60dedec7fe4e1af45e4cbe8667c7d4fc99))
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.0...tpp-registry-service-v0.9.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **tpp-registry:** reject a null array element with 400 instead of 500 ([#8007](https://github.com/JiRaska/open-bank-oss/issues/8007)) ([b8dd50c](https://github.com/JiRaska/open-bank-oss/commit/b8dd50c8fe334b014c3e2818665f3628245bebd5))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.8.0...tpp-registry-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.7.1...tpp-registry-service-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.7.0...tpp-registry-service-v0.7.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.14...tpp-registry-service-v0.7.0) (2026-08-16)
+
+
+### Features
+
+* **libs-runtime:** wire outboxDispatched/outboxDead metrics into AbstractOutboxDispatcher ([#5071](https://github.com/JiRaska/open-bank-oss/issues/5071)) ([8da83b0](https://github.com/JiRaska/open-bank-oss/commit/8da83b073b07052316c56425290579ff162dcbff)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
+## [0.6.14](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.13...tpp-registry-service-v0.6.14) (2026-08-16)
+
+
+### Bug Fixes
+
+* **tpp-registry:** write TPP lifecycle events to the outbox nothing wrote to ([#4995](https://github.com/JiRaska/open-bank-oss/issues/4995)) ([2da2c6c](https://github.com/JiRaska/open-bank-oss/commit/2da2c6c2a73fec9fb29e7003e3b71b13063fb532)), closes [#4007](https://github.com/JiRaska/open-bank-oss/issues/4007)
+
 ## [0.6.13](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.12...tpp-registry-service-v0.6.13) (2026-08-09)
 
 

@@ -27,7 +27,7 @@ data class FxRate(
     val pair: String get() = "$baseCurrency/$quoteCurrency"
     val midRate: BigDecimal get() = (bidRate + askRate).divide(BigDecimal.TWO)
     val spread: BigDecimal get() = askRate - bidRate
-    fun isValid(at: Instant = Instant.EPOCH) = at.isAfter(validFrom) && at.isBefore(validTo)
+    fun isValid(at: Instant) = at.isAfter(validFrom) && at.isBefore(validTo)
 
     /**
      * The same quote read from the other side: CZK/EUR out of EUR/CZK.

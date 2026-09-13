@@ -218,7 +218,15 @@ data class ProductRequest(
     val validTo: String? = null,
     val baseRate: Double? = null,
     val fee: Double? = null,
-    val fees: List<Fee>? = null,
+    /**
+     * Collections are declared with a NULLABLE element type on purpose, because that is the truth
+     * on the wire. Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check
+     * the ELEMENTS of a collection, so `{"fees": [null]}` deserialises happily into a `List<Fee>`
+     * holding a null, and the first element-wise read NPEs. Writing the types honestly is what
+     * makes [requireFees], [requireTermsAndConditions] and [requireTags] reachable instead of
+     * dead code -- they are the only way the domain object is built.
+     */
+    val fees: List<Fee?>? = null,
     val description: String? = null,
     val shortDescription: String? = null,
     val minBalance: Double? = null,
@@ -228,12 +236,26 @@ data class ProductRequest(
     val overdraftConfig: OverdraftConfig? = null,
     val termDepositConfig: TermDepositConfig? = null,
     val savingsConfig: SavingsConfig? = null,
-    val termsAndConditions: List<TermsAndConditions>? = null,
-    val tags: List<String>? = null,
+    val termsAndConditions: List<TermsAndConditions?>? = null,
+    val tags: List<String?>? = null,
     val eligibilitySegments: List<EligibilitySegment>? = null,
     /** Optional v1 optimistic precondition. v2 authoring requires it on every mutation. */
     val revision: Long? = null,
 ) {
+    /** `IllegalArgumentException` is rendered as a client error by the v1 resource; no
+     *  service-local mapper is added (#526). */
+    fun requireFees(): List<Fee>? = fees?.mapIndexed { index, fee ->
+        requireNotNull(fee) { "fees[$index] must not be null" }
+    }
+
+    fun requireTermsAndConditions(): List<TermsAndConditions>? = termsAndConditions?.mapIndexed { i, terms ->
+        requireNotNull(terms) { "termsAndConditions[$i] must not be null" }
+    }
+
+    fun requireTags(): List<String>? = tags?.mapIndexed { index, tag ->
+        requireNotNull(tag) { "tags[$index] must not be null" }
+    }
+
     fun toDomain(clock: Clock) = Product(
         id = UUID.randomUUID().toString(),
         code = code,
@@ -249,7 +271,7 @@ data class ProductRequest(
         validTo = validTo?.let { LocalDate.parse(it) },
         baseRate = baseRate ?: 0.0,
         fee = fee ?: 0.0,
-        fees = fees ?: emptyList(),
+        fees = requireFees() ?: emptyList(),
         description = description,
         shortDescription = shortDescription,
         minBalance = minBalance,
@@ -259,8 +281,8 @@ data class ProductRequest(
         overdraftConfig = overdraftConfig,
         termDepositConfig = termDepositConfig,
         savingsConfig = savingsConfig,
-        termsAndConditions = termsAndConditions ?: emptyList(),
-        tags = tags ?: emptyList(),
+        termsAndConditions = requireTermsAndConditions() ?: emptyList(),
+        tags = requireTags() ?: emptyList(),
         eligibilitySegments = eligibilitySegments ?: listOf(EligibilitySegment.ALL),
         createdAt = Instant.now(clock),
         updatedAt = Instant.now(clock),
@@ -278,7 +300,7 @@ data class ProductRequest(
         validTo = validTo?.let { LocalDate.parse(it) } ?: existing.validTo,
         baseRate = baseRate ?: existing.baseRate,
         fee = fee ?: existing.fee,
-        fees = fees ?: existing.fees,
+        fees = requireFees() ?: existing.fees,
         description = description ?: existing.description,
         shortDescription = shortDescription ?: existing.shortDescription,
         minBalance = minBalance ?: existing.minBalance,
@@ -288,8 +310,8 @@ data class ProductRequest(
         overdraftConfig = overdraftConfig ?: existing.overdraftConfig,
         termDepositConfig = termDepositConfig ?: existing.termDepositConfig,
         savingsConfig = savingsConfig ?: existing.savingsConfig,
-        termsAndConditions = termsAndConditions ?: existing.termsAndConditions,
-        tags = tags ?: existing.tags,
+        termsAndConditions = requireTermsAndConditions() ?: existing.termsAndConditions,
+        tags = requireTags() ?: existing.tags,
         eligibilitySegments = eligibilitySegments ?: existing.eligibilitySegments,
         updatedAt = Instant.now(clock),
     )

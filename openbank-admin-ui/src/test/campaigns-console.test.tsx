@@ -14,6 +14,12 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import CampaignsPage from '@/app/campaigns/page'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 // CampaignDetailPage can now take an operator to the newly created draft. The console tests render
 // that client page outside Next's App Router, so provide exactly the router capability it uses.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))

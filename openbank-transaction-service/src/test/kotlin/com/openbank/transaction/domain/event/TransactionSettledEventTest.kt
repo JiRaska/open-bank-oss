@@ -39,6 +39,8 @@ class TransactionSettledEventTest {
         assertThat(event.bookingDate).isEqualTo(bookingDate)
         assertThat(event.settledAt).isEqualTo(settledAt)
         assertThat(event.eventId).isNotNull()
+        // AuditConsumer attribution (#3994/#5256): read as the strongest (EVENT-sourced) claim.
+        assertThat(event.sourceService).isEqualTo("transaction-service")
     }
 
     @Test

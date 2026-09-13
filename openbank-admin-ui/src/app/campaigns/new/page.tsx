@@ -4,12 +4,13 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, BellRing, Clock3, Mail, Megaphone, PanelsTopLeft, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import {
   JourneyEditor,
   MAX_STEPS,
@@ -64,6 +65,41 @@ interface CampaignTrigger {
   humanForm: string
 }
 
+interface IncentiveOffer {
+  ref: { id: string; name: string; version: number }
+  productScope: string[]
+  effectiveFrom: string
+  expiresAt: string
+  stackingPolicy: 'EXCLUSIVE' | 'STACKABLE'
+}
+
+function isIncentiveOffer(value: unknown): value is IncentiveOffer {
+  if (!value || typeof value !== 'object') return false
+  const offer = value as Partial<IncentiveOffer>
+  const ref = offer.ref as Partial<IncentiveOffer['ref']> | undefined
+  const effectiveFrom = typeof offer.effectiveFrom === 'string' ? Date.parse(offer.effectiveFrom) : Number.NaN
+  const expiresAt = typeof offer.expiresAt === 'string' ? Date.parse(offer.expiresAt) : Number.NaN
+  return Boolean(
+    ref
+    && typeof ref.id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref.id)
+    && typeof ref.name === 'string'
+    && ref.name.trim().length > 0
+    && typeof ref.version === 'number'
+    && Number.isInteger(ref.version)
+    && ref.version > 0
+    && Array.isArray(offer.productScope)
+    && offer.productScope.length > 0
+    && offer.productScope.every(scope => typeof scope === 'string' && scope.trim().length > 0)
+    && Number.isFinite(effectiveFrom)
+    && Number.isFinite(expiresAt)
+    && expiresAt > effectiveFrom
+    && (offer.stackingPolicy === 'EXCLUSIVE' || offer.stackingPolicy === 'STACKABLE'),
+  )
+}
+
+type IncentiveCatalogueState = 'loading' | 'ok' | 'not_deployed' | 'unauthorized' | 'unreachable'
+
 /** The reviewed content choice served by campaign-service, rather than a second client-side copy. */
 interface CampaignTemplate {
   template: string
@@ -104,8 +140,15 @@ export default function NewCampaignPage() {
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
+  // ADR-0269 rule 1. No pre-selection: the maker states what this campaign sells, because
+  // a default would answer the credit step gate's question on their behalf.
+  const [productKind, setProductKind] = useState<'' | 'NONE' | 'UNSECURED' | 'SECURED' | 'REVOLVING'>('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [incentiveOffers, setIncentiveOffers] = useState<IncentiveOffer[]>([])
+  const [incentiveOfferRef, setIncentiveOfferRef] = useState<IncentiveOffer['ref'] | null>(null)
+  const [incentiveCatalogueState, setIncentiveCatalogueState] = useState<IncentiveCatalogueState>('loading')
+  const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments' | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
@@ -132,6 +175,9 @@ export default function NewCampaignPage() {
   const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // State only disables the button after React renders. Keep the network action single-flight so a
+  // rapid second submit cannot allocate another campaign draft before that render.
+  const saveInFlight = useRef(false)
 
   const templates = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.variables])) as Record<string, string[]>
   const templateChannel = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.channel])) as Record<string, EditorChannel>
@@ -168,12 +214,39 @@ export default function NewCampaignPage() {
   }
 
   useEffect(() => {
-    fetch('/api/segments')
-      .then(r => r.json())
-      .then((d: { items: Segment[]; state: string }) => {
-        if (d.state === 'ok') setSegments(d.items ?? [])
+    Promise.all([fetch('/api/audiences').then(r => r.json()), fetch('/api/segments').then(r => r.json())])
+      .then(([audiences, catalogue]: [{ items?: Array<Segment & { state?: string }>; state?: string }, { items?: Segment[]; state?: string }]) => {
+        const approved = audiences.state === 'ok'
+          ? (audiences.items ?? []).filter(item => (item.state ?? 'APPROVED') === 'APPROVED')
+          : catalogue.items ?? []
+        setSegments(approved)
+        setSegmentSource(audiences.state === 'ok' ? 'audiences' : 'segments')
       })
       .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/incentives')
+      .then(r => r.json())
+      .then((response: { items?: IncentiveOffer[]; state?: string }) => {
+        if (response.state === 'ok') {
+          const items = response.items
+          if (!Array.isArray(items) || !items.every(isIncentiveOffer)) {
+            setIncentiveOffers([])
+            setIncentiveCatalogueState('unreachable')
+            return
+          }
+          setIncentiveOffers(items)
+          setIncentiveCatalogueState('ok')
+          return
+        }
+        setIncentiveCatalogueState(
+          response.state === 'not_deployed' || response.state === 'unauthorized'
+            ? response.state
+            : 'unreachable',
+        )
+      })
+      .catch(() => setIncentiveCatalogueState('unreachable'))
   }, [])
 
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
@@ -181,8 +254,8 @@ export default function NewCampaignPage() {
   function previewReach(ref: string) {
     setReach(null)
     const [segName, segVersion] = ref.split('@')
-    if (!segName) return
-    fetch(`/api/segments/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
+    if (!segName || !segmentSource) return
+    fetch(`/api/${segmentSource}/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)
@@ -198,12 +271,14 @@ export default function NewCampaignPage() {
     fetch(`/api/campaigns/${encodeURIComponent(draftId)}`)
       .then(r => r.json())
       .then((d: { campaign?: {
-        state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
+        state?: string; name?: string; goal?: string; productKind?: 'NONE' | 'UNSECURED' | 'SECURED' | 'REVOLVING'
+        segmentRef?: { name: string; version: number }
         steps?: StoredCampaignStep[]; decisions?: Array<{
           sourceStepOrder: number; evaluationDelaySeconds?: number
           confirmedStepOrder: number; notConfirmedStepOrder: number
         }>; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
         holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
+        incentiveOfferRef?: { id: string; name: string; version: number } | null
       }; sources?: { campaign?: string } }) => {
         const campaign = d.campaign
         if (d.sources?.campaign !== 'ok' || !campaign || campaign.state !== 'DRAFT') {
@@ -212,6 +287,11 @@ export default function NewCampaignPage() {
         }
         setName(campaign.name ?? '')
         setGoal(campaign.goal ?? '')
+        // NONE, not '' — a PERSISTED campaign always has a kind (NOT NULL, backfilled by V19), so a
+        // payload without one is an older response, not an unanswered question. Hydrating it as ''
+        // would mark an existing draft incomplete and quietly disable its save button, which is a
+        // worse failure than the one the empty default guards against on a NEW campaign.
+        setProductKind(campaign.productKind ?? 'NONE')
         if (campaign.segmentRef) {
           const ref = `${campaign.segmentRef.name}@${campaign.segmentRef.version}`
           setSegment(ref)
@@ -260,6 +340,7 @@ export default function NewCampaignPage() {
         setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
         setConversionRule(campaign.conversionRule ?? null)
         setHoldoutPercent(campaign.holdoutPercent ?? 0)
+        setIncentiveOfferRef(campaign.incentiveOfferRef ?? null)
         setContentExperiment(campaign.steps?.some(step => step.variantBVariables !== undefined) ?? false)
         if (campaign.schedule) {
           setEntryMode('SCHEDULE')
@@ -283,13 +364,23 @@ export default function NewCampaignPage() {
     if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
     setSegment(requestedAudience)
     const [name, version] = requestedAudience.split('@')
-    fetch(`/api/segments/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+    fetch(`/api/${segmentSource}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)
       })
       .catch(() => undefined)
-  }, [requestedAudience, segments])
+  }, [requestedAudience, segments, segmentSource])
+
+  // Draft hydration can finish before the rolling audience catalogue tells us which preview
+  // endpoint exists. Re-run only once that source is known; otherwise an old deployment renders
+  // a real legacy draft with a permanently unknown reach.
+  useEffect(() => {
+    if (segment && segmentSource) previewReach(segment)
+  // previewReach is intentionally a closure: only the selected immutable ref and resolved source
+  // determine this external lookup.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment, segmentSource])
 
   // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
   // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
@@ -415,8 +506,11 @@ export default function NewCampaignPage() {
     entryMode === 'MANUAL' ||
     (entryMode === 'SCHEDULE' && cadence !== '') ||
     (entryMode === 'TRIGGER' && trigger !== '')
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
-    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+  const pinnedIncentiveUnavailable = incentiveOfferRef !== null &&
+    !incentiveOffers.some(offer => offer.ref.id === incentiveOfferRef.id)
+  const ready = name.trim() !== '' && goal.trim() !== '' && productKind !== '' && segment !== '' && steps.length > 0 &&
+    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null) &&
+    !pinnedIncentiveUnavailable
   // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
   // overview next to the canvas so a marketer can scan the whole customer footprint without
   // opening every node. It is derived solely from the steps that will be sent to campaign-service.
@@ -460,6 +554,8 @@ export default function NewCampaignPage() {
   }
 
   const submit = () => {
+    if (saveInFlight.current) return
+    saveInFlight.current = true
     setSaving(true)
     setError(null)
     const [segName, segVersion] = segment.split('@')
@@ -469,11 +565,13 @@ export default function NewCampaignPage() {
       body: JSON.stringify({
         name: name.trim(),
         goal: goal.trim(),
+        productKind,
         segmentName: segName,
         segmentVersion: Number(segVersion),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
+        ...(incentiveOfferRef ? { incentiveOfferRef } : {}),
         ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
         ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
         ...(decisions.length > 0 ? {
@@ -520,10 +618,13 @@ export default function NewCampaignPage() {
         )
       })
       .catch(() => setError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
-      .finally(() => setSaving(false))
+      .finally(() => {
+        saveInFlight.current = false
+        setSaving(false)
+      })
   }
 
-  return (
+  return <AuthGuard permission="campaign:create">
     <div className="campaign-composer">
       <header className="campaign-composer-hero">
         <Link href="/campaigns" className="campaign-composer-back">
@@ -561,6 +662,7 @@ export default function NewCampaignPage() {
           </div>
           <input
             id="c-name"
+            aria-label={t('Název kampaně', 'Campaign name')}
             className="input w-full"
             style={{ fontSize: '1.5rem', fontWeight: 600, padding: '0.7rem 0.9rem' }}
             placeholder={t('Pojmenujte kampaň', 'Name this campaign')}
@@ -569,6 +671,7 @@ export default function NewCampaignPage() {
           />
           <input
             id="c-goal"
+            aria-label={t('Cíl kampaně', 'Campaign goal')}
             className="input w-full"
             style={{ marginTop: '0.75rem' }}
             placeholder={t(
@@ -578,6 +681,33 @@ export default function NewCampaignPage() {
             value={goal}
             onChange={e => setGoal(e.target.value)}
           />
+          <label
+            htmlFor="c-product-kind"
+            className="block"
+            style={{ marginTop: '0.75rem', fontSize: '0.85rem', opacity: 0.8 }}
+          >
+            {t('Nabízí tato kampaň úvěr?', 'Does this campaign offer credit?')}
+          </label>
+          <select
+            id="c-product-kind"
+            aria-label={t('Typ úvěrového produktu', 'Credit product kind')}
+            className="input w-full"
+            style={{ marginTop: '0.25rem' }}
+            value={productKind}
+            onChange={e => setProductKind(e.target.value as typeof productKind)}
+          >
+            <option value="">{t('Vyberte…', 'Choose…')}</option>
+            <option value="NONE">{t('Ne — neúvěrová kampaň', 'No — not a credit campaign')}</option>
+            <option value="UNSECURED">{t('Ano — spotřebitelský úvěr', 'Yes — unsecured loan')}</option>
+            <option value="SECURED">{t('Ano — zajištěný úvěr (hypotéka, auto)', 'Yes — secured loan (mortgage, car)')}</option>
+            <option value="REVOLVING">{t('Ano — revolvingový (kontokorent, karta)', 'Yes — revolving (overdraft, card)')}</option>
+          </select>
+          <p style={{ marginTop: '0.35rem', fontSize: '0.78rem', opacity: 0.65 }}>
+            {t(
+              'Úvěrová kampaň se doručí jen klientům, kteří si nabídky úvěru sami zapnuli.',
+              'A credit campaign is delivered only to customers who switched credit offers on themselves.',
+            )}
+          </p>
         </div>
 
         <div className="campaign-audience-card">
@@ -595,6 +725,8 @@ export default function NewCampaignPage() {
                   type="button"
                   data-segment={ref}
                   data-selected={active ? 'true' : 'false'}
+                  aria-pressed={active}
+                  aria-label={t(`Vybrat publikum ${s.name}`, `Select ${s.name} audience`)}
                   onClick={() => {
                     setSegment(ref)
                     previewReach(ref)
@@ -632,6 +764,64 @@ export default function NewCampaignPage() {
           </p>
         </div>
 
+        <div className="campaign-audience-card" data-incentive-selection>
+          <div className="campaign-section-heading">
+            <div>
+              <p>{t('Motivace', 'Incentive')}</p>
+              <h2>{t('Volitelná odměna', 'Optional reward')}</h2>
+            </div>
+          </div>
+          <label htmlFor="c-incentive" className="text-sm font-medium">
+            {t('Publikovaná nabídka', 'Published offer')}
+          </label>
+          <select
+            id="c-incentive"
+            className="input w-full"
+            value={incentiveOfferRef?.id ?? ''}
+            disabled={incentiveCatalogueState !== 'ok'}
+            onChange={event => setIncentiveOfferRef(
+              incentiveOffers.find(offer => offer.ref.id === event.target.value)?.ref ?? null,
+            )}
+          >
+            <option value="">{t('Bez odměny', 'No reward')}</option>
+            {pinnedIncentiveUnavailable && incentiveOfferRef && (
+              <option value={incentiveOfferRef.id}>
+                {incentiveOfferRef.name}@{incentiveOfferRef.version} · {t('již není dostupná', 'no longer available')}
+              </option>
+            )}
+            {incentiveOffers.map(offer => (
+              <option key={offer.ref.id} value={offer.ref.id}>
+                {offer.ref.name}@{offer.ref.version} · {offer.productScope.join(', ')}
+              </option>
+            ))}
+          </select>
+          {incentiveCatalogueState !== 'ok' && (
+            <p role="status" className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+              {incentiveCatalogueState === 'not_deployed'
+                ? t('Incentive service není v tomto prostředí nasazená.', 'Incentive service is not deployed in this environment.')
+                : incentiveCatalogueState === 'unauthorized'
+                  ? t('Katalog odměn nemáte oprávnění zobrazit.', 'You are not authorized to view the incentive catalogue.')
+                  : incentiveCatalogueState === 'loading'
+                    ? t('Načítám katalog odměn…', 'Loading incentive catalogue…')
+                    : t('Katalog odměn teď není dostupný.', 'The incentive catalogue is currently unavailable.')}
+            </p>
+          )}
+          {incentiveCatalogueState === 'ok' && pinnedIncentiveUnavailable && incentiveOfferRef && (
+            <p role="alert" className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+              {t(
+                `Připnutá nabídka ${incentiveOfferRef.name}@${incentiveOfferRef.version} už není publikovaná. Vyberte jinou nebo odměnu výslovně odeberte.`,
+                `Pinned offer ${incentiveOfferRef.name}@${incentiveOfferRef.version} is no longer published. Choose another offer or explicitly remove the reward.`,
+              )}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+            {t(
+              'Kampaň uloží přesnou publikovanou verzi. Rezervaci kódu a hodnotu odměny řídí Incentive service.',
+              'The campaign pins the exact published revision. Incentive service owns code reservation and reward value.',
+            )}
+          </p>
+        </div>
+
         <div className="campaign-entry-card" data-entry-mode={entryMode}>
           <div className="campaign-section-heading">
             <span className="campaign-section-number">03</span>
@@ -648,6 +838,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="MANUAL"
               data-selected={entryMode === 'MANUAL' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'MANUAL'}
               onClick={() => chooseEntryMode('MANUAL')}
               className="rounded-lg border p-3 text-left text-sm"
               style={entryMode === 'MANUAL' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
@@ -661,6 +852,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="SCHEDULE"
               data-selected={entryMode === 'SCHEDULE' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'SCHEDULE'}
               onClick={() => chooseEntryMode('SCHEDULE')}
               disabled={cadences.length === 0}
               className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
@@ -675,6 +867,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="TRIGGER"
               data-selected={entryMode === 'TRIGGER' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'TRIGGER'}
               onClick={() => chooseEntryMode('TRIGGER')}
               disabled={triggers.length === 0}
               className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
@@ -995,8 +1188,10 @@ export default function NewCampaignPage() {
         </div>
         <div className="campaign-composer-footer-actions">
         <button
+          type="button"
           onClick={submit}
           disabled={!ready || saving}
+          aria-busy={saving}
           className="btn btn-primary disabled:opacity-40"
         >
           {saving
@@ -1007,7 +1202,7 @@ export default function NewCampaignPage() {
           <span className="text-xs text-muted-foreground">
             {incomplete
               ? t('Některý krok má nevyplněné hodnoty.', 'A step still has empty values.')
-              : t('Vyplňte název, cíl a publikum.', 'Fill in the name, goal and audience.')}
+              : t('Vyplňte název, cíl, typ produktu a publikum.', 'Fill in the name, goal, product kind and audience.')}
           </span>
         )}
         {reach !== null && (
@@ -1023,5 +1218,5 @@ export default function NewCampaignPage() {
         </div>
       </footer>
     </div>
-  )
+  </AuthGuard>
 }

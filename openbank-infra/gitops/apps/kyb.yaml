@@ -1,0 +1,44 @@
+# KYB domain: kyb-service + its single-owner CNPG Postgres + OIDC ExternalSecret + Kafka mTLS
+# identity + OPA bundle. kyb-service owns the BusinessOnboardingCase (ADR-0284) — the
+# register-verified, multi-signer onboarding of a sole trader or company — writes the entity
+# party and its representation mandates into party-service, and publishes the case lifecycle
+# onto openbank.kyb.events.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyb
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/kyb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyb
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      # The OPA bundle ConfigMap is within ~2 KB of the ceiling that client-side apply can
+      # carry: kubectl stores the whole object in the
+      # `kubectl.kubernetes.io/last-applied-configuration` annotation, and the API server
+      # rejects an annotation set over 256 KB with `metadata.annotations: Too long`. Argo
+      # then retries forever while the cluster keeps serving the PREVIOUS policy — a silent
+      # failure, since the Application looks busy rather than broken. Server-side apply does
+      # not write that annotation at all. 66 of the 89 Applications already set this; this
+      # one was created without it (#3414) and any further growth of the embedded
+      # rules.yaml tips it over — which is exactly how it surfaced here.
+      # Gate: opa-bundle-apply-size (.github/scripts/check-opa-bundle-apply-size.py).
+      - ServerSideApply=true

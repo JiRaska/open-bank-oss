@@ -39,10 +39,67 @@ describe('hasPermission', () => {
     expect(hasPermission([ROLES.KYC_OPENER], 'kyc:approve')).toBe(false)
   })
 
+  it('matches party-service PII read roles without widening the backend gate', () => {
+    expect(hasPermission([ROLES.ADMIN], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.VIEWER], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.KYC], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.COMPLIANCE], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_OPENER], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_REVIEWER], 'parties:view')).toBe(false)
+  })
+
   it('admits the supervisor to payment approval and audit reading, not to creation', () => {
     expect(hasPermission([ROLES.SUPERVISOR], 'payments:approve')).toBe(true)
     expect(hasPermission([ROLES.SUPERVISOR], 'audit:view')).toBe(true)
     expect(hasPermission([ROLES.SUPERVISOR], 'payments:create')).toBe(false)
+  })
+
+  // Issue #5020: the demo account (ROLE_VIEWER + ROLE_DEMO only, no write-capable role — see
+  // fix/demo-account-viewer-only) is admitted to exactly the *:view permissions verified safe
+  // against their backend: onboarding-service accepts a plain VIEWER, and the system pages
+  // proxy telemetry with no backend RBAC of their own. It must NOT be admitted to any
+  // permission whose backend has no viewer-equivalent tier, or the nav would render a link
+  // that 403s on click — worse than hiding it. That verification lives in each permission's
+  // own comment in roles.ts; this test only pins the resulting boolean so a future edit that
+  // silently widens or narrows demo's reach is caught here.
+  it('admits the demo account to the two verified-safe view permissions, nothing else', () => {
+    expect(hasPermission([ROLES.DEMO], 'onboarding:view')).toBe(true)
+    expect(hasPermission([ROLES.DEMO], 'system:view')).toBe(true)
+    // Structurally blocked — no backend viewer tier exists (verified by reading the
+    // service's @RolesAllowed / rego, not assumed):
+    expect(hasPermission([ROLES.DEMO], 'kyc:view')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'audit:view')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'delegations:view')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'notifications:view')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'regulatory:view')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'templates:view')).toBe(false)
+    // Deliberate policy exclusion, not a technical gap — dispute-service's own rego documents
+    // ROLE_VIEWER as excluded from compliance data on PII grounds; a product/compliance call,
+    // not something this matrix should silently widen.
+    expect(hasPermission([ROLES.DEMO], 'compliance:view')).toBe(false)
+    // Demo must never gain a write-capable permission, regardless of what view access it holds.
+    expect(hasPermission([ROLES.DEMO], 'accounts:create')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'transactions:reverse')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'payments:approve')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'system:config')).toBe(false)
+  })
+
+  // Flaky Test Hunter (ADR-0168, issue #5499): 'flaky-test-hunter:trigger' mirrors
+  // FlakyTestResource's POST /check/trigger @RolesAllowed("ROLE_ADMIN") exactly — a viewer or
+  // operator can read the findings list (via system:view on the /iaops page) but must never see
+  // the "Run check now" action, same as the backend would 403 it.
+  it('admits only ROLE_ADMIN to trigger a flaky-test-hunter check', () => {
+    expect(hasPermission([ROLES.ADMIN], 'flaky-test-hunter:trigger')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'flaky-test-hunter:trigger')).toBe(false)
+    expect(hasPermission([ROLES.VIEWER], 'flaky-test-hunter:trigger')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'flaky-test-hunter:trigger')).toBe(false)
+  })
+
+  it('admits ROLE_ADMIN and ROLE_VIEWER to flaky-test-hunter:view, mirroring the GET /findings roles', () => {
+    expect(hasPermission([ROLES.ADMIN], 'flaky-test-hunter:view')).toBe(true)
+    expect(hasPermission([ROLES.VIEWER], 'flaky-test-hunter:view')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'flaky-test-hunter:view')).toBe(false)
   })
 })
 

@@ -8,6 +8,7 @@ package com.openbank.flakytest.infrastructure.config
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
+import java.util.Optional
 
 @ConfigMapping(prefix = "openbank.flaky-test-hunter")
 @ApplicationScoped
@@ -28,6 +29,9 @@ interface FlakyTestHunterConfig {
 
     @WithDefault("JiRaska/open-bank-oss")
     fun githubRepo(): String
+
+    /** Fine-grained token limited to contents:write and pull_requests:write on this repository. */
+    fun githubToken(): Optional<String>
 
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String

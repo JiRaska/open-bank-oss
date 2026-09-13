@@ -110,6 +110,11 @@ Rollback (Path B): repoint back to the still-running 16 Cluster — seconds, no 
 
 ## Restore Drill Result
 
+> **This section is the working detail; the drill RECORD lives in
+> [`docs/bcp/dr-test-log.md` § 2026-07-26](../bcp/dr-test-log.md).** That is what
+> `ledger.restore_drill` cites, and what the readiness gate can date. Keep the two in step —
+> a result recorded only here is invisible to every reader and every check (#5673).
+
 | Field | Value |
 |-------|-------|
 | Date | 2026-07-26 |
@@ -227,7 +232,10 @@ kubectl delete cluster ledger-db-drill -n ledger
 ```
 
 > **Precheck z runbooku** „Backups verified — restore has been test-rehearsed"
-> je od 2026-07-26 splněn pro `ledger` — atestováno v
-> `openbank-libs/governance/attestations.yaml: ledger.restore_drill`. Fix v TF
+> je od 2026-07-26 splněn pro `ledger` — zaznamenáno v
+> [`docs/bcp/dr-test-log.md` § 2026-07-26](../bcp/dr-test-log.md) a atestováno v
+> `openbank-libs/governance/attestations.yaml: ledger.restore_drill`. Pozor na rozsah:
+> změřené RTO je databázové (~84 s), žádná služba se na obnovený cluster nepřepnula a
+> **RPO změřeno nebylo** — tohle není `dr_drill`. Fix v TF
 > byl aplikován jako součást #1759. Zbylých ~19 money-path DB tuto drill zatím
 > nemá — postup výše je teď ověřený end-to-end, jen aplikuj per-service.

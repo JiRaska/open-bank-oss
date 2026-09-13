@@ -5,6 +5,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
 import {
   FileSignature, Plus, Search, RefreshCw, Edit, Eye, X, Send, Archive,
@@ -16,6 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
+import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -88,10 +91,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
   try { return JSON.parse(text) } catch { return null }
 }
 
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  DRAFT:     { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
-  PUBLISHED: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
-  RETIRED:   { bg: 'var(--surface-3)',  text: 'var(--text-tertiary)', border: 'var(--border)' },
+const TEMPLATE_STATUS_TONE: Record<TemplateStatus, Tone> = {
+  DRAFT: 'warning',
+  PUBLISHED: 'success',
+  RETIRED: 'neutral',
 }
 
 // Generic merge-field tokens offered as clickable chips. These are a UX aid for
@@ -186,15 +189,6 @@ const DEFAULT_SAMPLE_DATA = {
 }
 const DEFAULT_SAMPLE_DATA_TEXT = JSON.stringify(DEFAULT_SAMPLE_DATA, null, 2)
 
-function StatusBadge({ status }: { status?: string }) {
-  const c = STATUS_COLOR[status ?? ''] ?? STATUS_COLOR.DRAFT
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: c.bg, color: c.text, border: `1px solid ${c.border}`, letterSpacing: '0.03em' }}>
-      {status ?? 'DRAFT'}
-    </span>
-  )
-}
-
 export default function DocumentTemplatesPage() {
   const { t, language } = useLanguage()
   const { data: session } = useSession()
@@ -214,6 +208,13 @@ export default function DocumentTemplatesPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
 
   const [modalOpen, setModalOpen] = useState(false)
+  const modalCloseRef = useRef<HTMLButtonElement>(null)
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null)
+  // Unsaved-draft guard (#9187). main's merge of this page rebuilt the editor on Radix and kept
+  // the focus-return half; this is the other half — closing a DIRTY editor must ask first.
+  const [discardEditorOpen, setDiscardEditorOpen] = useState(false)
+  const [editorBaseline, setEditorBaseline] = useState('')
+  const discardCancelRef = useRef<HTMLButtonElement>(null)
   const [editingTemplate, setEditingTemplate] = useState<DocumentTemplate | null>(null)
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
@@ -236,6 +237,20 @@ export default function DocumentTemplatesPage() {
   // so this bar is modelled on the app's own modal-overlay convention instead.
   const [pendingAction, setPendingAction] = useState<{ id: string; kind: 'publish' | 'retire' } | null>(null)
   const [actioning, setActioning] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const actionCancelRef = useRef<HTMLButtonElement>(null)
+  const actionReturnFocusRef = useRef<HTMLElement | null>(null)
+  const actionReturnIdRef = useRef<string | null>(null)
+
+  const openLifecycleDialog = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    action: { id: string; kind: 'publish' | 'retire' },
+  ) => {
+    actionReturnFocusRef.current = event.currentTarget
+    actionReturnIdRef.current = `template-row-primary-${action.id}`
+    setLifecycleError(null)
+    setPendingAction(action)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -252,7 +267,6 @@ export default function DocumentTemplatesPage() {
       setTemplates(items)
       setVisibleCount(PAGE_SIZE)
     } catch (e) {
-      setTemplates([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -353,17 +367,46 @@ export default function DocumentTemplatesPage() {
     previewRequestIdRef.current++
   }
 
-  const openCreateModal = () => {
+  // The baseline is what the editor opened WITH; dirty is any divergence from it. Comparing
+  // against a snapshot rather than tracking edits means a change that is typed and then undone
+  // correctly reads as clean, and no per-field wiring can be forgotten.
+  const editorSnapshot = useCallback(
+    (draft: Partial<DocumentTemplate>, sample: string) => JSON.stringify({ draft, sample }),
+    [],
+  )
+  const editorDirty = canEdit && editorBaseline !== editorSnapshot(formData, sampleDataText)
+
+  function requestEditorClose() {
+    if (saving) return
+    if (editorDirty) {
+      setDiscardEditorOpen(true)
+      return
+    }
+    setModalOpen(false)
+  }
+
+  function discardEditor() {
+    setDiscardEditorOpen(false)
+    setModalOpen(false)
+  }
+
+  const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(null)
-    setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
+    const next = { code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
   }
 
-  const openEditModal = (tpl: DocumentTemplate) => {
+  const openEditModal = (event: React.MouseEvent<HTMLButtonElement>, tpl: DocumentTemplate) => {
+    modalReturnFocusRef.current = event.currentTarget
     setEditingTemplate(tpl)
-    setFormData({ ...tpl })
+    const next = { ...tpl }
+    setFormData(next)
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setActionError(null)
     resetPreviewState()
     setModalOpen(true)
@@ -388,8 +431,14 @@ export default function DocumentTemplatesPage() {
     })
   }
 
+  // ONE lock across save, publish and retire (#7091): they were separate React flags,
+  // so a save could overlap a publish on the same template. React state disables the
+  // control a render too late, so the claim is synchronous.
+  const flight = useSingleFlight()
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const outcome = await flight.run('template:write', async () => {
     setSaving(true)
     setActionError(null)
     try {
@@ -412,73 +461,64 @@ export default function DocumentTemplatesPage() {
     } finally {
       setSaving(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const runAction = async (id: string, kind: 'publish' | 'retire') => {
+    const outcome = await flight.run('template:write', async () => {
     setActioning(true)
-    setActionError(null)
+    setLifecycleError(null)
     try {
       await apiFetch(`${TEMPLATES_PATH}/${id}/${kind}`, { method: 'POST' })
       await load()
       setPendingAction(null)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('Akci se nepodařilo provést', 'The action could not be completed'))
+      setLifecycleError(err instanceof Error ? err.message : t('Akci se nepodařilo provést', 'The action could not be completed'))
     } finally {
       setActioning(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   return (
     <AuthGuard permission="templates:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Šablony dokumentů', 'Document Templates')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileSignature size={18} style={{ color: 'var(--accent)' }} />
-              {t('Šablony dokumentů', 'Document Templates')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa šablon smluv, formulářů a vygenerovaných dokumentů (openbank-document-service)', 'Manage contract/form templates and generated documents (openbank-document-service)')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+        <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Šablony dokumentů', 'Document Templates')}</span></div>} icon={<FileSignature size={20} aria-hidden="true" />} title={t('Šablony dokumentů', 'Document Templates')} subtitle={t('Správa šablon smluv, formulářů a vygenerovaných dokumentů (openbank-document-service)', 'Manage contract/form templates and generated documents (openbank-document-service)')} actions={<div style={{ display: 'flex', gap: '8px' }}>
             {canEdit && tab === 'templates' && (
-              <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
+              <button className="btn btn-primary" type="button" onClick={openCreateModal} disabled={loading}>
                 <Plus size={14} /> {t('Nová šablona', 'New Template')}
               </button>
             )}
-            <button className="btn btn-secondary" onClick={load} disabled={loading}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
+              aria-busy={loading} aria-label={t('Obnovit šablony dokumentů', 'Refresh document templates')}>
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
-          </div>
-        </div>
+          </div>} />
 
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
-          {([
-            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} /> },
-            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} /> },
-          ]).map(tb => (
-            <button key={tb.id} onClick={() => setTab(tb.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '13px', fontWeight: 600,
-                border: 'none', borderBottom: tab === tb.id ? '2px solid var(--accent)' : '2px solid transparent',
-                background: 'none', cursor: 'pointer', color: tab === tb.id ? 'var(--accent)' : 'var(--text-secondary)',
-              }}>
-              {tb.icon}{tb.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          items={[
+            { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} />, tabId: 'document-templates-tab', panelId: 'document-templates-panel' },
+            { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} />, tabId: 'document-documents-tab', panelId: 'document-documents-panel' },
+          ] satisfies readonly TabItem<typeof tab>[]}
+          value={tab}
+          onChange={setTab}
+          label={t('Obsah šablon dokumentů', 'Document template content')}
+          idPrefix="document"
+          style={{ marginBottom: 18, borderBottom: '1px solid var(--border)' }}
+        />
 
-        {tab === 'templates' && (
-          <>
+        <section id="document-templates-panel" role="tabpanel" aria-labelledby="document-templates-tab" hidden={tab !== 'templates'}>
             {unavailable && (
               <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
                 <DataUnavailable kind={unavailable.kind} service={t('Document-service', 'Document-service')} feature={t('Šablony dokumentů', 'Document templates')} lang={language} dense />
+                {templates.length > 0 && (
+                  <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                    {t('Zobrazené šablony a jejich publikační stavy jsou poslední dostupná data; obnovení se nezdařilo.', 'Displayed templates and publication states are the last available data; refresh failed.')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -504,12 +544,12 @@ export default function DocumentTemplatesPage() {
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div style={{ position: 'relative', flex: 1, minWidth: '220px', maxWidth: '300px' }}>
-                <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód nebo název…', 'Code or name…')} value={search} onChange={e => setSearch(e.target.value)} />
+                <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                <input id="template-search" aria-label={t('Vyhledat šablonu podle kódu nebo názvu', 'Search templates by code or name')} className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód nebo název…', 'Code or name…')} value={search} onChange={e => setSearch(e.target.value)} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Status', 'Status')}:</span>
-                <select className="input" style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <label htmlFor="template-status-filter" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Status', 'Status')}:</label>
+                <select id="template-status-filter" className="input" style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                   <option value="ALL">{t('Všechny', 'All')}</option>
                   <option value="DRAFT">{t('Návrh', 'Draft')}</option>
                   <option value="PUBLISHED">{t('Publikováno', 'Published')}</option>
@@ -537,7 +577,7 @@ export default function DocumentTemplatesPage() {
                       <td key={j}><div className="skeleton" style={{ height: '13px', width: j === 1 ? '140px' : '60px' }} /></td>
                     ))}</tr>
                   ))}
-                  {!loading && visible.length === 0 && (
+                  {!loading && !unavailable && visible.length === 0 && (
                     <tr><td colSpan={7} style={{ padding: 0 }}>
                       <DataUnavailable kind="no_data" feature={t('Šablony', 'Templates')} lang={language} dense />
                     </td></tr>
@@ -547,21 +587,21 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px' }}>{tpl.code}</td>
                       <td style={{ fontSize: '13px', fontWeight: 600 }}>{tpl.name}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>v{tpl.version}</td>
-                      <td><StatusBadge status={tpl.status} /></td>
+                      <td><StatusBadge status={tpl.status ?? 'DRAFT'} tone={TEMPLATE_STATUS_TONE[tpl.status ?? 'DRAFT']} /></td>
                       <td style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{tpl.locale ?? '—'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} onClick={() => openEditModal(tpl)}>
+                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={event => openEditModal(event, tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} onClick={() => setPendingAction({ id: tpl.id, kind: 'publish' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} aria-label={t('Publikovat šablonu', 'Publish template')} onClick={event => openLifecycleDialog(event, { id: tpl.id, kind: 'publish' })}>
                               <Send size={13} />
                             </button>
                           )}
                           {canEdit && tpl.status === 'PUBLISHED' && (
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} onClick={() => setPendingAction({ id: tpl.id, kind: 'retire' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} aria-label={t('Vyřadit šablonu', 'Retire template')} onClick={event => openLifecycleDialog(event, { id: tpl.id, kind: 'retire' })}>
                               <Archive size={13} />
                             </button>
                           )}
@@ -573,64 +613,92 @@ export default function DocumentTemplatesPage() {
               </table>
               {!loading && filtered.length > visibleCount && (
                 <div style={{ padding: '12px', textAlign: 'center', borderTop: '1px solid var(--border)' }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
+                  <button className="btn btn-secondary btn-sm" type="button" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
                     {t(`Načíst dalších ${Math.min(PAGE_SIZE, filtered.length - visibleCount)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - visibleCount)} more`)}
                   </button>
                 </div>
               )}
             </div>
-          </>
-        )}
+          </section>
 
-        {tab === 'documents' && <DocumentsLookup t={t} language={language} />}
+        <section id="document-documents-panel" role="tabpanel" aria-labelledby="document-documents-tab" hidden={tab !== 'documents'}><DocumentsLookup t={t} language={language} /></section>
       </div>
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <Dialog.Root open onOpenChange={open => { if (!open) requestEditorClose() }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.65)' }} />
+            <Dialog.Content
+              className="card"
+              aria-busy={saving}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                const codeInput = document.getElementById('template-code') as HTMLInputElement | null
+                if (codeInput && !codeInput.disabled) codeInput.focus()
+                else modalCloseRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                if (modalReturnFocusRef.current?.isConnected) modalReturnFocusRef.current.focus()
+              }}
+              onEscapeKeyDown={event => { if (saving) event.preventDefault() }}
+              onPointerDownOutside={event => { if (saving) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(920px, calc(100% - 40px))', maxHeight: '92vh', overflowY: 'auto' }}
+            >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 700 }}>
+              <Dialog.Title style={{ fontSize: '15px', fontWeight: 700 }}>
                 {!canEdit
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
-              </h2>
-              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} /></button>
+              </Dialog.Title>
+              {/* Radix warns when a Dialog.Content has no description, and a screen reader then
+                  announces the title alone — "New Template" says nothing about what the form does.
+                  Visually hidden rather than rendered: the header is a title/close row and has no
+                  space for a sentence, but the accessible name still needs one. */}
+              <Dialog.Description style={{
+                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+                overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+              }}>
+                {t('Upravte metadata, HTML obsah a vzorová data. Náhled se obnovuje automaticky.',
+                   'Edit metadata, HTML content and sample data. The preview refreshes automatically.')}
+              </Dialog.Description>
+              <button ref={modalCloseRef} type="button" disabled={saving} aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={requestEditorClose} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div className="grid-3">
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Kód *', 'Code *')}</label>
-                    <input className="input" required disabled={!canEdit || !!editingTemplate} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="LOAN_AGREEMENT" />
+                    <label htmlFor="template-code" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Kód *', 'Code *')}</label>
+                    <input id="template-code" className="input" required disabled={!canEdit || !!editingTemplate} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="LOAN_AGREEMENT" />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze *', 'Version *')}</label>
-                    <input className="input" required value={formData.version ?? ''} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
+                    <label htmlFor="template-version" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze *', 'Version *')}</label>
+                    <input id="template-version" className="input" required value={formData.version ?? ''} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Jazyk', 'Locale')}</label>
-                    <input className="input" value={formData.locale ?? ''} onChange={e => setFormData(p => ({ ...p, locale: e.target.value }))} placeholder="cs" />
+                    <label htmlFor="template-locale" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Jazyk', 'Locale')}</label>
+                    <input id="template-locale" className="input" value={formData.locale ?? ''} onChange={e => setFormData(p => ({ ...p, locale: e.target.value }))} placeholder="cs" />
                   </div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
-                  <input className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Smlouva o úvěru', 'Loan agreement')} />
+                  <label htmlFor="template-name" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
+                  <input id="template-name" className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Smlouva o úvěru', 'Loan agreement')} />
                 </div>
                 <div className="grid-2">
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Odkaz na produkt', 'Product ref')}</label>
-                    <input className="input" value={formData.productRef ?? ''} onChange={e => setFormData(p => ({ ...p, productRef: e.target.value }))} placeholder={t('volitelné', 'optional')} />
+                    <label htmlFor="template-product-ref" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Odkaz na produkt', 'Product ref')}</label>
+                    <input id="template-product-ref" className="input" value={formData.productRef ?? ''} onChange={e => setFormData(p => ({ ...p, productRef: e.target.value }))} placeholder={t('volitelné', 'optional')} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Klasifikace', 'Classification')}</label>
-                    <input className="input" value={formData.classification ?? ''} onChange={e => setFormData(p => ({ ...p, classification: e.target.value }))} placeholder="restricted" />
+                    <label htmlFor="template-classification" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Klasifikace', 'Classification')}</label>
+                    <input id="template-classification" className="input" value={formData.classification ?? ''} onChange={e => setFormData(p => ({ ...p, classification: e.target.value }))} placeholder="restricted" />
                   </div>
                 </div>
 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Tělo šablony (HTML)', 'Template body (HTML)')}</label>
+                    <label htmlFor="template-body-html" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Tělo šablony (HTML)', 'Template body (HTML)')}</label>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <FileCode2 size={11} /> {t('Handlebars zástupné symboly', 'Handlebars placeholders')}
                     </span>
@@ -646,7 +714,7 @@ export default function DocumentTemplatesPage() {
 
                   <div style={{ marginBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                      <label htmlFor="template-sample-data" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
                         {t('Ukázková data pro náhled (JSON)', 'Sample data for preview (JSON)')}
                       </label>
                       {sampleDataInvalid && (
@@ -656,6 +724,7 @@ export default function DocumentTemplatesPage() {
                       )}
                     </div>
                     <textarea
+                      id="template-sample-data"
                       value={sampleDataText}
                       onChange={e => setSampleDataText(e.target.value)}
                       spellCheck={false}
@@ -726,7 +795,7 @@ export default function DocumentTemplatesPage() {
                           }
                         }}
                         spellCheck={false}
-                        aria-label={t('Tělo šablony (HTML)', 'Template body (HTML)')}
+                        id="template-body-html"
                         style={{
                           position: 'relative', width: '100%', height: '100%', resize: 'none', margin: 0,
                           fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5, padding: '10px',
@@ -767,13 +836,13 @@ export default function DocumentTemplatesPage() {
                 </div>
 
                 {actionError && (
-                  <div style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                  <div role="alert" style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
                     {actionError}
                   </div>
                 )}
               </fieldset>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zavřít', 'Close')}</button>
+                <button type="button" className="btn btn-secondary" onClick={requestEditorClose} disabled={saving}>{t('Zavřít', 'Close')}</button>
                 {canEdit && (
                   <button type="submit" className="btn btn-primary" disabled={saving}>
                     {saving ? t('Ukládám…', 'Saving…') : t('Uložit šablonu', 'Save Template')}
@@ -781,30 +850,89 @@ export default function DocumentTemplatesPage() {
                 )}
               </div>
             </form>
-          </div>
-        </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
+      {discardEditorOpen && (
+        <Dialog.Root open onOpenChange={open => { if (!open) setDiscardEditorOpen(false) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,0.72)' }} />
+            <Dialog.Content
+              role="alertdialog"
+              className="card"
+              onOpenAutoFocus={event => { event.preventDefault(); discardCancelRef.current?.focus() }}
+              onCloseAutoFocus={event => { event.preventDefault(); modalCloseRef.current?.focus() }}
+              style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(440px, calc(100vw - 32px))', padding: 20 }}
+            >
+              <Dialog.Title style={{ margin: 0, fontSize: 17 }}>{t('Zahodit neuložené změny?', 'Discard unsaved changes?')}</Dialog.Title>
+              <Dialog.Description style={{ margin: '8px 0 0', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {t('Změny šablony a ukázkových dat nejsou uložené. Po zahození je nelze obnovit.', 'Template and sample-data changes have not been saved. They cannot be recovered after discarding.')}
+              </Dialog.Description>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <Dialog.Close asChild><button ref={discardCancelRef} type="button" className="btn btn-secondary">{t('Pokračovat v úpravách', 'Keep editing')}</button></Dialog.Close>
+                <button type="button" className="btn btn-danger" onClick={discardEditor}>{t('Zahodit změny', 'Discard changes')}</button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Inline confirm for publish/retire — never a raw browser confirm()/alert() */}
       {pendingAction && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ width: '400px', maxWidth: '100%', padding: '20px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>
+        <Dialog.Root open onOpenChange={open => {
+          if (!open && !actioning) {
+            setLifecycleError(null)
+            setPendingAction(null)
+          }
+        }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(15,23,42,0.65)' }} />
+            <Dialog.Content
+              className="card"
+              aria-modal="true"
+              aria-busy={actioning}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                actionCancelRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                const original = actionReturnFocusRef.current
+                const rowFallback = actionReturnIdRef.current ? document.getElementById(actionReturnIdRef.current) : null
+                const pageFallback = document.getElementById('template-status-filter')
+                const target = original?.isConnected ? original : rowFallback ?? pageFallback
+                target?.focus()
+              }}
+              onEscapeKeyDown={event => { if (actioning) event.preventDefault() }}
+              onInteractOutside={event => { if (actioning) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1101, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 40px)', maxWidth: '400px', padding: '20px' }}
+            >
+            <Dialog.Title style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>
               {pendingAction.kind === 'publish' ? t('Publikovat šablonu?', 'Publish this template?') : t('Vyřadit šablonu?', 'Retire this template?')}
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+            </Dialog.Title>
+            <Dialog.Description style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
               {pendingAction.kind === 'publish'
                 ? t('Publikovaná verze je neměnná — další úprava vytvoří novou verzi.', 'A published version is immutable — a further edit creates a new version.')
                 : t('Vyřazená šablona se přestane nabízet pro generování nových dokumentů.', 'A retired template stops being offered for new document generation.')}
-            </div>
+            </Dialog.Description>
+            {lifecycleError && (
+              <div role="alert" style={{ padding: '10px 12px', marginBottom: '16px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                {lifecycleError}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button className="btn btn-secondary" onClick={() => setPendingAction(null)} disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
-              <button className="btn btn-primary" onClick={() => runAction(pendingAction.id, pendingAction.kind)} disabled={actioning}>
+              <Dialog.Close asChild>
+                <button ref={actionCancelRef} className="btn btn-secondary" type="button" disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
+              </Dialog.Close>
+              <button className="btn btn-primary" type="button" onClick={() => runAction(pendingAction.id, pendingAction.kind)} disabled={actioning} aria-busy={actioning}>
                 {actioning ? t('Provádím…', 'Working…') : t('Potvrdit', 'Confirm')}
               </button>
             </div>
-          </div>
-        </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
     </AuthGuard>
   )
@@ -857,8 +985,10 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
     <div>
       <div className="card" style={{ padding: '16px 20px', marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
-          <Hash size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+          <Hash size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
           <input
+            id="document-id"
+            aria-label={t('ID dokumentu', 'Document ID')}
             className="input"
             style={{ paddingLeft: '30px', width: '100%', fontFamily: 'var(--font-mono)' }}
             placeholder={t('ID dokumentu (UUID)…', 'Document ID (UUID)…')}
@@ -867,7 +997,7 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
             onKeyDown={e => { if (e.key === 'Enter') lookup() }}
           />
         </div>
-        <button className="btn btn-primary" onClick={lookup} disabled={loading || idInput.trim().length === 0}>
+        <button className="btn btn-primary" type="button" onClick={lookup} disabled={loading || idInput.trim().length === 0} aria-busy={loading} aria-label={t('Vyhledat dokument podle ID', 'Look up document by ID')}>
           <Search size={13} /> {loading ? t('Hledám…', 'Looking up…') : t('Vyhledat', 'Look up')}
         </button>
       </div>

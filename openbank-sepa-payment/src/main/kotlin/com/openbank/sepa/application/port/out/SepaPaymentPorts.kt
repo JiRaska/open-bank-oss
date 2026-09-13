@@ -20,6 +20,7 @@ data class SepaPaymentOutboxMessage(
     val payload: String,
     val eventId: UUID = UUID.randomUUID(),
     val createdAt: Instant,
+    val synthetic: Boolean = false,
 )
 
 /**
@@ -44,6 +45,21 @@ interface SepaPaymentRepository {
 
     /** Update a payment and enqueue a domain-event outbox message, atomically. */
     suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment
+
+    /**
+     * As [update], plus a second outbox message carrying the non-repudiation evidence for the same
+     * act — both rows and the aggregate change commit in ONE transaction (issue #6056).
+     *
+     * A separate method rather than a defaulted third parameter on [update]: an overload or a
+     * default argument on an interface this service's tests mock would let a call site silently
+     * resolve to the evidence-free variant, which is the one failure this method exists to make
+     * impossible.
+     */
+    suspend fun updateWithEvidence(
+        payment: SepaPayment,
+        outboxMessage: SepaPaymentOutboxMessage,
+        evidenceMessage: SepaPaymentOutboxMessage,
+    ): SepaPayment
 }
 
 /**
@@ -63,4 +79,19 @@ interface SepaPaymentEventPublisher {
     fun paymentCreatedPayload(payment: SepaPayment): String
 
     fun statusChangedPayload(previous: SepaPayment, current: SepaPayment): String
+
+    /**
+     * Serializes the `/returns` non-repudiation record (issue #6056). Every argument is either
+     * read off the pacs.004 itself or derived server-side from the security context — nothing
+     * here originates in a caller-supplied body field.
+     */
+    fun returnEvidencePayload(
+        payment: SepaPayment,
+        originalEndToEndId: String,
+        returnReasonCode: String?,
+        actorId: String,
+        actorType: String,
+        correlationId: String?,
+        reversalPerformed: Boolean,
+    ): String
 }

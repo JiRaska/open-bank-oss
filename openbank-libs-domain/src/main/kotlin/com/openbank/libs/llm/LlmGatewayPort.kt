@@ -8,10 +8,10 @@ package com.openbank.libs.llm
  *
  * Today four services hand-roll their own `java.net.http.HttpClient` against an OpenAI-compatible
  * `/chat/completions` endpoint (agent-service, copilot-service, devops-agent,
- * control-liveness-sentinel), each with a slightly different provider URL — and the six stub agents
- * point at a `litellm.ai-platform:4000` gateway that has never been deployed (ADR-0174 §2). That
- * makes the US-provider egress un-enforced (ADR-0175 §4): there is no single choke point to route
- * through an in-cluster gateway or to bound with an egress NetworkPolicy.
+ * control-liveness-sentinel), each with a slightly different provider URL. The agent workloads now
+ * point at the in-cluster `litellm.ai-platform:4000` gateway represented in GitOps (ADR-0174 §2),
+ * while these legacy adapters still require migration to make the choke point universal (ADR-0175
+ * §4).
  *
  * This port is that choke point. A pure-domain interface (no framework imports): the caller builds
  * its own prompt (including the ADR-0031 untrusted-input fencing) and gets back the completion text,

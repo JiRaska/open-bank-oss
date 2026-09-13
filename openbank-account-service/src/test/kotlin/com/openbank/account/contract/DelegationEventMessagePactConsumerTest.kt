@@ -43,7 +43,8 @@ import java.util.UUID
  * - `DelegationActivated` — the event that CREATES an enforceable row.
  * - `DelegationRevoked`  — the event that CLOSES one. A revoke that fails to parse leaves a
  *   revoked grant enforceable, which the consumer's own KDoc calls the worst direction this
- *   projection can drift.
+ *   projection can drift. It is the asynchronous authorization equivalent of a 403 boundary:
+ *   after this message, the former delegate must no longer be authorized.
  *
  * `eventType` and `resourceType` are `stringValue`: the consumer dispatches on the exact strings
  * (`"DelegationActivated"`, and `resourceType in setOf("ACCOUNT", "SAVINGS_GOAL")`), so a type
@@ -106,11 +107,14 @@ class DelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationActivated")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 1)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "ACCOUNT")
                 o.uuid("resourceId")
                 o.array("capabilities") { caps -> caps.stringType("ACCOUNT_READ_BALANCES") }
+                o.stringValue("approvalPolicy", "N_OF_M")
+                o.integerType("requiredApprovals", 3)
                 o.datetime("validFrom", VALID_FROM_FORMAT, VALID_FROM_EXAMPLE, UTC)
                 o.`object`("perTransactionLimit") { limit ->
                     limit.decimalType("amount", 1500.00)
@@ -128,12 +132,15 @@ class DelegationEventMessagePactConsumerTest {
         // Mirrors parseEnvelope + upsert, at the exact paths the consumer reads.
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationActivated")
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(1)
         assertThat(UUID.fromString(node.path("grantorPartyId").asText())).isNotNull()
         assertThat(UUID.fromString(node.path("granteePartyId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("ACCOUNT")
         assertThat(UUID.fromString(node.path("resourceId").asText())).isNotNull()
         assertThat(node.path("capabilities").isArray).isTrue()
         assertThat(node.path("capabilities")).isNotEmpty()
+        assertThat(node.path("approvalPolicy").asText()).isEqualTo("N_OF_M")
+        assertThat(node.path("requiredApprovals").asInt()).isEqualTo(3)
         assertThat(OffsetDateTime.parse(node.path("validFrom").asText())).isNotNull()
         // The ceiling is read as two flat leaves under perTransactionLimit — NOT as a Money
         // object. DelegationEvents.EventMoney exists precisely because `Money.currency` would
@@ -150,6 +157,7 @@ class DelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationRevoked")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 2)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "ACCOUNT")
@@ -165,6 +173,7 @@ class DelegationEventMessagePactConsumerTest {
         val node = objectMapper.readTree(messages.first().contentsAsBytes())
 
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationRevoked")
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(2)
         // closeById(grantId) is keyed on aggregateId alone — if that field ever moved, every
         // revoke would be a no-op and the grant would stay enforceable.
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()

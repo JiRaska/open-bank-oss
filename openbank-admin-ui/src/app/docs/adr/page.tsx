@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ScrollText, FileText } from 'lucide-react'
 import { loadAdrIndex, type AdrMeta, type AdrStatus } from '@/lib/governance/docs'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,30 +50,24 @@ export default async function AdrRegistryPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Architektonická rozhodnutí', 'Architecture Decisions')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScrollText size={18} style={{ color: 'var(--accent)' }} />
-            {t('Registr architektonických rozhodnutí (ADR)', 'Architecture Decision Records (ADR)')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Registr architektonických rozhodnutí (ADR)', 'Architecture Decision Records (ADR)')}
+        subtitle={t(
               `${adrs.length} rozhodnutí — proč je systém postavený tak, jak je. Každé ADR má kontext, rozhodnutí a důsledky.`,
               `${adrs.length} decisions — why the system is built the way it is. Each ADR records context, decision and consequences.`,
             )}
-          </p>
-        </div>
-        <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        icon={<ScrollText aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na dokumentaci', 'Back to docs')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       {adrs.length === 0 ? (
         <div className="card" style={{ padding: '24px' }}>

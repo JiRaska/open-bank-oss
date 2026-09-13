@@ -1,7 +1,8 @@
 ---
 date: 2026-07-29
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — triage of the wider code-cited-but-planned ADR set; this ADR's own remaining slice is tracked there"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,14 @@ summary: "Origination is a persisted, property-tested state machine on the LoanA
 ---
 
 # ADR-0211 — Loan origination orchestration: persisted state machine with durable timers, not a BPM suite
+
+**Delivery note (2026-08-19).** The core of D2 is live on `main` and was carrying
+`delivery-status: planned` while doing so: `OriginationTimersWorkflow` (whose own KDoc cites
+"ADR-0211 D2"), `OriginationTimerActivitiesImpl`, `OriginationTimersWorkerRegistrar`,
+`TemporalOriginationWorkflowAdapter` behind an `OriginationWorkflowPort`, plus the canonical-state
+migrations `V8__origination_canonical_states.sql` and `V9__origination_state_data_migration.sql`.
+Found by the code→ADR evidence read described in #5708 (the inverse of the ADR→path probe #5669
+deliberately rejected); the remaining slices are triaged there.
 
 ## Context
 

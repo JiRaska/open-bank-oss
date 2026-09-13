@@ -35,7 +35,12 @@ class SepaPaymentOutboxDispatcherTest {
     fun setUp() {
         outboxRepository = mockk()
         eventPublisher = mockk()
-        dispatcher = SepaPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+        dispatcher = SepaPaymentOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = true,
+            metrics = mockk(relaxed = true),
+        )
     }
 
     private fun entry(eventId: UUID = UUID.randomUUID(), payload: String = "{\"e\":1}") = OutboxEntry(
@@ -76,7 +81,7 @@ class SepaPaymentOutboxDispatcherTest {
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("broker down")
         coJustRun { eventPublisher.publish(ok) }
         coJustRun { outboxRepository.markSent(any(), any()) }
-        coJustRun { outboxRepository.markFailed(any(), any(), any()) }
+        coEvery { outboxRepository.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         dispatcher.dispatch()
 
@@ -99,7 +104,12 @@ class SepaPaymentOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
-        val disabledDispatcher = SepaPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+        val disabledDispatcher = SepaPaymentOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         disabledDispatcher.dispatch()
 

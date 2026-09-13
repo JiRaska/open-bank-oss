@@ -135,11 +135,50 @@ class DocumentResource(
         return Response.status(Response.Status.CREATED).entity(document.toResponse()).build()
     }
 
+    /**
+     * One page of a party's documents, newest first (#8082).
+     *
+     * Two things were wrong here, and they are one defect seen from two sides: the endpoint
+     * trusted the caller.
+     *
+     * **Bounded.** The read was unbounded. A party's document count grows with every rendered
+     * statement and agreement, and the whole set was serialised into a single response. The page
+     * size is clamped, not merely defaulted — a caller-supplied page size is a caller-supplied
+     * amount of work.
+     *
+     * **Policy-aligned.** It carried only @RolesAllowed, while its siblings [getDocument] and
+     * [getContent] are @Authorize-gated. A role check is not a policy decision — it cannot see
+     * which party is being browsed — so the one endpoint returning a party's whole document file
+     * was the one endpoint the PDP never saw. The action document.list is granted to
+     * ROLE_OPERATOR/ROLE_ADMIN by base rest.rego's operator-read-any rule (which matches the
+     * .list verb suffix) and to customer-edge's identity by edge-service-notification (which
+     * matches the document. family), so this adds a decision point without needing a new grant.
+     *
+     * The body stays an array; the page metadata rides in headers. Wrapping it in a page object
+     * would change the response type from array to object — a breaking contract change, and under
+     * ADR-0048 a major bump means serving every path under a new URL major, out of all proportion
+     * to adding pagination. Two live consumers parse this array today: admin-ui's Customer-360
+     * DocumentsPanel and customer-edge's CustomerDocumentResource. Same shape and same reasoning
+     * as campaign-service's send log.
+     */
     @GET
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-    suspend fun listByParty(@QueryParam("partyRef") partyRef: String?): List<DocumentResponse> {
+    @Authorize(action = "document.list", resource = "#partyRef")
+    suspend fun listByParty(
+        @QueryParam("partyRef") partyRef: String?,
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("50") size: Int,
+    ): Response {
         if (partyRef.isNullOrBlank()) throw BadRequestException("partyRef query parameter is required")
-        return queryUseCase.listByParty(partyRef).map { it.toResponse() }
+        if (page < 0) throw BadRequestException("page must not be negative")
+        val effectiveSize = size.coerceIn(1, MAX_PAGE_SIZE)
+        val items: List<DocumentResponse> =
+            queryUseCase.listByPartyPaged(partyRef, page, effectiveSize).map { it.toResponse() }
+        return Response.ok(items)
+            .header("X-Total-Count", queryUseCase.countByParty(partyRef))
+            .header("X-Page", page)
+            .header("X-Page-Size", effectiveSize)
+            .build()
     }
 
     @GET
@@ -161,5 +200,8 @@ class DocumentResource(
 
     private companion object {
         const val MAX_PREVIEW_BODY_LENGTH = 200_000
+
+        /** A caller-supplied page size is a caller-supplied amount of work. */
+        const val MAX_PAGE_SIZE = 200
     }
 }

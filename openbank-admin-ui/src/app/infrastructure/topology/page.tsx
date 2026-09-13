@@ -5,15 +5,16 @@
 'use client'
 import { useState, useEffect } from 'react'
 import {
-  Network, RefreshCw, Play, Pause, CheckCircle2, XCircle, HelpCircle,
-  Cloud, GitBranch, Database, Eye, Server,
+  Network, RefreshCw, Play, Pause,
+  Cloud, GitBranch, Database, Eye, Server, X,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
+import { edgeGeometry, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import { PageHeader, StatusBadge, statusTone } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -39,11 +40,11 @@ type NodeDef = { id: string; group: GroupKey; label: string; descCs: string; des
 type EdgeDef = { from: string; to: string; type: EdgeType }
 
 // Group metadata — colour + bilingual label. Icons render in the detail panel (HTML).
-const GROUPS: Record<GroupKey, { color: string; cs: string; en: string; Icon: typeof Cloud }> = {
-  aws:           { color: '#f97316', cs: 'AWS substrát',            en: 'AWS substrate',        Icon: Cloud },
-  platform:      { color: '#7c3aed', cs: 'Platforma / control plane', en: 'Platform / control plane', Icon: GitBranch },
-  data:          { color: '#2563eb', cs: 'Data / backing služby',   en: 'Data / backing services', Icon: Database },
-  observability: { color: '#0d9488', cs: 'Observabilita',           en: 'Observability',         Icon: Eye },
+const GROUPS: Record<GroupKey, { color: string; textColor: string; cs: string; en: string; Icon: typeof Cloud }> = {
+  aws:           { color: 'var(--warning)', textColor: 'var(--warning-text)', cs: 'AWS substrát',            en: 'AWS substrate',        Icon: Cloud },
+  platform:      { color: 'var(--accent)', textColor: 'var(--accent-text)', cs: 'Platforma / control plane', en: 'Platform / control plane', Icon: GitBranch },
+  data:          { color: 'var(--info)', textColor: 'var(--info-text)', cs: 'Data / backing služby',   en: 'Data / backing services', Icon: Database },
+  observability: { color: 'var(--success)', textColor: 'var(--success-text)', cs: 'Observabilita',           en: 'Observability',         Icon: Eye },
 }
 const GROUP_ORDER: GroupKey[] = ['aws', 'platform', 'data', 'observability']
 
@@ -152,7 +153,8 @@ const EDGE_CAT: Record<EdgeType, EdgeCat> = {
   manages: 'data', uses: 'data', 'backs-up': 'data', secrets: 'data', pulls: 'data', routes: 'data', auth: 'data',
   scales: 'flow', scrapes: 'flow', queries: 'flow', alerts: 'flow', mesh: 'flow',
 }
-const CAT_COLOR: Record<EdgeCat, string> = { control: '#7c3aed', data: '#2563eb', flow: '#0d9488' }
+const CAT_COLOR: Record<EdgeCat, string> = { control: 'var(--accent)', data: 'var(--info)', flow: 'var(--success)' }
+const CAT_TEXT_COLOR: Record<EdgeCat, string> = { control: 'var(--accent-text)', data: 'var(--info-text)', flow: 'var(--success-text)' }
 const CAT_DASHED: Record<EdgeCat, boolean> = { control: false, data: false, flow: true }
 const edgeTypeLabel = (type: EdgeType, t: (cs: string, en: string) => string): string => ({
   deploys: t('nasazuje', 'deploys'), provisions: t('provisiony', 'provisions'), admits: t('admission', 'admits'),
@@ -215,7 +217,10 @@ export default function InfraTopologyPage() {
       setIsChecking(false)
     }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const nodeMap = Object.fromEntries(NODES.map(n => [n.id, n]))
   const activeNode = selected ?? hovered
@@ -229,56 +234,54 @@ export default function InfraTopologyPage() {
   const selectedEdges = selected ? EDGES.filter(e => e.from === selected || e.to === selected) : []
 
   const groupLabel = (g: GroupKey) => t(GROUPS[g].cs, GROUPS[g].en)
-  const statusColor = (s: Status) => (s === 'UP' ? '#10b981' : s === 'DOWN' ? '#ef4444' : '#94a3b8')
+  // SVG cannot consume the HTML StatusBadge primitive, but it still derives
+  // colour from the same central vocabulary. The CSS tokens preserve dark-mode
+  // contrast without inventing a second UP/DOWN/UNKNOWN colour taxonomy here.
+  const liveStatusFill = (status: Status) => {
+    const tone = statusTone(status)
+    if (tone === 'success') return 'var(--success)'
+    if (tone === 'danger') return 'var(--danger)'
+    return 'var(--text-muted)'
+  }
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Topologie', 'Topology')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Topologie infrastruktury', 'Infrastructure Topology')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
-               'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Network size={18} aria-hidden="true" />}
+        title={t('Topologie infrastruktury', 'Infrastructure Topology')}
+        subtitle={t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
+          'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Topologie', 'Topology')}</span></div>}
+      />
 
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div role="group" aria-label={t('Filtrování vrstev infrastruktury', 'Infrastructure layer filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {(['all', ...GROUP_ORDER] as const).map(key => (
-            <button key={key} onClick={() => setFilter(key)}
+            <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
               style={{
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-                border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
-                background: filter === key ? 'var(--accent)' : 'var(--surface)',
-                color: filter === key ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+                border: `1px solid ${filter === key ? 'var(--accent-text)' : 'var(--border)'}`,
+                background: filter === key ? 'var(--accent-text)' : 'var(--surface)',
+                color: filter === key ? 'var(--text-inverse)' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
               }}>
               {key === 'all' ? t('Vše', 'All') : groupLabel(key)}
             </button>
           ))}
         </div>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok dat', 'Toggle data flow')}
+          <button type="button" onClick={() => setFlow(v => !v)} aria-pressed={flow} aria-label={t(flow ? 'Pozastavit tok dat' : 'Spustit tok dat', flow ? 'Pause data flow' : 'Start data flow')} title={t('Přepnout tok dat', 'Toggle data flow')}
             style={{
               display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
               borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
-              border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
-              background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${flow ? 'var(--accent-text)' : 'var(--border)'}`,
+              background: flow ? 'var(--accent-text)' : 'var(--surface)', color: flow ? 'var(--text-inverse)' : 'var(--text-secondary)',
             }}>
-            {flow ? <Pause size={13} /> : <Play size={13} />}{t('Tok dat', 'Data flow')}
+            {flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />}{t('Tok dat', 'Data flow')}
           </button>
-          <button onClick={load} disabled={isChecking} className="btn btn-secondary"
+          <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-            <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+            <RefreshCw aria-hidden="true" size={14} className={isChecking ? 'animate-spin' : ''} />
             {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
           </button>
         </div>
@@ -300,8 +303,8 @@ export default function InfraTopologyPage() {
               return (
                 <g key={b.key}>
                   <rect x={CANVAS_PAD - 14} y={b.y} width={WIDTH - (CANVAS_PAD - 14) * 2} height={b.h} rx="16"
-                    fill={`${meta.color}0a`} stroke={`${meta.color}33`} strokeWidth="1" />
-                  <text x={CANVAS_PAD} y={b.y + 20} fontSize="11" fill={meta.color} fontWeight="700" letterSpacing="0.08em">
+                    fill={`color-mix(in srgb, ${meta.color} 4%, transparent)`} stroke={`color-mix(in srgb, ${meta.color} 20%, transparent)`} strokeWidth="1" />
+                  <text x={CANVAS_PAD} y={b.y + 20} fontSize="11" fill={meta.textColor} fontWeight="700" letterSpacing="0.08em">
                     {groupLabel(b.key).toUpperCase()}
                   </text>
                 </g>
@@ -320,7 +323,7 @@ export default function InfraTopologyPage() {
               const pid = pathId('ix', e.from, e.to, i)
               return (
                 <g key={i} opacity={dim ? 0.1 : touches ? 1 : 0.5} style={{ transition: 'opacity 0.15s' }}>
-                  <path id={pid} d={d} fill="none" stroke={touches ? mixHex(color, '#000000', 0.15) : color}
+                  <path id={pid} d={d} fill="none" stroke={touches ? `color-mix(in srgb, ${color} 85%, var(--text-primary))` : color}
                     strokeWidth={touches ? 2 : 1.3} strokeDasharray={CAT_DASHED[cat] ? '5,4' : undefined}
                     markerEnd={`url(#ix-arrow-${cat})`} />
                   {flow && <FlowParticle pathId={pid} color={color} dur={2.6 + (i % 5) * 0.26} begin={(i % 7) * 0.18} />}
@@ -330,8 +333,8 @@ export default function InfraTopologyPage() {
                     return (
                       <g>
                         <rect x={mx - lbl.length * 3.1 - 5} y={my - 9} width={lbl.length * 6.2 + 10} height="15" rx="7.5"
-                          fill="var(--surface)" stroke={`${color}55`} strokeWidth="0.75" opacity="0.97" />
-                        <text x={mx} y={my + 2} fontSize="9" fill={color} textAnchor="middle" fontWeight="600">{lbl}</text>
+                          fill="var(--surface)" stroke={`color-mix(in srgb, ${color} 34%, transparent)`} strokeWidth="0.75" opacity="0.97" />
+                        <text x={mx} y={my + 2} fontSize="9" fill={CAT_TEXT_COLOR[cat]} textAnchor="middle" fontWeight="600">{lbl}</text>
                       </g>
                     )
                   })()}
@@ -349,20 +352,23 @@ export default function InfraTopologyPage() {
               const st = statusOf(n.id)
               const x = p.cx - p.w / 2, y = p.cy - PILL_H / 2
               return (
-                <g key={n.id} style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
+                <g key={n.id} role="button" tabIndex={0} aria-label={n.label} aria-pressed={isSel} aria-controls={isSel ? 'infra-topology-selection' : undefined}
+                  style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
                   onClick={() => setSelected(s => s === n.id ? null : n.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === n.id ? null : n.id) } }}
+                  onFocus={() => setHovered(n.id)}
                   onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}>
                   <rect x={x} y={y} width={p.w} height={PILL_H} rx={PILL_H / 2}
-                    fill={isSel ? meta.color : 'var(--surface)'} stroke={meta.color} strokeWidth={isSel ? 1.9 : 1.3}
+                    fill={isSel ? meta.textColor : 'var(--surface)'} stroke={meta.color} strokeWidth={isSel ? 1.9 : 1.3}
                     filter="url(#ix-shadow)" />
                   <circle cx={x + 15} cy={p.cy} r={4} fill={meta.color} />
-                  <text x={x + 26} y={p.cy + 4} fontSize="11" fontWeight="600" fill={isSel ? '#fff' : 'var(--text-primary)'}>{n.label}</text>
+                  <text x={x + 26} y={p.cy + 4} fontSize="11" fontWeight="600" fill={isSel ? 'var(--text-inverse)' : 'var(--text-primary)'}>{n.label}</text>
                   {st && (
                     <g transform={`translate(${x + p.w - 12}, ${y + 2})`}>
-                      <circle cx="0" cy="0" r="6.5" fill={statusColor(st)} stroke="var(--surface)" strokeWidth="1.5" />
-                      {st === 'UP' && <path d="M-2.5,0 L-0.8,1.8 L2.6,-2.2" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
-                      {st === 'DOWN' && <path d="M-2,-2 L2,2 M-2,2 L2,-2" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" />}
-                      {st === 'UNKNOWN' && <text x="0" y="2.5" fontSize="8" fill="#fff" textAnchor="middle" fontWeight="bold">?</text>}
+                      <circle cx="0" cy="0" r="6.5" fill={liveStatusFill(st)} stroke="var(--surface)" strokeWidth="1.5" />
+                      {st === 'UP' && <path d="M-2.5,0 L-0.8,1.8 L2.6,-2.2" fill="none" stroke="var(--text-inverse)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
+                      {st === 'DOWN' && <path d="M-2,-2 L2,2 M-2,2 L2,-2" fill="none" stroke="var(--text-inverse)" strokeWidth="1.4" strokeLinecap="round" />}
+                      {st === 'UNKNOWN' && <text x="0" y="2.5" fontSize="8" fill="var(--text-inverse)" textAnchor="middle" fontWeight="bold">?</text>}
                     </g>
                   )}
                 </g>
@@ -376,34 +382,33 @@ export default function InfraTopologyPage() {
                ['data', t('Data (spravuje · používá · zálohuje)', 'Data (manages · uses · backs up)')],
                ['flow', t('Tok (škálování · telemetrie · alerty)', 'Flow (scale · telemetry · alerts)')]] as [EdgeCat, string][]).map(([cat, lbl]) => (
               <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke={CAT_COLOR[cat]} strokeWidth="1.6" strokeDasharray={CAT_DASHED[cat] ? '5,3' : undefined} markerEnd={`url(#ix-arrow-${cat})`} /></svg>
+                <svg aria-hidden="true" width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke={CAT_COLOR[cat]} strokeWidth="1.6" strokeDasharray={CAT_DASHED[cat] ? '5,3' : undefined} markerEnd={`url(#ix-arrow-${cat})`} /></svg>
                 {lbl}
               </div>
             ))}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }} />{t('Živý stav (UP/DOWN)', 'Live status (UP/DOWN)')}
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--success)' }} />{t('Živý stav (UP/DOWN)', 'Live status (UP/DOWN)')}
             </div>
           </div>
         </div>
 
         {/* Detail panel */}
         {selectedNode && (
-          <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
+          <div id="infra-topology-selection" className="card" role="region" aria-label={t('Detail infrastrukturní komponenty', 'Infrastructure component details')} style={{ padding: '20px', alignSelf: 'start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `${GROUPS[selectedNode.group].color}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: GROUPS[selectedNode.group].color }}>
-                {(() => { const I = GROUPS[selectedNode.group].Icon; return <I size={16} /> })()}
+              <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `color-mix(in srgb, ${GROUPS[selectedNode.group].color} 10%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: GROUPS[selectedNode.group].textColor }}>
+                {(() => { const I = GROUPS[selectedNode.group].Icon; return <I aria-hidden="true" size={16} /> })()}
               </div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{selectedNode.label}</div>
+              <button type="button" aria-label={t('Zavřít detail infrastruktury', 'Close infrastructure details')} onClick={() => setSelected(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px' }}>
+                <X aria-hidden="true" size={16} />
+              </button>
               {statusOf(selectedNode.id) && (
-                <div style={{
-                  marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
-                  borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-                  background: `${statusColor(statusOf(selectedNode.id)!)}22`, color: statusColor(statusOf(selectedNode.id)!),
-                }}>
-                  {statusOf(selectedNode.id) === 'UP' && <CheckCircle2 size={12} />}
-                  {statusOf(selectedNode.id) === 'DOWN' && <XCircle size={12} />}
-                  {statusOf(selectedNode.id) === 'UNKNOWN' && <HelpCircle size={12} />}
-                  {statusOf(selectedNode.id)}
+                <div style={{ marginLeft: 'auto' }}>
+                  <StatusBadge
+                    status={statusOf(selectedNode.id)}
+                    withDot
+                  />
                 </div>
               )}
             </div>
@@ -411,7 +416,7 @@ export default function InfraTopologyPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('VRSTVA', 'LAYER')}</div>
-                <div style={{ fontSize: '12px', color: GROUPS[selectedNode.group].color, fontWeight: 600 }}>{groupLabel(selectedNode.group)}</div>
+                <div style={{ fontSize: '12px', color: GROUPS[selectedNode.group].textColor, fontWeight: 600 }}>{groupLabel(selectedNode.group)}</div>
               </div>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('POPIS', 'DESCRIPTION')}</div>
@@ -441,12 +446,13 @@ export default function InfraTopologyPage() {
                   {selectedEdges.map((e, i) => {
                     const out = e.from === selectedNode.id
                     const other = nodeMap[out ? e.to : e.from]
-                    const color = CAT_COLOR[EDGE_CAT[e.type]]
+                    const cat = EDGE_CAT[e.type]
+                    const color = CAT_COLOR[cat]
                     return (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
                         <span style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{out ? '→' : '←'}</span>
-                        <span style={{ color: GROUPS[other?.group ?? 'data'].color, fontWeight: 600 }}>{other?.label}</span>
-                        <span style={{ marginLeft: 'auto', fontSize: '10px', color, background: `${color}18`, padding: '2px 6px', borderRadius: '4px' }}>{edgeTypeLabel(e.type, t)}</span>
+                        <span style={{ color: GROUPS[other?.group ?? 'data'].textColor, fontWeight: 600 }}>{other?.label}</span>
+                        <span style={{ marginLeft: 'auto', fontSize: '10px', color: CAT_TEXT_COLOR[cat], background: `color-mix(in srgb, ${color} 9%, transparent)`, padding: '2px 6px', borderRadius: '4px' }}>{edgeTypeLabel(e.type, t)}</span>
                       </div>
                     )
                   })}
@@ -455,10 +461,10 @@ export default function InfraTopologyPage() {
 
               <a href="/infrastructure" style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 12px',
-                background: 'var(--accent-bg)', color: 'var(--accent)', borderRadius: 'var(--r-md)', fontSize: '12px',
+                background: 'var(--accent-bg)', color: 'var(--accent-text)', borderRadius: 'var(--r-md)', fontSize: '12px',
                 fontWeight: 600, textDecoration: 'none', marginTop: '4px', border: '1px solid var(--accent-border, transparent)',
               }}>
-                <Server size={14} /> {t('Otevřít přehled infrastruktury', 'Open infrastructure overview')}
+                <Server aria-hidden="true" size={14} /> {t('Otevřít přehled infrastruktury', 'Open infrastructure overview')}
               </a>
             </div>
           </div>

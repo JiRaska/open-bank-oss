@@ -9,6 +9,7 @@ import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.domain.event.TransactionCompletedEvent
 import com.openbank.transaction.domain.event.TransactionFailedEvent
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
+import com.openbank.transaction.domain.event.TransactionReversedEvent
 import com.openbank.transaction.domain.event.TransactionSettledEvent
 import com.openbank.transaction.domain.model.Transaction
 import jakarta.enterprise.context.ApplicationScoped
@@ -37,6 +38,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             instructionType = transaction.instructionType
                 ?: com.openbank.libs.domain.payment.InstructionType.UNKNOWN,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -46,6 +48,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             version = transaction.version,
             referenceNumber = transaction.referenceNumber,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -56,6 +59,18 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             referenceNumber = transaction.referenceNumber,
             reason = reason,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
+        ),
+    )
+
+    override fun reversedPayload(transaction: Transaction, reason: String): String = objectMapper.writeValueAsString(
+        TransactionReversedEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+            reason = reason,
+            occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -71,7 +86,17 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
                 bookingDate = transaction.bookingDate,
                 settledAt = now,
                 occurredAt = now,
+                sourceService = SOURCE_SERVICE,
             ),
         )
+    }
+
+    private companion object {
+        /**
+         * Producing service for `AuditConsumer` attribution (#3994/#5256). Matches the module
+         * directory without the `openbank-` prefix, the same spelling `EventAttribution` already
+         * maps `openbank.transactions.transaction.initiated` to.
+         */
+        const val SOURCE_SERVICE = "transaction-service"
     }
 }

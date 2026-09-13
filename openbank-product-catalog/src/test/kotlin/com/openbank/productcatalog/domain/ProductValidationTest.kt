@@ -7,6 +7,7 @@ package com.openbank.productcatalog.domain
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.SoftAssertions.assertSoftly
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 class ProductValidationTest {
     @Test
@@ -67,5 +68,7 @@ class ProductValidationTest {
         name = "Standard savings",
         type = "SAVINGS",
         currency = "EUR",
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
 }

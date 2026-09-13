@@ -12,9 +12,10 @@ package com.openbank.notification.domain
  * [com.openbank.notification.application.OperatorMessageService.render] ran any escaping between
  * a caller-supplied variable and the HTML body handed to `Mail.withHtml` — an operator (or, for
  * the system templates, an upstream domain event) could inject arbitrary markup that a customer's
- * mail client would render, including `<img onerror=...>`/`<script>`-style payloads and, for
- * `PASSWORD_RESET`'s `resetLink` (interpolated into an `href="..."` attribute), an attribute
- * breakout via an embedded `"`.
+ * mail client would render, including `<img onerror=...>`/`<script>`-style payloads and an
+ * attribute breakout via an embedded `"` if a variable is ever interpolated into an
+ * `href="..."` attribute (the removed PASSWORD_RESET's `resetLink` was that case, #8568 — the
+ * quote escaping stays so a future attribute-context variable is safe by default).
  *
  * Deliberately not a general-purpose sanitizer: every call site here treats its variables as
  * plain text that must render literally, never as markup the caller is allowed to inject, so

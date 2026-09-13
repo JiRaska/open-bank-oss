@@ -6,6 +6,7 @@ package com.openbank.audit.infrastructure.observability
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
 import jakarta.annotation.PostConstruct
@@ -143,7 +144,13 @@ class AuditChainIntegrityGauge {
             log.errorf(ex, "audit chain verification failed to run — leaving previous gauge values in place")
             return
         }
-        registry.timer("openbank.audit.chain.verify.duration")
+        // publishPercentileHistogram() is what makes the _bucket series exist at all -- the bare
+        // registry.timer(name).record(...) shortcut this replaced only emits _count/_sum, so no
+        // dashboard panel keyed on openbank_audit_chain_verify_duration_seconds_bucket could ever
+        // render (#5049). Percentiles/histogram config match the fleet's DomainMetrics convention
+        // (see AnaCreditMetricsAdapter etc.) rather than inventing a local shape.
+        DURATION_TIMER
+            .register(registry)
             .record(System.nanoTime() - startedAt, java.util.concurrent.TimeUnit.NANOSECONDS)
 
         intact.set(if (result.intact) 1 else 0)
@@ -167,5 +174,16 @@ class AuditChainIntegrityGauge {
                 result.firstBrokenEntryId,
             )
         }
+    }
+
+    private companion object {
+        const val P50 = 0.5
+        const val P95 = 0.95
+        const val P99 = 0.99
+
+        val DURATION_TIMER: Timer.Builder = Timer.builder("openbank.audit.chain.verify.duration")
+            .publishPercentiles(P50, P95, P99)
+            .publishPercentileHistogram()
+            .description("Wall time of one audit hash-chain verification sweep")
     }
 }

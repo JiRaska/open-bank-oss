@@ -28,6 +28,7 @@ V1 seeds cash/deposit/interest/fee accounts (1000, 1001, 2000, 2001, 2002, 3000,
 | Version | Summary | Rollback |
 |---|---|---|
 | `V1__init_ledger` | `gl_accounts`, partitioned `journal_entries` (2024–2026 + default), `journal_lines`, indexes, seed chart of accounts | drop schema (greenfield) |
+| `V25__regulatory_capital_accounts` | explicit CET1, deductions, AT1 and Tier 2 source accounts for COREP C 01.00 | delete only before any journal line references them |
 | `V2__create_ledger_outbox` | `ledger_outbox` + status/aggregate indexes | drop table |
 | `V3__ledger_governance` | `reversal_of` column, `ledger_idempotency` table, stable posting accounts (1100, 2100) | drop additions |
 | `V4__hibernate_sequences` | `ledger_outbox_seq` (Hibernate pooled allocator) | drop sequence |

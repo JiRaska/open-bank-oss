@@ -15,8 +15,9 @@
 |---|---|
 | `V1__create_audit.sql` | Creates `audit_entries` (BIGSERIAL `id` PK, unique `entry_id` UUID, event/aggregate/actor/payload columns) and lookup indexes on `aggregate_id`, `event_type`, `occurred_at DESC`, partial index on `actor_id`. Grants on `public`. |
 | `V2__compliance_fields.sql` | EBA ICT + GDPR enrichment: adds `session_id`, `user_agent`, `ip_address`, `data_sensitivity` (default `INTERNAL`), `retention_until`, `is_security_event` (default `FALSE`), `risk_score`. Adds security/session/retention indexes. **Installs immutability:** `RULE no_update_audit DO INSTEAD NOTHING` and `RULE no_delete_audit DO INSTEAD NOTHING`. Backfills `retention_until` and installs `trg_audit_retention` BEFORE INSERT trigger (`occurred_at + 10 years`). |
-| `V3__create_audit_outbox.sql` | Creates `audit_outbox` (BIGSERIAL `id` PK, unique `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus `(status, created_at)` and `aggregate_id` indexes. |
+| `V3__create_audit_outbox.sql` | Creates `audit_outbox` (BIGSERIAL `id` PK, unique `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus `(status, created_at)` and `aggregate_id` indexes. **Removed by V16** — see below. |
 | `V4__hibernate_sequences.sql` | Creates `audit_entries_seq` and `audit_outbox_seq` (`INCREMENT BY 50`) required by PanacheEntity id allocation. Rollback: `DROP SEQUENCE audit_entries_seq, audit_outbox_seq;`. |
+| `V16__drop_audit_outbox.sql` | Drops `audit_outbox` and `audit_outbox_seq` — the transactional-outbox apparatus built on top of it had zero writers anywhere in the service (#5126). Rollback recreates the table/indexes/sequence as of V8 (see the migration's own comment). |
 
 ## Tables
 
@@ -46,10 +47,6 @@
 | `risk_score` | SMALLINT, null | (V2) |
 
 **Immutability:** PostgreSQL `DO INSTEAD NOTHING` rules silently discard any `UPDATE`/`DELETE`. The trail is physically append-only; correction is by appending a new compensating entry, never by editing.
-
-### `audit_outbox`
-
-Transactional-outbox staging for re-emitting recorded events (`event_id`, `aggregate_id`, `event_type`, `payload`, `status` ∈ PENDING/SENT/FAILED, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at`). Drained by `AuditOutboxDispatcher`.
 
 ## PII & data classification
 

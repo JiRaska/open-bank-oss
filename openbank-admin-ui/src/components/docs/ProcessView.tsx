@@ -14,40 +14,30 @@
 
 import { useState } from 'react'
 import type { ElementType } from 'react'
-import { ShieldCheck, Info, CheckCircle2, CircleDashed, Circle, X } from 'lucide-react'
+import { ShieldCheck, Info, X } from 'lucide-react'
 import { Mermaid } from '@/components/docs/Mermaid'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { TONE_BORDER_LEFT_CLASS, TONE_TEXT_CLASS } from '@/components/ui/tone'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
+import { STATUS_META, StatusDot } from '@/lib/docs/status'
 
 type Mode = 'reality' | 'target'
 type Lens = 'story' | 'token' | 'tech'
 
-const STATUS_META: Record<Status, { label: string; color: string; bg: string; border: string; Icon: ElementType }> = {
-  live:    { label: 'Live (dev sandbox)',             color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2 },
-  partial: { label: 'Partial (deployed, incomplete)', color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: CircleDashed },
-  planned: { label: 'Planned (roadmap)',              color: '#94a3b8', bg: '#f8fafc', border: '#cbd5e1', Icon: Circle },
-}
-
 // Title icons a manifest may name (lucide-react). Extend as new processes need.
 const ICON_MAP: Record<string, ElementType> = { ShieldCheck }
 
-function StatusDot({ status }: { status: Status }) {
-  const m = STATUS_META[status]
-  return <m.Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
-}
-
-function StatusChip({ status }: { status: Status }) {
+function StatusChip({ status, label }: { status: Status; label: string }) {
   const m = STATUS_META[status]
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600,
-      padding: '2px 8px', borderRadius: '20px', background: m.bg, color: m.color, border: `1px solid ${m.border}`,
-    }}>
-      <StatusDot status={status} />{m.label}
-    </span>
+    <StatusBadge status={status} tone={m.tone} label={label} leading={<m.Icon size={12} />} className="badge-sm" />
   )
 }
 
 export function ProcessView({ proc }: { proc: Process }) {
+  const { language, t } = useLanguage()
   const [mode, setMode] = useState<Mode>('reality')
   const [lens, setLens] = useState<Lens>('story')
   const [selected, setSelected] = useState<TechNode | null>(null)
@@ -55,33 +45,29 @@ export function ProcessView({ proc }: { proc: Process }) {
   const TitleIcon = ICON_MAP[proc.icon] ?? ShieldCheck
   const overall = overallScore(proc.controls)
   const visibleStory = mode === 'reality' ? proc.story.filter(s => s.status === 'live') : proc.story
-  const gaugeColor = overall < 40 ? '#dc2626' : overall < 70 ? '#d97706' : '#059669'
+  const gaugeTone = overall < 40 ? 'danger' : overall < 70 ? 'warning' : 'success'
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Docs</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{proc.title}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <TitleIcon size={18} style={{ color: 'var(--accent)' }} />
-            {proc.title}
-          </h1>
-          <p className="page-subtitle">{proc.subtitle}</p>
-        </div>
-      </div>
+          </>}
+        title={proc.title}
+        subtitle={proc.subtitle}
+        icon={<TitleIcon aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Honesty banner + reality/target toggle */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'inline-flex', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div role="group" aria-label={t('Režim zobrazení procesu', 'Process view mode')} style={{ display: 'inline-flex', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
           {(['reality', 'target'] as Mode[]).map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} style={{
               padding: '6px 14px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer',
               fontFamily: 'inherit',
-              background: mode === m ? 'var(--accent)' : 'var(--surface)',
+              background: mode === m ? 'var(--accent-strong)' : 'var(--surface)',
               color: mode === m ? '#fff' : 'var(--text-secondary)',
             }}>{m === 'reality' ? 'Realita (dnes)' : 'Cíl (CNB/EBA)'}</button>
           ))}
@@ -89,22 +75,22 @@ export function ProcessView({ proc }: { proc: Process }) {
         {(Object.keys(STATUS_META) as Status[]).map(s => (
           <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <StatusDot status={s} />
-            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{STATUS_META[s].label}</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{STATUS_META[s].label[language]}</span>
           </div>
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)' }}>
-          <Info size={13} />
+          <Info size={13} aria-hidden="true" />
           Skóre = produkční compliance cíl. Dev sandbox je záměrně mimo scope pro některé prod controls (TLS, secrets — řeší infra vrstva).
         </div>
       </div>
 
       {/* Lens tabs */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+      <div role="group" aria-label={t('Čočka zobrazení procesu', 'Process view lens')} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
         {([['story', '① Příběh'], ['token', '② Tokeny'], ['tech', '③ Technologie']] as [Lens, string][]).map(([id, label]) => (
-          <button key={id} onClick={() => setLens(id)} style={{
+          <button key={id} type="button" aria-pressed={lens === id} onClick={() => setLens(id)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
             border: `1px solid ${lens === id ? 'var(--accent)' : 'var(--border)'}`,
-            background: lens === id ? 'var(--accent)' : 'var(--surface)',
+            background: lens === id ? 'var(--accent-strong)' : 'var(--surface)',
             color: lens === id ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
           }}>{label}</button>
         ))}
@@ -118,7 +104,7 @@ export function ProcessView({ proc }: { proc: Process }) {
               {visibleStory.map((s, i) => (
                 <li key={i} style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
                   <span style={{ marginRight: '8px' }}>{s.text}</span>
-                  {s.status !== 'live' && <StatusChip status={s.status} />}
+                  {s.status !== 'live' && <StatusChip status={s.status} label={STATUS_META[s.status].label[language]} />}
                 </li>
               ))}
             </ol>
@@ -156,10 +142,10 @@ export function ProcessView({ proc }: { proc: Process }) {
                       const m = STATUS_META[n.status]
                       const active = selected?.id === n.id
                       return (
-                        <button key={n.id} onClick={() => setSelected(active ? null : n)} title={n.desc} style={{
+                        <button key={n.id} type="button" aria-label={n.name} aria-pressed={active} onClick={() => setSelected(active ? null : n)} title={n.desc} style={{
                           display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px',
-                          cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`,
-                          boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none',
+                          cursor: 'pointer', background: m.background, border: `1px solid ${active ? m.text : m.border}`,
+                          boxShadow: active ? `0 0 0 2px var(--focus-ring)` : 'none',
                           color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left',
                         }}>
                           <StatusDot status={n.status} />{n.name}
@@ -170,12 +156,12 @@ export function ProcessView({ proc }: { proc: Process }) {
                 </div>
               ))}
               {selected && (
-                <div className="card" style={{ padding: '14px 16px', borderLeft: `3px solid ${STATUS_META[selected.status].color}` }}>
+                <div className={`card tone-border-left ${TONE_BORDER_LEFT_CLASS[STATUS_META[selected.status].tone]}`} style={{ padding: '14px 16px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{selected.name}</span>
-                    <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}><X size={15} /></button>
+                    <button type="button" aria-label={t('Zavřít technologické detaily', 'Close technology details')} onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}><X size={15} aria-hidden="true" /></button>
                   </div>
-                  <div style={{ marginBottom: '8px' }}><StatusChip status={selected.status} /></div>
+                  <div style={{ marginBottom: '8px' }}><StatusChip status={selected.status} label={STATUS_META[selected.status].label[language]} /></div>
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>{selected.desc}</p>
                 </div>
               )}
@@ -192,7 +178,7 @@ export function ProcessView({ proc }: { proc: Process }) {
             Compliance (produkční cíl)
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
-            <div style={{ fontSize: '40px', fontWeight: 800, color: gaugeColor, lineHeight: 1 }}>{overall}%</div>
+            <div className={TONE_TEXT_CLASS[gaugeTone]} style={{ fontSize: '40px', fontWeight: 800, lineHeight: 1 }}>{overall}%</div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
               vážený compliance score vůči CNB/EBA/PSD2/DORA. Cíl: 100 %.
             </div>
@@ -202,10 +188,10 @@ export function ProcessView({ proc }: { proc: Process }) {
               <div key={c.name} title={c.why}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', marginBottom: '3px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</span>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: STATUS_META[c.status].color }}>{c.pct}%</span>
+                  <span className={TONE_TEXT_CLASS[STATUS_META[c.status].tone]} style={{ fontSize: '12px', fontWeight: 700 }}>{c.pct}%</span>
                 </div>
                 <div style={{ height: '6px', borderRadius: '3px', background: 'var(--surface-2)', overflow: 'hidden', marginBottom: '3px' }}>
-                  <div style={{ width: `${c.pct}%`, height: '100%', background: STATUS_META[c.status].color }} />
+                  <div style={{ width: `${c.pct}%`, height: '100%', background: STATUS_META[c.status].text }} />
                 </div>
                 <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{c.regulation}</div>
                 <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4, marginTop: '2px' }}>{c.why}</div>

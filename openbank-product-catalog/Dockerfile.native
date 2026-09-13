@@ -29,10 +29,25 @@ COPY . /build
 
 ENV GRADLE_OPTS="-Xmx2g -Xms256m -XX:MaxMetaspaceSize=512m"
 USER root
+# --initialize-at-run-time=com.openbank.libs.domain.identifiers.Ids (#4797): Ids is a
+# Kotlin `object`, so its `generator: TimeBasedEpochGenerator` val runs in <clinit> and,
+# by native-image's default of eager build-time class initialization, is created DURING
+# the image build and baked into the image heap as a constant. SVM explicitly disallows
+# a Random/SplittableRandom instance there (a build-time seed would be frozen and reused
+# on every boot of the produced binary, defeating the point of a random generator) and
+# fails the whole build:
+#   "Detected an instance of Random/SplittableRandom class in the image heap ...
+#    reading field com.fasterxml.uuid.impl.TimeBasedEpochGenerator._random"
+# Deferring Ids to native-image RUNTIME initialization is GraalVM's own documented fix
+# for exactly this diagnostic, and is scoped to this Dockerfile only — Ids is used by
+# 30+ services that all run in plain JVM mode, where this never applies, so nothing
+# about their behaviour changes. Verified by re-running this build: without the flag,
+# fails at the native-image link stage with the error above; with it, that stage passes.
 RUN chmod +x gradlew && \
     ./gradlew :openbank-product-catalog:quarkusBuild \
       -Dquarkus.package.type=native \
       -Dquarkus.native.enabled=true \
+      -Dquarkus.native.additional-build-args=--initialize-at-run-time=com.openbank.libs.domain.identifiers.Ids \
       -Dorg.gradle.java.installations.auto-detect=false \
       --no-daemon \
       --console=plain

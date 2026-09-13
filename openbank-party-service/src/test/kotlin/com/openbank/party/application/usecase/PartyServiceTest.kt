@@ -16,6 +16,7 @@ import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.DocumentType
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyClassification
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
@@ -80,6 +81,7 @@ class PartyServiceTest {
 
         assertThat(savedPartySlot.captured.email).isEqualTo("alice@example.com")
         assertThat(savedPartySlot.captured.status).isEqualTo(PartyStatus.PENDING_KYC)
+        assertThat(savedPartySlot.captured.classification).isEqualTo(PartyClassification.CUSTOMER)
         assertThat(savedPartySlot.captured.kycStatus).isEqualTo(KycStatus.NOT_STARTED)
         assertThat(result).isSameAs(savedPartySlot.captured)
         assertEvent("PARTY_CREATED", result.id)

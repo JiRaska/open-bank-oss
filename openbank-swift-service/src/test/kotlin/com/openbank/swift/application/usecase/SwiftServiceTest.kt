@@ -5,6 +5,7 @@
 package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
@@ -20,6 +21,7 @@ import com.openbank.swift.domain.model.SwiftStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -90,38 +92,68 @@ class SwiftServiceTest {
     }
 
     @Test
-    fun `acknowledge transitions to ACKNOWLEDGED`(): Unit = runBlocking {
+    fun `acknowledge transitions to ACKNOWLEDGED and publishes the status change`(): Unit = runBlocking {
+        // #8718: the transition used to go through the plain `save`, so nothing downstream --
+        // audit-service included -- ever learned an operator had acknowledged. `saveWithOutbox`
+        // is the atomic form: no state change without its event, no event without the change.
         val id = UUID.fromString("00000000-0000-0000-0000-000000000011")
         val existing = message(id = id, status = SwiftStatus.SENT)
+        val outbox = slot<OutboxMessage>()
         coEvery { repo.findById(id) } returns existing
-        coEvery { repo.save(any()) } answers { firstArg() }
+        coEvery { repo.saveWithOutbox(any(), capture(outbox)) } answers { firstArg() }
 
         val result = service.acknowledge(id, "ACK-1")
 
         assertThat(result.status).isEqualTo(SwiftStatus.ACKNOWLEDGED)
         assertThat(result.ackReceivedAt).isNotNull
-        coVerify(exactly = 1) { repo.save(match { it.status == SwiftStatus.ACKNOWLEDGED }) }
+        coVerify(exactly = 1) { repo.saveWithOutbox(match { it.status == SwiftStatus.ACKNOWLEDGED }, any()) }
+        coVerify(exactly = 0) { repo.save(any()) }
+        assertThat(outbox.captured.aggregateId).isEqualTo(id)
+        assertThat(outbox.captured.eventType).isEqualTo("swift.message.status-changed")
+        val payload = objectMapper.readTree(outbox.captured.payload)
+        assertThat(payload.path("status").asText()).isEqualTo("ACKNOWLEDGED")
+        assertThat(payload.path("swiftMessageId").asText()).isEqualTo(id.toString())
+        assertThat(payload.path("sourceService").asText()).isEqualTo("swift-service")
+        assertThat(payload.path("currency").asText()).isEqualTo("EUR")
+        assertThat(payload.path("occurredAt").asText()).isEqualTo(result.updatedAt.toString())
+        // Contract-safe by construction: the payload keys stay exactly the seven
+        // `SwiftMessageEventPayload` declares plus `sourceService`. `ackRef` is NOT one of them --
+        // an earlier revision of the AsyncAPI document declared it and the producer never emitted
+        // it, so #8718 adds an occurrence of an existing event, not a field.
+        assertThat(payload.fieldNames().asSequence().toList())
+            .containsExactlyInAnyOrderElementsOf(STATUS_CHANGED_PAYLOAD_KEYS)
     }
 
     @Test
-    fun `reject sets REJECTED status and rejectionReason`(): Unit = runBlocking {
+    fun `reject sets REJECTED status and publishes the status change`(): Unit = runBlocking {
         val id = UUID.fromString("00000000-0000-0000-0000-000000000012")
         val existing = message(id = id, status = SwiftStatus.SENT)
+        val outbox = slot<OutboxMessage>()
         coEvery { repo.findById(id) } returns existing
-        coEvery { repo.save(any()) } answers { firstArg() }
+        coEvery { repo.saveWithOutbox(any(), capture(outbox)) } answers { firstArg() }
 
         val result = service.reject(id, "invalid details")
 
         assertThat(result.status).isEqualTo(SwiftStatus.REJECTED)
         assertThat(result.rejectionReason).isEqualTo("invalid details")
         coVerify(exactly = 1) {
-            repo.save(
+            repo.saveWithOutbox(
                 match {
                     it.status == SwiftStatus.REJECTED &&
                         it.rejectionReason == "invalid details"
                 },
+                any(),
             )
         }
+        coVerify(exactly = 0) { repo.save(any()) }
+        assertThat(outbox.captured.eventType).isEqualTo("swift.message.status-changed")
+        val payload = objectMapper.readTree(outbox.captured.payload)
+        assertThat(payload.path("status").asText()).isEqualTo("REJECTED")
+        assertThat(payload.path("swiftMessageId").asText()).isEqualTo(id.toString())
+        // `rejectionReason` stays off the wire for the same reason `ackRef` does; it lives on the
+        // aggregate, and the event carries the transition.
+        assertThat(payload.fieldNames().asSequence().toList())
+            .containsExactlyInAnyOrderElementsOf(STATUS_CHANGED_PAYLOAD_KEYS)
     }
 
     @Test
@@ -170,6 +202,7 @@ class SwiftServiceTest {
             .hasMessageContaining("SWIFT message not found: $id")
 
         coVerify(exactly = 0) { repo.save(any()) }
+        coVerify(exactly = 0) { repo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -182,6 +215,7 @@ class SwiftServiceTest {
             .hasMessageContaining("SWIFT message not found: $id")
 
         coVerify(exactly = 0) { repo.save(any()) }
+        coVerify(exactly = 0) { repo.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -202,6 +236,38 @@ class SwiftServiceTest {
         coVerify(exactly = 1) { settlementPort.settle(any()) }
         coVerify(exactly = 1) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
     }
+
+    @Test
+    fun `send with flag on writes sourceService onto both outbox payloads for AuditConsumer attribution`(): Unit =
+        runBlocking {
+            // #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+            // `AuditConsumer` reads. Before this field, both the SENT and COMPLETED outbox
+            // writes fell back to `EventAttribution.TopicAttribution`'s
+            // `openbank.payments.swift.event` -> `swift-service` entry — correct, but only
+            // TOPIC-sourced. Audit-service subscribes to that topic today, so this is a live
+            // attribution upgrade for every SWIFT payment leg, not a forward-looking one.
+            val txId = UUID.randomUUID()
+            val sentOutbox = slot<OutboxMessage>()
+            val completedOutbox = slot<OutboxMessage>()
+            coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+            coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+            coEvery { schemeGatewayPort.submit(any()) } returns
+                SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
+            coEvery {
+                repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, capture(sentOutbox))
+            } answers { firstArg() }
+            coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = txId)
+            coEvery {
+                repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, capture(completedOutbox))
+            } answers { firstArg() }
+
+            serviceWithFlag.send(command())
+
+            val sentNode = objectMapper.readTree(sentOutbox.captured.payload)
+            val completedNode = objectMapper.readTree(completedOutbox.captured.payload)
+            assertThat(sentNode.get("sourceService").asText()).isEqualTo("swift-service")
+            assertThat(completedNode.get("sourceService").asText()).isEqualTo("swift-service")
+        }
 
     @Test
     fun `send with flag on holds MT103 in SENT when transaction-service is unavailable`(): Unit = runBlocking {
@@ -288,6 +354,24 @@ class SwiftServiceTest {
         chargeCode = "SHA",
         priority = SwiftPriority.NORMAL,
     )
+
+    private companion object {
+        /**
+         * The whole wire surface of `swift.message.status-changed` — the seven keys
+         * `docs/asyncapi/openbank-events.yaml` declares plus `sourceService`. Asserting the key
+         * SET, not just the values, is what makes "#8718 adds no field" a claim the test can fail.
+         */
+        val STATUS_CHANGED_PAYLOAD_KEYS = listOf(
+            "sourceService",
+            "swiftMessageId",
+            "paymentSagaRef",
+            "status",
+            "messageType",
+            "amount",
+            "currency",
+            "occurredAt",
+        )
+    }
 
     private fun message(id: UUID, status: SwiftStatus) = SwiftMessage(
         id = id,

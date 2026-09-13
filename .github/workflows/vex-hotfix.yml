@@ -1,0 +1,58 @@
+# VEX hotfix (ADR-0279 WS3 #13) — closes the loop vex-triage.yml opens.
+#
+# vex-triage escalates a KEV-listed CVE to a severity:critical issue; this lane turns
+# the ones with a known fix into a hotfix PR: OSV fixed version + a direct pin in
+# openbank-libs/gradle/libs.versions.toml → branch + bump commit + PR labelled
+# security/kev-listed, linked to the triage issue. A human reviews and merges — the
+# bot writes the diff, never presses merge. BOM-managed/transitive modules get an
+# issue comment instead (the fix is a platform bump, a human decision).
+#
+# Deliberately narrower than Dependabot: only `kev-listed` issues (actively
+# exploited CVEs), one idempotent PR per CVE. Weekly Tuesday, a day after the
+# triage run that applies the label.
+#
+# Push-on-main note: this workflow never pushes to main (schedule/dispatch only, PR
+# branches only), so main-red-watch does not watch it — its failure mode is a red
+# run visible in the Actions tab, same as vex-triage.yml's SLA escalation.
+name: VEX hotfix
+
+on:
+  schedule:
+    - cron: "17 8 * * 2"   # weekly Tuesday 08:17 UTC, after Monday's vex-triage run
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would change without opening PRs or comments"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  vex-hotfix:
+    name: KEV hotfix PRs
+    # Public repo ⇒ hosted runners are free; no cluster access needed (FinOps: hosted-first).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write        # push the hotfix branch
+      pull-requests: write   # open the PR
+      issues: write          # comment when no direct pin exists
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the script branches from origin/main
+
+      - name: Script self-test (offline — proves the matching logic can still fail)
+        run: python3 .github/scripts/vex-hotfix.py --self-test
+
+      - name: Open KEV hotfix PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/vex-hotfix.py \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}

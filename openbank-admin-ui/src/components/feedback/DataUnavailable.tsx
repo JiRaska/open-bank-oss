@@ -118,8 +118,17 @@ export function DataUnavailable({
   dense = false,
 }: Props) {
   const c = copyFor(kind, service, feature, lang)
+  // A missing result is a normal screen state and should not interrupt a screen-reader user.
+  // A service/session failure happens after a data request, so announce it once without moving
+  // focus away from the operator's filters or retry action. Expired credentials are the exception:
+  // they block the workflow and deserve the assertive alert channel.
+  const liveRole = kind === 'no_data' || kind === 'not_found'
+    ? undefined
+    : kind === 'unauthorized' ? 'alert' : 'status'
   return (
     <div
+      role={liveRole}
+      aria-live={liveRole === 'alert' ? 'assertive' : liveRole === 'status' ? 'polite' : undefined}
       style={{
         padding: dense ? '24px' : '40px',
         textAlign: 'center',

@@ -1,0 +1,14 @@
+-- ADR-0252 phase 1 (#4348, #8630): carry the synthetic taint across the Kafka hop.
+--
+-- The projection row is the hand-off boundary, exactly as OutboxMessage.synthetic documents for
+-- the outbox: the finalizer that emits `domestic.delegated-spend.finalized-absent` runs later, on
+-- another worker, with no record and no request context to read the taint from. It must read a
+-- persisted column or it cannot know.
+--
+-- BOOLEAN NOT NULL DEFAULT FALSE is fail-to-real for every row that already exists: activity whose
+-- origin was never recorded counts as REAL, so nothing is retro-actively dropped out of a
+-- regulatory aggregate.
+--
+-- Rollback: before this migration is applied, DROP COLUMN synthetic; never edit an applied Flyway
+-- migration (the whole file is checksummed, comments included).
+ALTER TABLE domestic_delegated_spend_bindings ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT FALSE;

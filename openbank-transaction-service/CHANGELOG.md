@@ -1,5 +1,126 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.22.0...transaction-service-v1.23.0) (2026-09-13)
+
+
+### Features
+
+* **transaction:** say what a merchant coordinate can actually answer ([#9115](https://github.com/JiRaska/open-bank-oss/issues/9115)) ([6c01167](https://github.com/JiRaska/open-bank-oss/commit/6c01167cbd64ec75c77738457cecd667f2840a0b))
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **transaction:** bind four-eyes approvals to the request, not the maker ([#5043](https://github.com/JiRaska/open-bank-oss/issues/5043)) ([20ed7a1](https://github.com/JiRaska/open-bank-oss/commit/20ed7a1899c25dd3858a96c4f841db8ee0abcaa7))
+* **transaction:** guard transaction_outbox created_at plausibility at INSERT ([#9289](https://github.com/JiRaska/open-bank-oss/issues/9289)) ([e4c6e7c](https://github.com/JiRaska/open-bank-oss/commit/e4c6e7c05143073ac2a1a902310c86c4d1113f58))
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.1...transaction-service-v1.22.0) (2026-09-08)
+
+
+### Features
+
+* **transactions:** let an operator maintain the merchant catalogue ([#8874](https://github.com/JiRaska/open-bank-oss/issues/8874)) ([7c57855](https://github.com/JiRaska/open-bank-oss/commit/7c578553e45097a61c7cff4b6b5096eb276409f9))
+
+
+### Bug Fixes
+
+* **libs:** render a 401 as the standard envelope fleet-wide, from one @Provider ([#9025](https://github.com/JiRaska/open-bank-oss/issues/9025)) ([1cff956](https://github.com/JiRaska/open-bank-oss/commit/1cff95640c40d6bbc8a0f096476994a24f67c916))
+* **transaction:** announce the COMPLETED to REVERSED transition ([#9066](https://github.com/JiRaska/open-bank-oss/issues/9066)) ([dadae4f](https://github.com/JiRaska/open-bank-oss/commit/dadae4f2c0793dee01bedfb12c06d114e467fe6e))
+* **transaction:** reversals record what they reverse ([#9054](https://github.com/JiRaska/open-bank-oss/issues/9054)) ([f3ec567](https://github.com/JiRaska/open-bank-oss/commit/f3ec567a3b5c2ddaf7266cb297d98dc2d8287a3c)), closes [#8841](https://github.com/JiRaska/open-bank-oss/issues/8841)
+* **transaction:** unparseable enum inputs are 400, never a silent null ([#9037](https://github.com/JiRaska/open-bank-oss/issues/9037)) ([cb1e809](https://github.com/JiRaska/open-bank-oss/commit/cb1e8090e7ccd9a02eee4b678f09caed197a5d28))
+
+## [1.21.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.0...transaction-service-v1.21.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **transaction:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8463](https://github.com/JiRaska/open-bank-oss/issues/8463)) ([941a93b](https://github.com/JiRaska/open-bank-oss/commit/941a93bf0182c9a9d8ebe32df7d55788e1ca647e))
+
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.20.0...transaction-service-v1.21.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.19.2...transaction-service-v1.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [1.19.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.19.1...transaction-service-v1.19.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [1.19.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.19.0...transaction-service-v1.19.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.1...transaction-service-v1.19.0) (2026-08-20)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* make TransactionSagaStuck able to fire, delete 3 alerts that never could ([#5787](https://github.com/JiRaska/open-bank-oss/issues/5787)) ([55c2cdd](https://github.com/JiRaska/open-bank-oss/commit/55c2cdd0a57fc0dfeebb824194aa315f37f26ae3))
+* **transaction:** add sourceService to audit-consumed events ([#5329](https://github.com/JiRaska/open-bank-oss/issues/5329)) ([b83799b](https://github.com/JiRaska/open-bank-oss/commit/b83799b06ded82d524795e12d47cb6e6321c7a14)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [1.18.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.0...transaction-service-v1.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* make TransactionSagaStuck able to fire, delete 3 alerts that never could ([#5787](https://github.com/JiRaska/open-bank-oss/issues/5787)) ([55c2cdd](https://github.com/JiRaska/open-bank-oss/commit/55c2cdd0a57fc0dfeebb824194aa315f37f26ae3))
+
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.17.0...transaction-service-v1.18.0) (2026-08-19)
+
+
+### Features
+
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.4...transaction-service-v1.17.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **transaction:** add sourceService to audit-consumed events ([#5329](https://github.com/JiRaska/open-bank-oss/issues/5329)) ([b83799b](https://github.com/JiRaska/open-bank-oss/commit/b83799b06ded82d524795e12d47cb6e6321c7a14)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [1.16.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.3...transaction-service-v1.16.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **transaction:** a payee of ours settles same-day, whatever the rail says ([#5225](https://github.com/JiRaska/open-bank-oss/issues/5225)) ([aaef8b7](https://github.com/JiRaska/open-bank-oss/commit/aaef8b7d6719faf522d3e09c3c2f0f591810548e))
+
+## [1.16.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.2...transaction-service-v1.16.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **transaction:** own-account transfers book and value same-day, always ([#4869](https://github.com/JiRaska/open-bank-oss/issues/4869)) ([79a88b9](https://github.com/JiRaska/open-bank-oss/commit/79a88b931827c447d08f64481f75a13c225521e4))
+
 ## [1.16.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.1...transaction-service-v1.16.2) (2026-08-09)
 
 

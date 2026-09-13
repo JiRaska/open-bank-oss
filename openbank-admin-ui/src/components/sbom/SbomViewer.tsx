@@ -237,6 +237,7 @@ export function SbomViewer({ serviceName }: Props) {
                   <input
                     type="text"
                     placeholder="filter…"
+                    aria-label={t('Filtro komponent SBOM', 'Filter SBOM components')}
                     value={filter}
                     onChange={e => setFilter(e.target.value)}
                     style={{

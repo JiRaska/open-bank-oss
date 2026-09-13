@@ -34,7 +34,7 @@ import java.util.UUID
 class IctIncidentResource(private val service: IctIncidentService, private val clock: Clock) {
 
     @POST
-    fun reportIncident(req: ReportIncidentRequest): Response {
+    suspend fun reportIncident(req: ReportIncidentRequest): Response {
         val incident = service.reportIncident(
             ReportIncidentCommand(
                 title = req.title,
@@ -50,7 +50,7 @@ class IctIncidentResource(private val service: IctIncidentService, private val c
     }
 
     @GET
-    fun listIncidents(
+    suspend fun listIncidents(
         @QueryParam("status") status: String?,
         @QueryParam("severity") severity: String?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
@@ -66,11 +66,11 @@ class IctIncidentResource(private val service: IctIncidentService, private val c
 
     @GET
     @Path("/{id}")
-    fun getIncident(@PathParam("id") id: UUID): Response = Response.ok(service.getIncident(id)).build()
+    suspend fun getIncident(@PathParam("id") id: UUID): Response = Response.ok(service.getIncident(id)).build()
 
     @PATCH
     @Path("/{id}/status")
-    fun updateStatus(@PathParam("id") id: UUID, req: UpdateStatusRequest): Response {
+    suspend fun updateStatus(@PathParam("id") id: UUID, req: UpdateStatusRequest): Response {
         val updated = service.updateStatus(
             id = id,
             status = IncidentStatus.valueOf(req.status),
@@ -84,7 +84,7 @@ class IctIncidentResource(private val service: IctIncidentService, private val c
 
     @POST
     @Path("/{id}/regulatory-report")
-    fun markReportedToRegulator(@PathParam("id") id: UUID, req: RegulatoryReportRequest): Response =
+    suspend fun markReportedToRegulator(@PathParam("id") id: UUID, req: RegulatoryReportRequest): Response =
         Response.ok(service.markReportedToRegulator(id, req.regulatoryReportId)).build()
 }
 

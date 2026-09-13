@@ -21,10 +21,20 @@ import jakarta.enterprise.context.ApplicationScoped
  * change this slice does not make. [ResolveSurfaceUseCase] instead evaluates the rule directly
  * against this repository's own event history at read time — a local, engagement-specific
  * exclusion, not routed through the shared suppression list.
+ *
+ * ADR-0220 D3 (gamification, this slice): after the event is durably persisted, hand its own
+ * generated id to [AwardGamificationPointsUseCase] as the correlation id for any
+ * [com.openbank.engagement.domain.model.gamification.GamificationAward] it triggers. Deliberately
+ * sequenced AFTER `events.save` returns — an award must never correlate to an event that was not
+ * itself durably committed.
  */
 @ApplicationScoped
-class RecordEngagementEventUseCase(private val events: EngagementEventRepository) {
+class RecordEngagementEventUseCase(
+    private val events: EngagementEventRepository,
+    private val awardGamificationPoints: AwardGamificationPointsUseCase,
+) {
     suspend fun record(event: EngagementEvent) {
-        events.save(event)
+        val eventId = events.save(event)
+        awardGamificationPoints.evaluate(event, correlationEventId = eventId)
     }
 }

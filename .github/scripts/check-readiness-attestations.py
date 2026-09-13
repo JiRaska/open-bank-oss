@@ -78,6 +78,79 @@ KNOWN_KEYS = {
 
 REQUIRED_FIELDS = ("date", "ttl_days", "by", "ref")
 
+# Keys that assert an EXERCISE HAPPENED on a date, as opposed to a property that holds.
+# For these a runbook is not evidence: a runbook is the plan, undated and unchanged
+# whether or not anyone ever executed it, so citing one says "we know how to do this",
+# which is precisely the claim ADR-0242 says the estate must stop counting as a drill.
+# Measured 2026-08-19: the fleet's ONLY drill attestation was
+# `ledger.restore_drill … ref: runbook-0003`, and runbook-0003 is the PostgreSQL 16->18
+# major-upgrade procedure — not a restore, not a drill, and dated nowhere. It raised a
+# money-path readiness dimension from 2 to 3 on that basis.
+EXERCISE_KEYS = {"restore_drill", "dr_drill"}
+
+# A drill log entry is the durable artifact: `## YYYY-MM-DD — <scenario>` in one of these.
+DRILL_LOGS = ("docs/bcp/dr-test-log.md", "docs/bcp/chaos-test-log.md")
+
+# Exercise attestations that predate this rule and still cite a runbook. Shrink-only and
+# checked BOTH WAYS: a new one fails, and an entry that healed is reported so the list
+# cannot rot into a permanent exemption. Key: "<service>.<attestation key>".
+EXERCISE_REF_DEBT: dict[str, str] = {}
+
+# R8 (issue #5769) -- a pentest attestation minted by a CI lane must say what the
+# green is WORTH. A green api-fuzz/dast run is not interchangeable across services:
+# measured on the two ends of the range, consent's run drove 13/13 operations while
+# settlement's drove 1 and that one answered only auth errors. TTL renewal makes it
+# worse: a lane that exercises nothing renews the attestation forever. So a
+# `pentest` entry whose `by` is a CI lane (`ci-*`) must carry `ops: N` -- the number
+# of operations the run actually EXERCISED (schemathesis `Selected` minus the
+# auth-blocked ones, recorded machine-readably by the lane in
+# fuzz-reports/<svc>-ops*.json since #5769) -- and N must clear the floor, or the
+# entry must say `not_fuzzable: "<reason>"` so the matrix reads "not meaningfully
+# testable at v1 scope" instead of a silent pass.
+PENTEST_OPS_FLOOR = 5
+CI_BY_RE = re.compile(r"^ci-")
+
+# R8b (issue #9673) -- `ops` is hand-transcribed into this file next to the claim it justifies,
+# and nothing tied it to anything. Bound it by the one thing in the repo it cannot exceed: the
+# operations the service's committed OpenAPI declares (exercised = selected - auth_blocked <=
+# selected <= declared). A count above the declared surface is a typo, a sibling service's number
+# copied across, or a measurement of a surface the service no longer has -- all three were
+# undetectable. It is an upper bound only: an optimistic count BELOW the surface still passes, and
+# only the run's fuzz-reports/<svc>-ops*.json can settle that, which this offline gate cannot read.
+#
+# Counted with a line grammar, not yaml, because this gate degrades rather than requires pyyaml.
+# Checked against yaml.safe_load over all 56 committed specs: zero disagreements.
+SPEC_REL = "src/main/resources/openapi.yaml"
+_SPEC_OPERATION_RE = re.compile(r"^    (get|put|post|delete|patch|head|options|trace):\s*$")
+
+
+def spec_operation_count(module: pathlib.Path) -> int | None:
+    """Operations declared under the top-level `paths:` of the module's OpenAPI, or None."""
+    spec = module / SPEC_REL
+    if not spec.is_file():
+        return None
+    inside = False
+    count = 0
+    for line in spec.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.rstrip() == "paths:":
+            inside = True
+            continue
+        if inside and not line[0].isspace():
+            inside = False  # the next top-level key (components:, tags:, ...) ends `paths:`
+        if inside and _SPEC_OPERATION_RE.match(line):
+            count += 1
+    return count
+
+
+# CI-minted pentest attestations that predate R8. Shrink-only, checked BOTH WAYS:
+# a new ci-* pentest entry without ops fails, and a baselined entry that gains ops
+# (or leaves the file) is reported so the exemption cannot rot into permanence.
+PENTEST_OPS_DEBT: dict[str, str] = {
+    "ledger.pentest": "predates R8 (#5769): ci-zap-baseline run 32173390301; add ops from the run artifact on next renewal",
+}
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISSUE_RE = re.compile(r"^#\d+$")
 RUNBOOK_RE = re.compile(r"^runbook-(\d+)$")
@@ -144,6 +217,20 @@ def yaml_pairs(text: str) -> set[tuple[str, str]] | None:
         if isinstance(entries, dict)
         for key in entries
     }
+
+
+def drill_log_records(repo: pathlib.Path, ref: str, date: str) -> bool:
+    """True when `ref` is a drill log that actually carries an entry for `date`.
+
+    The point is the artifact, not the citation: a log the attestation names but that
+    never got the entry is the same silence as no evidence at all.
+    """
+    if ref.rstrip("/") not in DRILL_LOGS:
+        return True  # not a drill log; other rules judge it
+    path = repo / ref.rstrip("/")
+    if not path.is_file():
+        return False
+    return re.search(rf"^##\s+{re.escape(date)}\b", path.read_text(encoding="utf-8"), re.MULTILINE) is not None
 
 
 def ref_resolves(repo: pathlib.Path, ref: str) -> bool:
@@ -272,6 +359,74 @@ def check(
             )
             continue
 
+        # R7 -- an EXERCISE key must cite evidence the exercise happened, not the procedure
+        # for it. A runbook is undated and identical whether or not anyone ever ran it.
+        if key in EXERCISE_KEYS:
+            debt_key = f"{svc}.{key}"
+            cites_runbook = bool(RUNBOOK_RE.match(f["ref"]))
+            if cites_runbook and debt_key not in EXERCISE_REF_DEBT:
+                errors.append(
+                    f"{where}: `{debt_key}` cites {f['ref']!r} -- a runbook is the PLAN, not "
+                    f"evidence anyone executed it, and it carries no date to compare against "
+                    f"{f['date']}. Cite the drill record instead: an entry in "
+                    f"{' or '.join(DRILL_LOGS)} dated {f['date']}, the run URL, or a #issue"
+                )
+                continue
+            if not drill_log_records(repo, f["ref"], f["date"]):
+                errors.append(
+                    f"{where}: `{debt_key}` cites {f['ref']!r}, which carries no `## {f['date']}` "
+                    f"entry -- the log it names never got the record, so the attestation is "
+                    f"backed by nothing a reader can check"
+                )
+                continue
+
+        # R8 -- a CI-minted pentest attestation must record the exercised surface
+        # (#5769). A bare green is a lane that RAN, not a surface that was TESTED.
+        if key == "pentest" and CI_BY_RE.match(f.get("by", "")):
+            debt_key = f"{svc}.{key}"
+            ops_raw = f.get("ops")
+            if ops_raw is None and "not_fuzzable" not in f and debt_key not in PENTEST_OPS_DEBT:
+                errors.append(
+                    f"{where}: `{debt_key}` is minted by `{f['by']}` but records no `ops: N` "
+                    f"-- the exercised-operations count from the run (Selected minus "
+                    f"auth-blocked, fuzz-reports/<svc>-ops*.json). A pentest attestation "
+                    f"without it reads 'adversarial test passed' while asserting 'a lane "
+                    f"ran' (#5769). Below-floor services belong in `not_fuzzable: <reason>`."
+                )
+                continue
+            if ops_raw is not None:
+                try:
+                    ops = int(ops_raw)
+                except ValueError:
+                    errors.append(f"{where}: `{debt_key}` ops {ops_raw!r} is not an integer")
+                    continue
+                if ops < PENTEST_OPS_FLOOR and "not_fuzzable" not in f:
+                    errors.append(
+                        f"{where}: `{debt_key}` records ops={ops}, below the floor "
+                        f"({PENTEST_OPS_FLOOR}) -- that run tested too little surface to "
+                        f"mint a pentest attestation; use `not_fuzzable: <reason>` or fuzz "
+                        f"a meaningfully larger surface first"
+                    )
+                    continue
+                declared = spec_operation_count(repo / f"openbank-{svc}-service")
+                if declared is None:
+                    errors.append(
+                        f"{where}: `{debt_key}` records ops={ops}, but openbank-{svc}-service has "
+                        f"no {SPEC_REL} -- there is no declared surface a fuzz run could have "
+                        f"exercised, so the count cannot be checked against anything (#9673)"
+                    )
+                    continue
+                if ops > declared:
+                    errors.append(
+                        f"{where}: `{debt_key}` records ops={ops}, more than the {declared} "
+                        f"operation(s) openbank-{svc}-service/{SPEC_REL} declares -- exercised "
+                        f"operations cannot exceed the declared surface, so this is a "
+                        f"transcription error, a count copied from another service, or a "
+                        f"measurement of a surface the service no longer has. Re-read ops from "
+                        f"the run's fuzz-reports/<svc>-ops*.json (#9673)"
+                    )
+                    continue
+
         # Freshness. Exact calendar arithmetic, deliberately: the collector approximates a
         # month as 30 days, which lets a TTL run a day or two past its own expiry.
         age = (today - date).days
@@ -296,6 +451,34 @@ def check(
                 f"derived score then"
             )
 
+    # The debt list is checked the other way too: an entry that healed must leave, or the
+    # exemption silently becomes permanent and reads as a discharged obligation.
+    # Only against the real file: the self-test's fixtures are single-entry synthetic
+    # documents, and asking them about fleet-wide debt would make every unrelated case red.
+    live = {
+        f"{r['service']}.{r['key']}"
+        for r in records
+        if r["key"] in EXERCISE_KEYS and RUNBOOK_RE.match(r["fields"].get("ref", ""))
+    }
+    for stale in sorted(set(EXERCISE_REF_DEBT) - live) if file_rel == FILE_REL else []:
+        errors.append(
+            f"{file_rel}: `{stale}` is in EXERCISE_REF_DEBT but no longer cites a runbook "
+            f"-- remove the entry from check-readiness-attestations.py"
+        )
+
+    if file_rel == FILE_REL:
+        live_debt = {
+            f"{r['service']}.{r['key']}"
+            for r in records
+            if r["key"] == "pentest" and CI_BY_RE.match(r["fields"].get("by", ""))
+            and "ops" not in r["fields"] and "not_fuzzable" not in r["fields"]
+        }
+        for stale in sorted(set(PENTEST_OPS_DEBT) - live_debt):
+            errors.append(
+                f"{file_rel}: `{stale}` is in PENTEST_OPS_DEBT but now carries ops "
+                f"(or left the file) -- remove the entry from check-readiness-attestations.py"
+            )
+
     return (errors, warnings, len(records))
 
 
@@ -316,8 +499,22 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             True,
         ),
         (
-            "TRUE ENTRY citing a runbook must not be flagged",
-            "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
+            "R7: an exercise attestation citing a runbook fails for anyone not baselined",
+            "consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
+            "error",
+            True,
+        ),
+        (
+            "R7: a drill log that never got the entry is not evidence",
+            ("consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, "
+             "ref: docs/bcp/dr-test-log.md }\n"),
+            "error",
+            True,
+        ),
+        (
+            "R7 TRUE ENTRY: a drill log carrying that exact date is evidence",
+            ("consent:\n  dr_drill: { date: 2026-06-30, ttl_days: 180, by: jiri, "
+             "ref: docs/bcp/dr-test-log.md }\n"),
             "clean",
             True,
         ),
@@ -430,6 +627,48 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             "error",
             False,
         ),
+        (
+            "R8: CI-minted pentest without ops fails (#5769)",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref} }}\n",
+            "error",
+            True,
+        ),
+        (
+            "R8 TRUE ENTRY: CI-minted pentest with ops at the floor",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref}, ops: 13 }}\n",
+            "clean",
+            True,
+        ),
+        (
+            "R8: ops below the floor is not a pentest",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-zap-baseline, ref: {good_ref}, ops: 1 }}\n",
+            "error",
+            True,
+        ),
+        (
+            "R8 TRUE ENTRY: below-floor surface says so explicitly",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-zap-baseline, ref: {good_ref}, ops: 1, not_fuzzable: 'entire API behind auth at v1 scope' }}\n",
+            "clean",
+            True,
+        ),
+        (
+            "R8: a human pentest engagement needs no ops field",
+            f"ledger:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ext, ref: {good_ref} }}\n",
+            "clean",
+            True,
+        ),
+        (
+            "R8b: ops one above the declared OpenAPI surface is a transcription, not a measurement (#9673)",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref}, ops: 14 }}\n",
+            "error",
+            True,
+        ),
+        (
+            "R8b: ops for a service with no committed OpenAPI cannot be checked (#9673)",
+            f"consent:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref}, ops: 13 }}\n",
+            "error",
+            True,
+        ),
     ]
 
     failures = 0
@@ -438,8 +677,23 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
         # The sandbox needs the artefacts the "true entry" cases cite.
         (tmp / "openbank-ledger-service").mkdir()
         (tmp / "openbank-consent-service").mkdir()
+        (tmp / "openbank-audit-service").mkdir()
+        # R8b fixture: exactly 13 declared operations, so the TRUE ENTRY at ops: 13 sits ON the
+        # bound and ops: 14 is one above it. The trailing `components:` block carries
+        # method-shaped keys at the same indent: a counter that does not stop at the end of
+        # `paths:` reads 15 and lets ops: 14 through. A comment at column 0 inside `paths:` must
+        # not end the block either.
+        (tmp / "openbank-audit-service/src/main/resources").mkdir(parents=True)
+        (tmp / "openbank-audit-service" / SPEC_REL).write_text(
+            "openapi: 3.0.3\npaths:\n# a column-0 comment inside paths\n"
+            + "".join(f"  /r{i}:\n    get:\n      responses: {{}}\n" for i in range(13))
+            + "components:\n  x:\n    get:\n      y: 1\n    post:\n      y: 1\n"
+        )
         (tmp / "docs/runbooks").mkdir(parents=True)
         (tmp / "docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md").write_text("x")
+        (tmp / "docs/bcp").mkdir(parents=True)
+        (tmp / "docs/bcp/dr-test-log.md").write_text(
+            "# DR Test Log\n\n## 2026-06-30 — table-top\n- **Type**: table-top\n")
         rel = "att.yaml"
 
         for name, body, expect, expect_one in cases:
@@ -459,6 +713,68 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
                 failures += 1
             else:
                 print(f"  ok  [{got:5}] {name}")
+
+        # Scope guard: the EXEMPTION MECHANISM, now that EXERCISE_REF_DEBT is empty.
+        #
+        # #5673 emptied the list: the drill it covered really happened (#2495) and its record
+        # now lives in docs/bcp/dr-test-log.md, so nothing is exempt any more. That removed the
+        # gate's only live exercise of the exemption path -- and an unexercised escape hatch is
+        # exactly the kind of code that is discovered to be broken by the next person who needs
+        # it. So the case no longer reads the real list; it injects a debt entry, asserts the
+        # SAME body flips from error to clean, and asserts the stale-declaration direction. Both
+        # halves must move, or the exemption is not what makes the difference.
+        debt_body = "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n"
+        (tmp / rel).write_text(debt_body, encoding="utf-8")
+
+        errors, _, _ = check(tmp, rel, _TODAY)
+        if not errors:
+            print("::error::self-test: a runbook ref was clean with EXERCISE_REF_DEBT empty")
+            failures += 1
+        else:
+            print("  ok  [error] with the debt list EMPTY, a runbook ref for a drill fails")
+
+        _saved = dict(EXERCISE_REF_DEBT)
+        try:
+            EXERCISE_REF_DEBT["ledger.restore_drill"] = "self-test injected exemption"
+            errors, _, _ = check(tmp, rel, _TODAY)
+            if errors:
+                print(
+                    "::error::self-test: EXERCISE_REF_DEBT no longer exempts a baselined entry "
+                    f"-- errors={errors}"
+                )
+                failures += 1
+            else:
+                print("  ok  [clean] an INJECTED debt entry exempts that same runbook ref")
+
+            # ...and the other direction: exempt something that no longer cites a runbook and
+            # the stale-declaration error must fire, so the list cannot rot into a permanent
+            # exemption once the data is fixed.
+            # This one must be written at FILE_REL: the stale-declaration check is scoped
+            # `if file_rel == FILE_REL`, so against the self-test's own "att.yaml" it silently
+            # does nothing -- which is why this direction had never actually been exercised.
+            real = tmp / FILE_REL
+            real.parent.mkdir(parents=True, exist_ok=True)
+            real.write_text(
+                "ledger:\n  restore_drill: { date: 2026-06-30, ttl_days: 180, by: jiri, "
+                "ref: docs/bcp/dr-test-log.md }\n",
+                encoding="utf-8",
+            )
+            (tmp / "docs" / "bcp").mkdir(parents=True, exist_ok=True)
+            (tmp / "docs" / "bcp" / "dr-test-log.md").write_text(
+                "## 2026-06-30 — entry\n", encoding="utf-8"
+            )
+            errors, _, _ = check(tmp, FILE_REL, _TODAY)
+            if not any("no longer cites a runbook" in e for e in errors):
+                print(
+                    "::error::self-test: a STALE EXERCISE_REF_DEBT declaration was not reported "
+                    f"-- errors={errors}"
+                )
+                failures += 1
+            else:
+                print("  ok  [error] a debt entry whose attestation healed is reported as stale")
+        finally:
+            EXERCISE_REF_DEBT.clear()
+            EXERCISE_REF_DEBT.update(_saved)
 
         # Scope guard: an empty file must report zero, and zero must be visible.
         (tmp / rel).write_text("# nothing attested\n", encoding="utf-8")
@@ -480,7 +796,7 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
     if failures:
         print(f"::error::self-test: {failures} case(s) failed")
         return 1
-    print(f"self-test: all {len(cases) + 2} cases passed (both directions)")
+    print(f"self-test: all {len(cases) + 5} cases passed (both directions)")
     return 0
 
 

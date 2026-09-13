@@ -6,6 +6,7 @@
 package com.openbank.casecoordinator.application
 
 import com.openbank.casecoordinator.domain.model.CaseClass
+import com.openbank.casecoordinator.domain.model.CaseDeliveryMode
 import com.openbank.casecoordinator.infrastructure.config.CaseCoordinatorConfig
 import com.openbank.libs.temporal.TemporalConfig
 import io.mockk.every
@@ -16,6 +17,7 @@ import io.temporal.api.workflowservice.v1.WorkflowServiceGrpc
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowClientOptions
 import io.temporal.client.WorkflowExecutionAlreadyStarted
+import io.temporal.client.WorkflowOptions
 import io.temporal.client.WorkflowStub
 import io.temporal.serviceclient.WorkflowServiceStubs
 import org.assertj.core.api.Assertions.assertThat
@@ -64,6 +66,7 @@ class CaseOpenServiceTest {
         every { caseGroup.ttl() } returns java.time.Duration.ofMinutes(20)
         every { caseGroup.contestedRateThreshold() } returns 0.35
         every { caseGroup.maxContributions() } returns 40
+        every { caseGroup.deliveryMode() } returns CaseDeliveryMode.HITL
         every { workflowClient.options } returns WorkflowClientOptions.newBuilder().setNamespace("openbank").build()
         every { workflowClient.newUntypedWorkflowStub("CaseWorkflow", any()) } returns untyped
         every { untyped.start(any()) } returns WorkflowExecution.getDefaultInstance()
@@ -101,6 +104,19 @@ class CaseOpenServiceTest {
         assertThat(
             service.open(PRINCIPAL, COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
         ).isEqualTo(CaseOpenResult.Denied)
+    }
+
+    @Test
+    fun `shadow mode denies money-path case classes before a workflow can start`() {
+        every { caseGroup.deliveryMode() } returns CaseDeliveryMode.SHADOW
+        every { caseGroup.enabledClasses() } returns setOf(CaseClass.INCIDENT_RESPONSE, CaseClass.FRAUD_INVESTIGATION)
+
+        assertThat(
+            service.open(PRINCIPAL, COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
+        ).isEqualTo(CaseOpenResult.Denied)
+        io.mockk.verify(exactly = 0) {
+            workflowClient.newUntypedWorkflowStub(any<String>(), any<WorkflowOptions>())
+        }
     }
 
     @Test

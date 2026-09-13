@@ -10,23 +10,28 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.party.application.port.out.PartyDocumentFileRepository
 import com.openbank.party.application.port.out.PartyDocumentRepository
 import com.openbank.party.application.port.out.PartyOutboxRepository
+import com.openbank.party.application.port.out.PartyPayeeRepository
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.DocumentType
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyClassification
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import com.openbank.party.domain.model.Payee
 import com.openbank.party.domain.model.PhoneDirectory
 import com.openbank.party.infrastructure.persistence.entity.PartyDocumentEntity
 import com.openbank.party.infrastructure.persistence.entity.PartyDocumentFileEntity
 import com.openbank.party.infrastructure.persistence.entity.PartyEntity
+import com.openbank.party.infrastructure.persistence.entity.PartyPayeeEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.quarkus.panache.common.Sort
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -218,6 +223,7 @@ class PartyRepositoryImpl(
     private fun Party.toEntity() = PartyEntity().also {
         it.partyId = id
         it.partyType = partyType.name
+        it.classification = classification.name
         it.status = status.name
         it.legalName = legalName
         it.tradingName = tradingName
@@ -225,6 +231,8 @@ class PartyRepositoryImpl(
         it.nationality = nationality
         it.taxId = taxId
         it.registrationNumber = registrationNumber
+        it.legalForm = legalForm
+        it.registrationCountry = registrationCountry
         it.email = email
         it.phone = phone
         it.phoneHash = PhoneDirectory.hash(phone)
@@ -249,9 +257,11 @@ class PartyRepositoryImpl(
     }
 
     private fun PartyEntity.toDomain() = Party(
-        id = partyId, partyType = PartyType.valueOf(partyType), status = PartyStatus.valueOf(status),
+        id = partyId, partyType = PartyType.valueOf(partyType),
+        classification = PartyClassification.valueOf(classification), status = PartyStatus.valueOf(status),
         legalName = legalName, tradingName = tradingName, dateOfBirth = dateOfBirth,
         nationality = nationality, taxId = taxId, registrationNumber = registrationNumber,
+        legalForm = legalForm, registrationCountry = registrationCountry,
         email = email, phone = phone, discoverable = discoverable, kycStatus = KycStatus.valueOf(kycStatus),
         address = if (addressLine1 !=
             null
@@ -352,5 +362,60 @@ class PartyDocumentFileRepositoryImpl :
         mimeType = mimeType,
         content = content,
         uploadedAt = uploadedAt,
+    )
+}
+
+@ApplicationScoped
+class PartyPayeeRepositoryImpl :
+    PartyPayeeRepository,
+    PanacheRepository<PartyPayeeEntity> {
+
+    // Upsert on (partyId, iban): find-then-update rather than relying on the DB unique
+    // constraint to fail an INSERT and catching that, so a re-save is a normal managed-entity
+    // flush (bumps createdAt, keeps payeeId stable) instead of exception-driven control flow.
+    override suspend fun save(payee: Payee): Payee {
+        Panache.withTransaction {
+            find("partyId = ?1 AND iban = ?2", payee.partyId, payee.iban).firstResult().flatMap { existing ->
+                if (existing != null) {
+                    existing.name = payee.name
+                    existing.bic = payee.bic
+                    existing.createdAt = payee.createdAt
+                    Uni.createFrom().voidItem()
+                } else {
+                    persist(
+                        PartyPayeeEntity().also {
+                            it.payeeId = payee.id
+                            it.partyId = payee.partyId
+                            it.name = payee.name
+                            it.iban = payee.iban
+                            it.bic = payee.bic
+                            it.createdAt = payee.createdAt
+                        },
+                    ).replaceWithVoid()
+                }
+            }
+        }.awaitSuspending()
+        return payee
+    }
+
+    override suspend fun findByPartyId(partyId: UUID): List<Payee> =
+        Panache.withSession { find("partyId", Sort.by("createdAt", Sort.Direction.Descending), partyId).list() }
+            .awaitSuspending()
+            .map { it.toDomain() }
+
+    override suspend fun countByPartyId(partyId: UUID): Long =
+        Panache.withSession { count("partyId", partyId) }.awaitSuspending()
+
+    override suspend fun deleteByPartyIdAndIban(partyId: UUID, iban: String) {
+        Panache.withTransaction { delete("partyId = ?1 AND iban = ?2", partyId, iban) }.awaitSuspending()
+    }
+
+    private fun PartyPayeeEntity.toDomain() = Payee(
+        id = payeeId,
+        partyId = partyId,
+        name = name,
+        iban = iban,
+        bic = bic,
+        createdAt = createdAt,
     )
 }

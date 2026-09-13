@@ -14,9 +14,25 @@ import java.util.UUID
 
 data class OpenCeremonyRequest(
     val documentId: UUID,
-    val signerPartyRefs: List<String>,
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection, so `{"signerPartyRefs": [null]}` deserialises happily into a `List<String>`
+     * holding a null. Writing the type honestly is what makes [requireSignerPartyRefs] reachable
+     * instead of dead code. The guard lives here, on the wire boundary, so the command stays
+     * non-nullable.
+     */
+    val signerPartyRefs: List<String?>,
     val signatureLevel: SignatureLevel = SignatureLevel.ADVANCED,
-)
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`; no
+     * service-local mapper is added (#526).
+     */
+    fun requireSignerPartyRefs(): List<String> = signerPartyRefs.mapIndexed { index, ref ->
+        requireNotNull(ref) { "signerPartyRefs[$index] must not be null" }
+    }
+}
 
 data class RecordDecisionRequest(
     val partyRef: String,

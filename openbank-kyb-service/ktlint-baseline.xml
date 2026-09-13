@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/kyb/application/port/in/KybUseCases.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
+</baseline>

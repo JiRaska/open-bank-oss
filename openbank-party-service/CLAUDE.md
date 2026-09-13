@@ -44,3 +44,21 @@ Three things to keep true when touching this:
   life of the service. `PartyOutboxWriteIT` drives the REST endpoints (a `Panache.withTransaction`
   repo called from a bare `@QuarkusTest` thread throws "No current Vertx context found" — only an
   HTTP request carries a context) and asserts the row with a plain JDBC read.
+
+## `V8__party_aml_status.sql` cites the wrong ADR, permanently (#5785)
+
+The header comment of `src/main/resources/db/migration/V8__party_aml_status.sql` reads
+
+```
+-- AML screening outcome — second key of the KYC+AML activation gate (ADR-0073).
+```
+
+**ADR-0073 is "Hardware-backed credential storage for the customer app"** — mobile
+Keystore/Keychain secrets, nothing to do with the activation gate. The decision that actually
+covers `parties.aml_status` as the second key of the two-key activation gate is
+**ADR-0267 — Event-driven onboarding account lifecycle** (§2).
+
+The citation cannot be corrected. Flyway checksums the **whole migration file, comments
+included**, so editing an applied migration fails startup with `checksum mismatch`. This note is
+the correction; do not "fix" the SQL. If you are reading `V8` for the AML status column, read
+ADR-0267, not ADR-0073.

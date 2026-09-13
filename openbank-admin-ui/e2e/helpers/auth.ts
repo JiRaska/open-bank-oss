@@ -4,7 +4,7 @@
 
 // E2E sign-in helper. There is no Keycloak instance in the Playwright environment
 // (webServer.env in playwright.config.ts only sets NEXTAUTH_URL/NEXTAUTH_SECRET, not
-// KEYCLOAK_*), so a real OIDC login is impossible here. src/middleware.ts gates every
+// KEYCLOAK_*), so a real OIDC login is impossible here. src/proxy.ts gates every
 // non-auth route on a valid Auth.js session cookie with no test bypass in the
 // middleware/authOptions themselves (by design — auth bypasses don't belong in
 // production code paths, ADR-0080). Instead, mint a session-token cookie the same way
@@ -27,8 +27,8 @@ const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret'
 // USE_SECURE_COOKIES is false and the cookie has no `__Secure-` prefix.
 const SESSION_COOKIE_NAME = 'authjs.session-token'
 
-/** Signs the given browser context in as an operator with every role, bypassing Keycloak. */
-export async function signInAsOperator(context: BrowserContext, baseURL: string): Promise<void> {
+/** Signs a browser context in with an explicit role set, bypassing Keycloak. */
+export async function signInWithRoles(context: BrowserContext, baseURL: string, roles: string[]): Promise<void> {
   const token = await encode({
     secret: NEXTAUTH_SECRET,
     salt: SESSION_COOKIE_NAME,
@@ -36,11 +36,19 @@ export async function signInAsOperator(context: BrowserContext, baseURL: string)
       sub: 'e2e-operator',
       name: 'E2E Operator',
       email: 'e2e-operator@openbank.test',
-      // All route-guard roles (src/middleware.ts routeGuards) so any page renders.
-      roles: ['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_AUDITOR', 'ROLE_COMPLIANCE', 'ROLE_PAYMENTS'],
+      roles,
       accessToken: 'e2e-fake-access-token',
       accessTokenExpires: Date.now() + 60 * 60 * 1000,
     },
   })
   await context.addCookies([{ name: SESSION_COOKIE_NAME, value: token, url: baseURL }])
+}
+
+/** Signs the given browser context in as an operator with every role, bypassing Keycloak. */
+export async function signInAsOperator(context: BrowserContext, baseURL: string): Promise<void> {
+  return signInWithRoles(
+    context,
+    baseURL,
+    ['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_AUDITOR', 'ROLE_COMPLIANCE', 'ROLE_PAYMENTS'],
+  )
 }

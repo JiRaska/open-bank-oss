@@ -7,15 +7,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, Lock, Users, FileText, Clock, Sparkles, Hand } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Lock, Users, FileText, Clock, Sparkles, Hand, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { useAuth } from '@/lib/auth/useAuth'
+import { ROLES } from '@/lib/auth/roles'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentBodyAnalysis, AgentMeshMap } from '@/components/agent/AgentDiagnostics'
 import type { AgentDiagnostic, AgentMeshSummary } from '@/lib/governance/agentDiagnostics'
 import { OutcomeMetricsCard } from '@/components/agent/AgentOutcomes'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
 interface Schedule { daily: string | null; reactive: string | null }
@@ -148,6 +151,7 @@ function AgentDetailContent() {
   const params = useParams<{ agentId: string }>()
   const agentId = params.agentId
   const { t, language } = useLanguage()
+  const { hasRole } = useAuth()
   const [data, setData] = useState<AgentDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -177,22 +181,17 @@ function AgentDetailContent() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1100px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <div className="breadcrumb">
-          <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-          <Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{agentId}</span>
-        </div>
-        <Link href="/iaops" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px',
-          fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none' }}>
-          <ArrowLeft size={13} /> {t('Zpět na přehled agentů', 'Back to agent roster')}
-        </Link>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{agentId}</span></div>}
+        icon={<Users size={20} aria-hidden="true" />}
+        title={persona.name}
+        subtitle={persona.role}
+        actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na přehled agentů', 'Back to agent roster')}</Link>}
+      />
 
       {loading && !data ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
+          <RefreshCw size={16} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
           <span style={{ fontSize: '13px' }}>{t('Načítám agenta…', 'Loading agent…')}</span>
         </div>
       ) : data ? (
@@ -201,9 +200,6 @@ function AgentDetailContent() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '18px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <AgentPortrait agentId={agentId} />
             <div style={{ flex: 1, minWidth: '200px' }}>
-              <h1 style={{ fontSize: '25px', fontWeight: 850, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.03em' }}>
-                {persona.name}
-              </h1>
               <p style={{ fontSize: '13px', fontWeight: 750, color: 'var(--text-primary)', margin: '1px 0 3px' }}>
                 {persona.role}
               </p>
@@ -261,6 +257,28 @@ function AgentDetailContent() {
               </div>
             </div>
           </Card>
+
+          {agentId === 'flaky-test-hunter' && hasRole(ROLES.ADMIN) && (
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: '240px', flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <ShieldCheck size={15} style={{ color: '#0f766e' }} />
+                    <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Omezená operátorská kontrola', 'Bounded operator check')}</span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>
+                    {t(
+                      'Prověří testové zdroje napříč platformou. Pouze případná automatická oprava je omezená na testové soubory tohoto agenta a vznikne jen jako návrh; agent nic nemerguje.',
+                      'Scans test source across the platform. Only a possible automated repair is limited to this agent\'s test source and is a proposal only; the agent never merges.',
+                    )}
+                  </p>
+                </div>
+                <Link href="/iaops/flaky-test-hunter" className="btn btn-primary btn-sm">
+                  {t('Otevřít řízené spuštění', 'Open governed check')}
+                </Link>
+              </div>
+            </Card>
+          )}
 
           {data.charter && data.diagnostics.length > 0 && (
             <AgentBodyAnalysis agentId={agentId} diagnostics={data.diagnostics} language={language} />

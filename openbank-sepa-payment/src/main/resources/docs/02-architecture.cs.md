@@ -45,7 +45,7 @@ graph TB
     uc[Application<br/>SepaPaymentService]
     dom[Domain<br/>SepaPayment + stavový automat<br/>ScreeningPolicy<br/>+ doménové události]
     persist[Persistence<br/>SepaPaymentRepositoryImpl<br/>SepaPaymentOutboxRepositoryImpl]
-    outbox[Outbox<br/>SepaPaymentOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>SepaPaymentOutboxDispatcher<br/>@Scheduled každých 5s"]
     kafkaad[Kafka<br/>KafkaSepaPaymentEventPublisher]
     clients[Klienti<br/>SanctionsScreeningAdapter<br/>AmlCaseAdapter]
     idem[Idempotence<br/>libs IdempotencyStore]

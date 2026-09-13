@@ -47,6 +47,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 RULES = REPO / "openbank-libs" / "governance" / "rules.yaml"
 REUSE_TOML = REPO / "REUSE.toml"
@@ -344,6 +346,7 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest(agpl)
 
+    gatelib.subjects(len(agpl), "AGPL-3.0-only modules from rules.yaml")
     print(f"Canonical AGPL-3.0-only modules (rules.yaml): {len(agpl)}")
     for m in agpl:
         print(f"  - {m}")

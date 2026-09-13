@@ -21,7 +21,7 @@ import java.util.UUID
 
 /**
  * Consumer-driven MESSAGE contract for the `AccountCreated` event balance-service consumes to
- * initialize a zero balance (ADR-0073, [com.openbank.balance.infrastructure.kafka.BalanceInitConsumer]).
+ * initialize a zero balance (ADR-0267 §3, [com.openbank.balance.infrastructure.kafka.BalanceInitConsumer]).
  *
  * This is the first async (message) pact in the repo — it asserts the event carries the three fields
  * the consumer actually reads (`eventType`, `aggregateId`, `currency`); the producer (account-service)

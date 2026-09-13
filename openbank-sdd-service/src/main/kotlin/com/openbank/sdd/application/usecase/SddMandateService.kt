@@ -107,8 +107,19 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
         mandates.findByReference(instruction.creditorIdentifier, instruction.umr).flatMap { mandate ->
             when (val result = CollectionAuthorisationPolicy.authorise(mandate, instruction, controls)) {
                 is AuthorisationResult.Accept -> {
+                    // Replay guard (#8351): an authorised collection is uniquely identified by
+                    // (mandateId, umr, dueDate) — that triple is the deterministic dedup key the
+                    // debit consumer books under (`so-sdd-{mandateId}-{umr}-{dueDate}`). A retried
+                    // authorise for the SAME dueDate must not re-stamp and re-emit: the duplicate
+                    // event would be deduped downstream, but emitting it at all makes the retry
+                    // observable only as noise in the outbox. lastCollectionDate == dueDate means
+                    // this exact collection was already authorised — return the same decision
+                    // without side effects. A different dueDate is a NEW collection, not a retry.
+                    if (mandate!!.lastCollectionDate == instruction.dueDate) {
+                        return@flatMap Uni.createFrom().item(result)
+                    }
                     // Stamp the settled collection and emit for the downstream posting path.
-                    val stamped = MandateLifecycle.recordCollection(mandate!!, instruction.dueDate)
+                    val stamped = MandateLifecycle.recordCollection(mandate, instruction.dueDate)
                     mandates.save(stamped)
                         .flatMap { saved -> outbox.append(collectionAuthorisedEvent(saved, instruction)).map { saved } }
                         .map { result }

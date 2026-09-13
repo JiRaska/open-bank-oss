@@ -6,6 +6,7 @@ package com.openbank.billing.domain
 
 import com.openbank.libs.product.WaiveReason
 import java.math.BigDecimal
+import java.time.Instant
 
 /**
  * A fee definition as the billing service needs it for assessment — the subset of the
@@ -40,6 +41,13 @@ data class AssessedFee(
     val journalId: java.util.UUID? = null,
     val reversalJournalId: java.util.UUID? = null,
     val reversalReason: String? = null,
+    /**
+     * When the ledger confirmed this charge as [PostingStatus.POSTED] (ADR-0248). `null` until
+     * then. Backs the PAD Art. 5 annual fee-summary aggregation's year filter — the year a fee is
+     * counted in is the year it was actually posted, not the (potentially earlier) cycle/assessment
+     * date, matching `AssessedFeeEntity.postedAt` one-for-one.
+     */
+    val postedAt: Instant? = null,
 ) {
     val idempotencyKey: String get() = "fee-$cycleId-$accountId-$feeId-$currency"
 

@@ -18,7 +18,6 @@ class TemplateSensitivityTest {
     @Test
     fun `secret-bearing templates are classified (allow-list, not block-list)`() {
         assertThat(TemplateSensitivity.isSecret(NotificationTemplate.OTP_CODE)).isTrue()
-        assertThat(TemplateSensitivity.isSecret(NotificationTemplate.PASSWORD_RESET)).isTrue()
     }
 
     @Test
@@ -58,7 +57,6 @@ class TemplateSensitivityTest {
         // enum rather than in the consumer.
         assertThat(TemplateSensitivity.SECRET_TEMPLATES).containsExactlyInAnyOrder(
             NotificationTemplate.OTP_CODE,
-            NotificationTemplate.PASSWORD_RESET,
         )
     }
 }

@@ -5,6 +5,7 @@ package com.openbank.ledger.infrastructure.outbox
 
 import com.openbank.ledger.infrastructure.messaging.KafkaLedgerOutboxEventPublisher
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -38,7 +39,8 @@ class LedgerOutboxDispatcher(
     private val publisher: KafkaLedgerOutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher

@@ -4,37 +4,56 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { Map, Plus, Search, RefreshCw, ChevronRight, Fingerprint, Clock, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Map, Plus, Search, RefreshCw, Fingerprint, Clock, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
+import { parsePidRecords, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
-interface PidRecord {
-  id: string
-  personId: string
-  identifierType: string
-  identifierValue: string
-  issuingCountry: string
-  status: string
-  verified: boolean
-  createdAt: string
-  validUntil?: string
+type PidRecord = PidRecordEvidence
+
+interface BankIdSyncPayload {
+  readonly bankIdSub: string
+  readonly givenName: string
+  readonly familyName: string
+  readonly birthdate: string
+  readonly gender: string
+  readonly birthplace: string
+  readonly nationalities: readonly string[]
+  readonly idDocuments: readonly {
+    readonly type: string
+    readonly number: string
+    readonly issuingCountry: string
+    readonly issuedAt: string
+    readonly expiresAt: string
+  }[]
+  readonly email?: string
+  readonly phone?: string
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE:   'var(--success)',
-  INACTIVE: 'var(--text-muted)',
-  EXPIRED:  'var(--warning)',
-  REVOKED:  'var(--danger)',
+interface PendingBankIdSync {
+  readonly partyId: string
+  readonly payload: BankIdSyncPayload
+}
+
+// PID lifecycle deliberately treats expired credentials as renewal work and a
+// revoked credential as a security concern. Those meanings are stricter than
+// the shared consent-oriented defaults for the same words.
+function pidStatusTone(status: string): Tone {
+  if (status === 'EXPIRED') return 'warning'
+  if (status === 'REVOKED') return 'danger'
+  return statusTone(status)
 }
 
 export default function PidPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [records, setRecords] = useState<PidRecord[]>([])
   const [loading, setLoading] = useState(true)
   // Inline error is reserved for user-initiated writes (the quick-create form);
@@ -61,33 +80,46 @@ export default function PidPage() {
     idDocExpiresAt: ''
   })
   const [formSubmitting, setFormSubmitting] = useState(false)
+  // Party creation and BankID enrichment are two separate writes. Bind the confirmed party ID
+  // to the immutable payload submitted for that party, so recovery cannot enrich it with form
+  // values edited after the non-idempotent POST /parties began.
+  const [pendingBankIdSync, setPendingBankIdSync] = useState<PendingBankIdSync | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
     setLoading(true); setError(null); setUnavailable(null)
     try {
       const res = await fetch(`${PID_SERVICE}/api/v1/pids`, { signal: AbortSignal.timeout(5000) })
+      if (generation !== loadGeneration.current) return
       if (!res.ok) {
-        // 404/405 usually mean the list endpoint isn't implemented yet, so treat
-        // those as an empty list; everything else is classified for the panel.
-        if (res.status === 404 || res.status === 405) {
-          setRecords([])
-        } else {
-          setRecords([])
-          setUnavailable({ kind: await classifyBffFailure(res) })
-        }
+        // The service publishes no PID-list route today. A 404 is therefore an unavailable
+        // capability, not a missing record; 405 proves the path cannot serve this read either.
+        const kind: UnavailableKind = res.status === 404
+          ? 'not_deployed'
+          : res.status === 405 ? 'error' : await classifyBffFailure(res)
+        if (generation !== loadGeneration.current) return
+        setRecords([])
+        setUnavailable({ kind })
         return
       }
-      const data = await res.json()
-      setRecords(Array.isArray(data) ? data : data.items ?? data.content ?? [])
+      const data = parsePidRecords(await res.json() as unknown)
+      if (generation === loadGeneration.current) setRecords(data)
     } catch {
       // Timeout / abort / network — the BFF or pid-service didn't answer.
+      if (generation !== loadGeneration.current) return
       setRecords([])
       setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false)
+    }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoadId = window.setTimeout(load, 0)
+    return () => clearTimeout(initialLoadId)
+  }, [load])
 
   const filtered = records.filter(r =>
     !search || r.identifierValue?.toLowerCase().includes(search.toLowerCase()) ||
@@ -100,66 +132,76 @@ export default function PidPage() {
     setFormSubmitting(true)
     setError(null)
     setSuccessMsg(null)
-    
+
+    const checkpoint = pendingBankIdSync
     const requiredFields = [
       'givenName', 'familyName', 'birthdate', 'bankIdSub', 'nationalities', 
       'gender', 'birthplace', 'idDocType', 'idDocNumber', 'idDocCountry', 
       'idDocIssuedAt', 'idDocExpiresAt'
     ];
-    
-    for (const field of requiredFields) {
-      if (!formData[field as keyof typeof formData]) {
-        setError(t(`Prosím vyplňte všechna povinná pole (${field}).`, `Please fill all required fields (${field}).`));
-        setFormSubmitting(false);
-        return;
+
+    if (!checkpoint) {
+      for (const field of requiredFields) {
+        if (!formData[field as keyof typeof formData]) {
+          setError(t(`Prosím vyplňte všechna povinná pole (${field}).`, `Please fill all required fields (${field}).`));
+          setFormSubmitting(false);
+          return;
+        }
       }
     }
-    
+
     try {
       const nationalitiesArray = formData.nationalities.split(',').map(s => s.trim()).filter(Boolean)
-      
-      const createPayload = {
-        partyType: 'NATURAL_PERSON',
+      const syncPayload: BankIdSyncPayload = checkpoint?.payload ?? {
+        bankIdSub: formData.bankIdSub,
         givenName: formData.givenName,
         familyName: formData.familyName,
         birthdate: formData.birthdate,
-        bankIdSub: formData.bankIdSub,
-        nationalities: nationalitiesArray.length > 0 ? nationalitiesArray : ['CZ'],
-        verificationSource: 'BANKID',
-        initialRole: 'CUSTOMER',
-        onboardingChannel: 'BANKID'
+        gender: formData.gender,
+        birthplace: formData.birthplace,
+        nationalities: nationalitiesArray,
+        idDocuments: [{
+          type: formData.idDocType,
+          number: formData.idDocNumber,
+          issuingCountry: formData.idDocCountry,
+          issuedAt: formData.idDocIssuedAt,
+          expiresAt: formData.idDocExpiresAt
+        }],
+        email: formData.email || undefined,
+        phone: formData.phone || undefined
       }
-      
-      const res = await fetch(`${PID_SERVICE}/api/v1/parties`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createPayload)
-      })
-      if (!res.ok) throw new Error(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
 
-      const party = await res.json()
-      const partyId = party.id || party.partyId
-
-      if (formData.bankIdSub) {
-        const syncPayload = {
-          bankIdSub: formData.bankIdSub,
+      let partyId = checkpoint?.partyId
+      if (!partyId) {
+        const createPayload = {
+          partyType: 'NATURAL_PERSON',
           givenName: formData.givenName,
           familyName: formData.familyName,
           birthdate: formData.birthdate,
-          gender: formData.gender,
-          birthplace: formData.birthplace,
-          nationalities: nationalitiesArray,
-          idDocuments: [{
-            type: formData.idDocType,
-            number: formData.idDocNumber,
-            issuingCountry: formData.idDocCountry,
-            issuedAt: formData.idDocIssuedAt,
-            expiresAt: formData.idDocExpiresAt
-          }],
-          email: formData.email || undefined,
-          phone: formData.phone || undefined
+          bankIdSub: formData.bankIdSub,
+          nationalities: nationalitiesArray.length > 0 ? nationalitiesArray : ['CZ'],
+          verificationSource: 'BANKID',
+          initialRole: 'CUSTOMER',
+          onboardingChannel: 'BANKID'
         }
 
+        const res = await fetch(`${PID_SERVICE}/api/v1/parties`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createPayload)
+        })
+        if (!res.ok) throw new Error(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
+
+        const party = await res.json() as { id?: unknown; partyId?: unknown }
+        const createdPartyId = party.id || party.partyId
+        if (typeof createdPartyId !== 'string' || !createdPartyId) {
+          throw new Error(t('Služba nevrátila ID vytvořené strany.', 'The service did not return the created party ID.'))
+        }
+        partyId = createdPartyId
+        setPendingBankIdSync({ partyId: createdPartyId, payload: syncPayload })
+      }
+
+      if (syncPayload.bankIdSub) {
         const syncRes = await fetch(`${PID_SERVICE}/api/v1/parties/${partyId}/sync/bankid`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -167,10 +209,14 @@ export default function PidPage() {
         })
 
         if (!syncRes.ok) {
-          throw new Error(t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID selhala. Zkuste to prosím znovu.`, `Record created (ID: ${partyId}), but BankID sync failed. Please try again.`))
+          const retryable = syncRes.status === 408 || syncRes.status === 425 || syncRes.status === 429 || syncRes.status >= 500
+          throw new Error(retryable
+            ? t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID dočasně selhala. Zopakujte pouze synchronizaci BankID.`, `Record created (ID: ${partyId}), but BankID sync failed temporarily. Retry BankID sync only.`)
+            : t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID byla odmítnuta (HTTP ${syncRes.status}). Nevytvářejte další stranu; před opakováním synchronizace vyřešte chybu služby nebo dat.`, `Record created (ID: ${partyId}), but BankID sync was rejected (HTTP ${syncRes.status}). Do not create another party; resolve the service or data error before retrying sync.`))
         }
       }
-      
+
+      setPendingBankIdSync(null)
       setShowNewForm(false)
       setFormData({ 
         givenName: '', familyName: '', birthdate: '', bankIdSub: '', nationalities: 'CZ', 
@@ -179,7 +225,7 @@ export default function PidPage() {
       load()
       setSuccessMsg(t('Záznam úspěšně vytvořen a synchronizován.', 'Record created and synchronized successfully.'))
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to create record'
+      const msg = e instanceof Error ? e.message : t('Vytvoření záznamu selhalo.', 'Failed to create record.')
       setError(msg)
     } finally {
       setFormSubmitting(false)
@@ -187,42 +233,42 @@ export default function PidPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="pid:view">
       <div style={{ animation: 'fadeIn 0.2s ease-out', maxWidth: '1400px', margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">PID</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Map size={18} style={{ color: 'var(--accent)' }} />
-              {t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+        <PageHeader
+          icon={<Map size={18} aria-hidden="true" />}
+          title={t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
+          subtitle={t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">PID</span></div>}
+          actions={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-secondary" onClick={load} disabled={loading}>
-                <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={load}
+                disabled={loading}
+                aria-busy={loading}
+                aria-label={t('Obnovit PID záznamy', 'Refresh PID records')}
+              >
+                <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(true)} aria-label={t('Otevřít rychlé vytvoření PID záznamu', 'Open PID quick create')}>
                 {t('Rychlé vytvoření', 'Quick Create')}
               </button>
-              <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                <Plus size={13} /> {t('Nový záznam', 'New Record')}
-              </Link>
+              <Can permission="parties:create">
+                <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+                  <Plus size={13} aria-hidden="true" /> {t('Nový záznam', 'New Record')}
+                </Link>
+              </Can>
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right' }}>
               {t('Chcete vytvořit záznam rychle?', 'Want to create quickly?')}
             </div>
-          </div>
-        </div>
+          </div>}
+        />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {!loading && !unavailable && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Záznamů celkem', 'Total Records'), value: records.length, icon: <Fingerprint size={16} />, color: 'var(--accent)' },
             { label: t('Aktivní', 'Active'), value: records.filter(r => r.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
@@ -236,7 +282,7 @@ export default function PidPage() {
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="card" style={{ marginBottom: '24px', padding: '20px' }}>
           <h2 style={{ fontSize: '16px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -266,13 +312,23 @@ export default function PidPage() {
               <strong>{t('Rychlé vytvoření je pouze předvyplnění. Právně závazná AML identifikace vyžaduje plný onboarding a ověření.', 'Quick create is only pre-filling. Legally binding AML identification requires full onboarding and verification.')}</strong>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {pendingBankIdSync && (
+                <div role="status" style={{ padding: '12px', background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)', borderRadius: '6px', fontSize: '13px' }}>
+                  {t(
+                    `Strana ${pendingBankIdSync.partyId} už byla vytvořena. Údaje jsou uzamčené; další pokus zopakuje pouze synchronizaci BankID se stejnou stranou a původně odeslanou identitou.`,
+                    `Party ${pendingBankIdSync.partyId} was already created. The fields are locked; the next attempt retries BankID sync against the same party and originally submitted identity only.`,
+                  )}
+                </div>
+              )}
+              <fieldset disabled={formSubmitting || pendingBankIdSync !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Základní údaje', 'Basic Info')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Jméno', 'Given Name')} *</label>
+                  <label htmlFor="pid-given-name" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Jméno', 'Given Name')} *</label>
                   <input 
+                    id="pid-given-name"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -281,8 +337,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Příjmení', 'Family Name')} *</label>
+                  <label htmlFor="pid-family-name" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Příjmení', 'Family Name')} *</label>
                   <input 
+                    id="pid-family-name"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -291,8 +348,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum narození', 'Birthdate')} *</label>
+                  <label htmlFor="pid-birthdate" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum narození', 'Birthdate')} *</label>
                   <input 
+                    id="pid-birthdate"
                     type="date"
                     className="input" 
                     required 
@@ -302,8 +360,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Pohlaví', 'Gender')} *</label>
+                  <label htmlFor="pid-gender" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Pohlaví', 'Gender')} *</label>
                   <select 
+                    id="pid-gender"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -316,8 +375,9 @@ export default function PidPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Místo narození', 'Birthplace')} *</label>
+                  <label htmlFor="pid-birthplace" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Místo narození', 'Birthplace')} *</label>
                   <input 
+                    id="pid-birthplace"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -326,8 +386,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Občanství (čárkou oddělené)', 'Nationalities (comma separated)')} *</label>
+                  <label htmlFor="pid-nationalities" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Občanství (čárkou oddělené)', 'Nationalities (comma separated)')} *</label>
                   <input 
+                    id="pid-nationalities"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -340,8 +401,9 @@ export default function PidPage() {
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('BankID a Kontakt', 'BankID & Contact')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('BankID SUB', 'BankID SUB')} *</label>
+                  <label htmlFor="pid-bankid-sub" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('BankID SUB', 'BankID SUB')} *</label>
                   <input 
+                    id="pid-bankid-sub"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -350,8 +412,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Email', 'Email')}</label>
+                  <label htmlFor="pid-email" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Email', 'Email')}</label>
                   <input 
+                    id="pid-email"
                     type="email"
                     className="input" 
                     style={{ width: '100%' }}
@@ -360,8 +423,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Telefon', 'Phone')}</label>
+                  <label htmlFor="pid-phone" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Telefon', 'Phone')}</label>
                   <input 
+                    id="pid-phone"
                     type="tel"
                     className="input" 
                     style={{ width: '100%' }}
@@ -374,8 +438,9 @@ export default function PidPage() {
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Primární doklad totožnosti', 'Primary ID Document')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Typ dokladu', 'Document Type')} *</label>
+                  <label htmlFor="pid-document-type" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Typ dokladu', 'Document Type')} *</label>
                   <select 
+                    id="pid-document-type"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -388,8 +453,9 @@ export default function PidPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Číslo dokladu', 'Document Number')} *</label>
+                  <label htmlFor="pid-document-number" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Číslo dokladu', 'Document Number')} *</label>
                   <input 
+                    id="pid-document-number"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -398,8 +464,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Vydávající stát', 'Issuing Country')} *</label>
+                  <label htmlFor="pid-document-country" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Vydávající stát', 'Issuing Country')} *</label>
                   <input 
+                    id="pid-document-country"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -408,8 +475,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum vydání', 'Issued At')} *</label>
+                  <label htmlFor="pid-document-issued-at" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum vydání', 'Issued At')} *</label>
                   <input 
+                    id="pid-document-issued-at"
                     type="date"
                     className="input" 
                     required
@@ -419,8 +487,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Platnost do', 'Expires At')} *</label>
+                  <label htmlFor="pid-document-expires-at" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Platnost do', 'Expires At')} *</label>
                   <input 
+                    id="pid-document-expires-at"
                     type="date"
                     className="input" 
                     required
@@ -430,12 +499,19 @@ export default function PidPage() {
                   />
                 </div>
               </div>
+              </fieldset>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(false)} disabled={formSubmitting}>
                   {t('Zrušit', 'Cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={formSubmitting}>
-                  {formSubmitting ? t('Vytvářím...', 'Creating...') : t('Vytvořit', 'Create')}
+                  {formSubmitting
+                    ? pendingBankIdSync
+                      ? t('Synchronizuji...', 'Syncing...')
+                      : t('Vytvářím...', 'Creating...')
+                    : pendingBankIdSync
+                      ? t('Znovu synchronizovat BankID', 'Retry BankID sync')
+                      : t('Vytvořit', 'Create')}
                 </button>
               </div>
             </form>
@@ -455,6 +531,7 @@ export default function PidPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
               placeholder={t('Hledat hodnotu, ID osoby...', 'Search value, person ID...')}
+              aria-label={t('Hledat PID případy', 'Search PID cases')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -521,23 +598,23 @@ export default function PidPage() {
                   <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{r.identifierValue}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{r.issuingCountry}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                    <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                      {r.personId?.slice(0, 8) || r.personId}...
-                    </Link>
+                    <Can permission="parties:view">
+                      <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                        {r.personId?.slice(0, 8) || r.personId}...
+                      </Link>
+                    </Can>
                   </td>
                   <td>
-                    <span className="pill" style={{ background: `${STATUS_COLORS[r.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)' }}>
-                      {r.status}
-                    </span>
+                    <StatusBadge status={r.status} tone={pidStatusTone(r.status)} />
                   </td>
                   <td>
                     {r.verified ? <CheckCircle2 size={14} color="var(--success)" /> : <Clock size={14} color="var(--warning)" />}
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.createdAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
-                    <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
-                      {t('Detail', 'View')} <ChevronRight size={12} />
-                    </button>
+                    <span role="status" style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>
+                      {t('Detail není dostupný', 'Details unavailable')}
+                    </span>
                   </td>
                 </tr>
               ))}

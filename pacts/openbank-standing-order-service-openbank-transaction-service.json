@@ -1,0 +1,73 @@
+{
+  "consumer": {
+    "name": "openbank-standing-order-service"
+  },
+  "interactions": [
+    {
+      "description": "POST the due standing order as an own-account TRANSFER with no rail",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1500.00,
+          "currencyCode": "CZK",
+          "description": "Standing order \u2014 monthly savings",
+          "idempotencyKey": "standing-order-exec-pact-001",
+          "sourceAccountId": "aaaaaaaa-1111-4222-8333-444444444444",
+          "targetAccountId": "bbbbbbbb-1111-4222-8333-444444444444",
+          "type": "TRANSFER",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "COMPLETED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

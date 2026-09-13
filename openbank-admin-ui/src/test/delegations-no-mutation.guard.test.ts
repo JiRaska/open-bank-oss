@@ -5,11 +5,9 @@
 // ADR-0230: "mutations only as approval proposals, never direct writes."
 //
 // delegation-service exposes three bank-side mutations — POST /{id}/suspend, POST
-// /{id}/reinstate, DELETE /{id} — and admin-ui has nowhere legitimate to route them: there is no
-// four-eyes / maker-checker store for delegation actions anywhere in the fleet (the shared
-// libs/foureyes contract has no adopters, lending's ApprovalResource is lending-private and
-// exposes list+decide only, and agent-service's /api/v1/proposals has no create endpoint). The
-// unified inbox (ADR-0227) can therefore only READ a proposal someone else persisted.
+// /{id}/reinstate, DELETE /{id}. delegation-service now owns a durable lifecycle proposal store,
+// but its mutation edge is dark-launched and admin-ui intentionally federates only GET list/detail.
+// The unified inbox (ADR-0227) can READ immutable evidence; it cannot decide or execute it.
 //
 // So the console ships read-only, and this guard is what makes that a checked invariant instead
 // of a claim in a PR body: the day someone adds the "obvious" direct suspend route, this test
@@ -27,6 +25,9 @@ const UPSTREAM = 'delegation-service'
 
 /** The single non-GET upstream call this console is allowed to make. */
 const READ_ONLY_PROBE = '/api/v1/delegations/check'
+
+/** CRUD of reusable presets changes no grant and is deliberately outside ADR-0230's guard. */
+const ROLE_PRESET_PATH = '/api/v1/delegation-role-presets'
 
 /** Bank-side mutations on delegation-service that must never be reachable from admin-ui. */
 const FORBIDDEN_PATH_FRAGMENTS = ['/suspend', '/reinstate']
@@ -59,7 +60,7 @@ export function findDelegationMutations(files: { file: string; source: string }[
     const code = stripComments(source)
     if (!code.includes(UPSTREAM)) continue
 
-    const upstreamPaths = [...code.matchAll(/\/api\/v1\/delegations[^'"`\s)]*/g)].map(m => m[0])
+    const upstreamPaths = [...code.matchAll(/\/api\/v1\/(?:delegations|delegation-role-presets)[^'"`\s)]*/g)].map(m => m[0])
     const methods = [...code.matchAll(/method:\s*['"]([A-Z]+)['"]/g)].map(m => m[1])
 
     for (const path of upstreamPaths) {
@@ -73,6 +74,7 @@ export function findDelegationMutations(files: { file: string; source: string }[
     for (const method of methods) {
       if (method === 'GET') continue
       if (method === 'POST' && upstreamPaths.some(p => p.startsWith(READ_ONLY_PROBE))) continue
+      if (upstreamPaths.some(p => p.startsWith(ROLE_PRESET_PATH))) continue
       findings.push({ file, problem: `issues ${method} against ${UPSTREAM}` })
     }
   }
@@ -110,6 +112,7 @@ describe('delegation console is read-only (ADR-0230)', () => {
     const delegationRoutes = scanned.filter(f => f.source.includes(UPSTREAM)).map(f => f.file)
 
     expect(delegationRoutes).toContain('src/app/api/delegations/[id]/route.ts')
+    expect(delegationRoutes).toContain('src/app/api/delegations/approvals/[id]/route.ts')
     expect(delegationRoutes).toContain('src/app/api/delegations/party/[partyId]/route.ts')
     expect(delegationRoutes).toContain('src/app/api/delegations/check/route.ts')
   })

@@ -16,7 +16,18 @@ fun CardEntity.toDomain() = Card(
     currency = currency, deliveryAddress = deliveryAddress,
     activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
     expiresAt = expiresAt,
-    closedReason = closedReason?.let { r -> runCatching { CardClosedReason.valueOf(r) }.getOrNull() },
+    // #9038: a persisted value that does not parse is data corruption — be LOUD, never silently
+    // null the field back into the domain (#9037's strictPersisted shape). Every other enum on
+    // this row already throws via valueOf; closedReason was the silent exception.
+    closedReason = closedReason?.let { r ->
+        runCatching { CardClosedReason.valueOf(r) }
+            .getOrElse { _ ->
+                throw IllegalStateException(
+                    "persisted card $id has unparseable closedReason '$r'; " +
+                        "expected one of ${CardClosedReason.entries.joinToString()}",
+                )
+            }
+    },
     createdAt = createdAt, updatedAt = updatedAt,
     contactlessEnabled = contactlessEnabled, onlineEnabled = onlineEnabled,
     atmEnabled = atmEnabled, abroadEnabled = abroadEnabled,

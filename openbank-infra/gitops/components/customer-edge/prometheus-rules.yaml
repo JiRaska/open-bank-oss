@@ -29,9 +29,21 @@ spec:
           # Of the people who tried to sign the framework agreement in the last hour, fewer than 70%
           # succeeded — with enough attempts (>=10) that the ratio is meaningful, not sandbox noise.
           # This is the single metric the "people fall off at the signature" feedback maps to.
+          #
+          # `or vector(0)` on the NUMERATOR is what makes 0% conversion visible, and it is not
+          # decoration: if not one signature has succeeded, no series carries
+          # `action="SIGN_SUCCESS"` at all, so the division matches nothing and the whole
+          # expression yields no result — silent in exactly the total-failure case it exists for.
+          # `clamp_min` on the denominator cannot help; the missing side is the numerator.
+          # Measured against a real all-failing series (`openbank_llm_requests_total` for the
+          # #5736 model, 14 errors and 0 successes in 24h): the pre-fix form returns EMPTY, this
+          # form returns 0. Same shape as #5733 / #5736.
+          #
+          # At t=0 on a cold pod every counter is 0, so the `>= 10` attempts guard below is false
+          # and the rule is silent — `or vector(0)` adds no boot-time false positive.
           expr: |
             (
-              sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_SUCCESS"}[1h]))
+              (sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_SUCCESS"}[1h])) or vector(0))
               /
               clamp_min(sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])), 1)
             ) < 0.70
@@ -42,16 +54,25 @@ spec:
             severity: warning
             service: customer-edge
           annotations:
+            # Subject: incremented on the request path (OnboardingFunnelPublisher), not by any scheduler.
+            subject_period: continuous
             summary: "Onboarding signature conversion below 70%"
             description: "Fewer than 70% of framework-agreement signature attempts succeeded in the last hour ({{ $value | humanizePercentage }}). Check sca-service / document-service and the sign-fail reasons on the admin onboarding board."
         - alert: OnboardingConsentToSignDropoffHigh
           # Big leak between agreeing to the terms (AGREEMENT completed) and actually reaching the
           # signature (SIGN viewed): >40% of people who consented never even open the sign screen.
+          #
+          # `or vector(0)` for the same reason as the rule above, and this spelling hides it
+          # better: a 100% leak means NOBODY viewed the sign screen, so the `STEP_VIEWED` series
+          # does not exist and `1 - (nothing / x)` is nothing, not 1 — blind at exactly the 100%
+          # drop-off it is named for. Measured on the same real series: pre-fix EMPTY, post-fix 1.
+          # At t=0 on a cold pod the `>= 20` completions guard below is false, so this stays
+          # silent through a restart.
           expr: |
             (
               1 -
               (
-                sum(increase(onboarding_funnel_events_total{step="SIGN", action="STEP_VIEWED"}[6h]))
+                (sum(increase(onboarding_funnel_events_total{step="SIGN", action="STEP_VIEWED"}[6h])) or vector(0))
                 /
                 clamp_min(sum(increase(onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])), 1)
               )
@@ -63,6 +84,8 @@ spec:
             severity: warning
             service: customer-edge
           annotations:
+            # Subject: incremented on the request path (OnboardingFunnelPublisher), not by any scheduler.
+            subject_period: continuous
             summary: "High drop-off between consent and signature"
             description: "More than 40% of prospects who accepted the terms in the last 6h never reached the signature screen — a funnel leak between account creation and signing. Inspect the admin onboarding conversion board."
     # ADR-0192 screen feedback. Both alerts watch the DELIVERY of a user's report, not its content:

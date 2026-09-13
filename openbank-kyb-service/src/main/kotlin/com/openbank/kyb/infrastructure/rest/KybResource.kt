@@ -1,0 +1,492 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.kyb.infrastructure.rest
+
+import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
+import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
+import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
+import com.openbank.kyb.application.port.`in`.LookupCommand
+import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
+import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
+import com.openbank.kyb.application.port.`in`.RegistrySearchUseCase
+import com.openbank.kyb.application.port.`in`.RejectCaseCommand
+import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
+import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
+import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
+import com.openbank.kyb.application.port.`in`.SignCommand
+import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
+import com.openbank.kyb.application.usecase.CaseCallerMismatchException
+import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.RegistrySearchQuery
+import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
+import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
+import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
+import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
+import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
+import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
+import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
+import com.openbank.kyb.infrastructure.rest.dto.MatchInitiatorRequest
+import com.openbank.kyb.infrastructure.rest.dto.RejectRequest
+import com.openbank.kyb.infrastructure.rest.dto.RepresentationDecisionResponse
+import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
+import com.openbank.kyb.infrastructure.rest.dto.SchemeResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchHitResponse
+import com.openbank.kyb.infrastructure.rest.dto.SearchResponse
+import com.openbank.kyb.infrastructure.rest.dto.SignRequest
+import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
+import com.openbank.kyb.infrastructure.rest.dto.UboResponse
+import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
+import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.net.URI
+import java.time.LocalDate
+import java.util.UUID
+
+/**
+ * Business onboarding API (ADR-0284). Reached by the customer edge with the shared M2M token plus
+ * `X-Customer-Party-Id` — the authenticated human — and by the admin console for the review
+ * queue. **The customer identity comes from that header on every customer route and never from
+ * the body**: a body that names a different initiator is refused before any use case runs.
+ */
+@Tag(name = "KYB", description = "Legal-entity verification and business onboarding (ADR-0284)")
+@Path("/api/v1/kyb")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+@Suppress("TooManyFunctions") // one thin method per state transition of the case
+class KybResource {
+
+    @Inject lateinit var lookup: RegistryLookupUseCase
+
+    @Inject lateinit var search: RegistrySearchUseCase
+
+    @Inject lateinit var onboarding: BusinessOnboardingUseCase
+
+    @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var representation: RepresentationAttestationUseCase
+
+    @Inject lateinit var identity: SecurityIdentity
+
+    @Inject lateinit var packs: com.openbank.kyb.infrastructure.registry.CountryPackRegistry
+
+    @Inject lateinit var clock: java.time.Clock
+
+    @GET
+    @Path("/schemes")
+    @Operation(
+        summary = "Identifier schemes an applicant from a country may enter (national first, cross-border after)",
+    )
+    fun schemes(@QueryParam("country") country: String?): Response {
+        val today = java.time.LocalDate.ofInstant(clock.instant(), java.time.ZoneOffset.UTC)
+        val pack = packs.packFor(country, today)
+        val list = when {
+            pack != null -> pack.schemes
+            country.isNullOrBlank() -> IdentifierScheme.entries.toList()
+            else -> IdentifierScheme.forCountry(country)
+        }
+        return Response.ok(
+            mapOf(
+                "country" to country?.uppercase(),
+                "pack" to
+                    pack?.let {
+                        mapOf(
+                            "version" to it.version,
+                            "registry" to it.registry.name,
+                            "uboFallback" to it.uboRegister.fallback,
+                            "supportsNameSearch" to it.registry.supportsNameSearch,
+                        )
+                    },
+                "schemes" to list.map { SchemeResponse(it.name, it.country, it.displayName, it.checksum, example(it)) },
+            ),
+        ).build()
+    }
+
+    /**
+     * Find a company by name and town (issue #9707). Reuses the `kyb.lookup` action on purpose:
+     * it returns a strict subset of what `/lookup` returns (public-register data, less of it), and
+     * a new action would need a `role_action_matrix` line, a `shared_m2m_matrix_write_grants`
+     * entry and a ~79-bundle OPA restamp — a governance change for no extra exposure.
+     *
+     * Parameters are nullable and checked in the body: a non-null `String` query param is a 500
+     * for the absent case, never a 400 (root CLAUDE.md, `nonnull-jaxrs-param-ratchet`).
+     */
+    @GET
+    @Path("/registry/search")
+    @Authorize(action = "kyb.lookup")
+    @Operation(
+        summary = "Find a company by name, optionally narrowed by town (404 when this register cannot search)",
+    )
+    suspend fun searchRegistry(
+        @QueryParam("country") country: String?,
+        @QueryParam("name") name: String?,
+        @QueryParam("city") city: String?,
+        @QueryParam("limit") limit: Int?,
+    ): Response {
+        val c = requireNotNull(country?.takeIf { it.isNotBlank() }) { "query parameter 'country' is required" }
+        val n = requireNotNull(name?.takeIf { it.isNotBlank() }) { "query parameter 'name' is required" }
+        val result = search.search(
+            SearchRegistryCommand(
+                country = c.uppercase(),
+                name = n,
+                city = city,
+                limit = limit ?: RegistrySearchQuery.DEFAULT_LIMIT,
+            ),
+        ) ?: return Response.status(Response.Status.NOT_FOUND).entity(
+            mapOf("error" to "the register for country '$c' does not support name search"),
+        ).build()
+        val pack = packs.packFor(c.uppercase(), LocalDate.now(clock))
+        val hits = result.hits.map { h ->
+            SearchHitResponse.from(h, h.legalFormCode?.let { code -> pack?.legalFormLabels?.get(code)?.get("cs") })
+        }
+        return Response.ok(SearchResponse(hits, result.totalMatches, result.tooManyMatches)).build()
+    }
+
+    @POST
+    @Path("/lookup")
+    @Authorize(action = "kyb.lookup")
+    @Operation(
+        summary = "Look a business identifier up in its public register (404 unknown, 503 register down)",
+    )
+    suspend fun lookup(request: LookupRequest?): Response {
+        requireNotNull(request) { "request body is required" }
+        val extract =
+            lookup.lookup(LookupCommand(request.scheme(), request.identifier(), request.declared?.toCommand()))
+                ?: return Response.status(Response.Status.NOT_FOUND).entity(
+                    mapOf(
+                        "error" to "no register record for this identifier",
+                    ),
+                ).build()
+        return Response.ok(ExtractResponse.from(extract)).build()
+    }
+
+    @GET
+    @Path("/ubo")
+    @Authorize(action = "kyb.ubo.read")
+    @Operation(
+        summary = "Beneficial owners of a business identifier, as its jurisdiction's register states them",
+    )
+    suspend fun ubo(@QueryParam("scheme") scheme: String?, @QueryParam("identifier") identifier: String?): Response {
+        // Nullable declarations, not `String`: JAX-RS injects null for an absent parameter, and a
+        // non-null Kotlin parameter turns that into a 500 at offset 0 — the guard in the body would
+        // be dead code (rules.yaml: nonnull-jaxrs-param-ratchet). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        requireNotNull(scheme) { "query parameter 'scheme' is required" }
+        requireNotNull(identifier) { "query parameter 'identifier' is required" }
+        val parsed = LegalEntityIdentifier.of(
+            runCatching { IdentifierScheme.valueOf(scheme.uppercase()) }
+                .getOrElse { throw IllegalArgumentException("unknown identifier scheme '$scheme'") },
+            identifier,
+        )
+        // Always 200. A finding whose source is UNAVAILABLE or SELF_DECLARATION is an ANSWER the
+        // analyst has to act on, not an error: 404 here would read as "this company has no owners",
+        // which is the one conclusion none of the three sources supports.
+        return Response.ok(UboResponse.from(ubo.lookup(parsed))).build()
+    }
+
+    @POST
+    @Path("/cases")
+    @Authorize(action = "kyb.case.start", resource = "#request.initiatorPartyId")
+    @Operation(summary = "Start a business onboarding case for the authenticated human as initiator")
+    suspend fun start(
+        request: StartCaseRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        requireNotNull(request) { "request body is required" }
+        val initiator = requireNotNull(request.initiatorPartyId) { "initiatorPartyId is required" }
+        requireCaller(customerPartyId, initiator)
+        val lookupReq = LookupRequest(request.scheme, request.identifier, request.declared)
+        val case = onboarding.start(
+            StartCaseCommand(lookupReq.scheme(), lookupReq.identifier(), initiator, request.declared?.toCommand()),
+        )
+        return Response.created(
+            URI.create("/api/v1/kyb/cases/${case.id}"),
+        ).entity(CaseResponse.from(case, initiator)).build()
+    }
+
+    @GET
+    @Path("/cases")
+    @Authorize(action = "kyb.case.list")
+    @Operation(summary = "Cases a party is involved in (customer), or by status (operator review queue)")
+    suspend fun list(
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("status") status: String?,
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("20") size: Int,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        if (partyId != null) {
+            requireCaller(customerPartyId, partyId)
+            return Response.ok(onboarding.listForParty(partyId).map { CaseResponse.from(it, partyId) }).build()
+        }
+        requireOperator()
+        // #9038: absent status means the operator review queue (MANUAL_REVIEW), but an UNPARSEABLE
+        // one used to silently substitute MANUAL_REVIEW too — a typo answered the WRONG list with
+        // a 200. libs-runtime maps IllegalArgumentException to 400; never a service-local mapper
+        // (#526).
+        val st = status?.let {
+            runCatching { CaseStatus.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown case status '$it'") }
+        } ?: CaseStatus.MANUAL_REVIEW
+        return Response.ok(
+            onboarding.listByStatus(st, page.coerceAtLeast(0), size.coerceIn(1, MAX_PAGE)).map {
+                CaseResponse.from(it, null)
+            },
+        ).build()
+    }
+
+    @GET
+    @Path("/cases/{id}")
+    @Authorize(action = "kyb.case.read", resource = "#id")
+    suspend fun get(@PathParam("id") id: UUID, @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?): Response {
+        val case = onboarding.get(id)
+        if (customerPartyId != null) {
+            val involved =
+                case.initiatorPartyId == customerPartyId || case.signers.any { it.partyId == customerPartyId }
+            if (!involved) return notFound()
+        } else {
+            requireOperator()
+        }
+        return Response.ok(CaseResponse.from(case, customerPartyId)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/initiator")
+    @Authorize(action = "kyb.case.match-initiator", resource = "#id")
+    @Operation(summary = "The initiator states which listed representative they are (or that they are not listed)")
+    suspend fun matchInitiator(
+        @PathParam("id") id: UUID,
+        request: MatchInitiatorRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        requireNotNull(request) { "request body is required" }
+        val caller = requireCustomer(customerPartyId)
+        val case = onboarding.matchInitiator(
+            MatchInitiatorCommand(
+                id,
+                caller,
+                request.representativeIndex,
+                request.claimedName?.trim().orEmpty(),
+                request.dateOfBirth,
+            ),
+        )
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/cosigners")
+    @Authorize(action = "kyb.case.invite", resource = "#id")
+    @Operation(
+        summary = "Invite listed representatives to co-sign; returns their invitation tokens to the initiator only",
+    )
+    suspend fun inviteCosigners(
+        @PathParam("id") id: UUID,
+        request: InviteCosignersRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        requireNotNull(request) { "request body is required" }
+        val caller = requireCustomer(customerPartyId)
+        val case = onboarding.inviteCosigners(
+            InviteCosignersCommand(id, caller, request.representativeIndexes.orEmpty()),
+        )
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @POST
+    @Path("/invitations/{token}/claim")
+    @Authorize(action = "kyb.invitation.claim")
+    @Operation(summary = "An invited representative, now identity-verified, binds their own party to the case")
+    suspend fun claim(
+        @PathParam("token") token: String,
+        request: ClaimInvitationRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val claimant = request?.partyId ?: customerPartyId
+        val caller = requireCustomer(claimant)
+        requireCaller(customerPartyId, caller)
+        val case = onboarding.claimInvitation(ClaimInvitationCommand(token, caller))
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/sign")
+    @Authorize(action = "kyb.case.sign", resource = "#id")
+    @Operation(summary = "Record one signer's completed signature ceremony")
+    suspend fun sign(
+        @PathParam("id") id: UUID,
+        request: SignRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        val ref = requireNotNull(request?.signatureRef?.takeIf { it.isNotBlank() }) { "signatureRef is required" }
+        val case = onboarding.sign(SignCommand(id, caller, ref))
+        return Response.ok(CaseResponse.from(case, caller)).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/abandon")
+    @Authorize(action = "kyb.case.abandon", resource = "#id")
+    suspend fun abandon(
+        @PathParam("id") id: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        val caller = requireCustomer(customerPartyId)
+        return Response.ok(CaseResponse.from(onboarding.abandon(id, caller), caller)).build()
+    }
+
+    // --- operator review -------------------------------------------------------------------
+
+    @POST
+    @Path("/cases/{id}/review/resolve")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve", resource = "#id")
+    @Operation(summary = "Operator confirms a manually attested extract / power of attorney and sets the signer count")
+    suspend fun resolveReview(@PathParam("id") id: UUID, request: ResolveReviewRequest?): Response {
+        val required = requireNotNull(request?.requiredSignatures) { "requiredSignatures is required" }
+        val case = onboarding.resolveReview(
+            ResolveReviewCommand(
+                id,
+                required,
+                identity.principal?.name ?: "operator",
+                request.requiredSignerRoles.orEmpty(),
+            ),
+        )
+        return Response.ok(CaseResponse.from(case, null)).build()
+    }
+
+    // --- representation attestation (#9711) --------------------------------------------------
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "What the attestation store says about this entity's CURRENT register rule text")
+    suspend fun representationDecision(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val decision = representation.decisionFor(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(RepresentationDecisionResponse.from(decision)).build()
+    }
+
+    @POST
+    @Path("/representation/{scheme}/{identifier}")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Operator confirms how this entity is represented; supersedes any earlier confirmation")
+    suspend fun attestRepresentation(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+        request: AttestRepresentationRequest?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
+        val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
+        val attested = representation.attest(
+            AttestRepresentationCommand(
+                scheme = IdentifierScheme.valueOf(scheme.uppercase()),
+                identifier = identifier,
+                ruleTextHash = hash,
+                confirmedSigners = signers,
+                confirmedRoles = request.confirmedRoles.orEmpty(),
+                operator = identity.principal?.name ?: "operator",
+                note = request.note,
+            ),
+        )
+        return Response.ok(AttestationResponse.from(attested)).build()
+    }
+
+    @GET
+    @Path("/representation/{scheme}/{identifier}/history")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.review.resolve")
+    @Operation(summary = "Every confirmation ever made for this entity, superseded ones included")
+    suspend fun representationHistory(
+        @PathParam("scheme") scheme: String?,
+        @PathParam("identifier") identifier: String?,
+    ): Response {
+        requireNotNull(scheme) { "path parameter 'scheme' is required" }
+        requireNotNull(identifier) { "path parameter 'identifier' is required" }
+        val rows = representation.history(IdentifierScheme.valueOf(scheme.uppercase()), identifier)
+        return Response.ok(rows.map { AttestationResponse.from(it) }).build()
+    }
+
+    @POST
+    @Path("/cases/{id}/reject")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.case.reject", resource = "#id")
+    suspend fun reject(@PathParam("id") id: UUID, request: RejectRequest?): Response {
+        val reason =
+            requireNotNull(
+                request?.reason?.takeIf {
+                    it.length >= MIN_REASON
+                },
+            ) { "reason of at least $MIN_REASON characters is required" }
+        val case = onboarding.reject(RejectCaseCommand(id, reason, identity.principal?.name ?: "operator"))
+        return Response.ok(CaseResponse.from(case, null)).build()
+    }
+
+    private fun requireCustomer(customerPartyId: UUID?): UUID = customerPartyId
+        ?: throw CaseCallerMismatchException("$CUSTOMER_PARTY_HEADER header is required on customer routes")
+
+    private fun requireCaller(customerPartyId: UUID?, claimed: UUID) {
+        if (customerPartyId == null) {
+            requireOperator()
+        } else if (customerPartyId != claimed) {
+            throw CaseCallerMismatchException("party $claimed is not the authenticated customer")
+        }
+    }
+
+    private fun requireOperator() {
+        if (!identity.roles.any { it == Roles.OPERATOR || it == Roles.ADMIN || it == Roles.KYC }) {
+            throw CaseCallerMismatchException("operator role required")
+        }
+    }
+
+    private fun notFound() =
+        Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to "case not found")).build()
+
+    private fun example(scheme: IdentifierScheme) = when (scheme) {
+        IdentifierScheme.CZ_ICO, IdentifierScheme.SK_ICO -> "12345678"
+        IdentifierScheme.PL_NIP, IdentifierScheme.PL_KRS -> "1234567890"
+        IdentifierScheme.DE_HRB -> "HRB12345"
+        IdentifierScheme.AT_FN -> "FN123456A"
+        IdentifierScheme.GB_CRN -> "01234567"
+        IdentifierScheme.FR_SIREN, IdentifierScheme.DUNS -> "123456789"
+        IdentifierScheme.NL_KVK -> "12345678"
+        IdentifierScheme.LEI -> "315700N6RX2TO0QO8T71"
+        IdentifierScheme.EUID -> "CZOR.12345678"
+        IdentifierScheme.EU_VAT -> "CZ12345678"
+    }
+
+    companion object {
+        const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        private const val MAX_PAGE = 100
+        private const val MIN_REASON = 10
+    }
+}

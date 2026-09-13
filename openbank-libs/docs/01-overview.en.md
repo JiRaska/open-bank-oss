@@ -24,7 +24,7 @@ The audit counted **~4 500 lines of duplicated Kotlin** and several regulatory g
 | Per-service `BigDecimal + String` pairs for money | `Money` value object with `CurrencyCode` (ISO 4217) and `add/subtract/multiply` operations |
 | No unified audit log | `AuditEvent` envelope with GDPR Art. 30 fields + `AuditEventPublisher` port |
 | Service-to-service calls with no `Authorization` header | `BearerTokenClientHeadersFactory` automatic injection + correlation ID propagation |
-| Hardcoded `CHANGE_ME_LOCAL_DEV_ONLY` in the prod profile (K1) | `BootstrapVerifier` fail-fast at startup |
+| Hardcoded `CHANGE_ME_LOCAL_DEV_ONLY` in the prod profile (K1) | ⬜ **Not shipped.** No `BootstrapVerifier` exists in libs (`git grep BootstrapVerifier -- '*.kt'` returns 0), as ADR-0017's own delivery note records. K1 is held today by ESO/OpenBao secret injection (ADR-0007): deployed manifests take credentials through `secretKeyRef` and carry no dev placeholder, but no startup guard checks that (#8426) |
 | No runtime view of the tech stack | `BuildInfo` singleton → `/api/v1/info` shows Kotlin/Quarkus/JDK versions, LTS flag, support date |
 
 ## Key capabilities (per package)
@@ -52,7 +52,7 @@ mindmap
     security
       PiiMask deterministic masking
       Roles canonical enum
-      BootstrapVerifier
+      BootstrapVerifier NOT SHIPPED
       BearerTokenClientHeadersFactory
     util
       BuildInfo runtime stack
@@ -87,7 +87,7 @@ When a new OpenBank service `openbank-foo-service` is created:
 |---|---|---|
 | F1 — house cleaning | ✅ done | Unified dep declaration, Jandex plugin, deleted InfoResource/Redis duplicates |
 | F2 — domain primitives | ✅ done | Outbox, typesafe IDs, common exception mappers |
-| F3 — security foundation | ✅ done | PiiMask, Roles, AuditEvent, S2S auth, BootstrapVerifier |
+| F3 — security foundation | ⚠️ partial | PiiMask, Roles, AuditEvent, S2S auth. `BootstrapVerifier` was scoped into F3 and never shipped (#8426) |
 | F4 — convention plugin | planned | `build-logic/openbank.quarkus-service` Gradle convention plugin |
 | F5 — Quarkus platform extension | planned | Baseline `application.yaml` as a Quarkus extension |
 

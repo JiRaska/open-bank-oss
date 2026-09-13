@@ -30,10 +30,15 @@ com.openbank.libs/
 ├── idempotency/       IdempotencyStore port + Redis-backed implementation
 ├── persistence/
 │   └── outbox/        Generic transactional outbox primitives (entity, dispatcher, ports)
-├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory, BootstrapVerifier
+├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory
 ├── util/              BuildInfo (runtime tech-stack snapshot via Gradle stamping)
 └── web/               JAX-RS filters: CorrelationIdFilter, RateLimitFilter, ApiVersionResponseFilter, ServiceInfoResource, ServiceConfigResource
 ```
+
+`security/` **neobsahuje** `BootstrapVerifier` — tento řádek ho dříve uváděl a byl to omyl. ADR-0017
+předepisuje startup fail-fast guard proti dev-placeholder secrets, ten ale nebyl nikdy napsán
+(`git grep BootstrapVerifier -- '*.kt'` vrací 0) a delivery note téže ADR to uvádí. Dev placeholdery
+drží mimo prod injektáž secrets přes ESO/OpenBao `secretKeyRef` (ADR-0007), ne cokoli v této knihovně (#8426).
 
 ## Související dokumenty
 

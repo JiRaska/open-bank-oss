@@ -5,8 +5,10 @@
 package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.infrastructure.observability.FinrepMetricsAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -28,13 +30,25 @@ class CorepServiceTest {
     private val registry = SimpleMeterRegistry()
 
     @Test
+    fun `live working preview never reads frozen evidence implicitly`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 7, 31)
+        coEvery { ledgerPort.getLiveTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+
+        service.getTemplate(GetCorepTemplateQuery("C_01.00", asOf, TrialBalanceEvidence.LIVE_PREVIEW))
+
+        coVerify(exactly = 1) { ledgerPort.getLiveTrialBalance(asOf) }
+        coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
+    }
+
+    @Test
     fun `getTemplate dispatches C_01_00 to the own funds mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000"), currency = "CZK"),
         )
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns lines
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         val template = service.getTemplate(GetCorepTemplateQuery(templateId = "C_01.00", asOf = asOf))
@@ -48,7 +62,7 @@ class CorepServiceTest {
     @Test
     fun `getTemplate throws for an unknown or unimplemented COREP template id`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns emptyList()
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         assertThatThrownBy {
@@ -63,8 +77,11 @@ class CorepServiceTest {
         // ADR-0097 forbids silent gaps, so C 01.00's capital-structure rows ship as explicit flagged
         // zeros. That honesty is invisible without a series counting them.
         val asOf = LocalDate.of(2026, 6, 30)
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(
+            listOf(
+                TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            ),
+            ledgerSays = true,
         )
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
@@ -81,7 +98,7 @@ class CorepServiceTest {
     @Test
     fun `COREP is tagged balanced=not_applicable rather than pretending it balanced`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns emptyList()
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         service.getTemplate(GetCorepTemplateQuery(templateId = "C_01.00", asOf = asOf))
@@ -97,7 +114,7 @@ class CorepServiceTest {
     @Test
     fun `an unimplemented COREP template is counted as a framework-tagged failure`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
-        coEvery { ledgerPort.getTrialBalance(asOf) } returns emptyList()
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
         assertThatThrownBy {
@@ -109,4 +126,13 @@ class CorepServiceTest {
                 .tag("framework", "corep").tag("reason", "unknown_template").counter().count(),
         ).isEqualTo(1.0)
     }
+
+    /**
+     * The ledger verdict is passed EXPLICITLY at every call site, never derived from the lines
+     * (issue #6011). Deriving it would make both sides of the cross-check move together, and every
+     * disagreement case in this file would become structurally unreachable — the vacuity #6010
+     * removed one level down, reintroduced in the test instead of the production code.
+     */
+    private fun snapshot(lines: List<TrialBalanceLineDto>, ledgerSays: Boolean?) =
+        TrialBalanceSnapshot(lines = lines, ledgerReportsBalanced = ledgerSays)
 }

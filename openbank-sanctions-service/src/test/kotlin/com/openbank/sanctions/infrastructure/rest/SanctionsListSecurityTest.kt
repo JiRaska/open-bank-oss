@@ -35,4 +35,23 @@ class SanctionsListSecurityTest {
                 .isNull()
         }
     }
+
+    @Test
+    fun `no SanctionsListRefreshV2Resource endpoint is @PermitAll`() {
+        // Same guard for the v2 refresh-all resource (#9048) — a new URL major must not quietly
+        // drop the role-gating its v1 sibling carries.
+        val methods = SanctionsListRefreshV2Resource::class.java.declaredMethods.filter { m ->
+            m.getAnnotation(GET::class.java) != null ||
+                m.getAnnotation(POST::class.java) != null ||
+                m.getAnnotation(PUT::class.java) != null ||
+                m.getAnnotation(DELETE::class.java) != null ||
+                m.getAnnotation(PATCH::class.java) != null
+        }
+        assertThat(methods).isNotEmpty()
+        methods.forEach { m ->
+            assertThat(m.getAnnotation(PermitAll::class.java))
+                .describedAs("${m.name} must not be @PermitAll — use @RolesAllowed")
+                .isNull()
+        }
+    }
 }

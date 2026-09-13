@@ -1,5 +1,84 @@
 # Changelog
 
+## [1.17.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.1...balance-service-v1.17.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **balance:** guard balance_outbox created_at plausibility at INSERT ([#9290](https://github.com/JiRaska/open-bank-oss/issues/9290)) ([3948ad9](https://github.com/JiRaska/open-bank-oss/commit/3948ad9d8a82df48a4aad48f03670bf202da5f9a))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
+## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.0...balance-service-v1.17.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **balance,ledger:** fuzz-found 500s on date query params become 400/default ([#8835](https://github.com/JiRaska/open-bank-oss/issues/8835)) ([062c26a](https://github.com/JiRaska/open-bank-oss/commit/062c26afd615d4c973a51bfd4920618ceb5401f4))
+* **balance:** replay-safe hold placement + ADR-0287 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8980](https://github.com/JiRaska/open-bank-oss/issues/8980)) ([1118ba5](https://github.com/JiRaska/open-bank-oss/commit/1118ba560370d02a81d64475a1c64444243d97f8))
+* **balance:** write balance events to the outbox, retire the direct emitter ([#8510](https://github.com/JiRaska/open-bank-oss/issues/8510)) ([#8688](https://github.com/JiRaska/open-bank-oss/issues/8688)) ([82f0be3](https://github.com/JiRaska/open-bank-oss/commit/82f0be3409cb9cc82cfd0fd1fe2130562624c9e5))
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.16.0...balance-service-v1.17.0) (2026-09-01)
+
+
+### Features
+
+* **balance:** expose pending approvals in unified inbox ([#7031](https://github.com/JiRaska/open-bank-oss/issues/7031)) ([541a03d](https://github.com/JiRaska/open-bank-oss/commit/541a03d739528a503725f03020e75fbd67bd5058))
+
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.15.0...balance-service-v1.16.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.3...balance-service-v1.15.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [1.14.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.2...balance-service-v1.14.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [1.14.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.1...balance-service-v1.14.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.0...balance-service-v1.14.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **balance:** add sourceService to BalanceEvent for audit attribution ([#5374](https://github.com/JiRaska/open-bank-oss/issues/5374)) ([29683d8](https://github.com/JiRaska/open-bank-oss/commit/29683d829ebd18402495e5b31f84969e0a18e572))
+
+## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.3...balance-service-v1.14.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [1.13.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.2...balance-service-v1.13.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.1...balance-service-v1.13.2) (2026-08-10)
 
 

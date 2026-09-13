@@ -81,6 +81,12 @@ class ConversationRetentionScheduler(
     suspend fun sweepExpiredConversations() {
         if (!enabled) return
         val now = Instant.now(clock)
+        // observed-by: the workflow-liveness gauge. recordSuccess() runs only on a completed sweep,
+        // so a failing tick leaves openbank_workflow_last_success_age_seconds climbing until
+        // WorkflowLivenessStale fires (ADR-0237). That is a real signal for a job with no message to
+        // dead-letter, whose next tick retries the same work anyway — unlike a consumer, where
+        // acking discards the event. Stated because a bare catch here is indistinguishable from the
+        // #5698 defect.
         try {
             val deleted = conversationStore.deleteExpired(now)
             liveness?.recordSuccess()

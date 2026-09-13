@@ -7,7 +7,11 @@ package com.openbank.finrep.application.port.inbound
 import com.openbank.finrep.domain.model.CorepTemplate
 import java.time.LocalDate
 
-data class GetCorepTemplateQuery(val templateId: String, val asOf: LocalDate)
+data class GetCorepTemplateQuery(
+    val templateId: String,
+    val asOf: LocalDate,
+    val evidence: TrialBalanceEvidence = TrialBalanceEvidence.FROZEN,
+)
 
 interface CorepUseCase {
     suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate

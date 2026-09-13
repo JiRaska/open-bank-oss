@@ -114,8 +114,8 @@ openbank:
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra, the same provider devops-agent (ADR-0119) and
-    # the customer copilot (ADR-0089) already run against; "litellm.ai-platform" is not deployed
-    # anywhere in this repo's gitops (ADR-0163 E2E-wiring note).
+    # the customer copilot (ADR-0089) already run against; the in-cluster LiteLLM deployment is
+    # represented in GitOps under openbank-infra/gitops/components/ai-platform (ADR-0174).
     model-endpoint: ${LIVENESS_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
     model-id: ${LIVENESS_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
     github-api-url: ${LIVENESS_GITHUB_API_URL:https://api.github.com}

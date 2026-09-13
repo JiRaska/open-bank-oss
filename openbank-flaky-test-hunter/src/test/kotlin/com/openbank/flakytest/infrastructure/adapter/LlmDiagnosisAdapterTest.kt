@@ -52,8 +52,17 @@ class LlmDiagnosisAdapterTest {
     )
 
     private fun registeredPrompt(): String =
-        javaClass.getResourceAsStream("/governance-prompts/flaky-test-hunter/system.v1.md")!!
+        javaClass.getResourceAsStream("/governance-prompts/flaky-test-hunter/system.v2.md")!!
             .bufferedReader().use { it.readText() }
+
+    @Test
+    fun `registered prompt defines every emitted finding type`() {
+        val prompt = registeredPrompt()
+
+        assertThat(FlakyTestCheckType.entries.map { it.name }).allSatisfy { checkType ->
+            assertThat(prompt).contains(checkType)
+        }
+    }
 
     @Test
     fun `diagnose sends the registered system prompt and returns the model text`(): Unit = runBlocking {

@@ -18,8 +18,15 @@ interface LlmDiagnosisPort {
     suspend fun proposeIacFix(anomaly: CostAnomaly, diagnosis: String): String?
 }
 
+/**
+ * Returns the URL of a proposal PR that was actually created, or `null` when none was — an
+ * unwired write path, a missing token, or a refused anomaly. `null` is the ONLY way to say
+ * "nothing was created": there is deliberately no placeholder-URL return, because a well-formed
+ * string is indistinguishable from a delivered proposal to every consumer (#5897, and the
+ * `UnwiredProposalPort` precedent in `openbank-mcp-service`, #3900).
+ */
 interface GitHubProposalPort {
-    suspend fun openProposalPr(anomaly: CostAnomaly, iacDiff: String): String
+    suspend fun openProposalPr(anomaly: CostAnomaly, iacDiff: String): String?
 }
 
 interface AnomalyRepository {

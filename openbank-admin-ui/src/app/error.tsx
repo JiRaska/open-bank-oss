@@ -37,9 +37,14 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
 
   return (
     <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-      <div className="card" style={{ maxWidth: '440px', textAlign: 'center', padding: '32px' }}>
-        <AlertTriangle size={32} style={{ color: 'var(--warning)', margin: '0 auto 16px' }} />
-        <h2 style={{ fontSize: '16px', marginBottom: '8px' }}>
+      <div
+        className="card"
+        role="alert"
+        aria-labelledby="screen-error-title"
+        style={{ maxWidth: '440px', textAlign: 'center', padding: '32px' }}
+      >
+        <AlertTriangle aria-hidden="true" size={32} style={{ color: 'var(--warning)', margin: '0 auto 16px' }} />
+        <h2 id="screen-error-title" style={{ fontSize: '16px', marginBottom: '8px' }}>
           {t('Tuto obrazovku se nepodařilo zobrazit', 'This screen failed to render')}
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px', lineHeight: 1.5 }}>
@@ -49,8 +54,8 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
           )}
         </p>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-          <button className="btn btn-primary" onClick={() => reset()}>
-            <RotateCw size={13} /> {t('Zkusit znovu', 'Try again')}
+          <button type="button" className="btn btn-primary" onClick={() => reset()}>
+            <RotateCw aria-hidden="true" size={13} /> {t('Zkusit znovu', 'Try again')}
           </button>
           <Link href="/dashboard" className="btn btn-secondary">{t('Na přehled', 'Dashboard')}</Link>
         </div>

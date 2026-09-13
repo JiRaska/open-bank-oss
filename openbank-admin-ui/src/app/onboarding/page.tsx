@@ -4,60 +4,34 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
+import { Drawer, PageHeader } from '@/components/ui'
+import { Can } from '@/components/auth/AuthGuard'
+import {
+  ONBOARDING_STAGES as STAGES,
+  parseFunnelCounts,
+  parseOnboardingRecordPage,
+  type OnboardingRecord,
+  type OnboardingStage as Stage,
+} from '@/lib/onboarding/evidence'
 
 const SVC = 'onboarding-service'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface OnboardingRecord {
-  partyId: string
-  legalName: string | null
-  email: string | null
-  partyStatus: string
-  kycCaseId: string | null
-  kycStatus: string | null
-  scaEnrolled: boolean
-  deviceCount: number
-  funnelStage: string
-  blockedReason: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-interface RecordPage {
-  items: OnboardingRecord[]
-  total: number
-  page: number
-  size: number
-  stageFilter?: string
-}
-
-type FunnelCounts = Record<string, number>
+type FunnelCounts = Record<Stage, number>
 
 // ── Stage display config ──────────────────────────────────────────────────────
-
-const STAGES = [
-  'REGISTERED',
-  'KYC_OPEN',
-  'KYC_DOCUMENTS_REQUIRED',
-  'KYC_UNDER_REVIEW',
-  'SCA_PENDING',
-  'ACTIVE',
-  'BLOCKED',
-] as const
-
-type Stage = typeof STAGES[number]
 
 const STAGE_LABEL_CS: Record<Stage, string> = {
   REGISTERED:               'Registrován',
   KYC_OPEN:                 'KYC otevřeno',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — dokumenty',
+  KYC_DOCUMENTS_REQUIRED:  'KYC — dokumenty',
   KYC_UNDER_REVIEW:         'KYC — přezkoumání',
   SCA_PENDING:              'SCA čeká',
   ACTIVE:                   'Aktivní',
@@ -67,7 +41,7 @@ const STAGE_LABEL_CS: Record<Stage, string> = {
 const STAGE_LABEL_EN: Record<Stage, string> = {
   REGISTERED:               'Registered',
   KYC_OPEN:                 'KYC Open',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — Docs Needed',
+  KYC_DOCUMENTS_REQUIRED:  'KYC Documents',
   KYC_UNDER_REVIEW:         'KYC Under Review',
   SCA_PENDING:              'SCA Pending',
   ACTIVE:                   'Active',
@@ -77,7 +51,7 @@ const STAGE_LABEL_EN: Record<Stage, string> = {
 const STAGE_COLOR: Record<Stage, string> = {
   REGISTERED:               'var(--text-muted)',
   KYC_OPEN:                 'var(--yellow)',
-  KYC_DOCUMENTS_REQUIRED:   'var(--yellow)',
+  KYC_DOCUMENTS_REQUIRED:  '#f59e0b',
   KYC_UNDER_REVIEW:         'var(--accent)',
   SCA_PENDING:              '#a855f7',
   ACTIVE:                   'var(--green)',
@@ -88,9 +62,12 @@ const STAGE_COLOR: Record<Stage, string> = {
 
 export default function OnboardingPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
-  // funnel KPI
-  const [counts, setCounts] = useState<FunnelCounts>({})
+  // funnel KPI — `counts` stays null until the first response lands, so an in-flight or
+  // failed fetch is never rendered as an authoritative zero (issue #8233).
+  const [counts, setCounts] = useState<FunnelCounts | null>(null)
+  const [countsLoading, setCountsLoading] = useState(true)
   const [countsUnavail, setCountsUnavail] = useState<{ kind: UnavailableKind } | null>(null)
 
   // list
@@ -100,9 +77,24 @@ export default function OnboardingPage() {
   const [stage, setStage] = useState<Stage | ''>('')
   const [loading, setLoading] = useState(true)
   const [listUnavail, setListUnavail] = useState<{ kind: UnavailableKind } | null>(null)
+  const countsRequest = useRef(0)
+  const recordsRequest = useRef(0)
 
   // drawer
   const [selected, setSelected] = useState<OnboardingRecord | null>(null)
+
+  const purgeAuthorizedEvidence = useCallback(() => {
+    countsRequest.current += 1
+    recordsRequest.current += 1
+    setCounts(null)
+    setRecords([])
+    setTotal(0)
+    setSelected(null)
+    setCountsLoading(false)
+    setLoading(false)
+    setCountsUnavail({ kind: 'unauthorized' })
+    setListUnavail({ kind: 'unauthorized' })
+  }, [])
 
   const stageLabel = useCallback((s: string) =>
     language === 'cs'
@@ -114,41 +106,63 @@ export default function OnboardingPage() {
   // ── Load funnel counts ──────────────────────────────────────────────────────
 
   const loadCounts = useCallback(async () => {
-    setCountsUnavail(null)
+    const request = ++countsRequest.current
+    setCountsLoading(true); setCountsUnavail(null)
     try {
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/funnel'), { signal: AbortSignal.timeout(5000) })
-      if (!res.ok) { setCountsUnavail({ kind: await classifyBffFailure(res) }); return }
-      setCounts(await res.json())
+      if (!res.ok) {
+        const kind = await classifyBffFailure(res)
+        if (request !== countsRequest.current) return
+        if (kind === 'unauthorized') purgeAuthorizedEvidence()
+        else setCountsUnavail({ kind })
+        return
+      }
+      const parsed = parseFunnelCounts(await res.json())
+      if (request !== countsRequest.current) return
+      if (!parsed) { setCountsUnavail({ kind: 'error' }); return }
+      setCounts(parsed)
     } catch {
-      setCountsUnavail({ kind: 'unreachable' })
+      if (request === countsRequest.current) setCountsUnavail({ kind: 'unreachable' })
+    } finally {
+      if (request === countsRequest.current) setCountsLoading(false)
     }
-  }, [])
+  }, [purgeAuthorizedEvidence])
 
   // ── Load records list ───────────────────────────────────────────────────────
 
   const loadRecords = useCallback(async (pg: number, stg: Stage | '') => {
-    setLoading(true); setListUnavail(null)
+    const request = ++recordsRequest.current
+    setLoading(true); setListUnavail(null); setSelected(null)
     try {
       const query: Record<string, string> = { page: String(pg), size: '20' }
       if (stg) query.stage = stg
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/records', query), { signal: AbortSignal.timeout(5000) })
-      if (!res.ok) { setListUnavail({ kind: await classifyBffFailure(res) }); setRecords([]); return }
-      const data: RecordPage = await res.json()
-      setRecords(data.items ?? [])
+      if (!res.ok) {
+        const kind = await classifyBffFailure(res)
+        if (request !== recordsRequest.current) return
+        if (kind === 'unauthorized') purgeAuthorizedEvidence()
+        else { setListUnavail({ kind }); setRecords([]) }
+        return
+      }
+      const data = parseOnboardingRecordPage(await res.json(), pg, stg)
+      if (request !== recordsRequest.current) return
+      if (!data) { setListUnavail({ kind: 'error' }); setRecords([]); return }
+      setRecords(data.items)
       setTotal(data.total ?? 0)
     } catch {
-      setListUnavail({ kind: 'unreachable' })
-      setRecords([])
-    } finally { setLoading(false) }
-  }, [])
+      if (request === recordsRequest.current) { setListUnavail({ kind: 'unreachable' }); setRecords([]) }
+    } finally {
+      if (request === recordsRequest.current) setLoading(false)
+    }
+  }, [purgeAuthorizedEvidence])
 
   const refresh = useCallback(() => {
     loadCounts()
     loadRecords(page, stage)
   }, [loadCounts, loadRecords, page, stage])
 
-  useEffect(() => { loadCounts() }, [loadCounts])
-  useEffect(() => { loadRecords(page, stage) }, [loadRecords, page, stage])
+  useEffect(() => { void Promise.resolve().then(loadCounts) }, [loadCounts])
+  useEffect(() => { void Promise.resolve().then(() => loadRecords(page, stage)) }, [loadRecords, page, stage])
 
   const handleStageFilter = (s: Stage | '') => {
     setStage(s)
@@ -159,47 +173,58 @@ export default function OnboardingPage() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Onboarding', 'Onboarding')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ClipboardList size={18} style={{ color: 'var(--accent)' }} />
-            {t('Onboarding cockpit', 'Onboarding Cockpit')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Přehled průběhu onboardingu zákazníků — fáze po fázi', 'Customer onboarding funnel — stage by stage')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+      <PageHeader
+        title={t('Onboarding cockpit', 'Onboarding Cockpit')}
+        subtitle={t('Přehled průběhu onboardingu zákazníků — fáze po fázi', 'Customer onboarding funnel — stage by stage')}
+        icon={<ClipboardList size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Onboarding', 'Onboarding')}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px' }}>
           <Link href="/onboarding/analytics" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
             <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
             {t('Konverze', 'Conversion')}
           </Link>
-          <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button className="btn btn-secondary" type="button" onClick={refresh} disabled={loading || countsLoading}
+            aria-busy={loading || countsLoading} aria-label={t('Obnovit onboarding', 'Refresh onboarding')}>
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: (loading || countsLoading) ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
-      {/* KPI funnel tiles */}
-      {countsUnavail ? (
+      {/* KPI funnel tiles — never render a fabricated 0 while the count is unknown (#8233) */}
+      {countsLoading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          aria-label={t('Načítání počtů funnelu…', 'Loading funnel counts…')}
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}
+        >
+          {STAGES.map(s => (
+            <div key={s} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px 8px', textAlign: 'center' }}>
+              <div className="skeleton" style={{ height: '22px', width: '32px', margin: '0 auto' }} />
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.3 }}>
+                {stageLabel(s)}
+              </div>
+            </div>
+          ))}
+          <span className="sr-only">{t('Načítání počtů funnelu…', 'Loading funnel counts…')}</span>
+        </div>
+      ) : countsUnavail ? (
         <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
           <DataUnavailable kind={countsUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Funnel počty', 'Funnel counts')} lang={language} dense />
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}>
           {STAGES.map(s => {
-            const count = counts[s] ?? 0
+            const count = counts?.[s] ?? 0
             const isActive = stage === s
             const color = STAGE_COLOR[s]
             return (
               <button
                 key={s}
+                type="button"
+                aria-pressed={isActive}
                 onClick={() => handleStageFilter(isActive ? '' : s)}
                 style={{
                   background: isActive ? `${color}18` : 'var(--surface)',
@@ -227,12 +252,12 @@ export default function OnboardingPage() {
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Filtr:', 'Filter:')}</span>
           <span className="pill" style={{ background: `${STAGE_COLOR[stage]}22`, color: STAGE_COLOR[stage], display: 'flex', alignItems: 'center', gap: '4px' }}>
             {stageLabel(stage)}
-            <button
+            <button type="button"
               onClick={() => handleStageFilter('')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'inherit' }}
               aria-label={t('Zrušit filtr', 'Clear filter')}
             >
-              <X size={11} />
+              <X size={11} aria-hidden="true" />
             </button>
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t(`${total} záznamů`, `${total} records`)}</span>
@@ -245,7 +270,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={listUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Onboarding záznamy', 'Onboarding records')} lang={language} dense />
         </div>
       ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="card" aria-busy={loading} style={{ overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
               <tr>
@@ -283,7 +308,8 @@ export default function OnboardingPage() {
                 </tr>
               )}
               {!loading && records.map(r => (
-                <tr key={r.partyId} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}>
+                <tr key={r.partyId} tabIndex={0} aria-label={t(`Vybrat onboarding subjekt ${r.legalName ?? r.partyId}`, `Select onboarding party ${r.legalName ?? r.partyId}`)} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r) } }}>
                   <td style={{ fontWeight: 500 }}>{r.legalName ?? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{r.email ?? '—'}</td>
                   <td>
@@ -302,7 +328,7 @@ export default function OnboardingPage() {
                       ? <span style={{ color: 'var(--green)', fontSize: '12px' }}>✓ {r.deviceCount}</span>
                       : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.updatedAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.updatedAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <span style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       {t('Detail', 'Detail')} <ChevronRight size={12} />
@@ -316,13 +342,13 @@ export default function OnboardingPage() {
           {/* Pagination */}
           {total > 20 && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="btn btn-secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Předchozí strana onboardingu', 'Previous onboarding page')} disabled={page === 0} onClick={() => setPage(p => p - 1)}>
                 {t('← Předchozí', '← Prev')}
               </button>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 {t(`Strana ${page + 1} z ${Math.ceil(total / 20)}`, `Page ${page + 1} of ${Math.ceil(total / 20)}`)}
               </span>
-              <button className="btn btn-secondary" disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Další strana onboardingu', 'Next onboarding page')} disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
                 {t('Další →', 'Next →')}
               </button>
             </div>
@@ -351,22 +377,18 @@ function RecordDrawer({
   stageLabel: (s: string) => string
   t: (cs: string, en: string) => string
 }) {
+  const { language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const stageColor = STAGE_COLOR[record.funnelStage as Stage] ?? 'var(--text-muted)'
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 40 }}
-      />
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: '420px',
-        background: 'var(--surface)', borderLeft: '1px solid var(--border)',
-        zIndex: 50, overflowY: 'auto', padding: '24px',
-        boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
-      }}>
+    <Drawer
+      title={t(`Detail onboardingu ${record.legalName ?? record.partyId}`, `Onboarding details for ${record.legalName ?? record.partyId}`)}
+      description={t('Stav onboardingu, identity a související bankovní odkazy.', 'Onboarding, identity and related banking status.')}
+      onClose={onClose}
+      width={420}
+    >
+      <div style={{ padding: 24 }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
@@ -375,8 +397,8 @@ function RecordDrawer({
               {record.partyId}
             </div>
           </div>
-          <button onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít', 'Close')}>
-            <X size={14} />
+          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
 
@@ -399,19 +421,21 @@ function RecordDrawer({
           <DrawerRow label={t('Stav KYC', 'KYC status')} value={record.kycStatus?.replace('_', ' ') ?? '—'} />
           <DrawerRow label={t('KYC případ', 'KYC case ID')} value={record.kycCaseId ? record.kycCaseId.slice(0, 8) + '…' : '—'} mono />
           <DrawerRow label={t('SCA zapsáno', 'SCA enrolled')} value={record.scaEnrolled ? `✓ (${record.deviceCount} ${t('zařízení', 'device(s)')})` : '—'} />
-          <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString()} />
-          <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString()} />
+          <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString(dateLocale)} />
+          <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString(dateLocale)} />
         </div>
 
         {/* Links */}
         <div style={{ marginTop: '24px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <Link
-            href={`/parties/${record.partyId}`}
-            className="btn btn-secondary"
-            style={{ textDecoration: 'none', fontSize: '12px' }}
-          >
-            {t('Otevřít party →', 'Open party →')}
-          </Link>
+          <Can permission="parties:view">
+            <Link
+              href={`/parties/${record.partyId}`}
+              className="btn btn-secondary"
+              style={{ textDecoration: 'none', fontSize: '12px' }}
+            >
+              {t('Otevřít party →', 'Open party →')}
+            </Link>
+          </Can>
           {record.kycCaseId && (
             <Link
               href={`/kyc`}
@@ -423,7 +447,7 @@ function RecordDrawer({
           )}
         </div>
       </div>
-    </>
+    </Drawer>
   )
 }
 

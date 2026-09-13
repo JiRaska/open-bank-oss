@@ -51,7 +51,7 @@ class BankV1CatalogMapping(private val mapper: ObjectMapper, private val catalog
         val content = catalogJson.toContent(mapper.readTree(revision.content.encode()))
         val legacyJson = (content.attributes.values[LEGACY_DOCUMENT] as? CatalogValue.TextValue)?.value
             ?: throw IllegalArgumentException("mapped banking revision has no lossless legacyDocument")
-        val product = runCatching { mapper.readValue(legacyJson, Product::class.java) }
+        val product = runCatching { LegacyProductJson.readProduct(mapper, legacyJson) }
             .getOrElse { throw IllegalArgumentException("legacyDocument is not a valid bank product", it) }
         ProductValidation.requireValid(product)
         val outerType = (content.attributes.values[PRODUCT_TYPE] as? CatalogValue.TextValue)?.value

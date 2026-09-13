@@ -69,6 +69,11 @@ class AuditAnchorRepository : PanacheRepository<AuditAnchorEntity> {
         find("ORDER BY id ASC").list()
     }.awaitSuspending().map { it.toDomain() }
 
+    /** Limits public-key lookup to immutable key identifiers actually recorded on this audit log. */
+    suspend fun hasKeyId(keyId: String): Boolean = Panache.withSession {
+        count("keyId", keyId)
+    }.awaitSuspending() > 0
+
     private fun AuditAnchorEntity.toDomain() = AuditAnchor(
         lastEntryId = lastEntryId,
         lastRecordHash = lastRecordHash,

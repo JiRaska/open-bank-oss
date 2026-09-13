@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.2...pid-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the NATURAL_PERSON party type the service actually accepts ([#9932](https://github.com/JiRaska/open-bank-oss/issues/9932)) ([3c3e479](https://github.com/JiRaska/open-bank-oss/commit/3c3e4791bd9e35c39167f56eef0f539995314dbb)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.1...pid-service-v0.10.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** guard pid_outbox created_at plausibility at INSERT ([#9317](https://github.com/JiRaska/open-bank-oss/issues/9317)) ([b9fbed5](https://github.com/JiRaska/open-bank-oss/commit/b9fbed5f5716b2940487af2a182c33afee7c3900))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.0...pid-service-v0.10.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **pid:** reject a null array element with 400 instead of 500 ([#8002](https://github.com/JiRaska/open-bank-oss/issues/8002)) ([0ade9ac](https://github.com/JiRaska/open-bank-oss/commit/0ade9aca7e6a1ff20b86366234556625c73aef2a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.9.1...pid-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.9.0...pid-service-v0.9.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.17...pid-service-v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.8.17](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.16...pid-service-v0.8.17) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.8.16](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.15...pid-service-v0.8.16) (2026-08-16)
+
+
+### Bug Fixes
+
+* **pid:** track trusted-list refresh liveness ([#5085](https://github.com/JiRaska/open-bank-oss/issues/5085)) ([bea782f](https://github.com/JiRaska/open-bank-oss/commit/bea782f0af29b04dee0d25233454205138bc4d03))
+
 ## [0.8.15](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.14...pid-service-v0.8.15) (2026-08-09)
 
 

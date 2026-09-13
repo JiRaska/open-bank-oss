@@ -8,6 +8,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JiRaska/open-bank-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/JiRaska/open-bank-oss)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13505/badge)](https://www.bestpractices.dev/projects/13505)
 [![codecov](https://codecov.io/gh/JiRaska/open-bank-oss/graph/badge.svg)](https://codecov.io/gh/JiRaska/open-bank-oss)
+[![Deploy drift](https://img.shields.io/github/issues-search/JiRaska/open-bank-oss?query=label%3Adeploy-drift%20state%3Aopen&label=deploy%20drift)](https://github.com/JiRaska/open-bank-oss/issues?q=label%3Adeploy-drift+state%3Aopen)
 [![Open in GitHub Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?logo=github)](https://codespaces.new/JiRaska/open-bank-oss)
 [![Platform: Apache 2.0](https://img.shields.io/badge/Platform-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
 [![AI agents: AGPL-3.0 + commercial](https://img.shields.io/badge/AI_agents-AGPL--3.0--only_%2B_commercial-blue.svg)](docs/adr/0136-agent-services-agpl-in-repo-open-core.md)
@@ -182,6 +183,7 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
+- [`docs/deployment-reference.md`](docs/deployment-reference.md) — evaluator's reference: topology, sizing tiers, cost estimates, and the production delta
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
@@ -196,6 +198,12 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 ## Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+New here? The fastest path in: pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue)
+(each carries a newcomer-context comment telling you exactly where to start), spin the stack up with
+one command (`cd openbank-infra && make up-infra && make up-all`), and sanity-check the live sandbox
+via [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md). Target: first green PR in ~15 minutes
+of hands-on time.
 
 OpenBank uses the [Developer Certificate of Origin](https://developercertificate.org/) — every commit must
 be signed off and signed with `git commit -s -S`.

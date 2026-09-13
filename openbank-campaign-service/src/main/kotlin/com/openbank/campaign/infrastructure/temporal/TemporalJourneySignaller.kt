@@ -17,7 +17,14 @@ import java.util.UUID
 
 /**
  * Temporal-backed journey control (ADR-0200 D1/D2). The workflow id is the idempotency key:
- * starting an already-running id is a no-op for Temporal, which is what makes re-enrolment safe.
+ * starting an already-RUNNING id is a no-op, which is what makes a redelivered enrolment safe.
+ *
+ * Read the qualifier literally. [WorkflowExecutionAlreadyStarted] is raised only against a live
+ * execution, and no [io.temporal.api.enums.v1.WorkflowIdReusePolicy] is set, so the default
+ * `ALLOW_DUPLICATE` applies: the same id started again AFTER the first journey completed begins a
+ * second execution. The policy is left alone on purpose — `REJECT_DUPLICATE` would also refuse a
+ * legitimate later re-enrolment — so the guarantee here is "no duplicate while it runs", not
+ * "never a duplicate" (#5745).
  */
 @ApplicationScoped
 class TemporalJourneySignaller(

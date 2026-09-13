@@ -1,0 +1,153 @@
+# Security-KPI alerts (ADR-0279 hub signals, issue #8590).
+#
+# The six security KPIs (netpol coverage, dependency freshness, credential
+# rotation, fuzz coverage, threat-model staleness, Dependabot MTTR) are computed
+# weekly by CI (.github/workflows/security-kpis.yml running
+# .github/scripts/security-kpis.py) into openbank-admin-ui/security-kpis.json,
+# baked into the admin-ui image, and were visible only to a human opening the
+# console. admin-ui now re-exports the same snapshot as Prometheus gauges at
+# /api/security/kpis/metrics (scraped via servicemonitor-admin-ui.yaml), and
+# these rules alert on them.
+#
+# BOOT / SEED BEHAVIOR — the thing that bit WorkflowLivenessStale (#2239):
+# there is no per-pod seeding problem here because the emitter is not a pod
+# lifecycle gauge. Every series is a file-backed value: admin-ui reads the
+# baked security-kpis.json on every scrape, so a fresh pod serves exactly the
+# same values as the old one. Three consequences were re-derived, not assumed:
+#
+#   * At t=0 on a cold pod the gauges hold the LAST snapshot's values. A KPI
+#     that was breaching before a redeploy keeps alerting across it (correct);
+#     a healthy snapshot stays quiet across it (correct). No deploy storm.
+#   * The failure mode of THIS pipeline is not a wrong value but a FROZEN one:
+#     if the weekly publisher stops landing, every gauge holds its last value
+#     forever and every threshold rule below goes silently quiet-or-stuck.
+#     SecurityKpiSnapshotStale is the rule that watches the watcher, off
+#     openbank_security_kpi_generated_timestamp_seconds. 8 days > the 7-day
+#     weekly cadence plus a day of slack for a retried workflow run.
+#   * A collector that degrades (mttr's dependabot API is 403 without a
+#     security-scoped PAT today; freshness on a Maven Central outage) OMITS its
+#     gauge rather than emitting 0 — a 0 would read as "no overdue credentials"
+#     and disarm the alert. An omitted series makes the threshold rule go
+#     inactive (no false page) and the omission is itself caught by the
+#     staleness rule only if the whole snapshot freezes; a per-signal outage
+#     with the rest fresh is visible on the console card, which is the contract
+#     ADR-0056 already chose for per-signal degradation.
+#
+# All five are severity: warning with team: security — Alertmanager routes only
+# critical/warning, and none of these is a page-now condition (#3346 keeps
+# critical reserved for those). Every rule is a plain gauge comparison with no
+# rate/increase window, so no subject_period annotation is required by
+# check-alert-window-vs-subject-period.py; the snapshot's own weekly cadence is
+# why every `for:` is an hour or longer — the values can only change once a
+# week, so a shorter `for:` would add no signal and a flap window.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-security-kpi-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.security.kpis
+      interval: 5m
+      rules:
+        # 1. The snapshot itself stopped moving. Every other rule in this file
+        # derives from this one being quiet: with a frozen snapshot their
+        # verdicts are about last week's estate, not this one's. 8 days > the
+        # weekly workflow cadence + retry slack; `for: 1h` only absorbs a
+        # scrape gap, not a missed publish.
+        - alert: SecurityKpiSnapshotStale
+          expr: time() - openbank_security_kpi_generated_timestamp_seconds > 8 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Security KPI snapshot is {{ $value | humanizeDuration }} old (weekly publisher overdue)"
+            description: >-
+              The security-kpis.json snapshot baked into admin-ui is older than
+              8 days — the weekly security-kpis.yml workflow has not landed a
+              fresh snapshot. Every other security-KPI alert is now reading
+              frozen values: a green fuzz-coverage or credential-rotation rule
+              is last week's green. Check the workflow's latest run; if the
+              image simply has not been redeployed since the last publish, the
+              fix is a redeploy, not a collector change.
+
+        # 2. Fuzz coverage dropped below 100% of in-scope operations. The gate
+        # (check-fuzz-coverage) already fails the run that introduces the gap,
+        # so by the time this fires the gap has SURVIVED a red CI — typically an
+        # override-scoped run being mistaken for a fleet measurement, or a new
+        # operation merged while the gate was green on a stale operation list.
+        # `for: 1h` is formality: the value can only move weekly.
+        - alert: SecurityFuzzCoverageRegression
+          expr: openbank_security_kpi_fuzz_coverage_pct < 100
+          for: 1h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "API fuzz coverage is {{ $value }}% of in-scope operations"
+            description: >-
+              The latest fleet fuzz run exercised fewer operations than are in
+              scope. Read the console's fuzz card for the run URL and the
+              uncovered operation list before assuming a regression — an
+              override-scoped dispatch is excluded from this metric already, so
+              a sub-100 reading here is a real fleet gap.
+
+        # 3. A static credential passed its declared rotation deadline. The
+        # inventory gate (credential-inventory.py --enforce) fails the pipeline
+        # that lets one go overdue, so a value > 0 means one aged past its
+        # deadline between runs. 6h of for: gives the on-call rotation automation
+        # room to clear a just-crossed deadline without paging a human.
+        - alert: SecurityCredentialRotationOverdue
+          expr: openbank_security_kpi_credentials_overdue > 0
+          for: 6h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "{{ $value }} static credential(s) past their rotation deadline"
+            description: >-
+              credential-inventory.py counts static ExternalSecrets whose
+              declared rotation deadline is in the past. Rotate per
+              docs/runbooks (credential rotation) and re-run the inventory; the
+              metric clears at the next weekly snapshot or image redeploy.
+
+        # 4. A money-path threat model has gone > 90 days without a change.
+        # Staleness is slow by definition; 24h of for: is deliberately generous —
+        # the number moves in whole days and only at the weekly snapshot.
+        - alert: SecurityThreatModelStale
+          expr: openbank_security_kpi_threat_models_stale > 0
+          for: 24h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "{{ $value }} money-path threat model(s) untouched for >90 days"
+            description: >-
+              docs/threat-models/<service>.md for a money-path service has not
+              changed in over 90 days. A year-old money-path model is prose
+              nobody has re-derived from the code; re-review it against the
+              service's current trust boundaries (ADR-0030).
+
+        # 5. The oldest open Critical/High Dependabot alert is over two weeks
+        # old — the SLO S1 remediation proxy. NOTE: this gauge is absent (not
+        # zero) while the dependabot-alerts API answers 403 — GITHUB_TOKEN can
+        # never read it and a security-scoped METADATA_REFRESH_PAT has not been
+        # set. An absent series makes this rule inactive, which is the honest
+        # state; do not "fix" that by emitting 0.
+        - alert: SecurityDependabotCriticalOpenOld
+          expr: openbank_security_kpi_dependabot_oldest_open_days > 14
+          for: 24h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Oldest open Critical/High Dependabot alert is {{ $value }} days old"
+            description: >-
+              An open Critical/High Dependabot alert has exceeded the 14-day
+              remediation SLO proxy (ADR-0279). Triage the alert; if the whole
+              series is absent rather than large, the MTTR collector is
+              unauthenticated (403) and needs a security-scoped
+              METADATA_REFRESH_PAT, not a triage.

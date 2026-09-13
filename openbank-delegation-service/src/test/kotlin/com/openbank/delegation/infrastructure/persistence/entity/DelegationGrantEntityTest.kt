@@ -43,6 +43,7 @@ class DelegationGrantEntityTest {
             validFrom = now,
             validTo = now.plusDays(7),
             status = DelegationStatus.ACTIVE,
+            lifecycleRevision = 7,
             grantScaSessionId = UUID.randomUUID(),
             acceptScaSessionId = UUID.randomUUID(),
             note = "proof for buyer",

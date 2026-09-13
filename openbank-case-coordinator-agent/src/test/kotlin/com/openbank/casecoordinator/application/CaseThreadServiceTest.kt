@@ -48,6 +48,7 @@ class CaseThreadServiceTest {
         every { repository.findCase(WORKFLOW_ID) } returns caseRow()
         every { repository.listContributions(WORKFLOW_ID) } returns emptyList()
         every { repository.listProposalEvents(WORKFLOW_ID) } returns emptyList()
+        every { repository.listSignalEvidence(WORKFLOW_ID) } returns emptyList()
 
         val thread = service.caseThread(WORKFLOW_ID)
 
@@ -65,6 +66,8 @@ class CaseThreadServiceTest {
         deadlineAtEpochMs = T0 + DEADLINE_MS,
         contestedRate = 0.0,
         contributionCount = 0,
+        budgetTokens = 200_000,
+        budgetContributions = 40,
     )
 
     private companion object {

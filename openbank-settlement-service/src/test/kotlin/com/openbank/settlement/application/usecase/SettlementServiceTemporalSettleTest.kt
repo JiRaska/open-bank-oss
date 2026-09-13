@@ -52,7 +52,7 @@ class SettlementServiceTemporalSettleTest {
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, temporalConfig, env.workflowClient)
+        service = SettlementService(repo, temporalConfig, env.workflowClient, mockk(relaxed = true))
     }
 
     @AfterEach

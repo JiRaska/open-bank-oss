@@ -1,5 +1,112 @@
 # Changelog
 
+## [1.28.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.28.0...ledger-service-v1.28.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ledger:** guard ledger_outbox created_at plausibility at INSERT ([#9288](https://github.com/JiRaska/open-bank-oss/issues/9288)) ([f443342](https://github.com/JiRaska/open-bank-oss/commit/f443342b3a4b44614158631f65363d7e4ce9e7b9))
+
+## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.1...ledger-service-v1.28.0) (2026-09-08)
+
+
+### Features
+
+* **clearing:** post net-settlement journal per settled batch via the transactional outbox ([#8723](https://github.com/JiRaska/open-bank-oss/issues/8723)) ([5e38f44](https://github.com/JiRaska/open-bank-oss/commit/5e38f445e4169f24a4f0871ca748c22debf9e384))
+* **ledger:** record the synthetic taint on the journal and let the trial balance exclude it ([#8629](https://github.com/JiRaska/open-bank-oss/issues/8629)) ([7989f39](https://github.com/JiRaska/open-bank-oss/commit/7989f39afab7a77bb389a1391878b0292c6254ed))
+
+
+### Bug Fixes
+
+* **balance,ledger:** fuzz-found 500s on date query params become 400/default ([#8835](https://github.com/JiRaska/open-bank-oss/issues/8835)) ([062c26a](https://github.com/JiRaska/open-bank-oss/commit/062c26afd615d4c973a51bfd4920618ceb5401f4))
+
+## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.0...ledger-service-v1.27.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **ledger:** entity timestamp defaults EPOCH -&gt; Instant.now() — burn-down complete ([#8465](https://github.com/JiRaska/open-bank-oss/issues/8465)) ([2ad36b6](https://github.com/JiRaska/open-bank-oss/commit/2ad36b67e9973e482e8d36aa47a231e11c774106))
+
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.2...ledger-service-v1.27.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+
+### Bug Fixes
+
+* **ledger:** answer 400 for a null journal line and an absent body, not 500 ([#7860](https://github.com/JiRaska/open-bank-oss/issues/7860)) ([b8c7461](https://github.com/JiRaska/open-bank-oss/commit/b8c746157bc8e1ce121f5528f093423c29c46f31))
+
+## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.1...ledger-service-v1.26.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **ledger:** require human close draft maker ([#7624](https://github.com/JiRaska/open-bank-oss/issues/7624)) ([7b5d97e](https://github.com/JiRaska/open-bank-oss/commit/7b5d97eecc37f3f5d24dc76c1c7d06a7ad0933f9))
+
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.0...ledger-service-v1.26.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
+## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.25.0...ledger-service-v1.26.0) (2026-08-26)
+
+
+### Features
+
+* **ledger:** persist trusted synthetic taint ([#7176](https://github.com/JiRaska/open-bank-oss/issues/7176)) ([aee9dd8](https://github.com/JiRaska/open-bank-oss/commit/aee9dd800af708489bd75fb9e82f131a983e6a45))
+
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.24.0...ledger-service-v1.25.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.23.0...ledger-service-v1.24.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.22.0...ledger-service-v1.23.0) (2026-08-19)
+
+
+### Features
+
+* **ledger:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5687](https://github.com/JiRaska/open-bank-oss/issues/5687)) ([c0d5dee](https://github.com/JiRaska/open-bank-oss/commit/c0d5dee48e379bdc89e26b3ad852edd5084bdab4))
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.2...ledger-service-v1.22.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [1.21.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.1...ledger-service-v1.21.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [1.21.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.0...ledger-service-v1.21.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.2...ledger-service-v1.21.0) (2026-08-15)
 
 

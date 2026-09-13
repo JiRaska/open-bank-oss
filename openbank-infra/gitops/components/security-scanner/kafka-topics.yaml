@@ -2,22 +2,12 @@
 # does not auto-create topics) so the Strimzi topic operator manages them.
 # Lives in the `messaging` namespace next to the Kafka cluster.
 #
-# security.scan.event  — periodic scan result per service (SAST/health/CVE verdict)
 # security.ict.incident — DORA ICT incident events (critical findings only)
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: openbank.security.scan.event
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 604800000
-    cleanup.policy: delete
----
+#
+# openbank.security.scan.event was removed in #4709: it was provisioned here, ACL'd on both
+# the producer and the audit side, and had no writer for the whole life of the service —
+# end offset 0 on the broker and 0 rows in the service's outbox table. Deleting a topic that
+# nothing produces to is safe; there are no records and no consumer group offsets to strand.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:

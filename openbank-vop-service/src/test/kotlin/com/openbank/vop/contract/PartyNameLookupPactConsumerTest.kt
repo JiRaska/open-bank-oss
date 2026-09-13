@@ -29,14 +29,14 @@ import org.junit.jupiter.api.extension.ExtendWith
  * (git-pact, ADR-0063) and replayed by `PartyEventPactProviderVerificationTest` in
  * openbank-party-service — the single `@Provider("openbank-party-service")` class in the repo.
  *
- * Why hop 2 and not hop 1: see `AccountHolderNameLookupAdapter`. Both hops are real HTTP, but
+ * Why hop 2 first: see `AccountHolderNameLookupAdapter`. Both hops are real HTTP, but
  * party-service is where the *answer* comes from — a renamed or dropped `legalName`/`tradingName`
  * turns every verification into NO_DATA while every unit test stays green (the port is mocked
- * there). Hop 1 (account-service `GET /api/v1/accounts/iban/{iban}`) is deliberately NOT pinned in
- * this PR: account-service's only `@Provider` class is message-only (`MessageTestTarget`, no
- * Quarkus boot) and its own KDoc records that an HTTP consumer contract would first need it
- * converted to party-service's per-interaction target dispatch. That conversion is provider-side
- * work on a money-path service, not a vop test change.
+ * there). Hop 1 (account-service `GET /api/v1/accounts/iban/{iban}`) was left unpinned at the time
+ * because account-service's only `@Provider` class was message-only (`MessageTestTarget`, no
+ * Quarkus boot), so an HTTP interaction had nowhere to be replayed. That is no longer the case —
+ * `AccountPactFolderProviderVerificationTest` boots Quarkus and dispatches per interaction — and
+ * hop 1 is now pinned by [AccountIbanLookupPactConsumerTest] (#8345).
  *
  * **The expected path is a LITERAL; only the outgoing request is reflected off the client's
  * `@Path`** (CLAUDE.md "Contract tests", measured on #2290). Deriving *both* sides is vacuous: the
@@ -102,6 +102,44 @@ class PartyNameLookupPactConsumerTest {
         assertThat(summary.tradingName).isNotBlank()
     }
 
+    // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
+    // replay boots with a TestAuthMechanism that authenticates EVERY replayed request as
+    // pact-verifier/ROLE_OPERATOR, so a recorded 401/403 expectation can never pass provider
+    // replay — it would be a permanently red interaction (same failure class as the account-side
+    // hop, #8552). The negative case is covered where it can actually run: party-service's own
+    // resource authz test asserts an anonymous lookup answers 401. The consumer-side behaviour
+    // (no token, expect rejection) stays a client property, not a wire contract.
+
+    /**
+     * The negative case (ADR-0279 #3), in the one shape the provider replay CAN serve: a party id
+     * nobody holds is a DIFFERENT PATH, so the provider distinguishes it from the 200 interaction
+     * and answers 404 under the same TestAuthMechanism that makes a recorded 401 unreachable.
+     * Enumeration resistance is a real contract — "not found" must not become an empty party.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun unknownPartyPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no party exists for the id")
+        .uponReceiving("GET a party id the bank does not hold")
+        .path(UNKNOWN_PARTY_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unknownPartyPact")
+    fun `a party id the bank does not hold is a 404, not an empty party`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/parties/$UNKNOWN_PARTY_ID")
+            .then()
+            .statusCode(404)
+    }
+
     /**
      * The asymmetry that makes this contract falsifiable at the consumer layer: the path the client
      * would really call, recomputed from [PartyServiceClient]'s own annotations, must equal the
@@ -128,6 +166,10 @@ class PartyNameLookupPactConsumerTest {
          * + `@GET @Path("/{id}")`). Never derive this from the client — see the class KDoc.
          */
         const val EXPECTED_PARTY_PATH = "/api/v1/parties/$PACT_PARTY_ID"
+
+        /** No state seeds this one — that IS the state. A well-formed id no party carries. */
+        const val UNKNOWN_PARTY_ID = "00000000-0000-4000-8000-000000000001"
+        const val UNKNOWN_PARTY_PATH = "/api/v1/parties/$UNKNOWN_PARTY_ID"
 
         fun clientDerivedPartyPath(): String {
             val base = PartyServiceClient::class.java.getAnnotation(Path::class.java).value

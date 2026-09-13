@@ -1,6 +1,19 @@
 # QRlessPay SDK — open-source reference SDK proposal
 
-Status: Proposal (v0) · Protocol: [qrlesspay-v1](qrlesspay-v1.md) · Decision: [ADR-0095](../adr/0095-qrlesspay-ble-proximity-spayd-payments.md)
+Status: **Implemented** — this document is the architecture; the code is at
+[github.com/JiRaska/qrlesspay-sdk](https://github.com/JiRaska/qrlesspay-sdk) (Apache-2.0, `v0.1.0`).
+Protocol: [qrlesspay-v1](qrlesspay-v1.md) · Decision: [ADR-0095](../adr/0095-qrlesspay-ble-proximity-spayd-payments.md)
+
+> **What shipped against this document, and what did not.** Native Swift and Kotlin cores that agree
+> byte for byte, BLE transports on both platforms, a React Native binding, UWB and SAS, an example
+> iOS app, and the conformance suite this document argues for — 3 positive vectors, 20 negative
+> cases, 19 UWB cases, run by both implementations, with CI regenerating and diffing them. Flutter
+> is not started. Nothing is published to a package registry, and nothing has run on real hardware.
+>
+> The suite justified itself before it was finished: building the second implementation found that
+> the reference CBOR encoding did not match §3 of the spec — text keys, integer arrays, 326 B
+> against 197 B — so anything written from the spec could not read it. A round-trip test could not
+> have found it, which is the argument of §3 of this document restated as a fact.
 
 QRlessPay is an open, bank-agnostic BLE profile. For it to become a standard
 (ČBA/EPC ambition, ADR-0095), other banks must be able to adopt it in weeks, not

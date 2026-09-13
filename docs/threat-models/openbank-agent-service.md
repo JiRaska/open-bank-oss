@@ -35,11 +35,30 @@ takes a state-changing money-path action. The surfaces that accept external inpu
 operator ──bearer──▶ admin-ui BFF ──bearer + X-Agent-Id──▶ /mcp ──▶ AgentPolicyGate ──▶ OPA sidecar
                                                               │                         (agents.rego)
                                                               ├──▶ McpToolRegistry ──▶ downstream svc REST
-                                                              └──▶ AuditEventPublisher ──▶ Kafka audit-events-out
+                                                              └──▶ AuditEventPublisher
+                                                                     (DurableAgentAuditPublisher)
+                                                                        │
+                                                                        ▼
+                                                              agent_audit_outbox (local Postgres,
+                                                              same tx as the audited operation)
+                                                                        │  AgentAuditOutboxDispatcher
+                                                                        ▼  (@Scheduled, gated off)
+                                                              Kafka openbank.agent.audit.events
+                                                                        │  AgentAuditConsumer
+                                                                        ▼
+                                                              audit-service → audit_entries
+                                                              (append-only, hash-chained)
 ```
 
 Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service (Keycloak bearer),
-(c) agent-service→downstream services (service bearer), (d) agent-service→OPA (localhost sidecar).
+(c) agent-service→downstream services (service bearer), (d) agent-service→OPA (localhost sidecar),
+(e) agent-service→Kafka (mTLS, KafkaUser `agent-service`, `Write, Describe` on
+`openbank.agent.audit.events` and deliberately no `Read` — a component may append to the trail
+about itself and may not read it back; `openbank-infra/gitops/components/agent/kafka-agent-mtls.yaml`);
+(f) agent-service→`openbank-communication-service`, client-credentials, read-only
+(`PublishedStyleProvider`, ADR-0285 D5) — fetches the published style for the `ui-assistant`
+persona, cached with a short TTL, no baseline fallback (see T-I3). NOT wired into
+`AgentChatService.systemPrompt()` or `CatalogReviewService` yet (infrastructure only).
 
 ## 2. STRIDE
 
@@ -82,9 +101,33 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 
 ### Repudiation
 
-- **T-R1.** Every decision (ALLOW/DENY), tool execution, model completion and now identity rejection
+- **T-R1.** Every decision (ALLOW/DENY), tool execution, model completion and identity rejection
   is audited with an attributable actor (AI_AGENT for agent actions, the OIDC subject for operator
   actions). Kill-switch flips record the OIDC subject, never a body field.
+- **T-R2 (issue #6191, ADR-0031 D5).** Those events reach a durable record and not only a log line.
+  Until #6209 the fleet's only `AuditEventPublisher` implementation was the log-only fallback, so
+  the DFD arrow above credited a Kafka delivery that no code performed — the evidence for every AI
+  action was a log line written by the same process whose behaviour a dispute would put in question.
+  `DurableAgentAuditPublisher` (an `@Alternative`) now enqueues into `agent_audit_outbox` inside the
+  audited operation's own transaction, so an audit call returns only after the source database has
+  acknowledged the row; `AgentAuditOutboxDispatcher` drains it and marks a row published only on
+  Kafka ack, leaving a failed send claimed for retry with `last_error` recorded.
+  `AgentAuditConsumer` acks the Kafka offset only after `audit_entries` has committed, and the
+  producer's `eventId` is the row's `entry_id`, so an at-least-once redelivery de-duplicates rather
+  than double-chaining (`AgentAuditRedeliveryIT`).
+  **Residual, stated rather than implied:**
+  - **The transport is off by default.** `AGENT_AUDIT_KAFKA_ENABLED` defaults to `false` (#6209's
+    deliberate rollout choice), and the gitops `group.id`/`auto.offset.reset` override that
+    audit-service needs is deliberately not added yet. Until both land, AI provenance is durable in
+    agent-service's *local* outbox and has not reached the tamper-evident trail — the outbox grows
+    unbounded and no `audit_entries` row exists. This is a rollout state, not a design gap, but it
+    is the state today and no green test contradicts it.
+  - **`aggregate_id` degrades to the `unknown` sentinel.** The envelope spells the acted-on
+    resource `aggregateId`; `AuditConsumer.inferAggregateId` derives that column from a fixed chain
+    of business id field names and cannot see it. The row is therefore attributable to the actor
+    but not joinable to the resource, and `audit_entries` is append-only so it can never be
+    corrected. Measured by `AgentAuditEventPersistenceIT`, which asserts the sentinel rather than
+    agreeing with it silently.
 
 ### Information disclosure
 
@@ -97,6 +140,17 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 - **T-I2 — prompt-injection exfiltration (FIND-S4-05).** Untrusted tool results are wrapped in
   data markers; the system prompt forbids following embedded instructions; the charter allow-list +
   gate bound what any missed phrasing could reach. PII is masked on every agent data scope.
+- **T-I3 — `communication-service` leg (ADR-0285 D5).** **Information disclosure / tampering** — a
+  compromised communication-service serves a poisoned style, or the read exposes something it
+  shouldn't. The read is read-only, client-credentials, `GET .../published` only — no write path,
+  no customer or operator data crosses this boundary (style content is bank-authored prose, never
+  PII). Moot today regardless: nothing composes the fetched style into a live prompt yet
+  (`PublishedStyleProvider` is unused infrastructure, not wired into `AgentChatService.systemPrompt()`
+  or `CatalogReviewService`), and unlike `openbank-copilot-service`'s equivalent provider it has no
+  git-registered-baseline fallback to poison in the first place — `ui-assistant`'s ADR-0148 registry
+  entry has never been split into `core.v1`/`style.v1`, so a total failure returns `null`, not a
+  substitute prompt. Blast radius reassessed when a composition cutover is actually proposed —
+  *open, tracked with that follow-up*.
 
 ### Denial of service
 
@@ -122,3 +176,16 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
   operator's roles) is a follow-up. Requires admin-ui pod compromise to exploit; deny tier untouched.
 - **D3b:** author≠approver codified in agent policy (not only GitHub branch protection).
 - Explicit per-run OTel trace already live (D7, #2385); LLM-level Langfuse observability planned.
+- **`AgentChatService`/`CatalogReviewService` composition cutover (T-I3, ADR-0285 D5):**
+  `PublishedStyleProvider` is built and tested but not called from either service. Unlike
+  copilot-service, there is no `core.v1`/`style.v1` registry split for `ui-assistant` to compose
+  yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
+
+## 4. Change log
+
+- **2026-09-11 (ADR-0285 D5 client infra, T-I3):** Added `PublishedStyleProvider` (client-credentials
+  read of `communication-service`'s published style for the `ui-assistant` persona, cache + short
+  TTL, no baseline fallback) and `CommunicationStyleClient`/`CommunicationStyleAdapter`.
+  Infrastructure only — not called from `AgentChatService.systemPrompt()` or `CatalogReviewService`,
+  no runtime behaviour change. New trust boundary (f): outbound, read-only, no customer or operator
+  data crosses it. See T-I3 and the matching open item.

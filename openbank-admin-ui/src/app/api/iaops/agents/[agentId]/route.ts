@@ -55,13 +55,19 @@ async function fetchProposals(agentId: string): Promise<{ available: boolean; pr
     const rows = await res.json() as Array<Record<string, unknown>>
     return {
       available: true,
-      proposals: rows.map(r => ({
-        id: String(r.id ?? ''),
-        title: String(r.title ?? ''),
-        state: String(r.state ?? ''),
-        proposedAt: String(r.proposedAt ?? ''),
-        decidedAt: r.decidedAt ? String(r.decidedAt) : null,
-      })),
+      // The query parameter narrows current agent-service versions. Keep this local
+      // check as the BFF boundary too: an older service can silently ignore unknown
+      // query parameters, and this page must never label another agent's work as
+      // this agent's history during a rolling deployment.
+      proposals: rows
+        .filter(r => r.proposedBy === agentId)
+        .map(r => ({
+          id: String(r.id ?? ''),
+          title: String(r.title ?? ''),
+          state: String(r.state ?? ''),
+          proposedAt: String(r.proposedAt ?? ''),
+          decidedAt: r.decidedAt ? String(r.decidedAt) : null,
+        })),
     }
   } catch {
     return { available: false, proposals: [] }

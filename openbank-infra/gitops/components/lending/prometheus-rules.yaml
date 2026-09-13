@@ -48,16 +48,14 @@ spec:
           annotations:
             summary: "High error rate on lending-service"
             description: ">10% of spans on lending-service are erroring at >0.5 err/s."
-        - alert: LendingRepaymentProcessingStalled
-          # Repayment events must be processed promptly; a stall means accounts
-          # may be incorrectly reported as overdue to the credit bureau.
-          expr: |
-            increase(openbank_lending_repayments_processed_total[30m]) == 0
-            and on() hour() >= 6 and on() hour() <= 22
-          for: 30m
-          labels:
-            severity: warning
-            service: lending
-          annotations:
-            summary: "No repayments processed in 30m (business hours)"
-            description: "lending-service has not processed any repayment events in 30m during business hours — check Kafka consumer lag."
+        # LendingRepaymentProcessingStalled was REMOVED in #5733. It watched
+        # `openbank_lending_repayments_processed_total`, which nothing emits, and its premise was
+        # wrong in two further ways that instrumenting the metric would not have fixed. There are no
+        # "repayment events": LendingService.recordRepayment is a REST operation and lending-service
+        # has no `@Incoming` consumer at all, so the description's "check Kafka consumer lag" points
+        # at a consumer that does not exist. And repayments are due per installment, i.e. monthly —
+        # a 30-minute window with none is the overwhelmingly common case, so the rule would have
+        # paged constantly rather than detecting anything.
+        # The real risk it named — an account wrongly reported overdue to the credit bureau — is a
+        # per-loan correctness property. It belongs on loan state (a count of loans past due whose
+        # repayment was accepted but not applied), not on a service-wide throughput floor.

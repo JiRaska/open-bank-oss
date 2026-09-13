@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.transaction.application.port.out.FxRatePort
 import com.openbank.transaction.application.port.out.FxRateView
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -24,6 +25,7 @@ import java.math.BigDecimal
 
 /** Typed client for the fx-service rate API; the rate endpoints require an authenticated role. */
 @RegisterRestClient(configKey = "fx-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/fx")
 @Produces(MediaType.APPLICATION_JSON)

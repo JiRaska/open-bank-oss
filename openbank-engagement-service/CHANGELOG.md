@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.0...engagement-service-v0.14.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **engagement:** guard engagement_outbox created_at plausibility at INSERT ([#9307](https://github.com/JiRaska/open-bank-oss/issues/9307)) ([31b3daf](https://github.com/JiRaska/open-bank-oss/commit/31b3dafb848d58cb3e503d6c4fce49935934eaeb))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.13.0...engagement-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.12.4...engagement-service-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.12.4](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.12.3...engagement-service-v0.12.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.12.2...engagement-service-v0.12.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.12.1...engagement-service-v0.12.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.12.0...engagement-service-v0.12.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.11.1...engagement-service-v0.12.0) (2026-08-17)
+
+
+### Features
+
+* **engagement:** add gamification engine domain slice (ADR-0261) ([#5138](https://github.com/JiRaska/open-bank-oss/issues/5138)) ([fef7be1](https://github.com/JiRaska/open-bank-oss/commit/fef7be1a53ffc923da8617d0a652732800639632))
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.11.0...engagement-service-v0.11.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.10.0...engagement-service-v0.11.0) (2026-08-14)
 
 

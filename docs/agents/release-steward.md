@@ -63,10 +63,16 @@ agents apply to other axes, applied here to release engineering itself.
   state finops-agent/devops-agent/control-liveness-sentinel/governance-auditor shipped with. Until
   that lands, the openapi-collision check (ADR-0165 incident 4) is structurally complete but
   detects nothing in a live deployment.
-- The LLM diagnosis and fix-diff generation are stubs pending the shared LiteLLM gateway wiring; a
-  finding today produces a tracking ticket with a placeholder summary rather than an LLM-drafted
-  root-cause note, and the one mechanical-fix path (`APP_VERSION_OVERRIDE`) does not yet generate a
-  real diff.
+- The LLM diagnosis and fix-diff generation are stubs pending the shared LiteLLM gateway wiring, so
+  the one mechanical-fix path (`APP_VERSION_OVERRIDE`) does not yet generate a real diff.
+- **`GitHubProposalPort` is unwired and REFUSES — no finding of this agent reaches GitHub today**
+  (#5897). Both methods return `null`, and `DiagnoseAndProposeActivityImpl` then leaves the finding
+  `DIAGNOSED` with a null `proposalUrl`: it is never counted in a run's `findingsProposed` and never
+  presented as awaiting a human. It previously returned a fabricated
+  `https://github.com/openbank/openbank/issues/pending-release-steward-<id>` URL and moved the
+  finding to `PROPOSED` — a no-op sharing its shape with a real result, on a host that is not even
+  this repository. This follows `openbank-mcp-service`'s `UnwiredProposalPort` (#3900).
+  `flaky-test-hunter`'s adapter is the template if and when this gets wired.
 - `repo-root` (`RELEASE_STEWARD_REPO_ROOT`) must point at a mounted, up-to-date checkout of `main`
   for the `RepoStateReadPort` checks to be meaningful — the deployment-side checkout-mount wiring
   (a sidecar or init-container `git pull`) is tracked separately and not yet part of this PR's

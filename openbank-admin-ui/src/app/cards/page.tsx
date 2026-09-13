@@ -3,27 +3,31 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
-  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck,
+  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck, X, Layers,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { CARD_STATUSES, type CardTransition } from '@/lib/cards/lifecycle'
 import { CARD_TYPES, type Card } from '@/lib/cards/types'
-import { cardStatusColor, CardStatusChip } from '@/components/cards/CardStatusChip'
+import { cardStatusColor } from '@/components/cards/CardStatusChip'
 import { CardLifecycleMap } from '@/components/cards/CardLifecycleMap'
 import { CardTransitionButtons } from '@/components/cards/CardTransitionButtons'
 import { ConfirmTransitionDialog } from '@/components/cards/ConfirmTransitionDialog'
 import { CardOperationFeedback } from '@/components/cards/CardOperationFeedback'
 import { IssueCardDialog } from '@/components/cards/IssueCardDialog'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
+import { LoadMoreControl, PageHeader, StatCard } from '@/components/ui'
+import type { Tone } from '@/components/ui/tone'
 
 // Admin-UI rule #2: page the render. `GET /api/v1/cards` is an unpaginated
 // list-all on the service side, so the cap has to be applied here — a portfolio
@@ -34,7 +38,12 @@ const ALL = '__ALL__'
 
 export default function CardsPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const router = useRouter()
+  const { data: session } = useSession()
+  const canIssue = hasPermission(session?.user?.roles ?? [], 'cards:issue')
+  const canManage = hasPermission(session?.user?.roles ?? [], 'cards:manage')
+  const canBlock = hasPermission(session?.user?.roles ?? [], 'cards:block')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>(ALL)
   const [typeFilter, setTypeFilter] = useState<string>(ALL)
@@ -42,6 +51,8 @@ export default function CardsPage() {
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [pending, setPending] = useState<{ card: Card; transition: CardTransition } | null>(null)
   const [issuing, setIssuing] = useState(false)
+  const cardsResultsRef = useRef<HTMLElement>(null)
+  const closeFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   // Single graceful data path (admin-ui rule #1): the hook classifies a non-OK
   // BFF response and auto-wakes a scaled-to-zero pod (KEDA, ADR-0057) instead of
@@ -74,13 +85,23 @@ export default function CardsPage() {
 
   const page = filtered.slice(0, visible)
   const highlightedCard = cards.find(c => c.id === highlighted) ?? null
+  const hasFilters = search.trim().length > 0 || statusFilter !== ALL || typeFilter !== ALL
 
   const open = useCallback((cardId: string) => router.push(`/cards/${cardId}`), [router])
+  const clearFilters = () => {
+    setSearch('')
+    setStatusFilter(ALL)
+    setTypeFilter(ALL)
+    setVisible(PAGE_SIZE)
+  }
 
   const onSelectTransition = (card: Card, tr: CardTransition) => {
     setHighlighted(card.id)
     ops.setFeedback(null)
-    if (tr.irreversible) setPending({ card, transition: tr })
+    if (tr.irreversible) {
+      closeFocusOverrideRef.current = null
+      setPending({ card, transition: tr })
+    }
     else void ops.runTransition(card, tr)
   }
 
@@ -94,18 +115,13 @@ export default function CardsPage() {
   })
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Vydávání karet', 'Card Issuance')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Vydávání a správa platebních karet — PCI DSS Level 1', 'Card issuance and management — PCI DSS Level 1')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader
+          icon={<CreditCard size={20} aria-hidden="true" />}
+          title={t('Vydávání karet', 'Card Issuance')}
+          subtitle={t('Vydávání a správa platebních karet — PCI DSS Level 1', 'Card issuance and management — PCI DSS Level 1')}
+          actions={<div className="flex flex-wrap items-center gap-2">
             <ServiceStatusBadge
               label="card-issuance :8118"
               loading={loading}
@@ -118,59 +134,59 @@ export default function CardsPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
-              <Plus size={13} /> {t('Vydat kartu', 'Issue a card')}
+            {canIssue && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
+                <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
+              </button>
+            )}
+            {/* The capability matrix is a sibling surface, not a filter on this list: it answers
+                "which network offers what, and what do we bind" rather than anything about the
+                cards below (ADR-0283 phase 3). */}
+            <Link href="/cards/capabilities" className="btn btn-ghost btn-sm">
+              <Layers size={13} aria-hidden="true" /> {t('Schopnosti sítí', 'Network capabilities')}
+            </Link>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit karty', 'Refresh cards')}>
+              <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
-              <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
-            </button>
-          </div>
-        </div>
+          </div>}
+        />
 
         {/* KPIs */}
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Celkem karet', 'Total cards'), value: cards.length, icon: <CreditCard size={16} />, color: 'var(--accent)' },
-            { label: t('Aktivní', 'Active'), value: countBy('ACTIVE'), icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Blokované', 'Blocked'), value: countBy('BLOCKED'), icon: <XCircle size={16} />, color: 'var(--danger)' },
-            { label: t('Čekající', 'Pending'), value: countBy('PENDING'), icon: <Clock size={16} />, color: 'var(--warning)' },
-          ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color }}>{k.icon}</div>
-              </div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
-          ))}
+            { label: t('Celkem karet', 'Total cards'), value: cards.length, icon: <CreditCard size={16} /> },
+            { label: t('Aktivní', 'Active'), value: countBy('ACTIVE'), icon: <CheckCircle2 size={16} />, tone: 'success' as Tone },
+            { label: t('Blokované', 'Blocked'), value: countBy('BLOCKED'), icon: <XCircle size={16} />, tone: 'danger' as Tone },
+            { label: t('Čekající', 'Pending'), value: countBy('PENDING'), icon: <Clock size={16} />, tone: 'warning' as Tone },
+          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
         </div>
 
         <CardLifecycleMap current={highlightedCard?.status} />
 
-        <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
+        {!pending && <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />}
 
         {/* Table */}
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gap: '10px' }}>
             <div style={{ position: 'relative' }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => { setSearch(e.target.value); setVisible(PAGE_SIZE) }}
                 placeholder={t('Hledat podle PAN, držitele nebo produktu…', 'Search by PAN, cardholder or product…')}
                 aria-label={t('Hledat karty', 'Search cards')}
+                aria-controls="cards-results"
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div role="group" aria-label={t('Filtr podle stavu', 'Filter by status')} style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                <button style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
+                <button type="button" aria-controls="cards-results" aria-pressed={statusFilter === ALL} style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
                   {t('Vše', 'All')} · {cards.length}
                 </button>
                 {CARD_STATUSES.filter(s => countBy(s) > 0).map(s => {
                   const c = cardStatusColor(s)
                   const active = statusFilter === s
                   return (
-                    <button key={s} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
+                    <button key={s} type="button" aria-controls="cards-results" aria-pressed={active} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
                       style={{ ...chip(active), background: active ? c.bg : 'var(--surface-2)', color: active ? c.text : 'var(--text-secondary)', borderColor: active ? c.border : 'var(--border)' }}>
                       {s} · {countBy(s)}
                     </button>
@@ -181,23 +197,36 @@ export default function CardsPage() {
                 {CARD_TYPES.filter(ct => cards.some(c => c.cardType === ct)).map(ct => {
                   const active = typeFilter === ct
                   return (
-                    <button key={ct} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
+                    <button key={ct} type="button" aria-controls="cards-results" aria-pressed={active} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
                       {ct}
                     </button>
                   )
                 })}
               </div>
+              {hasFilters && <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters} aria-controls="cards-results" aria-label={t('Vyčistit všechny filtry karet', 'Clear all card filters')}>
+                <X size={13} aria-hidden="true" /> {t('Vyčistit filtry', 'Clear filters')}
+              </button>}
             </div>
+            <p role="status" aria-live="polite" style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
+              {hasFilters
+                ? t(`${filtered.length} karet odpovídá filtrům`, `${filtered.length} cards match the filters`)
+                : t(`${cards.length} karet v portfoliu`, `${cards.length} cards in the portfolio`)}
+            </p>
           </div>
 
-          {loading ? (
+          <section
+            ref={cardsResultsRef}
+            id="cards-results"
+            tabIndex={-1}
+            aria-label={t('Výsledky karet', 'Card results')}
+          >
+          {unavailable && <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} dense={cards.length > 0} />}
+          {loading && cards.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
               <div>{t('Načítám karty…', 'Loading cards…')}</div>
             </div>
-          ) : unavailable ? (
-            <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} />
-          ) : filtered.length === 0 ? (
+          ) : unavailable && cards.length === 0 ? null : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Karty', 'Cards')} lang={language}
               detail={cards.length === 0
                 ? t('Služba běží, zatím nebyly vydány žádné karty.', 'The service is running; no cards have been issued yet.')
@@ -248,9 +277,9 @@ export default function CardsPage() {
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.expiryDate}</td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.cardholderName || '—'}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-US') : '—'}</td>
+                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                         <td style={{ padding: '10px 16px' }} onClick={e => e.stopPropagation()}>
-                          <CardTransitionButtons card={c} busy={ops.busy} onSelect={tr => onSelectTransition(c, tr)} />
+                          {(canManage || canBlock) && <CardTransitionButtons card={c} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={tr => onSelectTransition(c, tr)} />}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-tertiary)' }}><ChevronRight size={14} /></td>
                       </tr>
@@ -258,18 +287,19 @@ export default function CardsPage() {
                   })}
                 </tbody>
               </table>
-              <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
-                  {t(`Zobrazeno ${page.length} z ${filtered.length}`, `Showing ${page.length} of ${filtered.length}`)}
-                </span>
-                {page.length < filtered.length && (
-                  <button className="btn btn-ghost btn-sm" onClick={() => setVisible(v => v + PAGE_SIZE)}>
-                    {t('Načíst další', 'Load more')}
-                  </button>
-                )}
-              </div>
+              <LoadMoreControl
+                loaded={page.length}
+                total={filtered.length}
+                progressLabel={t(`Zobrazeno ${page.length} z ${filtered.length} karet`, `Showing ${page.length} of ${filtered.length} cards`)}
+                buttonLabel={t(`Načíst dalších ${Math.min(PAGE_SIZE, filtered.length - page.length)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - page.length)} more`)}
+                buttonAriaLabel={t('Načíst další karty', 'Load more cards')}
+                controls="cards-results"
+                onLoadMore={() => setVisible(v => v + PAGE_SIZE)}
+                announceProgress={false}
+              />
             </>
           )}
+          </section>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '14px', fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
@@ -286,8 +316,16 @@ export default function CardsPage() {
           card={pending.card}
           transition={pending.transition}
           busy={ops.busy !== null}
+          feedback={ops.feedback}
+          closeFocusOverrideRef={closeFocusOverrideRef}
           onCancel={() => setPending(null)}
-          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => { if (ok) setPending(null) })}
+          onDismissFeedback={() => ops.setFeedback(null)}
+          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => {
+            if (ok) {
+              closeFocusOverrideRef.current = cardsResultsRef.current
+              setPending(null)
+            }
+          })}
         />
       )}
 

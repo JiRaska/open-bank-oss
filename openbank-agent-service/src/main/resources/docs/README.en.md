@@ -19,8 +19,8 @@ This documentation is published directly by the service at the management endpoi
 
 - **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — PostgreSQL via **plain JDBC + Flyway**, **no JPA**
 - **Port:** 8109 (app HTTP), 8085 (management — health, metrics, docs)
-- **Persistence:** one table. `governance.yaml` declares `primaryDatastore: PostgreSQL` / `databaseName: openbank_agent`; Flyway versions the `agent_proposal` HITL approval queue (ADR-0031 D4) and nothing else. The rate-limiter state is **in-memory** only
-- **Outbox:** none. The service emits **AI-attributed audit events** via `openbank-libs` `AuditEventPublisher` (no domain outbox table)
+- **Persistence:** PostgreSQL stores the `agent_proposal` HITL approval queue (ADR-0031 D4) and the durable `agent_audit_outbox`; rate-limiter state is **in-memory** only
+- **Outbox:** `agent_audit_outbox` acknowledges AI-attributed audit events before Kafka delivery; runtime activation remains controlled pending attestation
 - **Idempotency:** N/A — all operations are read-only / non-mutating
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); outbound MCP tool calls carry a `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** every tool call passes the OPA-backed **AgentPolicyGate** (deny-by-default), bounded by the `ui-assistant` charter in `agents.yaml`; enforcement is `advisory` by default, flip to `block` (ADR-0031 D9)

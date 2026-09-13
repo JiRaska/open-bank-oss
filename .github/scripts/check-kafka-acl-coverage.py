@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+import tempfile
 
 import yaml
 
@@ -96,6 +97,13 @@ def required(app_yaml: pathlib.Path) -> set[tuple[str, str]]:
 
     The direction comes from the channel's own key (`incoming` vs `outgoing`), which is what makes
     the operation checkable at all — a bare topic name says nothing about which way it flows.
+
+    One exception, and it is not a special case so much as the same rule applied one level down:
+    an incoming channel's `dead-letter-queue.topic` is WRITE-ONLY from this service's side. The
+    SmallRye Kafka connector parks a failed message there with its own producer and never
+    subscribes to it; nothing in this repo consumes an `openbank.dlq.*` topic — no channel, no
+    redrive tool. Classifying it by the enclosing `incoming` key would demand a Read ACL nobody
+    uses, which is a widening, not a fix (#5751).
     """
     try:
         doc = gatelib.load_yaml(app_yaml)
@@ -105,9 +113,12 @@ def required(app_yaml: pathlib.Path) -> set[tuple[str, str]]:
     _walk(doc, [], flat)
     out: set[tuple[str, str]] = set()
     for path, value in flat:
-        if not path or path[-1] not in ("topic", "topics") or not isinstance(value, str):
+        leaf = path[-1] if path else ""
+        if leaf not in ("topic", "topics", "dead-letter-queue.topic") or not isinstance(value, str):
             continue
-        if "incoming" in path:
+        if leaf == "dead-letter-queue.topic" or "dead-letter-queue" in path:
+            operation = "Write"          # the connector produces into the DLQ; it never reads it
+        elif "incoming" in path:
             operation = "Read"
         elif "outgoing" in path:
             operation = "Write"
@@ -180,7 +191,42 @@ def selftest() -> int:
     if not kafka_users():
         print("selftest FAIL: no KafkaUser CRs found — the scan itself is broken.")
         return 1
-    print(f"selftest OK: {len(cases)} cases, both directions (flags the near-miss, spares the prefix match).")
+
+    # Direction classification, including the DLQ carve-out. Without these the gate would demand a
+    # Read ACL on every `openbank.dlq.*` topic (#5751) and nothing here could tell.
+    fixture = (
+        "mp:\n"
+        "  messaging:\n"
+        "    incoming:\n"
+        "      party-events-in:\n"
+        "        topic: openbank.party.events\n"
+        "        failure-strategy: dead-letter-queue\n"
+        "        dead-letter-queue:\n"
+        "          topic: openbank.dlq.demo.party-events-in\n"
+        "    outgoing:\n"
+        "      demo-events-out:\n"
+        "        topic: openbank.demo.events\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture_path = pathlib.Path(tmp) / "application.yaml"
+        fixture_path.write_text(fixture, encoding="utf-8")
+        got = required(fixture_path)
+    expected = {
+        ("openbank.party.events", "Read"),
+        ("openbank.demo.events", "Write"),
+        ("openbank.dlq.demo.party-events-in", "Write"),
+    }
+    if got != expected:
+        print(f"selftest FAIL: direction classification is {sorted(got)}, expected {sorted(expected)}")
+        return 1
+    if ("openbank.dlq.demo.party-events-in", "Read") in got:
+        print("selftest FAIL: a dead-letter topic was classified as consumed")
+        return 1
+
+    print(
+        f"selftest OK: {len(cases)} coverage case(s), both directions (flags the near-miss, spares the "
+        f"prefix match), plus {len(expected)} direction case(s) incl. the write-only DLQ.",
+    )
     return 0
 
 

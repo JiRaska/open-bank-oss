@@ -4,63 +4,145 @@
 
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import type { JournalEntry, CursorPage } from '@/types'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge } from '@/components/ui'
+import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
 
-const STATUS_PILL: Record<string, string> = {
-  POSTED:   'pill pill-success',
-  PENDING:  'pill pill-warning',
-  REVERSED: 'pill pill-neutral',
-  DRAFT:    'pill pill-info',
+const PAGE_SIZE = 20
+const BFF_FAILURES = new Set<UnavailableKind>([
+  'not_deployed',
+  'scaled_to_zero',
+  'unauthorized',
+  'unreachable',
+  'not_found',
+  'error',
+])
+
+function unavailableKind(error: unknown): UnavailableKind {
+  return error instanceof Error && BFF_FAILURES.has(error.message as UnavailableKind)
+    ? error.message as UnavailableKind
+    : 'unreachable'
 }
 
 export default function LedgerPage() {
   const [fromDate, setFromDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 10) })
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
-  const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
+  const [result, setResult]     = useState<LedgerJournalPage | null>(null)
+  const [resultWindow, setResultWindow] = useState<{ from: string; to: string } | null>(null)
   const [loading, setLoading]   = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
   // of a raw "HTTP 500" leak (admin-ui graceful-state rule).
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [moreError, setMoreError] = useState<string | null>(null)
+  const activeRequest = useRef<AbortController | null>(null)
+  const queryChanged = resultWindow !== null && (resultWindow.from !== fromDate || resultWindow.to !== toDate)
 
-  async function search() {
-    setLoading(true); setUnavailable(null)
+  useEffect(() => () => {
+    const controller = activeRequest.current
+    activeRequest.current = null
+    controller?.abort()
+  }, [])
+
+  function updateWindow(setter: (value: string) => void, value: string) {
+    const controller = activeRequest.current
+    activeRequest.current = null
+    controller?.abort()
+    setLoading(false)
+    setLoadingMore(false)
+    setter(value)
+  }
+
+  async function loadPage(from: string, to: string, signal: AbortSignal, cursor?: string) {
     try {
-      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate, toDate }), {
-        signal: AbortSignal.timeout(8000),
+      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate: from, toDate: to, limit: String(PAGE_SIZE), ...(cursor ? { cursor } : {}) }), {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
       })
       if (!res.ok) {
-        setResult(null)
-        setUnavailable({ kind: await classifyBffFailure(res) })
-        return
+        throw new Error(await classifyBffFailure(res))
       }
-      setResult(await res.json() as CursorPage<JournalEntry>)
-    } catch {
+      try {
+        return parseLedgerJournalPage(await res.json(), PAGE_SIZE)
+      } catch {
+        throw new Error('error')
+      }
+    } catch (error) {
+      throw new Error(unavailableKind(error))
+    }
+  }
+
+  async function search() {
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setLoadingMore(false)
+    const requestedWindow = { from: fromDate, to: toDate }
+    setLoading(true); setUnavailable(null); setMoreError(null)
+    try {
+      const next = await loadPage(requestedWindow.from, requestedWindow.to, controller.signal)
+      if (controller.signal.aborted) return
+      setResult(next)
+      setResultWindow(requestedWindow)
+      setExpanded(null)
+    } catch (error) {
       // Timeout / abort / network — the BFF or ledger-service didn't answer.
-      setResult(null)
-      setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+      if (!controller.signal.aborted) setUnavailable({ kind: unavailableKind(error) })
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        setLoading(false)
+      }
+    }
+  }
+
+  async function loadMore() {
+    if (queryChanged || !resultWindow) return
+    const cursor = result?.pagination.nextCursor
+    if (!cursor) return
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
+    setLoading(false)
+    setLoadingMore(true); setMoreError(null)
+    try {
+      const next = await loadPage(resultWindow.from, resultWindow.to, controller.signal, cursor)
+      if (controller.signal.aborted) return
+      const existing = new Set(result?.data.map(entry => entry.id) ?? [])
+      if (next.data.some(entry => existing.has(entry.id))) throw new Error('Duplicate ledger page')
+      setResult(previous => previous ? { data: [...previous.data, ...next.data], pagination: next.pagination } : next)
+    } catch {
+      // Keep already-read ledger records visible; a failed next page must not erase evidence.
+      if (!controller.signal.aborted) setMoreError(t('Další stránku se nepodařilo načíst. Zkuste to znovu.', 'The next page could not be loaded. Try again.'))
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        setLoadingMore(false)
+      }
+    }
   }
 
   return (
+    <AuthGuard permission="accounts:view">
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span>
-          </div>
-          <h1 className="page-title">{t('Hlavní kniha', 'General Ledger')}</h1>
-          <p className="page-subtitle">{t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')}</p>
-        </div>
-      </div>
+      <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span></div>} title={t('Hlavní kniha', 'General Ledger')} subtitle={t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')} />
+
+      <Can permission="system:view">
+        <ContextualInsights dashboardUid="openbank-ledger-int" panels={LEDGER_INSIGHTS}
+          titleCs="Integrita účetního toku" titleEn="Ledger flow integrity"
+          descriptionCs="Čekající předání, chybovost a rychlost zaúčtování bez zavádějících účetních závěrů."
+          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions." />
+      </Can>
 
       <div className="card">
         <div style={{
@@ -70,12 +152,12 @@ export default function LedgerPage() {
           borderRadius: '8px 8px 0 0',
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
         }}>
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
-          <button className="btn btn-primary" onClick={search} disabled={loading}>
-            <Search size={13} />
+          <label htmlFor="ledger-from-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
+          <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => updateWindow(setFromDate, e.target.value)} />
+          <label htmlFor="ledger-to-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
+          <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => updateWindow(setToDate, e.target.value)} />
+          <button type="button" className="btn btn-primary" onClick={search} disabled={loading} aria-busy={loading}>
+            <Search size={13} aria-hidden="true" />
             {loading ? t('Načítání…', 'Loading…') : t('Načíst záznamy', 'Load Entries')}
           </button>
           {result && (
@@ -85,8 +167,17 @@ export default function LedgerPage() {
           )}
         </div>
 
+        {queryChanged && resultWindow && (
+          <div role="status" aria-live="polite" style={{ margin: '10px 16px', padding: '10px 12px', borderRadius: 8, background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', color: 'var(--warning-text)', fontSize: 12 }}>
+            {t(
+              `Zobrazený snapshot patří období ${resultWindow.from}–${resultWindow.to}. Pro nové období načtěte záznamy znovu; stránkování je do té doby uzamčeno.`,
+              `The visible snapshot belongs to ${resultWindow.from}–${resultWindow.to}. Load entries for the new period; pagination is locked until then.`,
+            )}
+          </div>
+        )}
+
         {/* Calm, explained unavailable state — never a raw HTTP status. */}
-        {unavailable && (
+        {unavailable && !result && (
           <DataUnavailable
             kind={unavailable.kind}
             service={t('Ledger-service', 'Ledger-service')}
@@ -96,7 +187,27 @@ export default function LedgerPage() {
           />
         )}
 
-        {!unavailable && (
+        {unavailable && result && <div role="status" aria-live="polite">
+          <DataUnavailable
+            kind={unavailable.kind}
+            service={t('Ledger-service', 'Ledger-service')}
+            feature={t('Aktualizace hlavní knihy', 'General Ledger refresh')}
+            lang={language}
+            dense
+          />
+          <p style={{ margin: '6px 16px 10px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t(
+              'Zobrazen je poslední úspěšný výsledek pro vybrané období. Novější účetní zápisy zatím nemusí být zahrnuté.',
+              'Showing the last successful result for the selected period. Newer journal entries may not be included yet.',
+            )}
+          </p>
+        </div>}
+
+        {loading && result && <p role="status" aria-live="polite" style={{ margin: '10px 16px 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji hlavní knihu; poslední výsledek zůstává dostupný.', 'Refreshing the General Ledger; the last result remains available.')}
+        </p>}
+
+        {(!unavailable || result) && (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
             <thead>
@@ -107,37 +218,37 @@ export default function LedgerPage() {
                 <th>{t('Datum záznamu', 'Entry Date')}</th>
                 <th>{t('Datum valuty', 'Value Date')}</th>
                 <th>{t('Stav', 'Status')}</th>
+                <th>{t('Původ', 'Origin')}</th>
                 <th>{t('Řádky', 'Lines')}</th>
                 <th>{t('Popis', 'Description')}</th>
               </tr>
             </thead>
             <tbody>
               {!result && !loading && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
               )}
-              {loading && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
+              {loading && !result && (
+                <tr><td colSpan={9}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
               )}
               {!loading && result && result.data.length === 0 && (
-                <tr><td colSpan={8}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
               )}
-              {!loading && result?.data.map(entry => {
+              {result?.data.map(entry => {
                 const isOpen = expanded === entry.id
                 return (
-                  <>
-                    <tr
-                      key={entry.id}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setExpanded(isOpen ? null : entry.id)}
-                    >
+                  <Fragment key={entry.id}>
+                    <tr>
                       <td style={{ color: 'var(--text-tertiary)', paddingLeft: '14px' }}>
-                        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <button type="button" className="btn btn-ghost" style={{ padding: '3px' }} aria-label={isOpen ? t('Skrýt řádky deníku', 'Hide journal lines') : t('Zobrazit řádky deníku', 'Show journal lines')} aria-expanded={isOpen} aria-controls={`ledger-entry-${entry.id}`} onClick={() => setExpanded(isOpen ? null : entry.id)}>
+                          {isOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+                        </button>
                       </td>
                       <td><span className="mono" style={{ fontSize: '12px', fontWeight: 500 }}>{entry.entryNumber ?? '—'}</span></td>
                       <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.entryDate}</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.valueDate}</span></td>
-                      <td><span className={STATUS_PILL[entry.status] ?? 'pill pill-neutral'}>{entry.status}</span></td>
+                      <td><StatusBadge status={entry.status} /></td>
+                      <td><StatusBadge status={entry.synthetic ? 'SYNTHETIC' : 'BUSINESS'} tone={entry.synthetic ? 'info' : 'neutral'} label={entry.synthetic ? t('Canary', 'Canary') : t('Obchodní', 'Business')} /></td>
                       <td>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -155,9 +266,9 @@ export default function LedgerPage() {
                       </td>
                     </tr>
                     {isOpen && (
-                      <tr key={`${entry.id}-exp`}>
-                        <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
-                          <div style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
+                      <tr>
+                        <td colSpan={9} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                          <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                               {t('Řádky deníku', 'Journal Lines')}
                             </div>
@@ -165,6 +276,7 @@ export default function LedgerPage() {
                               <thead>
                                 <tr style={{ color: 'var(--text-tertiary)' }}>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Účet HK', 'GL Account')}</th>
+                                  <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Podúčet', 'Sub-account')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Strana', 'Side')}</th>
                                   <th style={{ textAlign: 'right', padding: '4px 12px 4px 0', fontWeight: 600 }}>{t('Částka', 'Amount')}</th>
                                   <th style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontWeight: 600 }}>CCY</th>
@@ -179,6 +291,9 @@ export default function LedgerPage() {
                                       <span className="mono" style={{ fontSize: '11px' }}>{line.glAccountId.slice(0, 8)}…</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}>
+                                      <span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{line.subAccountId ? `${line.subAccountId.slice(0, 8)}…` : '—'}</span>
+                                    </td>
+                                    <td style={{ padding: '6px 12px 6px 0' }}>
                                       <span style={{
                                         fontWeight: 700, fontSize: '11px',
                                         color: line.side === 'DEBIT' ? 'var(--danger)' : 'var(--success)',
@@ -187,11 +302,11 @@ export default function LedgerPage() {
                                       </span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}><span className="tag">{line.currencyCode}</span></td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.baseAmount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 0' }}><span className="tag">{line.baseCurrencyCode}</span></td>
                                   </tr>
@@ -202,7 +317,7 @@ export default function LedgerPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -212,10 +327,14 @@ export default function LedgerPage() {
 
         {result?.pagination.hasNextPage && (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <button className="btn btn-secondary" style={{ fontSize: '12px' }}>{t('Načíst další', 'Load more')}</button>
+            {moreError && <p role="alert" style={{ margin: '0 0 8px', fontSize: '12px', color: 'var(--danger-text)' }}>{moreError}</p>}
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore || queryChanged} aria-busy={loadingMore}>
+              {loadingMore ? t('Načítám…', 'Loading…') : t('Načíst další', 'Load more')}
+            </button>
           </div>
         )}
       </div>
     </div>
+    </AuthGuard>
   )
 }

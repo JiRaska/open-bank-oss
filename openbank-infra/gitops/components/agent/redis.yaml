@@ -1,0 +1,96 @@
+# Cross-replica PoP nonce replay guard for agent-service (ADR-0031 D3b, issue #4728).
+# RedisNonceStore backs AgentSvidVerifier's single-use nonce claim so a replayed PoP is
+# rejected on every replica, not just the one that first saw it — same shape as the fleet's
+# other TTL-bounded shared caches (RedisIdempotencyStore/RedisApprovalStore in
+# openbank-libs-runtime). Ephemeral on purpose — persistence is disabled (--save ""
+# --appendonly no); a restart just clears in-flight nonce claims, which only re-opens the
+# same replay window a fresh pod already has, not a new one. Prod should use an
+# operator-managed HA Redis. Named agent-redis (not the bare per-ns `redis`) because
+# `platform` is a shared namespace (copilot-service already owns `copilot-redis` there).
+# Pinned to the valkey uid 999/gid 1000 for PSS restricted; /data is a writable emptyDir so
+# the root fs can stay read-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-redis
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: agent-redis
+    app.kubernetes.io/part-of: agent-service
+spec:
+  replicas: 1
+  # Terminate-first, deliberately (#3545). This is a single-writer cache on an emptyDir
+  # behind one ClusterIP Service: a SURGED second pod would answer half the traffic from an
+  # empty keyspace, so surge is not a property worth keeping here. It also makes the roll
+  # possible at all when the cluster has no room for two pods.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: docker.io/valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-redis
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: agent-redis
+spec:
+  selector:
+    app.kubernetes.io/name: agent-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

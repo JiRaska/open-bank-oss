@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.2...dispute-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **dispute:** a withdrawal's outcome must be JSON null, not the string "null" ([#9595](https://github.com/JiRaska/open-bank-oss/issues/9595)) ([3d10285](https://github.com/JiRaska/open-bank-oss/commit/3d10285d4512af2e6effc1f753c725d358b2ebf7)), closes [#8745](https://github.com/JiRaska/open-bank-oss/issues/8745)
+* **dispute:** guard dispute_outbox created_at plausibility at INSERT ([#9305](https://github.com/JiRaska/open-bank-oss/issues/9305)) ([46ce72e](https://github.com/JiRaska/open-bank-oss/commit/46ce72efa255a3c322d9a9ef3bb5dc6918efdb66))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.1...dispute-service-v0.10.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **dispute:** operator update to a terminal status emits dispute.resolved ([#9057](https://github.com/JiRaska/open-bank-oss/issues/9057)) ([14fcbb4](https://github.com/JiRaska/open-bank-oss/commit/14fcbb4a6aadb3ed466ffb1deb8addb29acd61e9))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.0...dispute-service-v0.10.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.6...dispute-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.5...dispute-service-v0.9.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **dispute:** add sourceService to audit-attribution outbox payloads ([#5344](https://github.com/JiRaska/open-bank-oss/issues/5344)) ([35ce80e](https://github.com/JiRaska/open-bank-oss/commit/35ce80efe7e5d8f4076cf89655887513ac90d704)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.4...dispute-service-v0.9.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.3...dispute-service-v0.9.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.2...dispute-service-v0.9.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **observability:** track gauge refresh liveness ([#5087](https://github.com/JiRaska/open-bank-oss/issues/5087)) ([86904fa](https://github.com/JiRaska/open-bank-oss/commit/86904faa8ae0fdfd7e085b4c4f175691ae07c865))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.1...dispute-service-v0.9.2) (2026-08-09)
 
 

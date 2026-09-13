@@ -4,11 +4,9 @@
 
 package com.openbank.sanctions.application.usecase
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
+import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.domain.model.SanctionsList
-import com.openbank.sanctions.domain.model.SanctionsListChangeSet
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
@@ -17,7 +15,6 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
-import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.ZonedDateTime
 import java.util.UUID
@@ -26,16 +23,8 @@ import java.util.UUID
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
     private val importer: SanctionsImportService,
-    private val outbox: SanctionsOutboxRepository,
     private val clock: Clock,
-    /**
-     * ADR-0256 D1 storm guard: the share of a list that may change in one refresh before the
-     * refresh is treated as an upstream reformat rather than a regime action. Above it the
-     * re-screening trigger is NOT raised — a schema change upstream must not become a fleet-wide
-     * re-screening of the whole customer book. 0.5 by default: a real sanctions action edits a
-     * handful of entries, never half the list.
-     */
-    private val stormThresholdShare: Double = DEFAULT_STORM_THRESHOLD_SHARE,
+    private val publisher: SanctionsChangePublisher,
 ) {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
@@ -44,13 +33,8 @@ class SanctionsListService(
     constructor(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
-        outbox: SanctionsOutboxRepository,
-        @ConfigProperty(
-            name = "openbank.sanctions.list-change.storm-threshold-share",
-            defaultValue = "0.5",
-        )
-        stormThresholdShare: Double,
-    ) : this(repo, importer, outbox, Clock.systemUTC(), stormThresholdShare)
+        publisher: SanctionsChangePublisher,
+    ) : this(repo, importer, Clock.systemUTC(), publisher)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -75,13 +59,15 @@ class SanctionsListService(
         val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
-            val changeSet = importer.importList(enumType, list.sourceUrl)
-            // Baseline = the entry count BEFORE this refresh. It is what the storm guard measures
-            // the diff against, and it must be read before markUpdated() overwrites it.
-            publishChangeEvent(list.id, changeSet, baselineEntryCount = list.lastEntryCount)
-            // If importer found nothing (format stub / network error), fall back to stored count
-            if (changeSet.changeCount > 0) {
-                changeSet.changeCount
+            val result = importer.importList(enumType, list.sourceUrl)
+            // Failed imports may already have committed earlier batches. Publish what actually
+            // committed, including retained evidence from previous attempts, regardless of outcome.
+            publisher.publishPending(list.id, enumType)
+            // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
+            // the usable feed count is known. Other outcomes cannot establish a new population,
+            // so retain the prior reported count; committed partial changes are journaled separately.
+            if (result.outcome == ListImportOutcome.IMPORTED) {
+                result.entriesImported
             } else {
                 list.lastEntryCount ?: 0
             }
@@ -93,90 +79,31 @@ class SanctionsListService(
     }
 
     /**
-     * Publish a `SANCTIONS_LIST_CHANGED` outbox event when a refresh produced a content-level
-     * diff (ADR-0256 D1). A content-identical refresh ([SanctionsListChangeSet.isEmpty]) raises
-     * nothing — otherwise the daily cron would be a daily fleet-wide re-screening. The event
-     * carries the changed/deactivated external_ids so the consumer (kyc-service) can re-screen
-     * only the affected customers, not the whole book.
-     *
-     * Failure to persist the outbox row fails the refresh loudly: a list that *did* change but
-     * emitted no event is precisely the screening gap this exists to close, so it must not pass
-     * silently.
+     * #9048: request a refresh of every enabled list and answer immediately. The endpoint cannot
+     * afford to run the imports synchronously — a full sweep of all feeds can take far longer
+     * than any sane HTTP timeout, so the request used to hang until the proxy gave up while the
+     * imports kept running in the background, and the caller could not tell whether anything had
+     * happened. Instead we set a `refreshRequestedAt` flag on every enabled list; the scheduled
+     * loop treats a flagged list as due and runs the real imports one list at a time, clearing the
+     * flag via markUpdated as each completes. Per-list progress stays queryable through each
+     * list's lastUpdatedAt.
      */
-    private suspend fun publishChangeEvent(listId: UUID, changeSet: SanctionsListChangeSet, baselineEntryCount: Int?) {
-        if (changeSet.isEmpty) return
-
-        // ADR-0256 D1 storm guard. An upstream schema reformat re-writes every row and is
-        // indistinguishable, entry by entry, from "the whole list changed" — so the diff alone
-        // would raise a trigger that re-screens the entire customer book. Above the threshold the
-        // re-screening trigger is NOT raised; a distinct operator-facing event is, carrying counts
-        // only.
-        //
-        // Skipped when there is no baseline (a list's FIRST import legitimately changes 100% of
-        // nothing): with baseline null or 0 the share is undefined, and treating that as a storm
-        // would mean a newly configured list could never raise its first trigger.
-        if (baselineEntryCount != null && baselineEntryCount > 0) {
-            val share = changeSet.changeCount.toDouble() / baselineEntryCount
-            if (share > stormThresholdShare) {
-                // Deliberately a DIFFERENT event type: a consumer must never be able to mistake it
-                // for SANCTIONS_LIST_CHANGED and re-screen on it. Counts only, not the id list —
-                // here the id list is "most of the list" and would be noise, not evidence.
-                outbox.persistStandalone(
-                    OutboxMessage(
-                        aggregateId = listId,
-                        eventType = EVENT_SANCTIONS_LIST_CHANGE_STORM,
-                        payload = mapper.writeValueAsString(
-                            stormPayload(changeSet, baselineEntryCount, share, stormThresholdShare),
-                        ),
-                    ),
-                )
-                // ERROR, not WARN: a withheld trigger means a real list change may go
-                // un-re-screened until someone looks. Silence would trade one invisible failure
-                // for another.
-                Log.errorf(
-                    "%s for %s: %d of %d entries changed (%.1f%% > %.1f%% threshold) — " +
-                        "re-screening trigger WITHHELD, this looks like an upstream reformat. " +
-                        "Verify the feed and re-screen deliberately if the change is real " +
-                        "(ADR-0256 D1).",
-                    EVENT_SANCTIONS_LIST_CHANGE_STORM,
-                    changeSet.listType,
-                    changeSet.changeCount,
-                    baselineEntryCount,
-                    share * PERCENT,
-                    stormThresholdShare * PERCENT,
-                )
-                return
-            }
-        }
-        val payload = mapper.writeValueAsString(
-            mapOf(
-                "listType" to changeSet.listType.name,
-                "changedExternalIds" to changeSet.changedExternalIds.sorted(),
-                "deactivatedExternalIds" to changeSet.deactivatedExternalIds.sorted(),
-                "changeCount" to changeSet.changeCount,
-            ),
-        )
-        outbox.persistStandalone(
-            OutboxMessage(
-                aggregateId = listId,
-                eventType = EVENT_SANCTIONS_LIST_CHANGED,
-                payload = payload,
-            ),
-        )
-        Log.infof(
-            "Published %s for %s (%d changed, %d deactivated)",
-            EVENT_SANCTIONS_LIST_CHANGED,
-            changeSet.listType,
-            changeSet.changedExternalIds.size,
-            changeSet.deactivatedExternalIds.size,
-        )
+    suspend fun requestRefreshAll(): Int {
+        Log.info("Refresh requested for all enabled sanctions lists (deferred to scheduler)")
+        return repo.requestRefreshAll()
     }
 
-    suspend fun refreshAll(): List<SanctionsList> {
-        Log.info("Refreshing all enabled sanctions lists")
-        return repo.listSanctionsLists()
-            .filter { list -> list.enabled }
-            .map { list -> refresh(list.listType) }
+    /**
+     * Legacy v1 variant of the same request: flags the lists exactly like [requestRefreshAll] but
+     * returns the enabled lists (200 + array) so the v1 contract SHAPE survives the deprecation
+     * window (docs/03-api: a breaking change moves to /api/v2 while v1 runs in parallel). The
+     * returned lists are the PRE-refresh state — v1 could no longer keep its old post-refresh
+     * semantics anyway, because those semantics were the defect: they required the imports to
+     * finish inside the request.
+     */
+    suspend fun requestRefreshAllLegacy(): List<SanctionsList> {
+        requestRefreshAll()
+        return repo.listSanctionsLists().filter { it.enabled }
     }
 
     /**
@@ -202,14 +129,23 @@ class SanctionsListService(
     // failure here is logged and the list is simply retried on its next due tick.
     suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
-        val due = repo.listSanctionsLists().filter { it.isDueForScheduledRefresh(now) }
-        for (list in due) {
-            Log.infof("Scheduled refresh for %s", list.listType)
+        val enabled = repo.listSanctionsLists().filter { it.enabled }
+        for (list in enabled) {
             try {
-                refresh(list.listType)
+                if (list.isDueForScheduledRefresh(now)) {
+                    Log.infof("Scheduled refresh for %s", list.listType)
+                    refresh(list.listType)
+                } else {
+                    // Recover committed evidence without waiting for tomorrow's feed.
+                    val type = LIST_TYPES[list.listType] ?: continue
+                    publisher.publishPending(list.id, type)
+                }
             } catch (ex: Exception) {
+                // observed-by: every enabled list is revisited on the next tick. Pending journal
+                // evidence is retained on failure and retried even outside the feed's cron minute.
+                // Aborting the sweep would let one unavailable list starve the other lists.
                 Log.warnf(
-                    "Scheduled refresh failed for %s (%s: %s) — will retry next due tick",
+                    "Scheduled refresh or publication failed for %s (%s: %s) — will retry next tick",
                     list.listType,
                     ex.javaClass.simpleName,
                     ex.message,
@@ -241,6 +177,9 @@ class SanctionsListService(
 
     private fun SanctionsList.isDueForScheduledRefresh(now: ZonedDateTime): Boolean {
         if (!enabled) return false
+        // #9048: an explicit refresh request overrides the cron schedule — the operator asked for
+        // this list now, so the next tick picks it up regardless of hour/day.
+        if (refreshRequestedAt != null) return true
         val currentDay = now.dayOfWeek.name.take(3)
         if (currentDay !in cronDays.split(',').filter { it.isNotBlank() }) return false
         if (now.hour != cronHour || now.minute != cronMinute) return false
@@ -265,35 +204,7 @@ class SanctionsListService(
     }
 
     companion object {
+        private val LIST_TYPES = SanctionsListType.entries.associateBy { it.name }
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
-        const val EVENT_SANCTIONS_LIST_CHANGED = "SANCTIONS_LIST_CHANGED"
-
-        /** Raised INSTEAD of the re-screening trigger when the diff trips the D1 storm guard. */
-        const val EVENT_SANCTIONS_LIST_CHANGE_STORM = "SANCTIONS_LIST_CHANGE_STORM"
-
-        /** Default share of a list that may change in one refresh before it reads as a reformat. */
-        const val DEFAULT_STORM_THRESHOLD_SHARE = 0.5
-
-        private const val PERCENT = 100.0
-        private val mapper = jacksonObjectMapper().findAndRegisterModules()
     }
 }
-
-/**
- * Payload for the ADR-0256 D1 storm event. Top-level and pure, placed AFTER the class: it keeps
- * SanctionsListService under detekt's TooManyFunctions threshold (which fires AT the limit, not
- * above it), and sitting after the class means it cannot take an annotation intended for a
- * following declaration.
- */
-private fun stormPayload(
-    changeSet: SanctionsListChangeSet,
-    baselineEntryCount: Int,
-    share: Double,
-    thresholdShare: Double,
-): Map<String, Any> = mapOf(
-    "listType" to changeSet.listType.name,
-    "changeCount" to changeSet.changeCount,
-    "baselineEntryCount" to baselineEntryCount,
-    "changedShare" to share,
-    "thresholdShare" to thresholdShare,
-)

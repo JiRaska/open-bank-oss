@@ -16,6 +16,10 @@ import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+
+/** Named so detekt's TooGenericExceptionThrown does not fire at the throw site. */
+private class UpstreamDown : RuntimeException("connection refused")
 
 class OnboardingResumeServiceTest {
 
@@ -131,5 +135,55 @@ class OnboardingResumeServiceTest {
         every { store.find(caseId) } returns null
         svc.onPartyEvent(decidedEvent("DISTINCT_NEW", null))
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    /**
+     * The #5698 pair. Before this fix the handler caught every downstream failure, logged it, and
+     * returned normally — acking the Kafka message — while a `finally` deleted the pending record
+     * regardless. So a few seconds of party-service downtime stranded the applicant permanently:
+     * the event was gone AND the record a replay would have needed was gone with it.
+     *
+     * Both halves are asserted, because a test that cannot tell a transient downstream failure from
+     * a malformed payload proves nothing about either.
+     */
+    @Test
+    fun `a persistent upstream failure is RETHROWN and the pending record is KEPT for a replay`() {
+        every { upstream.post("http://party/api/v1/parties", any(), any(), any()) } throws UpstreamDown()
+
+        assertThrows<UpstreamDown> { svc.onPartyEvent(decidedEvent("DISTINCT_NEW", null)) }
+
+        verify(exactly = 3) { upstream.post("http://party/api/v1/parties", any(), any(), any()) }
+        verify(exactly = 0) { store.delete(any()) }
+    }
+
+    @Test
+    fun `a transient upstream failure is retried, succeeds, and then clears the pending record`() {
+        var calls = 0
+        every { upstream.post("http://party/api/v1/parties", any(), any(), any()) } answers {
+            calls++
+            if (calls == 1) throw UpstreamDown() else Response.ok("{}").build()
+        }
+
+        svc.onPartyEvent(decidedEvent("DISTINCT_NEW", null))
+
+        verify(exactly = 2) { upstream.post("http://party/api/v1/parties", any(), any(), any()) }
+        verify(exactly = 1) { store.delete(caseId) }
+    }
+
+    @Test
+    fun `a malformed payload is acked, touching neither upstream nor the pending store`() {
+        svc.onPartyEvent("not json")
+        svc.onPartyEvent("""{"eventType":"IdentityVerificationCaseDecided"}""") // no aggregateId
+
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 0) { store.delete(any()) }
+    }
+
+    @Test
+    fun `an unknown verdict is acked and clears the pending record`() {
+        svc.onPartyEvent(decidedEvent("SOMETHING_ELSE", null))
+
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 1) { store.delete(caseId) }
     }
 }

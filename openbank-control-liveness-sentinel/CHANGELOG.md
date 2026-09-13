@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.2...control-liveness-sentinel-v0.7.3) (2026-08-27)
+
+
+### Performance
+
+* **flaky-test-hunter:** add read-path smoke coverage ([#7374](https://github.com/JiRaska/open-bank-oss/issues/7374)) ([b93d00d](https://github.com/JiRaska/open-bank-oss/commit/b93d00d3ab19f3705b87212ab0ce60cfd1119f6f))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.1...control-liveness-sentinel-v0.7.2) (2026-08-09)
 
 

@@ -40,11 +40,21 @@ enum class NotificationTemplate(val variables: Set<String>) {
     TRANSACTION_FAILED(setOf("amount", "currency", "reason")),
     KYC_APPROVED(emptySet()),
     KYC_REJECTED(setOf("reason")),
-    KYC_DOCUMENT_REQUIRED(setOf("documentType")),
     CONSENT_GRANTED(setOf("scope")),
     CONSENT_REVOKED(setOf("scope")),
+
+    // No producer, and deliberately kept: it is the only member of TemplateSensitivity's
+    // SECRET_TEMPLATES, so deleting it as "unproduced" would silently empty the at-rest redaction
+    // guard (#8568). sca-service refuses TOTP outright (#8567) — there is no transport for a code.
     OTP_CODE(setOf("code")),
-    PASSWORD_RESET(setOf("resetLink")),
+
+    // No PASSWORD_RESET template (#8568): no password flow exists anywhere in the system —
+    // the app authenticates with passkeys/biometrics and Keycloak runs with
+    // resetPasswordAllowed=false and no SMTP, so nothing could ever produce one.
+
+    // No producer (#8568). Kept rather than removed because the onboarding moment it would occupy
+    // already carries KYC_APPROVED and then ACCOUNT_OPENED — a third greeting there is a product
+    // decision about REPLACING one of those, not a gap to fill.
     WELCOME(setOf("name")),
 
     /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */
@@ -56,10 +66,85 @@ enum class NotificationTemplate(val variables: Set<String>) {
      * discipline — a campaign supplies values, never free-form body text.
      */
     MARKETING_PRODUCT_OFFER(setOf("offerTitle", "offerText", "ctaText")),
+
+    // ── ADR-0232 delegated-access lifecycle — sent to the party actionable on each transition.
+    // `resourceType` is the only detail carried on `openbank.delegation.events` that is safe to
+    // put in a template: neither party's display name rides the wire (DelegationEvents.kt has no
+    // name field — delegation-service's own counterparty-names table is a read-model local to that
+    // service), so DelegationNotificationConsumer cannot render one without an extra cross-service
+    // call this fan-out deliberately does not make (see its KDoc).
+
+    /** A grantee has an offer waiting to accept or decline (DelegationOffered). */
+    DELEGATION_OFFERED(setOf("resourceType")),
+
+    /** The grantor's offer was accepted and the grant is now active (DelegationActivated). */
+    DELEGATION_ACCEPTED(setOf("resourceType")),
+
+    /** The grantee declined the grantor's offer (DelegationDeclined). */
+    DELEGATION_DECLINED(setOf("resourceType")),
+
+    /** The grantor revoked an active grant; the grantee's access ends now (DelegationRevoked). */
+    DELEGATION_REVOKED(setOf("resourceType")),
+
+    /** The bank temporarily removed delegated authority (DelegationSuspended). */
+    DELEGATION_SUSPENDED(setOf("resourceType")),
+
+    /** The bank restored previously suspended delegated authority (DelegationReinstated). */
+    DELEGATION_REINSTATED(setOf("resourceType")),
+
+    /** The grantee gave up delegated authority (DelegationRenounced). */
+    DELEGATION_RENOUNCED(setOf("resourceType")),
+
+    /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
+    DELEGATION_EXPIRED(setOf("resourceType")),
+
+    /** The grantor's delegated authority was used for a confirmed payment for the first time. */
+    DELEGATION_FIRST_USE(emptySet()),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
     fun unknownVariables(vars: Map<String, String>): Set<String> = vars.keys - variables
+
+    /**
+     * Owner-approved no-device fallback policy (#4363). This is intentionally part of the closed
+     * template model rather than a free-form configuration map: adding a template forces an
+     * explicit delivery decision in review. `null` means the existing in-app-feed-only behaviour
+     * remains correct.
+     *
+     * A fallback e-mail never contains the rendered notification body. It is a generic prompt to
+     * open the authenticated app, so a missing device cannot turn lock-screen-safe push content
+     * into unbounded e-mail PII (ADR-0135 §3).
+     */
+    val noDeviceFallbackChannel: NotificationChannel?
+        get() = when (this) {
+            ACCOUNT_FROZEN,
+            KYC_REJECTED,
+            TRANSACTION_FAILED,
+            // First delegated spend is a security event of the same severity as ACCOUNT_FROZEN:
+            // someone just exercised delegated authority over the grantor's money, and a missing
+            // device must not silence that (the fallback carries no body, only the prompt).
+            DELEGATION_FIRST_USE,
+            -> NotificationChannel.EMAIL
+            ACCOUNT_OPENED,
+            ACCOUNT_CLOSED,
+            TRANSACTION_COMPLETED,
+            KYC_APPROVED,
+            CONSENT_GRANTED,
+            CONSENT_REVOKED,
+            OTP_CODE,
+            WELCOME,
+            SCA_APPROVAL,
+            MARKETING_PRODUCT_OFFER,
+            DELEGATION_OFFERED,
+            DELEGATION_ACCEPTED,
+            DELEGATION_DECLINED,
+            DELEGATION_REVOKED,
+            DELEGATION_SUSPENDED,
+            DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED,
+            DELEGATION_EXPIRED,
+            -> null
+        }
 
     /**
      * The customer-facing category a template belongs to (#2). SECURITY is deliberately un-mutable:
@@ -68,9 +153,12 @@ enum class NotificationTemplate(val variables: Set<String>) {
      */
     val category: NotificationCategory
         get() = when (this) {
-            OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN, SCA_APPROVAL,
-            KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
+            OTP_CODE, ACCOUNT_FROZEN, SCA_APPROVAL,
+            KYC_APPROVED, KYC_REJECTED,
             CONSENT_GRANTED, CONSENT_REVOKED,
+            DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
+            DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -112,6 +200,11 @@ data class NotificationRequest(
      * meaningless to the producer, which is the only party that can join it back to its own row.
      */
     val correlationId: UUID? = null,
+    /**
+     * Optional durable idempotency key for a producer-owned business fact. Unlike
+     * [correlationId], a duplicate key deliberately produces no second notification row or send.
+     */
+    val deduplicationKey: UUID? = null,
     /** Optional bank-owned app route for a PUSH tap; never a template variable. */
     val deepLink: String? = null,
     /**
@@ -124,6 +217,8 @@ data class NotificationRequest(
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */
 object MobileDeepLink {
+    private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
+
     private val allowed = setOf(
         "openbank://home",
         "openbank://savings",
@@ -132,5 +227,11 @@ object MobileDeepLink {
         "openbank://products",
     )
 
-    fun isAllowed(value: String?): Boolean = value == null || value in allowed
+    fun isAllowed(value: String?): Boolean = value == null || value in allowed || isCanonicalDelegationDetail(value)
+
+    private fun isCanonicalDelegationDetail(value: String): Boolean {
+        if (!value.startsWith(DELEGATION_DETAIL_PREFIX)) return false
+        val id = value.removePrefix(DELEGATION_DETAIL_PREFIX)
+        return runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
+    }
 }

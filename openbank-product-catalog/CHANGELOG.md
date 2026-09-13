@@ -1,5 +1,110 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.4...product-catalog-v0.18.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **product-catalog:** guard catalog_outbox created_at plausibility at INSERT ([#9318](https://github.com/JiRaska/open-bank-oss/issues/9318)) ([fab20b4](https://github.com/JiRaska/open-bank-oss/commit/fab20b4e1809a766a524ca3af4e85376665b3a2e))
+
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.3...product-catalog-v0.18.4) (2026-09-08)
+
+
+### Bug Fixes
+
+* **edge:** catalogue rates cross to the customer as percent, not as the stored fraction ([#9144](https://github.com/JiRaska/open-bank-oss/issues/9144)) ([9ce6286](https://github.com/JiRaska/open-bank-oss/commit/9ce62868fdf9d58eecf67293e3cdf1334bc02861))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.2...product-catalog-v0.18.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **product-catalog:** require product timestamps, read-repair legacy docs ([#8454](https://github.com/JiRaska/open-bank-oss/issues/8454)) ([40c42d5](https://github.com/JiRaska/open-bank-oss/commit/40c42d58564ce4ba509f4500b3084bd510768c17))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.1...product-catalog-v0.18.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **product-catalog:** reject a null array element with a client error instead of 500 ([#8004](https://github.com/JiRaska/open-bank-oss/issues/8004)) ([3370d18](https://github.com/JiRaska/open-bank-oss/commit/3370d18614e17953afa2d7d698e9cb0bc487bb91))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.0...product-catalog-v0.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **product-catalog:** return canonical product IDs ([#6013](https://github.com/JiRaska/open-bank-oss/issues/6013)) ([7b458b7](https://github.com/JiRaska/open-bank-oss/commit/7b458b732dca1739f0f5be7797cf84355ca325b9))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.17.0...product-catalog-v0.18.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.16.0...product-catalog-v0.17.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.15.0...product-catalog-v0.16.0) (2026-08-17)
+
+
+### Features
+
+* **product-catalog:** loan products in the catalog kernel (ADR-0260 Phase A+B) ([#5139](https://github.com/JiRaska/open-bank-oss/issues/5139)) ([af04613](https://github.com/JiRaska/open-bank-oss/commit/af04613a74c7d2cb27baf1b681448ebd3e3c7c33))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.14.0...product-catalog-v0.15.0) (2026-08-17)
+
+
+### Features
+
+* **product-catalog:** expose immutable revision lookup ([#5201](https://github.com/JiRaska/open-bank-oss/issues/5201)) ([78d4efe](https://github.com/JiRaska/open-bank-oss/commit/78d4efe5beec8f42d379bb9efd1ba350a6bee2a9))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.3...product-catalog-v0.14.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** add declarative deposit profiles ([#5152](https://github.com/JiRaska/open-bank-oss/issues/5152)) ([17e5ec5](https://github.com/JiRaska/open-bank-oss/commit/17e5ec52a9fdf80993c16f38ef3b0590a059d6ae))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.2...product-catalog-v0.13.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** round-trip insurance profiles ([#5086](https://github.com/JiRaska/open-bank-oss/issues/5086)) ([2c3726b](https://github.com/JiRaska/open-bank-oss/commit/2c3726bbba0f3121bb7306a91056046069ddbc27))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.1...product-catalog-v0.13.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** three native-image defects blocking main-red [#4797](https://github.com/JiRaska/open-bank-oss/issues/4797) ([#5028](https://github.com/JiRaska/open-bank-oss/issues/5028)) ([f757efa](https://github.com/JiRaska/open-bank-oss/commit/f757efa7f2a8d3975db45afa12d61e9a4921dd1b))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.0...product-catalog-v0.13.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** isolate reconciliation conflicts ([#4987](https://github.com/JiRaska/open-bank-oss/issues/4987)) ([613fc01](https://github.com/JiRaska/open-bank-oss/commit/613fc0147aeb630bcdfb734e83c94861e4e5c271))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.12.1...product-catalog-v0.13.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** govern bundles and private offers ([#4969](https://github.com/JiRaska/open-bank-oss/issues/4969)) ([f2d2f45](https://github.com/JiRaska/open-bank-oss/commit/f2d2f45117b89c2c28861fa9b7ff6d7751c9e64e))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.12.0...product-catalog-v0.12.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **product-catalog:** serialise the bank-v1 mapping check ([#4901](https://github.com/JiRaska/open-bank-oss/issues/4901)) ([ee9d201](https://github.com/JiRaska/open-bank-oss/commit/ee9d2016b43b32c78004b7d29fdffeef25ba675b)), closes [#4896](https://github.com/JiRaska/open-bank-oss/issues/4896)
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.4...product-catalog-v0.12.0) (2026-08-14)
 
 

@@ -4,6 +4,8 @@
 
 package com.openbank.lending.infrastructure.adapter
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
@@ -13,11 +15,13 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.Loan
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.origination.OriginationState
+import io.quarkus.runtime.Startup
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Default
@@ -32,13 +36,31 @@ import java.util.UUID
  * (the platform realization pattern, ADR-0045), without touching the application service.
  */
 
+/**
+ * Offline `@Default` [LedgerPostingPort]: **refuses** the posting rather than reporting a success
+ * it did not achieve (#6057).
+ *
+ * It used to return `Uni<Unit>` — byte-for-byte the same signal [RestLedgerPostingAdapter] returns
+ * after ledger-service accepts the journal — and log the discard at `debug`, below the shipped
+ * level. That is the `PushResult.skipped()` shape: a disabled adapter sharing a success signal with
+ * a working one, with no metric and no error to disagree. Measured consequence: 44 active loans,
+ * 6.6M CZK principal, and zero journal lines on every lending GL account.
+ *
+ * Same reasoning as [NoOpBorrowerAccountLookupPort] two blocks down, which this file already
+ * applied to the customer-facing leg and not to the ledger leg: an offline build genuinely cannot
+ * write to a general ledger, so it must say so rather than pretend to.
+ */
 @ApplicationScoped
 @Default
 class NoOpLedgerPostingPort : LedgerPostingPort {
     private val log = Logger.getLogger(NoOpLedgerPostingPort::class.java)
     override fun post(posting: LedgerPosting): Uni<Unit> {
-        log.debugf("no-op ledger posting: %s ref=%s", posting.kind, posting.reference)
-        return Uni.createFrom().item(Unit)
+        log.warnf(
+            "ledger backend not configured: REFUSING %s posting ref=%s (no journal written)",
+            posting.kind,
+            posting.reference,
+        )
+        return Uni.createFrom().failure(LedgerBackendNotConfiguredException(posting.kind, posting.reference))
     }
 }
 
@@ -59,6 +81,8 @@ class NoOpCollateralValuationPort : CollateralValuationPort {
 @ApplicationScoped
 @Default
 class ConservativeRiskParameterSource : RiskParameterSource {
+    private val log = Logger.getLogger(ConservativeRiskParameterSource::class.java)
+
     /** Deliberately conservative flat PD/LGD until a real risk model is bound (ADR-0028 D4). */
     override fun parametersFor(loan: Loan, exposureAtDefault: Money): Uni<EclInputs> = Uni.createFrom().item(
         EclInputs(
@@ -66,8 +90,36 @@ class ConservativeRiskParameterSource : RiskParameterSource {
             pdLifetime = RiskParameterSource.DEFAULT_PD_LIFETIME,
             lgd = RiskParameterSource.DEFAULT_LGD,
             exposureAtDefault = exposureAtDefault,
+            modelVersion = MODEL_VERSION,
         ),
     )
+
+    /**
+     * Boot-time audit (issue #8364): which risk-parameter model this pod provisions with. `@Startup`
+     * forces eager init — an `@ApplicationScoped` bean is lazy, so without this the line would only
+     * appear on the first provisioning call, which for a monthly cycle can be never.
+     */
+    @Startup
+    fun logBoundModel() {
+        log.infof(
+            "IFRS 9 risk-parameter model bound: %s (PD12M=%s, PDLT=%s, LGD=%s) — conservative placeholder, " +
+                "not production-grade regulatory capital (ADR-0028 D4)",
+            MODEL_VERSION,
+            RiskParameterSource.DEFAULT_PD_12M,
+            RiskParameterSource.DEFAULT_PD_LIFETIME,
+            RiskParameterSource.DEFAULT_LGD,
+        )
+    }
+
+    companion object {
+        /**
+         * The version stamped onto every ECL this source produces (issue #8364). CONVENTION: any PR
+         * that changes the DEFAULT_* constants above bumps this string in the same commit — that is
+         * what makes a parameter change a reviewed event with a visible before/after in every
+         * persisted provisioning record (`loan_provisioning.model_version`), not a silent edit.
+         */
+        const val MODEL_VERSION = "noop-flat-v1"
+    }
 }
 
 @ApplicationScoped
@@ -82,6 +134,53 @@ class LoggingLoanEventEmitter : LoanEventEmitter {
     }
 }
 
+/**
+ * The offline defaults for the disbursement's customer-facing leg (#3931) — gated together under
+ * `lending.borrower-credit.backend`, same as the rest of this file. A no-op lookup that always
+ * returns null makes [com.openbank.lending.application.usecase.LendingService] take the fail-loud
+ * "no account" branch rather than the credit silently claiming success for a payment that never
+ * happened: an offline/local build cannot pay a customer, so it must say so, not pretend to.
+ */
+@ApplicationScoped
+@Default
+class NoOpBorrowerAccountLookupPort : BorrowerAccountLookupPort {
+    override fun findCurrentAccount(partyId: UUID, currency: String): Uni<UUID?> = Uni.createFrom().nullItem()
+}
+
+@ApplicationScoped
+@Default
+class NoOpBorrowerCreditPort : BorrowerCreditPort {
+    private val log = Logger.getLogger(NoOpBorrowerCreditPort::class.java)
+
+    // Refuses rather than returning the real client's success value (#6057). Reachable now that
+    // the account lookup is not the only fail-loud step: a test or future caller supplying an
+    // account id must not get a "paid" answer from an adapter that pays nobody.
+    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        log.warnf("borrower-credit backend not configured: REFUSING credit %s ref=%s", amount, reference)
+        return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("credit", reference))
+    }
+
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        log.warnf("borrower-credit backend not configured: REFUSING debit %s ref=%s", amount, reference)
+        return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("debit", reference))
+    }
+}
+
+/**
+ * Offline `@Default` [OriginationWorkflowPort]: reports [TimerArmingOutcome.NOT_ARMED_NO_WORKFLOW_BACKEND]
+ * rather than the arming success it did not achieve (#6085).
+ *
+ * It used to return `Uni<Unit>` — the exact value [com.openbank.lending.infrastructure.temporal
+ * .TemporalOriginationWorkflowAdapter] returns after the timers workflow is started and signalled —
+ * and log the discard at `debug`, below the shipped level. Measured on the deployed image by
+ * grepping ArC's generated bytecode inside the running pod: `TemporalOriginationWorkflowAdapter`
+ * **0** occurrences, `NoOpOriginationWorkflowPort` **4**, while that pod's environment held
+ * `OPENBANK_TEMPORAL_ENABLED=true`. Consequence: no document-SLA, offer-expiry or
+ * reflection/cooling-off timer had ever been armed, and nothing disagreed.
+ *
+ * Unlike [NoOpLedgerPostingPort] this does not *refuse* — see [TimerArmingOutcome] for why a
+ * notification must not fail the transition it merely accompanies.
+ */
 @ApplicationScoped
 @Default
 class NoOpOriginationWorkflowPort : OriginationWorkflowPort {
@@ -91,8 +190,12 @@ class NoOpOriginationWorkflowPort : OriginationWorkflowPort {
         applicationId: LoanApplicationId,
         state: OriginationState,
         reflectionPeriodDays: Int?,
-    ): Uni<Unit> {
-        log.debugf("no-op origination workflow: %s entered %s", applicationId.value, state)
-        return Uni.createFrom().item(Unit)
+    ): Uni<TimerArmingOutcome> {
+        // Debug is right *here*: an offline build legitimately has no Temporal, and this adapter
+        // cannot know whether that is intended. What must not be quiet is the caller, which now
+        // receives a distinct outcome instead of the real adapter's success value and warns on it —
+        // see LendingService.armTimers. The fix is the SIGNAL, not the log level.
+        log.debugf("no-op origination workflow: %s entered %s, no timer armed", applicationId.value, state)
+        return Uni.createFrom().item(TimerArmingOutcome.NOT_ARMED_NO_WORKFLOW_BACKEND)
     }
 }

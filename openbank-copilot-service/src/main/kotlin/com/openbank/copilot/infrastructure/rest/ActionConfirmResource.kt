@@ -27,6 +27,17 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Exchanges a one-time proposal token for a confirmed action (ADR-0089 D2, Track A).
+ *
+ * **UNREACHABLE IN PRACTICE** (#5900): nothing in `src/main` issues a
+ * [com.openbank.copilot.domain.ProposalToken], so [tokenStore] is never written and every call
+ * lands on the 404 below. The live HITL route is the SSE `[PROPOSAL_END:{...}]` sentinel into the
+ * existing customer-edge payment + SCA flow; no client in this repo calls this endpoint. Note also
+ * that the confirm performs no SCA of its own — it checks bearer identity, token ownership, TTL and
+ * the OPA gate, then returns a fresh `actionId` without invoking any money-path service. Treat the
+ * ownership/TTL/one-time-use logic here as the half that is ready, not as a working control.
+ */
 @Path("/api/v1/copilot/actions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

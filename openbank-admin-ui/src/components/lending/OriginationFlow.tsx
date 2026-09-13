@@ -183,7 +183,7 @@ export function OriginationFlow({ current, history = [], lang = 'cs' }: Props) {
           </div>
           {(fact?.at || fact?.actor) && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {fact?.at && <span>{new Date(fact.at).toLocaleString()}</span>}
+              {fact?.at && <span>{new Date(fact.at).toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB')}</span>}
               {fact?.actor && <span title={fact.actorKind ?? undefined}>{fact.actor}</span>}
               {fact?.actorKind && <span className="pill" style={{ fontSize: 10 }}>{fact.actorKind}</span>}
             </div>

@@ -1,0 +1,38 @@
+# Recovery Cluster for the DR restore drill (docs/bcp/automated-dr-restore.md).
+# Restores ledger-db's barman S3 archive into a throwaway namespace, read-only.
+# Substitute ${NS} before applying. Derived from
+# openbank-infra/gitops/components/ledger/postgres.yaml — same image, same storage
+# class, half the instance count (a restore check does not need HA), no
+# ScheduledBackup (this cluster is deleted at the end of the run, not backed up).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ledger-db-restored
+  namespace: ${NS}
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # Read-only recovery from the LIVE ledger-db archive. `externalClusters` names the
+  # source barman store; `bootstrap.recovery` tells CNPG to initialize FROM it rather
+  # than run initdb. Credentials via EKS Pod Identity on this namespace's CNPG
+  # ServiceAccount, granted read-only against the ledger-db backup prefix — the
+  # restore must not be able to write back to the source bucket path it reads from.
+  bootstrap:
+    recovery:
+      source: ledger-db-source
+  externalClusters:
+    - name: ledger-db-source
+      barmanObjectStore:
+        destinationPath: s3://openbank-sandbox-db-backups/ledger-db
+        s3Credentials:
+          inheritFromIAMRole: true

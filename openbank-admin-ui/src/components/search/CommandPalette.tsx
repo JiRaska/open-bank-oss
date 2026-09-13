@@ -10,6 +10,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useRouter } from 'next/navigation'
 import { CreditCard, Search, User, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -49,8 +50,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [recents, setRecents] = useState<EntityRef[]>([])
   const [active, setActive] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [unavailable, setUnavailable] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   const shown = query.trim().length >= 2 ? results : recents
 
@@ -58,25 +62,37 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     if (open) {
       setQuery('')
       setResults([])
+      setUnavailable(false)
+      setLoading(false)
       setRecents(loadRecents())
       setActive(0)
-      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [open])
 
   useEffect(() => {
     if (!open || query.trim().length < 2) return
-    setLoading(true)
     const ctrl = new AbortController()
     const timer = setTimeout(() => {
       fetch(`/api/entities/resolve?q=${encodeURIComponent(query.trim())}`, { signal: ctrl.signal, cache: 'no-store' })
-        .then(r => (r.ok ? r.json() : { results: [] }))
-        .then(d => setResults(d.results ?? []))
-        .catch(() => {})
-        .finally(() => setLoading(false))
+        .then(r => {
+          if (!r.ok) throw new Error(`Entity resolution failed with ${r.status}`)
+          return r.json()
+        })
+        .then(d => {
+          if (ctrl.signal.aborted) return
+          setResults(d.results ?? [])
+        })
+        .catch(() => {
+          if (ctrl.signal.aborted) return
+          setResults([])
+          setUnavailable(true)
+        })
+        .finally(() => {
+          if (!ctrl.signal.aborted) setLoading(false)
+        })
     }, DEBOUNCE_MS)
     return () => { clearTimeout(timer); ctrl.abort() }
-  }, [open, query])
+  }, [attempt, open, query])
 
   const choose = useCallback((ref: EntityRef) => {
     pushRecent(ref)
@@ -109,18 +125,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const shownRef = useRef(shown)
   const activeRef = useRef(active)
   const chooseRef = useRef(choose)
-  const onCloseRef = useRef(onClose)
   useLayoutEffect(() => {
     shownRef.current = shown
     activeRef.current = active
     chooseRef.current = choose
-    onCloseRef.current = onClose
   })
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current() }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActive(a => Math.max(0, Math.min(a + 1, shownRef.current.length - 1)))
@@ -140,8 +153,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     el?.scrollIntoView?.({ block: 'nearest' })
   }, [active])
 
-  if (!open) return null
-
   const groups: Array<{ title: string; icon: typeof User; items: Array<{ ref: EntityRef; index: number }> }> = []
   const parties = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'party')
   const accounts = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'account')
@@ -149,41 +160,69 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   if (accounts.length) groups.push({ title: t('Účty', 'Accounts'), icon: CreditCard, items: accounts })
 
   return (
-    <div
-      role="dialog" aria-modal="true" aria-label={t('Rychlé hledání', 'Quick search')}
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)',
-        display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '12vh',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
+    <Dialog.Root open={open} onOpenChange={nextOpen => { if (!nextOpen) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)' }} />
+        <Dialog.Content
+        onOpenAutoFocus={event => {
+          event.preventDefault()
+          openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          inputRef.current?.focus()
+        }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const opener = openerRef.current
+          if (opener?.isConnected) opener.focus()
+          openerRef.current = null
+        }}
         style={{
+          position: 'fixed', zIndex: 101, left: '50%', top: '12vh', transform: 'translateX(-50%)',
           width: '560px', maxWidth: '92vw', background: 'var(--surface)',
           border: '1px solid var(--border)', borderRadius: '12px',
           boxShadow: '0 16px 48px rgba(0,0,0,0.35)', overflow: 'hidden',
         }}
       >
+        <Dialog.Title style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+          {t('Rychlé hledání', 'Quick search')}
+        </Dialog.Title>
+        <Dialog.Description style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+          {t('Vyhledejte klienta nebo účet a otevřete jeho detail.', 'Search for a party or account and open its detail.')}
+        </Dialog.Description>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-          <Search size={15} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+          <Search size={15} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
-            onChange={e => { setQuery(e.target.value); setActive(0) }}
+            onChange={e => {
+              const nextQuery = e.target.value
+              setQuery(nextQuery)
+              setResults([])
+              setUnavailable(false)
+              setLoading(nextQuery.trim().length >= 2)
+              setActive(0)
+            }}
             placeholder={t('Jméno, e-mail, telefon, IČO, IBAN…', 'Name, email, phone, reg. no., IBAN…')}
             aria-label={t('Hledat klienty a účty', 'Search parties and accounts')}
+            aria-controls="command-palette-results"
+            aria-activedescendant={shown[active] ? `command-palette-option-${shown[active].type}-${shown[active].id}` : undefined}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
               fontSize: '14px', color: 'var(--text-primary)',
             }}
           />
-          <button onClick={onClose} aria-label={t('Zavřít', 'Close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0 }}>
-            <X size={15} />
+          <button type="button" onClick={onClose} aria-label={t('Zavřít', 'Close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0 }}>
+            <X size={15} aria-hidden="true" />
           </button>
         </div>
 
-        <div ref={listRef} style={{ maxHeight: '46vh', overflowY: 'auto', padding: '6px' }}>
+        <div
+          id="command-palette-results"
+          ref={listRef}
+          role="listbox"
+          aria-label={t('Výsledky hledání', 'Search results')}
+          aria-busy={loading}
+          style={{ maxHeight: '46vh', overflowY: 'auto', padding: '6px' }}
+        >
           {query.trim().length < 2 && recents.length > 0 && (
             <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
               {t('Nedávné', 'Recent')}
@@ -200,6 +239,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 return (
                   <div
                     key={`${ref.type}:${ref.id}`}
+                    id={`command-palette-option-${ref.type}-${ref.id}`}
                     onClick={() => choose(ref)}
                     onMouseEnter={() => setActive(index)}
                     role="option" aria-selected={isActive}
@@ -223,7 +263,33 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               })}
             </div>
           ))}
-          {query.trim().length >= 2 && !loading && shown.length === 0 && (
+          {query.trim().length >= 2 && loading && (
+            <div role="status" aria-live="polite" style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-tertiary)' }}>
+              {t('Hledám klienty a účty…', 'Searching parties and accounts…')}
+            </div>
+          )}
+          {query.trim().length >= 2 && !loading && unavailable && (
+            <div role="alert" style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              <div>{t('Vyhledávání je dočasně nedostupné.', 'Search is temporarily unavailable.')}</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setUnavailable(false)
+                  setLoading(true)
+                  setAttempt(value => value + 1)
+                  requestAnimationFrame(() => inputRef.current?.focus())
+                }}
+                style={{
+                  marginTop: '10px', border: '1px solid var(--border)', borderRadius: '8px',
+                  background: 'var(--surface-raised)', color: 'var(--text-primary)',
+                  padding: '6px 12px', cursor: 'pointer', fontWeight: 600,
+                }}
+              >
+                {t('Zkusit znovu', 'Try again')}
+              </button>
+            </div>
+          )}
+          {query.trim().length >= 2 && !loading && !unavailable && shown.length === 0 && (
             <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-tertiary)' }}>
               {t('Nic nenalezeno', 'No results')}
             </div>
@@ -235,7 +301,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <span>↵ {t('otevřít', 'open')}</span>
           <span>esc {t('zavřít', 'close')}</span>
         </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

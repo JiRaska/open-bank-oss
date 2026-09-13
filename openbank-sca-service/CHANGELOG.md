@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.1...sca-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **sca:** guard sca_outbox created_at plausibility at INSERT ([#9320](https://github.com/JiRaska/open-bank-oss/issues/9320)) ([3681a5b](https://github.com/JiRaska/open-bank-oss/commit/3681a5b69efe87c467eead0cad921bda64e62a07))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.0...sca-service-v0.15.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **sca:** commit the enrolled device and its outbox row in one transaction ([#8683](https://github.com/JiRaska/open-bank-oss/issues/8683)) ([1a9445f](https://github.com/JiRaska/open-bank-oss/commit/1a9445ff1ba21d185e23ddaad759f6d47376f8fe)), closes [#8679](https://github.com/JiRaska/open-bank-oss/issues/8679)
+* **sca:** refuse TOTP instead of minting a challenge nobody can satisfy ([#8567](https://github.com/JiRaska/open-bank-oss/issues/8567)) ([3095ae6](https://github.com/JiRaska/open-bank-oss/commit/3095ae652ec3ee2acf671aad05e6b2c30772aa9c))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.14.1...sca-service-v0.15.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.14.0...sca-service-v0.14.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.5...sca-service-v0.14.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **sca:** add sourceService to DEVICE_ENROLLED for audit attribution ([#5337](https://github.com/JiRaska/open-bank-oss/issues/5337)) ([247639d](https://github.com/JiRaska/open-bank-oss/commit/247639db84d3e238948df1ebc322d11c2ad07881)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.4...sca-service-v0.13.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.3...sca-service-v0.13.4) (2026-08-14)
 
 

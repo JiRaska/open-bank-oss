@@ -26,6 +26,7 @@ export const CARD_STATUSES = [
   'BLOCKED',
   'EXPIRED',
   'CANCELLED',
+  'CONSUMED',
 ] as const
 
 export type CardStatus = (typeof CARD_STATUSES)[number]
@@ -67,6 +68,7 @@ export const CARD_TRANSITIONS: Record<CardStatus, readonly CardTransition[]> = {
   BLOCKED: [CANCEL],
   EXPIRED: [],
   CANCELLED: [],
+  CONSUMED: [],
 }
 
 /** Transitions the aggregate would accept from `status`; empty for an unknown status. */
@@ -77,5 +79,5 @@ export function legalTransitions(status: string | undefined | null): readonly Ca
 
 /** True for a status a card can never leave (Card.TERMINAL_STATUSES). */
 export function isTerminal(status: string | undefined | null): boolean {
-  return status === 'CANCELLED' || status === 'EXPIRED'
+  return status === 'CANCELLED' || status === 'EXPIRED' || status === 'CONSUMED'
 }

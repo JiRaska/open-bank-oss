@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.1...sdd-service-v0.13.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sdd:** guard sdd_outbox created_at plausibility at INSERT ([#9297](https://github.com/JiRaska/open-bank-oss/issues/9297)) ([6766f2f](https://github.com/JiRaska/open-bank-oss/commit/6766f2f414c01154edd1c4ed8585418b2f3dace1))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.0...sdd-service-v0.13.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **sdd:** replay-safe collection authorisation + ADR-0285 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8978](https://github.com/JiRaska/open-bank-oss/issues/8978)) ([b776e59](https://github.com/JiRaska/open-bank-oss/commit/b776e59c52cccc30cbf1ad0506f2fac1beac1d04))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.12.0...sdd-service-v0.13.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.11.0...sdd-service-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.10.4...sdd-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.10.3...sdd-service-v0.10.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.10.2...sdd-service-v0.10.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.10.1...sdd-service-v0.10.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.10.0...sdd-service-v0.10.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.9.0...sdd-service-v0.10.0) (2026-08-07)
 
 

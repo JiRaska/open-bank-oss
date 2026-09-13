@@ -58,6 +58,9 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /devices` | `accounts:read` | list devices (tokens never returned) |
 | `POST /onboarding/start` | *(anonymous)* | create `PENDING_ACTIVATION` party |
 | `POST /onboarding/account` | `accounts:read` | open first account after KYC gate |
+| `GET /products/term-deposits` | `accounts:read` | discover active public term-deposit offers |
+| `GET /products/term-deposits/{productId}` | `accounts:read` | read one offer and its conditions |
+| `POST /term-deposits` | `accounts:read` | open a term-deposit account after KYC |
 
 ## Selected requests
 
@@ -101,6 +104,16 @@ Content-Type: application/json
 ### Open first account after KYC
 
 `POST /onboarding/account` requires `ROLE_CUSTOMER`. The edge reads the party from party-service and forwards to account-service **only if `status == ACTIVE`**, injecting `partyId` from the JWT.
+
+### Term deposits
+
+The app discovers offers through `GET /products/term-deposits`; the edge filters the operator
+catalogue to products that are `ACTIVE`, public and valid today. Each offer carries its rate, fixed
+term, deposit limits, early-withdrawal conditions and terms links. To open one, call
+`POST /term-deposits` with only `{ "productId": "…" }` and an `Idempotency-Key`. The edge derives
+`TERM_DEPOSIT` and the currency from that offer rather than trusting client-supplied values, then
+applies the same ACTIVE-KYC and authoritative-legal-name gate as account opening. Creating the
+account is separate from funding it: the app follows with its normal account-funding flow.
 
 ## Error model
 

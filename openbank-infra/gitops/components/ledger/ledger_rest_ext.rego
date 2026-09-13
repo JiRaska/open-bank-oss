@@ -12,10 +12,9 @@
 # source, not guessed:
 #   ledger.list     — list journal entries (LedgerResource)
 #   ledger.read     — journal/trial-balance/sub-ledger-balance/control-account reads
-#   ledger.create   — POST a balanced journal entry (LedgerResource.postJournal);
-#                      ALSO used by YearCloseResource.createDraft (#fiscalYear resource) —
-#                      same action string, two different resources/use cases, both
-#                      operator-only writes on the book of record.
+#   ledger.create   — POST a balanced journal entry (LedgerResource.postJournal).
+#   ledger.close.draft — create/refresh a period or fiscal-year close DRAFT; human-only
+#                      because its recorded principal becomes maker evidence.
 #   ledger.reverse  — reverse a posted journal entry (#journalId)
 #   ledger.approve  — attest a DRAFT year-close (#fiscalYear) — a statutory close,
 #                      not a routine posting; kept operator-only, no M2M path.
@@ -98,16 +97,25 @@ allowed_reasons contains "service-ledger-read" if {
 	endswith(input.action, sprintf(".%v", [verb]))
 }
 
-# Operators and admins may perform any ledger write: post/reverse a journal, run an
-# FX revaluation, or create/refresh a year-close DRAFT. Attestation (ledger.approve)
-# rides on this too — it is still an operator action, but see the note below on why
-# it has NO M2M path at all (unlike create/reverse).
+# Operators and admins may perform routine ledger writes. Close DRAFT creation has a
+# separate human-only reason below because the recorded principal is maker evidence.
 allowed_reasons contains "operator-ledger-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	not startswith(input.principal.id, "service-account-")
 	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
+}
+
+# Period and fiscal-year close DRAFT creation is a maker action. It must never inherit the
+# service-ledger-post exception for ledger.create: a service-account maker makes the later
+# four-eyes comparison technically distinct but evidentially meaningless.
+allowed_reasons contains "operator-ledger-close-draft" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+    input.action == "ledger.close.draft"
 }
 
 # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
@@ -173,5 +181,5 @@ allowed_reasons contains "service-ledger-reverse" if {
 
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
-	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve"}
+    input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }

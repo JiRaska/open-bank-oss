@@ -43,8 +43,26 @@ money (debits the customer, credits fee income), so it is a money-path service.
    (CREDIT fee-receivable / DEBIT fee-income — the exact reverse), keyed
    `fee-reversal-{cycleId}-{accountId}-{feeId}-{currency}` (distinct from the charge's key). On
    success the fee is marked `REVERSED` with the reversal journal id.
+7. **Annual fee-summary (ADR-0248, PAD Art. 5 push duty):** Trigger: `AnnualFeeSummaryScheduler`
+   (disabled by default, `openbank.billing.annual-fee-summary.scheduler.enabled=false`) → pages
+   account-service's fleet-wide `GET /api/v1/accounts/active` (reuses the existing
+   `BillableAccountDiscoveryPort` trust boundary) → for each account,
+   `AnnualFeeSummaryService.publishForAccount` reads `account-service GET /api/v1/accounts/{id}`
+   a SECOND way (`AccountPartyLookupPort`, new — resolves `partyId`, the same existing endpoint
+   `RestAccountContextPort` already calls for `productId`) and reads `assessed_fee` rows
+   (`postedFeesForAccount`, POSTED-only, in-year) to build an `AnnualFeeSummary`. Appends a
+   `billing_outbox` row (`billing.annual-fee-summary.ready`) idempotent per `(accountId, year)`
+   (`appendAnnualFeeSummaryEvent`), dispatched by the SAME `BillingOutboxDispatcher` →
+   `LedgerOutboxEventPublisher`, which routes this `eventType` to a **new Kafka producer**
+   (`billing-events-out` → topic `openbank.billing.fee.event`) instead of the ledger REST call —
+   billing-service's first Kafka publisher; document-service consumes it to render the PAD Art. 5
+   annual statement of fees. `interestRate` is always `null` (no source for it anywhere in
+   billing-service's domain, a documented gap, not fabricated data).
 
-Trust boundaries: every inbound/outbound hop is service↔service over mTLS with OIDC bearer tokens.
+Trust boundaries: every inbound/outbound hop is service↔service over mTLS with OIDC bearer tokens,
+EXCEPT the new outbound Kafka publish in step 7, which is a message-broker boundary (mTLS to the
+Kafka cluster per `mp.messaging.connector.smallrye-kafka` config, not OIDC) — billing-service's
+first departure from "every trust boundary here is OIDC+mTLS REST".
 
 ## 3. Authn/Authz
 
@@ -167,11 +185,65 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
   (sandbox) yet.** All verification so far is unit/integration-level (Testcontainers Postgres +
   Redis) and the DST harness (pure-JVM, in-memory). Sandbox e2e verification of a charged, a
   waived, and a reversed fee all reconciling to the ledger is a required go-live gate.
+- **Annual fee-summary (ADR-0248, scheduler-disabled, now credentialed but still
+  sandbox-unverified):** the scheduler is disabled by default
+  (`openbank.billing.annual-fee-summary.scheduler.enabled=false`) for the same reason the
+  discovered cycle sweep is double-gated — an accidental fire publishes a real PAD Art. 5 push-duty
+  event per active account, with no cheap way to retract it once document-service's consumer has
+  acted. Residual risks distinct from the charge path above:
+  - This is billing-service's **first outbound Kafka publish** — a new class of trust boundary
+    (message broker, not OIDC+mTLS REST) that nothing else in this service's data flow uses. The
+    boundary was *designed* 2026-08-07 (ADR-0248) but its runtime identity was never provisioned —
+    the Deployment carried no `KAFKA_*` env vars, `KafkaUser`, or cert `Secret` at all, so
+    `application.yaml`'s config had nowhere to connect (readiness probe: reactive-messaging channel
+    `DOWN`, `Connection to node -1 (localhost/127.0.0.1:9092) could not be established`). Closed
+    2026-08-19 (see change log) by provisioning the `billing-service` `KafkaUser` (Write+Describe on
+    `openbank.billing.fee.event` only) and the matching mTLS cert projection. **This gap did not
+    cause the 2 `billing.fee.post-intent.v1` rows dead-lettered in #4701** — that event type is
+    dispatched via `LedgerOutboxEventPublisher.publishCharge`, a REST call to ledger-service that
+    never touches this Kafka channel at all; #4701's actual cause was malformed JSON from
+    unescaped fee names (fixed separately, #5642). The scheduler itself is still off, so this
+    channel carries no live traffic yet.
+    Delivery is at-least-once (standard outbox semantics); document-service's consumer is
+    responsible for its own idempotent handling of `(accountId, year)` — billing only guarantees
+    it appends the outbox row at most once per `(accountId, year)` (deterministic `aggregateId`
+    + a transactional existence check), not that Kafka delivers it exactly once.
+  - `interestRate` is **always `null`** — billing-service has no source for a debit/credit
+    interest rate anywhere in its domain. A downstream consumer that silently treats `null` as
+    `0.00` rather than "unknown" would misrepresent the PAD Art. 5 document; this is a data-gap
+    risk for the consuming side (document-service), not something billing-service can close
+    itself, and is called out explicitly so it is not missed at integration time.
+  - `AnnualFeeSummaryLine.category` currently reuses the fee's display `name` — there is no PAD
+    Annex II taxonomy mapping in this service yet (ADR-0248's own open item). Not a security risk,
+    but a correctness/compliance one worth tracking alongside the interest-rate gap: the rendered
+    document should not go to production before that mapping (and legal review of it) lands.
+  - `AccountPartyLookupPort` reads the SAME account-service endpoint
+    (`GET /api/v1/accounts/{id}`) `RestAccountContextPort` already calls, over the SAME existing
+    OIDC M2M trust boundary — no new inbound/outbound relationship, just a second field
+    (`partyId`) read off an already-trusted response.
 
 ## 6. Change log
 
+- **2026-08-26** — The operator approval inbox gains a bounded, read-only
+  `GET /api/v1/fees/approvals` edge. It returns pending approval workflow metadata
+  (random id, action, resource id, maker id and creation time) only to human `ROLE_OPERATOR` or
+  `ROLE_ADMIN` callers behind the existing OPA boundary. The billing policy explicitly vetoes
+  every `service-account-*` identity for `billing.approval.read`; this includes edge and shared
+  service principals that currently carry `ROLE_OPERATOR` and may be classified as `HUMAN`, so
+  machine traffic cannot enumerate approval metadata.
+  Results are capped at 200 and ordered
+  oldest first; the endpoint cannot decide, post or reverse a fee. Existing maker/checker
+  separation, one-time execution and 24-hour Redis TTL controls remain unchanged. **Risk class:**
+  confidentiality of operator workflow metadata and bounded Redis read load; no new caller,
+  service edge or money mutation. Rollback: remove the GET route and let the admin UI report this
+  source unavailable; billing decisions and fee flows are unaffected.
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
+
 | Date | Change |
 |---|---|
+| 2026-08-19 | Operationalizes the 2026-08-07 entry below: `KafkaUser billing-service` (Write+Describe on `openbank.billing.fee.event` only, no incoming channels) + `ExternalSecret`-projected mTLS keystore/truststore + the matching `KAFKA_*` env vars on the Deployment (#4701 investigation). The trust boundary itself was already documented; nothing about its shape changed, only that it now has a live identity instead of falling through to `localhost:9092`. Does **not** address #4701's dead-lettered `billing.fee.post-intent.v1` rows — that path is REST-to-ledger, not Kafka; see the corrected §5 bullet and #5642. |
+| 2026-08-07 | Trust-boundary change (ADR-0248, Refs #4109): new outbound Kafka publisher — billing-service's first — for the `billing.annual-fee-summary.ready` event (topic `openbank.billing.fee.event`, PAD Art. 5 annual statement of fees, consumed by document-service). New `AnnualFeeSummaryScheduler` (disabled by default), `AnnualFeeSummaryService` use case, and `AccountPartyLookupPort` (a second read of the already-trusted `account-service GET /api/v1/accounts/{id}` response, no new boundary). See §2 step 7 and the new §5 residual-risk bullet: `interestRate` is always `null` (no source in this service's domain) and `AnnualFeeSummaryLine.category` reuses the fee name pending the PAD Annex II taxonomy mapping ADR-0248 itself flags as an open item. |
 | 2026-08-05 | Trust-boundary change (#3734): `operator-billing-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes all three billing writes (`post`, `reverse`, `approval.decide`) to `service-account-openbank-edge` — the role_action_matrix grants all three to ROLE_OPERATOR and matrix-allows bypasses rule-level exclusions. Billing has no in-repo M2M caller at all (verified 2026-08-05: no edge URL, no backend REST client; account-service's billing-discovery read is INBOUND from billing), so no identity-scoped grant needed preserving. Ext moved from generator heredoc to standalone `billing_rest_ext.rego` with an 8-test opa suite. |
 
 - 2026-06-29 — initial model for the phase-2b skeleton (ADR-0143).

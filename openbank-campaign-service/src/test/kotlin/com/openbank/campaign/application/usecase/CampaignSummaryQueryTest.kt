@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -43,6 +44,7 @@ class CampaignSummaryQueryTest {
         id = id,
         name = "c-$id",
         goal = "goal",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("actives", 1),
         steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         state = state,

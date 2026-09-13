@@ -41,6 +41,7 @@ import org.jboss.logging.Logger
 class CopilotChatService(
     private val gateway: ModelGateway,
     private val guard: PromptInjectionGuard,
+    private val contentSafety: ContentSafetyGuard,
     private val tools: CopilotToolRegistry,
     private val actionTools: ActionToolRegistry,
     private val policyGate: CopilotPolicyGate,
@@ -57,6 +58,11 @@ class CopilotChatService(
             // Don't echo the matched rule — it would let an attacker iterate toward a bypass.
             if (guard.blocks()) return ChatOutcome.Replied(ChatReply(turn.conversationId, INJECTION_REFUSAL))
         }
+        // Model-based classifier after the deterministic one: the regex set is cheaper and cannot be
+        // talked out of a match, so it runs first and the network call only happens for what it lets through.
+        if (contentSafety.checkUserInput(customerId, turn.message)) {
+            return ChatOutcome.Replied(ChatReply(turn.conversationId, UNSAFE_REFUSAL))
+        }
 
         val messages = mutableListOf(
             ChatMessage(ChatRole.SYSTEM, systemPrompt() + " " + PromptInjectionGuard.UNTRUSTED_PREAMBLE),
@@ -66,6 +72,11 @@ class CopilotChatService(
         messages += ChatMessage(ChatRole.USER, turn.message)
 
         val outcome = converse(turn.conversationId, messages, customerId)
+        // Output side: an unsafe completion is not predictable from a safe-looking input, and a
+        // blocked draft must never be persisted as conversation memory either.
+        if (outcome is ChatOutcome.Replied && contentSafety.checkAssistantOutput(customerId, outcome.reply.reply)) {
+            return ChatOutcome.Replied(ChatReply(turn.conversationId, UNSAFE_REFUSAL))
+        }
         if (outcome is ChatOutcome.Replied && outcome.reply.reply.isNotBlank()) {
             persistTurn(customerId, turn.conversationId, turn.message, outcome.reply.reply, partyId)
         }
@@ -98,6 +109,10 @@ class CopilotChatService(
                 onChunk(INJECTION_REFUSAL)
                 return
             }
+        }
+        if (contentSafety.checkUserInput(customerId, turn.message)) {
+            onChunk(UNSAFE_REFUSAL)
+            return
         }
 
         val messages = mutableListOf(
@@ -143,7 +158,15 @@ class CopilotChatService(
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
                 emitThemeSentinel(themeSpecs, onChunk)
                 emitProposalSentinel(proposals, onChunk)
-                persistTurn(customerId, turn.conversationId, turn.message, finalText.toString(), partyId)
+                // Output classification on the streaming path is DETECTIVE, not preventive, and the
+                // KDoc must not pretend otherwise: the text has already been streamed to the client
+                // token by token, so an unsafe verdict here cannot unsend it. What it still does is
+                // audit the completion and keep it out of conversation memory — buffering the whole
+                // answer to classify it first would delete the only reason this endpoint streams.
+                val unsafeOutput = contentSafety.checkAssistantOutput(customerId, finalText.toString())
+                if (!unsafeOutput) {
+                    persistTurn(customerId, turn.conversationId, turn.message, finalText.toString(), partyId)
+                }
                 return
             }
 
@@ -382,6 +405,9 @@ class CopilotChatService(
         const val INJECTION_REFUSAL =
             "Tuto zprávu nemůžu zpracovat — odpovídá známému vzoru prompt-injection. " +
                 "Moje oprávnění jsou vynucována na serveru; zkuste prosím přeformulovat dotaz."
+        const val UNSAFE_REFUSAL =
+            "S tímhle vám bohužel nemůžu pomoct. Zkuste prosím jiný dotaz, " +
+                "nebo se obraťte na klientskou linku."
         const val MAX_STEPS_MESSAGE = "Nepodařilo se mi to dokončit v 5 krocích. Zkuste prosím dotaz upřesnit."
     }
 }

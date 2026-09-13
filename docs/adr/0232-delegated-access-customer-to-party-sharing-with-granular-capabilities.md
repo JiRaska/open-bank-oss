@@ -1,7 +1,8 @@
 ---
 date: 2026-07-31
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#9355 — complete D3 rail rollout beyond domestic payment and reconcile reservations to final clearing outcomes"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,24 @@ summary: "Delegation service owns granular, SCA-bound grants over products (acco
 ---
 
 # ADR-0232 — Delegated access: customer-to-party sharing with granular capabilities
+
+**Delivery note (measured 2026-09-09).** `openbank-delegation-service` carries
+`DelegationGrant`/`SpendCeilings`/`SpendReservation`, a threat model, and is listed money-path in
+`rules.yaml`. The first D3 payment-instruction path is now live at customer-edge: a delegated
+domestic-payment initiation asks account-service's amount-aware
+`/delegation/payment-authorization` decision before the delegate's own SCA is consumed or an
+instruction reaches domestic-payment. The decision is based on the local active-grant projection,
+requires `ACCOUNT_INITIATE_PAYMENT`, carries the grantor and delegation id into the audit chain,
+and fails closed for an unavailable decision, absent/expired grant, or a per-transaction ceiling.
+`DelegatedDomesticPaymentTest`, `LegacyDelegationArmRefusedIT` and
+`CustomerEdgeDelegatedPaymentPactConsumerTest` prove that boundary.
+
+This is deliberately a **first rail**, not completion of D3: delegated SEPA, instant, card and
+savings execution still need their own enforcing integrations. Domestic payment reserves the
+delegated grant's atomic, idempotent `SpendReservation` before SCA, releases it if SCA fails, and
+confirms it when the domestic-payment service accepts the instruction. A later clearing failure
+therefore conservatively remains counted until final-outcome reconciliation is added; this avoids
+ever re-opening a ceiling before the money path can prove it did not move.
 
 Relates: ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0094
 (EUDI hub), ADR-0118 (GDPR lifecycle), ADR-0126 (unified consent),
@@ -167,6 +186,12 @@ weekly cap), "Společný cíl" (shared vault, N_OF_M withdrawal), "Senior
 trusted contact" (read-only + fraud alerts, structurally incapable of
 transacting).
 
+The product-service projection must receive `approvalPolicy` and `requiredApprovals` on every
+authority-opening event before any non-SOLO policy can be offered. Missing fields from legacy
+events resolve only to `SOLO`; unknown future policy values may be retained but never interpreted
+as executable authority. This projection is input to, not a substitute for, the immutable
+per-operation approval-requirement snapshot described by ADR-0284 D3.
+
 ## Alternatives considered
 
 - **Extend consent-service with a `CUSTOMER` grantee type** — rejected:
@@ -298,7 +323,10 @@ computing once there is a debit to refuse.
   (ADR-0030 — it is money-path-adjacent: it mints payment rights).
 - Event-fed projection is eventually consistent: a revocation takes
   seconds, not milliseconds, to reach enforcement points — accepted,
-  and mitigated by suspend-now fraud hooks consuming the same topic.
+  and **not** mitigated by suspend-now fraud hooks: no such hook exists.
+  Fraud scoring is shadow-only on every rail and its verdict is discarded at
+  the activity boundary (#4403), so the revocation lag is currently accepted
+  unmitigated rather than covered.
 - `AccountAuthorization` migration needs a dual-run period and a
   backfill; until it completes, two grant sources exist for accounts.
 - External disclosure links are an exfiltration surface: OTP + expiry +

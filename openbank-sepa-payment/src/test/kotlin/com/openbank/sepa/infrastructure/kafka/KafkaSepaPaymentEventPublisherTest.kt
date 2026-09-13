@@ -88,6 +88,10 @@ class KafkaSepaPaymentEventPublisherTest {
         assertThat(json).contains("\"paymentId\":\"${payment.id}\"")
         assertThat(json).contains("\"status\":\"RECEIVED\"")
         assertThat(json).contains("\"endToEndId\":\"E2E-kafka\"")
+        // Issue #3994/#5256: the wire payload actually reaching Kafka carries sourceService — a
+        // domain-level assertion on the event alone cannot prove that, only serializing through
+        // this publisher (the same objectMapper.writeValueAsString call the real outbox uses) can.
+        assertThat(json).contains("\"sourceService\":\"sepa-payment\"")
     }
 
     @Test
@@ -100,6 +104,7 @@ class KafkaSepaPaymentEventPublisherTest {
         assertThat(json).contains("\"previousStatus\":\"RECEIVED\"")
         assertThat(json).contains("\"newStatus\":\"REJECTED\"")
         assertThat(json).contains("\"rejectReason\":\"SANCTIONS_HIT\"")
+        assertThat(json).contains("\"sourceService\":\"sepa-payment\"")
     }
 
     @Test

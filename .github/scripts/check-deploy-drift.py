@@ -7,7 +7,8 @@
 # WHY THIS EXISTS
 #   The sandbox ran lending 0.11.5 while main was at 0.20.2 — what runs is not what is
 #   tested, and the drift was discovered by accident, not by a check. Every gitops
-#   component manifest pins an immutable image tag (`sandbox-<sha>`), so "which build is
+#   component manifest pins an immutable image tag (`sandbox-<sha>` or the manual-refresh
+#   `sandbox-<sha>-run<github-run-id>`), so "which build is
 #   deployed" is a committed fact in this repo, and "what is main" is a git query away.
 #   Nothing compared the two.
 #
@@ -15,7 +16,8 @@
 #   For every ECR `openbank-*` image referenced from
 #   `openbank-infra/gitops/components/**/*.yaml` whose module dir carries a version.txt:
 #
-#     1. the tag must name a commit (`sandbox-<hex>`) — anything else is UNVERIFIABLE,
+#     1. the tag must name a commit (`sandbox-<hex>`, optionally followed by the
+#        provenance-only `-run<github-run-id>` suffix) — anything else is UNVERIFIABLE,
 #        because an unpinned or hand-set tag can never be shown to equal main;
 #     2. the commit must exist and be an ancestor of the checked-out main HEAD —
 #        a build from a throwaway branch is not "deployed == main" either;
@@ -60,7 +62,10 @@ COMPONENTS_GLOB = "openbank-infra/gitops/components/**/*.yaml"
 IMAGE_RE = re.compile(
     r"image:\s*[\"']?\S*\.amazonaws\.com/(openbank-[a-z0-9-]+):([^\s\"'}]+)"
 )
-SANDBOX_TAG_RE = re.compile(r"^sandbox-([0-9a-f]{8,40})$")
+# A manually requested evidence refresh may rebuild the same commit. ECR tags are immutable,
+# so it appends the GitHub workflow run id. The suffix is deliberately narrow: it is provenance,
+# not a second version axis, and parsing must still resolve exactly the commit prefix.
+SANDBOX_TAG_RE = re.compile(r"^sandbox-([0-9a-f]{8,40})(?:-run([1-9][0-9]*))?$")
 
 STATUS_OK = "ok"
 STATUS_DRIFT = "drift"
@@ -120,7 +125,7 @@ def version_at(root: pathlib.Path, ref: str, module: str):
 
 
 def parse_sandbox_tag(tag: str):
-    """Hex sha prefix from a sandbox-<hex> tag, else None."""
+    """Hex sha prefix from an approved immutable sandbox tag, else None."""
     m = SANDBOX_TAG_RE.match(tag)
     return m.group(1) if m else None
 
@@ -161,7 +166,7 @@ def evaluate_service(root: pathlib.Path, service: str, tags, threshold_days: int
         prefix = parse_sandbox_tag(tag)
         if prefix is None:
             entry["reason"] = (
-                f"tag {tag!r} does not name a commit (want sandbox-<sha>) — "
+                f"tag {tag!r} does not name a commit (want sandbox-<sha>[-run<id>]) — "
                 "an unpinned tag can never be shown to equal main"
             )
             entries.append(entry)
@@ -226,7 +231,7 @@ def run_offline(root: pathlib.Path) -> int:
         for tag, manifest in sorted(tags):
             if parse_sandbox_tag(tag) is None:
                 print(f"ERROR: {manifest}: {service} pinned to {tag!r} — "
-                      "deployed images must carry sandbox-<sha> so the drift watch "
+                      "deployed images must carry sandbox-<sha>[-run<id>] so the drift watch "
                       "can compare them to main.", file=sys.stderr)
                 errors += 1
     if skipped:
@@ -235,7 +240,7 @@ def run_offline(root: pathlib.Path) -> int:
         print(f"{errors} malformed image pin(s).", file=sys.stderr)
         return 1
     print(f"declaration drift clean: {len(images) - len(skipped)} deployed module(s), "
-          "every pin is sandbox-<sha>.")
+          "every pin is an approved immutable sandbox tag.")
     return 0
 
 
@@ -295,7 +300,9 @@ def _git_env(date: str):
 
 
 def _git_fixture(root: pathlib.Path, date: str, *args: str):
-    subprocess.run(["git", "-C", str(root), *args], check=True,
+    # A hermetic fixture must not inherit a contributor's global commit.gpgsign=true.
+    # This only creates throwaway test commits; it never changes the repository policy.
+    subprocess.run(["git", "-c", "commit.gpgsign=false", "-C", str(root), *args], check=True,
                    capture_output=True, env=_git_env(date))
 
 
@@ -312,7 +319,10 @@ def self_test() -> int:
     # --- pure functions, both directions ----------------------------------
     expect("parses sandbox-<sha>", parse_sandbox_tag("sandbox-99114189") == "99114189")
     expect("parses full sha", parse_sandbox_tag("sandbox-" + "a" * 40) == "a" * 40)
+    expect("parses manual refresh tag", parse_sandbox_tag("sandbox-99114189-run32826611610") == "99114189")
     expect("rejects sandbox-sec1", parse_sandbox_tag("sandbox-sec1") is None)
+    expect("rejects non-numeric refresh suffix", parse_sandbox_tag("sandbox-99114189-runproof") is None)
+    expect("rejects zero refresh run", parse_sandbox_tag("sandbox-99114189-run0") is None)
     expect("rejects latest", parse_sandbox_tag("latest") is None)
     expect("rejects semver", parse_sandbox_tag("1.2.3") is None)
     expect("same version is in sync",

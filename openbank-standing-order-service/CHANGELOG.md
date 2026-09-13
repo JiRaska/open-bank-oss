@@ -1,5 +1,84 @@
 # Changelog
 
+## [0.16.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.3...standing-order-service-v0.16.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **standing-order:** guard standing_order_outbox created_at plausibility at INSERT ([#9321](https://github.com/JiRaska/open-bank-oss/issues/9321)) ([5d5473a](https://github.com/JiRaska/open-bank-oss/commit/5d5473a3fc26c9699414aa477c4893e50a1b5511))
+
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.2...standing-order-service-v0.16.3) (2026-09-08)
+
+
+### Bug Fixes
+
+* **standing-order:** correct the create POST's OpenAPI schema to the served contract ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8968](https://github.com/JiRaska/open-bank-oss/issues/8968)) ([b997cf0](https://github.com/JiRaska/open-bank-oss/commit/b997cf01c2b54b00850fd2fe8e86ab9d35abf98b))
+* **standing-order:** reject a missing amount at the deserialization boundary ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8971](https://github.com/JiRaska/open-bank-oss/issues/8971)) ([338d1b1](https://github.com/JiRaska/open-bank-oss/commit/338d1b12245981f4ed43225d4bc14206f5431e93))
+
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.1...standing-order-service-v0.16.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.0...standing-order-service-v0.16.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **standing-order:** disable outbox dispatcher scheduler under %test ([#7709](https://github.com/JiRaska/open-bank-oss/issues/7709)) ([5877a81](https://github.com/JiRaska/open-bank-oss/commit/5877a81cde80f3a906e1a9831c3b8aab9cd24746)), closes [#7539](https://github.com/JiRaska/open-bank-oss/issues/7539)
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.15.0...standing-order-service-v0.16.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.10...standing-order-service-v0.15.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.14.10](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.9...standing-order-service-v0.14.10) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.14.9](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.8...standing-order-service-v0.14.9) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.14.8](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.7...standing-order-service-v0.14.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.6...standing-order-service-v0.14.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **standing-order:** route DOMESTIC/INTERNAL orders, don't complete before they run ([#889](https://github.com/JiRaska/open-bank-oss/issues/889)) ([#5250](https://github.com/JiRaska/open-bank-oss/issues/5250)) ([2330eee](https://github.com/JiRaska/open-bank-oss/commit/2330eeea0716ffa2beb5176e786bd9f483d5250f))
+
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.5...standing-order-service-v0.14.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.4...standing-order-service-v0.14.5) (2026-08-02)
 
 

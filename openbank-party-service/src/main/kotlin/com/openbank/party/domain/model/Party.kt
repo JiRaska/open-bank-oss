@@ -10,6 +10,16 @@ import java.util.UUID
 enum class PartyType { INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST }
 
 /**
+ * Origin classification of a party. Synthetic parties are bank-owned canaries, never an
+ * alternative customer type: they must still traverse the same control paths as customers.
+ *
+ * This is deliberately immutable in [Party]. Turning an existing customer into a synthetic
+ * record (or the reverse) would falsify historical regulatory projections and taint lineage.
+ * ADR-0252.
+ */
+enum class PartyClassification { CUSTOMER, SYNTHETIC }
+
+/**
  * [CLOSED] and [MERGED] are both terminal, and deliberately distinct (ADR-0179): CLOSED is written
  * only by GDPR Art. 17 erasure, which anonymizes PII; MERGED retires a duplicate identity and
  * preserves everything, pointing at the survivor via [Party.mergedIntoPartyId].
@@ -20,6 +30,7 @@ enum class DocumentType { NATIONAL_ID, PASSPORT, DRIVING_LICENCE, COMPANY_REGIST
 data class Party(
     val id: UUID,
     val partyType: PartyType,
+    val classification: PartyClassification = PartyClassification.CUSTOMER,
     val status: PartyStatus,
     val legalName: String,
     val tradingName: String?,
@@ -27,6 +38,10 @@ data class Party(
     val nationality: String?,
     val taxId: String?,
     val registrationNumber: String?,
+    /** ADR-0284: register legal-form code (ARES `pravniForma`, ISO 20275 ELF, …) for a COMPANY/SOLE_TRADER; null for a person. */
+    val legalForm: String? = null,
+    /** ADR-0284: ISO 3166-1 alpha-2 of the register that issued [registrationNumber]. */
+    val registrationCountry: String? = null,
     val email: String,
     val phone: String?,
     /** Pay-to-phone findability. Opt-in — see [PhoneDirectory]. */
@@ -83,6 +98,24 @@ data class PartyDocument(
     val issuingCountry: String,
     val expiryDate: String?,
     val verifiedAt: Instant?,
+    val createdAt: Instant,
+)
+
+/**
+ * A saved payee (uložený příjemce) — a transfer recipient the customer chose to remember so a
+ * future payment can start from a tap instead of re-typing the IBAN. Pure convenience data, NOT
+ * an authorisation input: sending money to it still goes through the paying account-service's
+ * full SCA + Verification-of-Payee path exactly as if the IBAN had been typed fresh. Mirrors the
+ * mobile app's own device-local `Payee`/`SavedPayees` shape and rules field-for-field (name/iban/
+ * bic, dedup-by-normalised-IBAN, cap 30, newest-first) — this is the server side of the SAME
+ * feature (TOP-10 #5, server-synced saved payees), not a new one.
+ */
+data class Payee(
+    val id: UUID,
+    val partyId: UUID,
+    val name: String,
+    val iban: String,
+    val bic: String?,
     val createdAt: Instant,
 )
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.5...security-scanner-v0.8.0) (2026-08-20)
+
+
+### Features
+
+* **analytics:** fail closed without durable backfill ([#6050](https://github.com/JiRaska/open-bank-oss/issues/6050)) ([8fca000](https://github.com/JiRaska/open-bank-oss/commit/8fca000162af7d6f6c3ed0bcb4c9fcba5d8742d8))
+
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.4...security-scanner-v0.7.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **security-scanner:** apply Flyway out-of-order to fix V4/V5 boot collision ([#5630](https://github.com/JiRaska/open-bank-oss/issues/5630)) ([57a39a6](https://github.com/JiRaska/open-bank-oss/commit/57a39a64644f4e390a2dea6fa877467e60f9441f))
+
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.3...security-scanner-v0.7.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** add sourceService to ICT incident events ([#5381](https://github.com/JiRaska/open-bank-oss/issues/5381)) ([cc78dbe](https://github.com/JiRaska/open-bank-oss/commit/cc78dbe7d972957068794cacdd8e7fe6c08cd1fb)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.2...security-scanner-v0.7.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.1...security-scanner-v0.7.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** wire outboxDispatched into SecurityOutboxDispatcher ([#5195](https://github.com/JiRaska/open-bank-oss/issues/5195)) ([779cc0f](https://github.com/JiRaska/open-bank-oss/commit/779cc0f2033ebcec35428f1401734e819efeca34))
+
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.0...security-scanner-v0.7.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **security-scanner:** give the DORA ICT incident register a durable row ([#4939](https://github.com/JiRaska/open-bank-oss/issues/4939)) ([0bf9812](https://github.com/JiRaska/open-bank-oss/commit/0bf9812af427eef52ab07bcdd3527e2e8a5ee5b2))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.6.1...security-scanner-v0.7.0) (2026-08-08)
 
 

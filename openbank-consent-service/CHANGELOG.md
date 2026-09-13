@@ -1,5 +1,108 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.24.0...consent-service-v0.24.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **consent:** guard consent_outbox created_at plausibility at INSERT ([#9304](https://github.com/JiRaska/open-bank-oss/issues/9304)) ([e33b426](https://github.com/JiRaska/open-bank-oss/commit/e33b426aad46f0f86cbd15362a1cabb3b55a0bea))
+* **consent:** replay-safe suppression creation + ADR-0288 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9011](https://github.com/JiRaska/open-bank-oss/issues/9011)) ([3ad41c6](https://github.com/JiRaska/open-bank-oss/commit/3ad41c643d14f8760ffd2eabe7f93a8d2ece8469))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.23.0...consent-service-v0.24.0) (2026-09-08)
+
+
+### Features
+
+* **notifications:** tell customers when a third party gains or loses account access ([#8491](https://github.com/JiRaska/open-bank-oss/issues/8491)) ([add3357](https://github.com/JiRaska/open-bank-oss/commit/add33579f036aae4ca9b09534d845d2a8dfa3229))
+
+
+### Bug Fixes
+
+* **consent:** reconcile the consent request/response schemas with the DTOs they describe ([#6017](https://github.com/JiRaska/open-bank-oss/issues/6017)) ([89f7b73](https://github.com/JiRaska/open-bank-oss/commit/89f7b73b6a2d9c447002ff505bd7c8ecf66e567b))
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.22.0...consent-service-v0.23.0) (2026-09-01)
+
+
+### Features
+
+* **consent:** expose pending approvals in unified inbox ([#7037](https://github.com/JiRaska/open-bank-oss/issues/7037)) ([77573dc](https://github.com/JiRaska/open-bank-oss/commit/77573dc07495e784dc325a656c47f067217606ba))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.21.0...consent-service-v0.22.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.20.0...consent-service-v0.21.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.1...consent-service-v0.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.0...consent-service-v0.19.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **consent:** supersede the consent a new grant replaces ([#6505](https://github.com/JiRaska/open-bank-oss/issues/6505)) ([2a499da](https://github.com/JiRaska/open-bank-oss/commit/2a499da386b08eaded7f5c462dbb5be325c4f996)), closes [#6487](https://github.com/JiRaska/open-bank-oss/issues/6487)
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.2...consent-service-v0.19.0) (2026-08-21)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 0 — credit-offer consent and the distress suppression floor ([#6226](https://github.com/JiRaska/open-bank-oss/issues/6226)) ([bf87d31](https://github.com/JiRaska/open-bank-oss/commit/bf87d314745d72eae965a256e6f68f34e8bf01b2))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.1...consent-service-v0.18.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **consent:** map SuppressionEntity to the columns V6 actually created ([#5711](https://github.com/JiRaska/open-bank-oss/issues/5711)) ([87473a5](https://github.com/JiRaska/open-bank-oss/commit/87473a5f2189093d819a1bd8b4808f288d192e33))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.0...consent-service-v0.18.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **consent:** add sourceService to consent domain events for audit attribution ([#5376](https://github.com/JiRaska/open-bank-oss/issues/5376)) ([300a223](https://github.com/JiRaska/open-bank-oss/commit/300a223b69be937a8a55a9991ba55b5f8c8b75bc))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.3...consent-service-v0.18.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.2...consent-service-v0.17.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.1...consent-service-v0.17.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **consent:** record expiration sweep liveness ([#5030](https://github.com/JiRaska/open-bank-oss/issues/5030)) ([a9a141b](https://github.com/JiRaska/open-bank-oss/commit/a9a141bea2d6860dff016f2c09ffad0b4b97ecb9))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.0...consent-service-v0.17.1) (2026-08-09)
 
 

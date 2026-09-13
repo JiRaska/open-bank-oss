@@ -14,3 +14,22 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Durable bootstrap state for delegated domestic-payment reservations. Separate bounded keys for
+# v1/v2 prevent a delayed ambiguous RESERVED publish from compacting away terminal evidence.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: openbank.delegation.spend-reservation-state
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  # Both revision keys must share one ordered log. Scaling partitions requires protocol redesign.
+  partitions: 1
+  replicas: 1
+  config:
+    cleanup.policy: compact
+    retention.ms: -1

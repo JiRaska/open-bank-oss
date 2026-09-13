@@ -28,11 +28,14 @@
 # reports itself instead of consuming the budget of everything after it in the list, which the
 # shared `OVERALL=1` used to hide.
 #
-# Batch lane (openbank-batch): weekly + manual, never a PR gate (ADR-0053).
+# Batch lane (openbank-batch): nightly + manual, never a PR gate (ADR-0053). Nightly since
+# ADR-0279 #2 — a weekly cadence meant a money-path endpoint regression could sit unfuzzed
+# for three days; hosted runners on a public repo make the nightly pass free.
 name: API fuzz
 
 on:
   schedule:
+    - cron: "17 4 * * *"   # nightly 04:17 UTC (ADR-0279 #2)
     - cron: "30 5 * * 2"   # weekly Tue 05:30 UTC — after the Monday dep bumps
     - cron: "30 5 * * 4"   # weekly Thu 05:30 UTC
   workflow_dispatch:
@@ -67,6 +70,13 @@ jobs:
       # a service that becomes money-path is fuzzed the day rules.yaml says so. A service that
       # cannot be fuzzed is EXCLUDED OUT LOUD with its reason — a silently shortened list reads as
       # "covered" when it is not, which is the failure this whole issue is about.
+      # The harness's boot-failure CLASSIFIER, exercised against a known crash and a known
+      # timeout before the matrix runs. #6492 was eighteen days of a timeout reported as a
+      # failure; a diagnostic that has only ever printed one message cannot be trusted to tell
+      # the two apart, so prove it here rather than assume it. ~0.1s.
+      - name: Self-test the fuzz harness diagnostics
+        run: .github/scripts/fuzz-services.sh --self-test
+
       - name: Derive service list
         id: derive
         env:
@@ -105,7 +115,25 @@ jobs:
           print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("services=" + json.dumps(keep) + "\n")
+          # Durable scope record for the aggregate step: the job list alone is NOT
+          # evidence of what was in scope (#2) — keep and skipped-with-reason both.
+          # `override` matters downstream: the security-kpis collector reads the LATEST
+          # run's artifact, and a dispatch-narrowed run is not a coverage measurement
+          # (the authenticated lane says so in its step summary; here it must be
+          # machine-readable, or the KPI reports 2/2 = 100 % about a two-service probe
+          # as if it were the fleet — measured 2026-09-05, run 33954836043).
+          with open("fuzz-scope.json", "w") as fh:
+              json.dump({"keep": keep, "skipped": skipped,
+                         "override": bool(override),
+                         "overrideRequested": override}, fh, indent=2)
           PY
+
+      - name: Upload derived scope
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-scope
+          path: fuzz-scope.json
+          retention-days: 30
 
   fuzz:
     name: "schemathesis (${{ matrix.service }})"
@@ -128,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: |
@@ -162,102 +190,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Fuzz services
-        run: |
-          set -uo pipefail
-          mkdir -p fuzz-reports
-          OVERALL=0
-
-          for svc in $SERVICES; do
-            APP_YAML="${svc}/src/main/resources/application.yaml"
-            SPEC="${svc}/src/main/resources/openapi.yaml"
-            if [ ! -f "$APP_YAML" ] || [ ! -f "$SPEC" ]; then
-              echo "::error::[${svc}] missing application.yaml or openapi.yaml — skip"
-              OVERALL=1; continue
-            fi
-
-            # Derive the HTTP port and database name from the service's own
-            # config — no per-service table to rot.
-            PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
-            DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
-            DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
-            echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
-
-            # Job-local postgres on the localhost:5432 the %dev profile
-            # expects. NB: the batch pool's chart-managed dind has no
-            # registry-mirror (unlike the build pool) — this pull hits Docker
-            # Hub directly; weekly cadence keeps it under the anon rate limit.
-            docker rm -f fuzz-pg >/dev/null 2>&1 || true
-            docker run -d --name fuzz-pg -p 5432:5432 \
-              -e POSTGRES_USER="${DBUSER}" \
-              -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
-              -e POSTGRES_DB="${DB}" \
-              postgres:16.3-alpine >/dev/null
-            PG_UP=0
-            for i in $(seq 1 30); do
-              docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && { PG_UP=1; break; }
-              sleep 2
-            done
-            if [ "$PG_UP" != "1" ]; then
-              echo "::error::[${svc}] postgres never became ready — skip"
-              OVERALL=1
-              docker rm -f fuzz-pg >/dev/null 2>&1 || true
-              continue
-            fi
-
-            # Quarkus dev mode: %dev disables OIDC; Flyway migrates at start.
-            # Kafka producers are lazy — no broker needed for the HTTP surface
-            # (the transactional outbox keeps brokers out of the request path).
-            echo "==> [${svc}] starting quarkusDev"
-            ./gradlew ":${svc}:quarkusDev" \
-              -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
-              -Dquarkus.console.basic=true \
-              --console=plain --quiet \
-              > "fuzz-reports/${svc}-boot.log" 2>&1 &
-            DEV_PID=$!
-
-            # Readiness = the main HTTP socket answers anything (000 = conn
-            # refused). /q/* may live on the management port in prod profiles;
-            # here only socket-open matters before pointing schemathesis at it.
-            UP=0
-            for i in $(seq 1 90); do
-              code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
-              if [ "$code" != "000" ]; then UP=1; break; fi
-              kill -0 "$DEV_PID" 2>/dev/null || break
-              sleep 2
-            done
-            if [ "$UP" != "1" ]; then
-              echo "::error::[${svc}] failed to boot — see ${svc}-boot.log artifact"
-              tail -50 "fuzz-reports/${svc}-boot.log" || true
-              OVERALL=1
-            else
-              echo "==> [${svc}] fuzzing http://localhost:${PORT}"
-              # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on
-              # transitive starlette/pytest — schemathesis 3.x hard-caps pytest<9 and
-              # starlette<1, so the vulnerable pins couldn't be bumped without this jump):
-              #   --base-url        -> --url (same semantics)
-              #   --hypothesis-max-examples -> --max-examples (dropped hypothesis- prefix)
-              #   --hypothesis-deadline     -> removed; no CLI equivalent in 4.x (deadline
-              #                                is no longer user-configurable this way)
-              #   --request-timeout unit changed ms -> seconds (5000ms was the old value)
-              #   --experimental=openapi-3.1 -> removed; OpenAPI 3.1 support is now default
-              #   --junit-xml       -> --report junit --report-junit-path
-              schemathesis run "$SPEC" \
-                --url "http://localhost:${PORT}" \
-                --checks not_a_server_error \
-                --max-examples "${MAX_EXAMPLES}" \
-                --request-timeout 5 \
-                --report junit --report-junit-path "fuzz-reports/${svc}-junit.xml" \
-                | tee "fuzz-reports/${svc}-fuzz.log" || OVERALL=1
-            fi
-
-            # Teardown before the next service re-binds 5432/dev port.
-            kill "$DEV_PID" 2>/dev/null || true
-            pkill -f "quarkusDev" 2>/dev/null || true
-            sleep 3
-            docker rm -f fuzz-pg >/dev/null 2>&1 || true
-          done
-
-          exit "$OVERALL"
+        run: .github/scripts/fuzz-services.sh
 
       - name: Upload fuzz reports
         if: always()
@@ -266,3 +199,51 @@ jobs:
           name: api-fuzz-reports-${{ matrix.service }}
           path: fuzz-reports/
           retention-days: 30
+
+  # ADR-0279 #2: merge the per-service exercised-surface records into ONE fuzz-coverage.json
+  # (uploaded as the `fuzz-coverage` artifact). The security-kpis snapshot publisher reads
+  # the latest run's artifact into the excellence console, so "what did DAST actually test"
+  # is a durable number, not a job list. if: always() — a failed leg is exactly what this
+  # record must capture (as no-evidence), so the aggregate runs on red runs too.
+  aggregate:
+    name: fuzz coverage record
+    needs: [prepare, fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the aggregator
+        run: python3 .github/scripts/fuzz-coverage-aggregate.py --self-test
+
+      - name: Download all fuzz reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: api-fuzz-reports-*
+          path: fuzz-artifacts
+          merge-multiple: true
+
+      - name: Download the derived scope
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: fuzz-scope
+          path: fuzz-scope-dir
+
+      - name: Build fuzz-coverage.json
+        run: |
+          python3 .github/scripts/fuzz-coverage-aggregate.py \
+            --artifacts fuzz-artifacts \
+            --scope fuzz-scope-dir/fuzz-scope.json \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out fuzz-coverage.json
+
+      - name: Upload fuzz-coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-coverage
+          path: fuzz-coverage.json
+          retention-days: 90   # the KPI publisher reads the latest run's artifact; 90d
+                               # covers a long stretch of red fuzz runs without losing it

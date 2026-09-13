@@ -11,6 +11,23 @@ metadata:
 spec:
   monitoring:
     enablePodMonitor: true
+    # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
+    # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
+    # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
+    # by anything here: `max_connections`, by the PostgresConnectionsSaturated alert
+    # (prometheus-rules-db.yaml) and by dashboard-openbank-postgres. Everything else is
+    # static configuration whose authoritative copy is this manifest, so it is dropped at
+    # scrape. RE2 has no negative lookahead, hence mark-then-drop rather than one regex.
+    podMonitorMetricRelabelings:
+      - sourceLabels: [__name__, name]
+        regex: cnpg_pg_settings_setting;max_connections
+        targetLabel: __tmp_cnpg_keep
+        replacement: "1"
+      - sourceLabels: [__name__, __tmp_cnpg_keep]
+        regex: cnpg_pg_settings_setting;
+        action: drop
+      - regex: __tmp_cnpg_keep
+        action: labeldrop
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
@@ -23,7 +40,47 @@ spec:
     limits:
       cpu: "1"
       memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS
+  # Pod Identity on the engagement-db ServiceAccount (aws/.../db-backups.tf) — barman reads the
+  # SDK chain, no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  #
+  # engagement-db was the LAST CNPG cluster in the fleet with no backup of any kind: it never
+  # attempted an archive, so — unlike the campaign-db case, where archiving failed loudly for
+  # ~48h — nothing alerted and nothing could. The first time anyone needed a recovery point
+  # there would not have been one. Enumerated by walking every `kind: Cluster` manifest for a
+  # `barmanObjectStore`, not by reading the fleet-rollout comment in db-backups.tf, which has
+  # now been wrong three times (#1444).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/engagement-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
   bootstrap:
     initdb:
       database: openbank_engagement
       owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: engagement-db-daily
+  namespace: engagement
+spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
+  schedule: "0 51 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: engagement-db

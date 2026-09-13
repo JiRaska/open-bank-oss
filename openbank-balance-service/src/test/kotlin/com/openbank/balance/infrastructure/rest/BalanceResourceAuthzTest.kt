@@ -127,4 +127,29 @@ class BalanceResourceAuthzTest {
             statusCode(404)
         }
     }
+
+    // Regression coverage for the `balance.approval.decide` money-path authz gap found by PR
+    // #5686's OPA verification: the action was missing from rules.yaml's role_action_matrix, so
+    // real OPA evaluation resolved allow=false for every OPERATOR and the four-eyes checker
+    // endpoint 403'd in any AUTHZ_ENFORCE=true environment. This test profile never runs a real
+    // OPA sidecar (authz.enforce defaults to false here, same as every other test above) so it
+    // cannot itself prove the grant — that is what
+    // openbank-infra/gitops/components/balances/balance_rest_ext_test.rego's
+    // test_operator_may_decide_approval / test_edge_may_not_decide_approval_despite_matrix_grant
+    // assert against the real regenerated bundle. What this test DOES prove: the interceptor is
+    // a correct no-op for balance.approval.decide in advisory mode, matching every other
+    // endpoint in this class, so the endpoint's own behavior (unknown approval id -> 404) is
+    // reachable and not masked by the authz layer.
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `advisory mode does not block approval decide - unknown approval id 404s from the handler`() {
+        Given {
+            contentType("application/json")
+            body("""{"approve":true}""")
+        } When {
+            patch("/api/v1/balances/approvals/${UUID.randomUUID()}")
+        } Then {
+            statusCode(404)
+        }
+    }
 }

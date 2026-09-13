@@ -9,6 +9,7 @@ import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
@@ -21,8 +22,11 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.util.UUID
+
+private class TransientDownstreamFailure : RuntimeException("transaction-service down")
 
 class PartyEventConsumerTest {
 
@@ -30,6 +34,7 @@ class PartyEventConsumerTest {
     private val accountRepository: AccountRepository = mockk()
     private val welcomeBonusPort: WelcomeBonusPort = mockk(relaxed = true)
     private val notificationRequestPort: NotificationRequestPort = mockk(relaxed = true)
+    private val partyMandateRepository: PartyMandateProjectionRepository = mockk(relaxed = true)
     private val objectMapper = ObjectMapper()
 
     private fun consumer(bonusEnabled: Boolean) = PartyEventConsumer(
@@ -45,6 +50,7 @@ class PartyEventConsumerTest {
         welcomeBonusAmount = BigDecimal("100000.00"),
         welcomeBonusCurrency = "CZK",
         notificationRequestPort = notificationRequestPort,
+        partyMandateRepository = partyMandateRepository,
     )
 
     private fun pendingAccount(id: UUID, type: AccountType = AccountType.CURRENT): Account = mockk {
@@ -63,6 +69,51 @@ class PartyEventConsumerTest {
     private fun activeEvent(partyId: UUID) =
         """{"eventType":"PARTY_UPDATED","partyId":"$partyId","partyType":"INDIVIDUAL",""" +
             """"status":"ACTIVE","legalName":"Jan Novák","email":"jan@example.cz","occurredAt":"2026-06-11T08:05:00Z"}"""
+
+    private fun mandateEvent(
+        type: String,
+        principal: UUID,
+        mandate: UUID,
+        agent: UUID,
+        authority: String,
+        quorum: Int,
+    ) = """{"eventType":"$type","partyId":"$principal",""" +
+        """"mandateId":"$mandate","agentPartyId":"$agent","authority":"$authority",""" +
+        """"requiredSignatures":$quorum,"status":"ACTIVE"}"""
+
+    @Test
+    fun `mandate grant projects exact authority and quorum`(): Unit = runBlocking {
+        val principal = UUID.randomUUID()
+        val mandate = UUID.randomUUID()
+        val agent = UUID.randomUUID()
+
+        consumer(false).consume(mandateEvent("PARTY_MANDATE_GRANTED", principal, mandate, agent, "JOINT", 2))
+
+        coVerify {
+            partyMandateRepository.upsert(
+                match {
+                    it.id == mandate &&
+                        it.principalPartyId == principal &&
+                        it.agentPartyId == agent &&
+                        it.authority == "JOINT" &&
+                        it.requiredSignatures == 2 &&
+                        it.active
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `mandate revoke disables the projected authority`(): Unit = runBlocking {
+        val principal = UUID.randomUUID()
+        val mandate = UUID.randomUUID()
+
+        consumer(false).consume(
+            """{"eventType":"PARTY_MANDATE_REVOKED","partyId":"$principal","mandateId":"$mandate"}""",
+        )
+
+        coVerify { partyMandateRepository.revoke(mandate) }
+    }
 
     @Test
     fun `PARTY_CREATED for an individual opens PENDING_ACTIVATION current and savings accounts`(): Unit = runBlocking {
@@ -161,18 +212,32 @@ class PartyEventConsumerTest {
         coVerify(exactly = 0) { notificationRequestPort.notifyIncomingCredit(any(), any(), any()) }
     }
 
+    /**
+     * Replaces `a failing welcome bonus does not propagate out of the consumer or notify`, which
+     * asserted that a failed grant is swallowed because "the grant is best-effort". It is not: the
+     * party goes ACTIVE exactly once, so there is no later event to retry on, and the customer
+     * simply never receives the money — with an ERROR line as the only trace (#5698). The bonus now
+     * retries — through consume()'s existing withBoundedRetry, not a second nested one — and then
+     * propagates, so the record dead-letters and the grant can be re-driven.
+     *
+     * The notification that follows the grant IS best-effort and stays swallowed: by then the money
+     * is booked, so the event is complete without it.
+     */
     @Test
-    fun `a failing welcome bonus does not propagate out of the consumer or notify`(): Unit = runBlocking {
+    fun `a failing welcome bonus propagates after retries so the record is dead-lettered`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         val accountId = UUID.randomUUID()
         coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns listOf(pendingAccount(accountId))
         coEvery { welcomeBonusPort.grantWelcomeBonus(any(), any(), any()) } throws
-            RuntimeException("transaction-service down")
+            TransientDownstreamFailure()
 
-        // Must not throw — activation already succeeded; the grant is best-effort.
-        consumer(bonusEnabled = true).consume(activeEvent(partyId))
+        assertThrows<TransientDownstreamFailure> {
+            runBlocking { consumer(bonusEnabled = true).consume(activeEvent(partyId)) }
+        }
 
         coVerify { accountUseCase.activateAccount(accountId) }
+        // MAX_PROJECTION_ATTEMPTS: consume()'s own retry loop is the only one on this path.
+        coVerify(exactly = 4) { welcomeBonusPort.grantWelcomeBonus(any(), any(), any()) }
         // No bonus → no "you received money" notification.
         coVerify(exactly = 0) { notificationRequestPort.notifyIncomingCredit(any(), any(), any()) }
     }

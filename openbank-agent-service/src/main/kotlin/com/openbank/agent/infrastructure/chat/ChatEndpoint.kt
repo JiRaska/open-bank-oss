@@ -39,10 +39,25 @@ class ChatEndpoint {
 
     data class ChatTurn(val role: String = "user", val content: String = "")
     data class ChatRequest(
-        val messages: List<ChatTurn> = emptyList(),
+        /**
+         * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+         * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS
+         * of a collection, so `{"messages": [null]}` deserialises happily into a `List<ChatTurn>`
+         * holding a null. Writing the type honestly is what makes [requireMessages] reachable
+         * instead of dead code.
+         */
+        val messages: List<ChatTurn?> = emptyList(),
         val model: String? = null,
         val context: String? = null,
-    )
+    ) {
+        /**
+         * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+         * no service-local mapper is added (#526).
+         */
+        fun requireMessages(): List<ChatTurn> = messages.mapIndexed { index, turn ->
+            requireNotNull(turn) { "messages[$index] must not be null" }
+        }
+    }
 
     data class ModelInfo(val id: String, val provider: String, val sensitivity: String)
     data class ChatResponse(
@@ -69,7 +84,7 @@ class ChatEndpoint {
     @POST
     @Path("/chat")
     fun chat(request: ChatRequest): ChatResponse = runBlocking {
-        val history = request.messages.map { ChatMessage(role = parseRole(it.role), content = it.content) }
+        val history = request.requireMessages().map { ChatMessage(role = parseRole(it.role), content = it.content) }
         val outcome = chatService.chat(history = history, modelId = request.model, pageContext = request.context)
         ChatResponse(
             reply = outcome.reply,

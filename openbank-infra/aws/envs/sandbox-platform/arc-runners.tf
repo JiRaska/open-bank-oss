@@ -87,7 +87,19 @@ locals {
   # the FIRST runner-image.yml run to complete after PR #963 — its "Verify
   # signature + attestation actually landed" step (no continue-on-error)
   # passed for this exact digest, confirmed live before this bump.
-  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:45c0408d8992a900d7a539463b9210686d988513b39b06beaa35643b4a03e972"
+  #
+  # 2026-09-12: re-pinned to sha256:9f227805… — the first build from the FIXED
+  # runner-image.yml (#9793, run 34693338577), whose log carries the line this workflow
+  # had never produced before: "attested + verified SLSA provenance". The 45c0408d… pin
+  # above was signed and SBOM-attested and still denied at admission, because #8847 made
+  # SLSA provenance an admission input on 2026-09-05 and this image had none.
+  #
+  # Verified against the PUBLIC KEY THE POLICIES PIN, not the KMS alias — the 2026-09-04
+  # build verified fine against the alias and was rejected anyway, so the alias is not the
+  # thing that answers the question:
+  #   signature OK · cyclonedx OK · slsaprovenance OK
+  #
+  runner_image   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/openbank-ci-runner@sha256:9f227805610d42bb0f3ace66248c7aba271c78fe6f0e8c5e26fc5d9ca53a32f9"
   runner_command = ["/home/runner/run.sh"]
 
   # -------------------------------------------------------------------------
@@ -673,27 +685,29 @@ data "aws_iam_policy_document" "arc_deploy_ecr" {
       "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
     ]
   }
-  # A new service's ECR repository is declared nowhere — every one of the ~32 existing repos was
-  # created by hand — so the first build of a new service compiles, runs the whole cold-cache
-  # Gradle build, and dies at the push with `name unknown` (issue #3423, measured on
-  # openbank-delegation-service). Nothing upstream can see it: the drift declaration checks only
-  # the pin's SHAPE, and the attestation gate reports the image as ABSENT, which is the correct
-  # state for a first registration.
+  # CreateRepository REMOVED (#3661, point 2 of #3477): every openbank-* repository this role
+  # could have created is now declared in ecr-service-repositories.tf and, as of that PR's apply,
+  # imported into Terraform state — a build job that can create registry namespaces is exactly
+  # the thing declaring them was meant to remove the need for (#3423's original hole). Verified
+  # before removing, not assumed: `aws ecr describe-repositories` against the live account, diffed
+  # against the file's own for_each derivation (gitops image pins + the CI runner image), showed
+  # zero repositories the declaration does not already cover.
   #
-  # Scoped to openbank-* deliberately. CreateRepository already exists on this role for
-  # repository/docker-hub/* (the pull-through cache); widening it to `*` would let a build create
-  # anything in the registry, and the naming prefix is the whole boundary.
+  # Describe STAYS. It answers a question CreateRepository never did: whether a missing repository
+  # is a real drift (Terraform's declaration and the account have diverged — someone deleted a
+  # repository outside Terraform, or a new service's gitops manifest landed without its
+  # ecr-service-repositories.tf entry in the same PR) versus this role simply lacking permission
+  # to see it. Collapsing that distinction is what made #3444 fail builds for repositories that
+  # already existed (reverted by #3453) — the same failure mode Create's removal must not
+  # reintroduce from the opposite direction. ensure-ecr-repository.sh's fail-open path (#3492)
+  # keeps working unchanged: it can still observe and still fails open, it just never creates.
   #
-  # Describe is here for a reason of its own: without it the caller cannot tell
-  # RepositoryNotFoundException from AccessDenied, and reading the latter as the former is what
-  # made #3444 fail builds for repositories that already existed (reverted by #3453).
-  # ensure-ecr-repository.sh now fails OPEN when it cannot observe the registry, so it is inert
-  # until this statement applies rather than dependent on it.
+  # sid renamed from EcrCreateServiceRepository — the old name asserted a capability this
+  # statement no longer grants.
   statement {
-    sid = "EcrCreateServiceRepository"
+    sid = "EcrDescribeServiceRepository"
     actions = [
       "ecr:DescribeRepositories",
-      "ecr:CreateRepository",
     ]
     resources = [
       "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
@@ -1045,7 +1059,8 @@ resource "aws_iam_role_policy" "arc_build_ecr_pullthrough" {
 
 # Cosign image signing (ADR-0029/0030 supply-chain). The auto-deploy build job signs
 # every pushed image with the AWS KMS key alias/openbank-cosign-signing (cosign v2,
-# tag-based) so kyverno's verify-openbank-image-signatures Enforce policy admits the
+# tag-based) so kyverno's verify-openbank-image-sbom-attestation Enforce policy (which
+# verifies the image signature as well as the SBOM attestation) admits the
 # Deployment. Without this grant the build runner pushes UNSIGNED images and every
 # deploy is blocked ("no signatures found"). Scoped to the single cosign key.
 data "aws_iam_policy_document" "arc_build_cosign" {
@@ -1073,4 +1088,127 @@ resource "kubernetes_service_account" "arc_build_runner" {
       "eks.amazonaws.com/role-arn" = aws_iam_role.arc_build_runner[0].arn
     }
   }
+}
+
+# ---------------------------------------------------------------------------
+# batch scale set — runs-on: openbank-batch (ADR-0277, issue #6458).
+#
+# rules.yaml: ci_runners.pools.batch declared this pool from the start — a
+# low-capped lane so a scan/cron burst cannot starve the merge-required build
+# lane — and the OpenTofu simply never created it: a job targeting
+# openbank-batch queued FOREVER, and "no runner has taken this yet" was
+# indistinguishable from "no runner will ever exist" (#6458). Weekly lanes
+# (api-fuzz, perf-gate) already route here, so this change turns declared
+# capacity into real capacity. Trust level identical to build (no cloud-write
+# creds, no secrets): reuses the openbank-build-runner SA.
+# ---------------------------------------------------------------------------
+resource "helm_release" "arc_batch" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-batch"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_config_map.dind_mirror_certs]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-batch"
+    minRunners         = 0 # weekly lanes only; idle cost must be $0 (ADR-0053)
+    maxRunners         = var.arc_batch_max_runners
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_build_runner[0].metadata[0].name
+        priorityClassName  = "openbank-ci"
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        affinity           = local.runner_affinity
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
+        containers = [
+          {
+            name         = "runner"
+            image        = local.runner_image
+            command      = local.runner_command
+            env          = local.runner_docker_env
+            volumeMounts = local.runner_docker_volume_mounts
+            resources = {
+              requests = { cpu = "2", memory = "4Gi", "ephemeral-storage" = "16Gi" }
+              limits   = { memory = "8Gi" }
+            }
+          },
+          local.dind_container,
+        ]
+        volumes = local.dind_volumes
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# dr scale set — runs-on: openbank-dr (ADR-0277). The resilience lane:
+# dr-restore-verify (#8347, #4757), the money-path chaos drill (#4755) and the
+# attestation evidence jobs (#2365) need a runner that may TALK to the cluster
+# — and until this scale set existed, eleven issues sat blocked on that fact.
+#
+# Trust posture: scheduled-workflow-only by convention enforced in
+# rules.yaml (pr_jobs_allowed_pools excludes it, so PR code can never schedule
+# here). The pod SA is openbank-dr with NO IRSA/cloud role; its cluster
+# permissions come from a Role+RoleBinding scoped to the restore/verify
+# namespaces, living in gitops (components/platform/dr-runner-rbac.yaml) so
+# RBAC drift is ArgoCD-visible, and pinned by the Kyverno policy beside it.
+# minRunners=0: this lane exists to run quarterly; idle spend is $0.
+# ---------------------------------------------------------------------------
+resource "kubernetes_service_account" "arc_dr" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-dr"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    # Deliberately NO eks.amazonaws.com/role-arn: the DR lane has no cloud
+    # permissions. Restore/verify evidence is gathered with kubectl against
+    # in-cluster APIs; the S3 backup reads go through the CNPG/backup tooling's
+    # own identities, not the runner's.
+  }
+}
+
+resource "helm_release" "arc_dr" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-dr"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_service_account.arc_dr]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-dr"
+    minRunners         = 0
+    maxRunners         = var.arc_dr_max_runners
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_dr[0].metadata[0].name
+        priorityClassName  = "openbank-ci"
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        affinity           = local.runner_affinity
+        # No dind, no gradle caches: DR/chaos lanes run kubectl + shell, not builds.
+        containers = [
+          {
+            name  = "runner"
+            image = local.runner_image
+            resources = {
+              requests = { cpu = "1", memory = "1Gi", "ephemeral-storage" = "4Gi" }
+              limits   = { memory = "2Gi" }
+            }
+          },
+        ]
+      }
+    }
+  })]
 }

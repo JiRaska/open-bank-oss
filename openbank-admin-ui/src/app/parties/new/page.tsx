@@ -4,11 +4,15 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, ArrowLeft, Save } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { parseCreatedParty } from '@/lib/party/createdParty'
+import styles from './page.module.css'
 
 const PARTY_SERVICE = '/api/svc/party-service'
 
@@ -17,6 +21,13 @@ export default function NewPartyPage() {
   const { t } = useLanguage()
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  // State updates are asynchronous, so `saving` alone cannot stop two submit events in the
+  // same event turn. Creating a party is externally visible and the current service only
+  // de-duplicates by email, so take a synchronous client-side single-flight lock as well.
+  const createInFlight = useRef(false)
+  // A retry after a lost/failed response must replay the same idempotency key: the server may
+  // already have committed the first request. Editing any field starts a genuinely new command.
+  const idempotencyKeyRef = useRef<string | null>(null)
   const [form, setForm] = useState({
     partyType: 'INDIVIDUAL',
     legalName: '', tradingName: '', email: '', phone: '',
@@ -24,13 +35,19 @@ export default function NewPartyPage() {
     addressLine1: '', addressCity: '', addressPostal: '', addressCountry: 'CZ',
   })
 
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const set = (k: string, v: string) => {
+    idempotencyKeyRef.current = null
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (createInFlight.current) return
+    createInFlight.current = true
     setSaving(true); setError(null)
     try {
-      const idempotencyKey = crypto.randomUUID()
+      const idempotencyKey = idempotencyKeyRef.current ?? crypto.randomUUID()
+      idempotencyKeyRef.current = idempotencyKey
       const body = {
         partyType: form.partyType,
         legalName: form.legalName,
@@ -50,6 +67,7 @@ export default function NewPartyPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
       })
       if (!res.ok) {
         // User-initiated write: show a calm, human inline message rather than
@@ -57,71 +75,74 @@ export default function NewPartyPage() {
         setError(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
         return
       }
-      const party = await res.json()
+      const party = parseCreatedParty(await res.json().catch(() => null))
+      if (!party) {
+        setError(t(
+          'Výsledek vytvoření nelze ověřit. Subjekt již mohl vzniknout; beze změny údajů opakujte pokus bezpečně se stejným klíčem.',
+          'The creation result could not be verified. The party may already exist; retry without changing the details to safely reuse the same key.',
+        ))
+        return
+      }
       router.push(`/parties/${party.id}`)
     } catch {
       setError(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
-    } finally { setSaving(false) }
+    } finally {
+      createInFlight.current = false
+      setSaving(false)
+    }
   }
 
   return (
+    <AuthGuard permission="parties:create">
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Parties</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Nový subjekt', 'New Party')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={18} style={{ color: 'var(--accent)' }} />
-            {t('Registrovat nový subjekt', 'Register New Party')}
-          </h1>
-          <p className="page-subtitle">{t('Vytvořte nového zákazníka nebo společnost v platformě', 'Create a new customer or company in the platform')}</p>
-        </div>
-        <Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ArrowLeft size={13} /> {t('Zpět', 'Back')}
-        </Link>
-      </div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Registrovat nový subjekt', 'Register New Party')}
+        subtitle={t('Vytvořte nového zákazníka nebo společnost v platformě', 'Create a new customer or company in the platform')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Nový subjekt', 'New Party')}</span></div>}
+        actions={<Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>}
+      />
 
-      <form onSubmit={submit}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <form onSubmit={submit} aria-busy={saving} aria-describedby="party-form-guidance">
+        <p id="party-form-guidance" className={styles.guidance}>
+          {t('Pole označená * jsou povinná. Údaje před uložením zkontrolujte — stanou se součástí klientského profilu.', 'Fields marked * are required. Review the details before saving — they become part of the customer profile.')}
+        </p>
+        <div className={styles.formGrid}>
           {/* Identity */}
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Identita', 'Identity')}</div>
             <div className="field">
-              <label className="field-label">{t('Typ subjektu *', 'Party Type *')}</label>
-              <select className="input" value={form.partyType} onChange={e => set('partyType', e.target.value)}>
+              <label className="field-label" htmlFor="party-type">{t('Typ subjektu *', 'Party Type *')}</label>
+              <select id="party-type" className="input" value={form.partyType} onChange={e => set('partyType', e.target.value)}>
                 <option value="INDIVIDUAL">{t('Fyzická osoba', 'Individual')}</option>
                 <option value="COMPANY">{t('Společnost', 'Company')}</option>
                 <option value="SOLE_TRADER">{t('Živnostník', 'Sole Trader')}</option>
               </select>
             </div>
             <div className="field">
-              <label className="field-label">{t('Obchodní jméno *', 'Legal Name *')}</label>
-              <input className="input" required value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} />
+              <label className="field-label" htmlFor="party-legal-name">{t('Obchodní jméno *', 'Legal Name *')}</label>
+              <input id="party-legal-name" className="input" required autoComplete="name" value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} />
             </div>
             <div className="field">
-              <label className="field-label">{t('Obchodní název', 'Trading Name')}</label>
-              <input className="input" value={form.tradingName} onChange={e => set('tradingName', e.target.value)} placeholder={t('Nepovinné', 'Optional')} />
+              <label className="field-label" htmlFor="party-trading-name">{t('Obchodní název', 'Trading Name')}</label>
+              <input id="party-trading-name" className="input" value={form.tradingName} onChange={e => set('tradingName', e.target.value)} placeholder={t('Nepovinné', 'Optional')} />
             </div>
             <div className="field">
-              <label className="field-label">{t('DIČ', 'Tax ID')}</label>
-              <input className="input" value={form.taxId} onChange={e => set('taxId', e.target.value)} placeholder="e.g. CZ12345678" />
+              <label className="field-label" htmlFor="party-tax-id">{t('DIČ', 'Tax ID')}</label>
+              <input id="party-tax-id" className="input" value={form.taxId} onChange={e => set('taxId', e.target.value)} placeholder="e.g. CZ12345678" />
             </div>
             <div className="field">
-              <label className="field-label">{t('Registrační číslo', 'Registration Number')}</label>
-              <input className="input" value={form.registrationNumber} onChange={e => set('registrationNumber', e.target.value)} placeholder={t('IČO firmy', 'Company reg. number')} />
+              <label className="field-label" htmlFor="party-registration-number">{t('Registrační číslo', 'Registration Number')}</label>
+              <input id="party-registration-number" className="input" value={form.registrationNumber} onChange={e => set('registrationNumber', e.target.value)} placeholder={t('IČO firmy', 'Company reg. number')} />
             </div>
             {form.partyType === 'INDIVIDUAL' && <>
               <div className="field">
-                <label className="field-label">{t('Státní příslušnost', 'Nationality')}</label>
-                <input className="input" value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="e.g. CZ" maxLength={2} />
+                <label className="field-label" htmlFor="party-nationality">{t('Státní příslušnost', 'Nationality')}</label>
+                <input id="party-nationality" className="input" value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="e.g. CZ" maxLength={2} />
               </div>
               <div className="field">
-                <label className="field-label">{t('Datum narození', 'Date of Birth')}</label>
-                <input className="input" type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} />
+                <label className="field-label" htmlFor="party-date-of-birth">{t('Datum narození', 'Date of Birth')}</label>
+                <input id="party-date-of-birth" className="input" type="date" autoComplete="bday" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} />
               </div>
             </>}
           </div>
@@ -131,55 +152,56 @@ export default function NewPartyPage() {
             <div className="card" style={{ padding: '20px' }}>
               <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Kontakt', 'Contact')}</div>
               <div className="field">
-                <label className="field-label">{t('E-mail *', 'Email *')}</label>
-                <input className="input" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" />
+                <label className="field-label" htmlFor="party-email">{t('E-mail *', 'Email *')}</label>
+                <input id="party-email" className="input" type="email" required autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" />
               </div>
               <div className="field">
-                <label className="field-label">{t('Telefon', 'Phone')}</label>
-                <input className="input" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+420 123 456 789" />
+                <label className="field-label" htmlFor="party-phone">{t('Telefon', 'Phone')}</label>
+                <input id="party-phone" className="input" autoComplete="tel" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+420 123 456 789" />
               </div>
             </div>
 
             <div className="card" style={{ padding: '20px' }}>
               <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Adresa', 'Address')}</div>
               <div className="field">
-                <label className="field-label">{t('Ulice', 'Street')}</label>
-                <input className="input" value={form.addressLine1} onChange={e => set('addressLine1', e.target.value)} placeholder={t('Ulice a číslo popisné', 'Street and number')} />
+                <label className="field-label" htmlFor="party-address-line1">{t('Ulice', 'Street')}</label>
+                <input id="party-address-line1" className="input" autoComplete="street-address" value={form.addressLine1} onChange={e => set('addressLine1', e.target.value)} placeholder={t('Ulice a číslo popisné', 'Street and number')} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div className={styles.addressGrid}>
                 <div className="field">
-                  <label className="field-label">{t('Město', 'City')}</label>
-                  <input className="input" value={form.addressCity} onChange={e => set('addressCity', e.target.value)} />
+                  <label className="field-label" htmlFor="party-address-city">{t('Město', 'City')}</label>
+                  <input id="party-address-city" className="input" autoComplete="address-level2" value={form.addressCity} onChange={e => set('addressCity', e.target.value)} />
                 </div>
                 <div className="field">
-                  <label className="field-label">{t('PSČ', 'Postal Code')}</label>
-                  <input className="input" value={form.addressPostal} onChange={e => set('addressPostal', e.target.value)} />
+                  <label className="field-label" htmlFor="party-address-postal">{t('PSČ', 'Postal Code')}</label>
+                  <input id="party-address-postal" className="input" autoComplete="postal-code" value={form.addressPostal} onChange={e => set('addressPostal', e.target.value)} />
                 </div>
               </div>
               <div className="field">
-                <label className="field-label">{t('Kód země', 'Country Code')}</label>
-                <input className="input" value={form.addressCountry} onChange={e => set('addressCountry', e.target.value)} maxLength={2} placeholder="CZ" />
+                <label className="field-label" htmlFor="party-address-country">{t('Kód země', 'Country Code')}</label>
+                <input id="party-address-country" className="input" autoComplete="country" value={form.addressCountry} onChange={e => set('addressCountry', e.target.value)} maxLength={2} placeholder="CZ" />
               </div>
             </div>
           </div>
         </div>
 
         {error && (
-          <div className="card" style={{ padding: '12px 16px', color: 'var(--red)', marginTop: '16px', fontSize: '13px' }}>
+          <div className="card" role="alert" style={{ padding: '12px 16px', color: 'var(--red)', marginTop: '16px', fontSize: '13px' }}>
             {error}
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+        <div className={styles.actions}>
           <Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {t('Zrušit', 'Cancel')}
           </Link>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            <Save size={13} />
+          <button type="submit" className="btn btn-primary" disabled={saving} aria-busy={saving}>
+            <Save size={13} aria-hidden="true" />
             {saving ? t('Vytvářím…', 'Creating…') : t('Vytvořit subjekt', 'Create Party')}
           </button>
         </div>
       </form>
     </div>
+    </AuthGuard>
   )
 }

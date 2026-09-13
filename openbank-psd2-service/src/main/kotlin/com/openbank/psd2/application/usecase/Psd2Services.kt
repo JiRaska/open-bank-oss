@@ -92,6 +92,7 @@ class ConsentManagementService(private val consentClient: ConsentServiceClient, 
     ConsentManagementUseCase {
 
     override suspend fun createConsent(command: CreateConsentCommand): ObConsentResponse {
+        requireNoNullAccountRefs(command.request.access)
         val scopes = buildScopes(command.request.access)
         val ibans = collectIbans(command.request.access)
         val validUntil = minOf(command.request.validUntil, LocalDate.now(clock).plusDays(90))
@@ -159,10 +160,28 @@ class ConsentManagementService(private val consentClient: ConsentServiceClient, 
 
     private fun collectIbans(access: ObAccess): List<String>? {
         val ibans = mutableSetOf<String>()
-        access.accounts?.mapNotNull { it.iban }?.let { ibans.addAll(it) }
-        access.balances?.mapNotNull { it.iban }?.let { ibans.addAll(it) }
-        access.transactions?.mapNotNull { it.iban }?.let { ibans.addAll(it) }
+        access.accounts?.mapNotNull { it?.iban }?.let { ibans.addAll(it) }
+        access.balances?.mapNotNull { it?.iban }?.let { ibans.addAll(it) }
+        access.transactions?.mapNotNull { it?.iban }?.let { ibans.addAll(it) }
         return if (ibans.isEmpty()) null else ibans.toList()
+    }
+
+    /**
+     * Reject a `null` JSON array element with a 400 (#7867). Jackson null-checks constructor
+     * parameters but not collection elements, so `[null]` deserialises into a list holding a
+     * null; without this guard the first dereference was an NPE that `GenericExceptionMapper`
+     * rendered as a 500. `IllegalArgumentException` maps to 400 via libs-runtime.
+     */
+    private fun requireNoNullAccountRefs(access: ObAccess) {
+        mapOf(
+            "accounts" to access.accounts,
+            "balances" to access.balances,
+            "transactions" to access.transactions,
+        ).forEach { (field, refs) ->
+            refs?.forEachIndexed { index, ref ->
+                requireNotNull(ref) { "access.$field[$index] must not be null" }
+            }
+        }
     }
 
     private fun mapStatus(s: String): String = when (s) {

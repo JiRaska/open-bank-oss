@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignEngagementQuery
+import com.openbank.campaign.application.usecase.CampaignIncentiveOutcomeProjector
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
 import com.openbank.campaign.application.usecase.CampaignSummaryQuery
 import com.openbank.campaign.domain.model.SendOutcome
@@ -16,6 +17,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
 /**
@@ -28,6 +30,9 @@ class CampaignSendLogResource(
     private val query: CampaignSendLogQuery,
     private val summaries: CampaignSummaryQuery,
     private val engagement: CampaignEngagementQuery,
+    private val incentives: CampaignIncentiveOutcomeProjector,
+    @ConfigProperty(name = "openbank.campaign.incentive-outcome-projection.ready", defaultValue = "false")
+    private val incentiveOutcomeProjectionReady: Boolean,
 ) {
 
     /**
@@ -106,6 +111,19 @@ class CampaignSendLogResource(
     @Path("/{id}/engagement")
     @Authorize(action = "campaign.read", resource = "#id")
     suspend fun engagement(@PathParam("id") id: UUID): Response = Response.ok(engagement.metrics(id)).build()
+
+    /** Reward lifecycle funnel. Only `committed` is an authoritative redemption. */
+    @GET
+    @Path("/{id}/incentives")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun incentives(@PathParam("id") id: UUID): Response {
+        if (!incentiveOutcomeProjectionReady) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .entity(mapOf("error" to "incentive outcome projection is not initialized"))
+                .build()
+        }
+        return Response.ok(incentives.funnel(id)).build()
+    }
 
     private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
         .entity(

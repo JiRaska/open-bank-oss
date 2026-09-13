@@ -1,0 +1,44 @@
+{
+  "consumer": {
+    "name": "openbank-engagement-service"
+  },
+  "interactions": [
+    {
+      "description": "GET whether an in-app marketing consent covers a party",
+      "providerStates": [
+        {
+          "name": "an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/consents/party/e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1/grantee/party-service:marketing-comms/active",
+        "query": {
+          "scope": [
+            "MARKETING_COMMS_INAPP"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "granted": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-consent-service"
+  }
+}

@@ -31,28 +31,23 @@ interface TestScanPort {
 interface LlmDiagnosisPort {
     suspend fun diagnose(finding: FlakyTestFinding, contextMetrics: Map<String, Double>): String
 
-    /** Returns non-null ONLY when it might, in a future iteration, generate a scaffold diff for
-     * `TEST_COUNT_DRIFT` — the one check with a shape that COULD have a narrow mechanical case (e.g.
-     * a stale JUnit5 tag-filter exclusion). Every other check type always returns null BY DESIGN
-     * (ADR-0168 Decision): guessing wrong on `suspend fun` vs. `: Unit` for a runBlocking-Unit
-     * finding, or on which of two colliding `@Provider` test classes should own the interaction, or
-     * on why a Pact provider test is locally gated, could silently mask a real bug instead of fixing
-     * it — a human has to read the test's intent first. In v1 this still returns null for every
-     * check type (the fleet's usual bootstrap-stub state), pending the shared LiteLLM/GitHub App
-     * wiring; the branch point is kept structurally in place, mirroring release-steward's
-     * `APP_VERSION_OVERRIDE` precedent. */
+    /** Returns a marker for the sole implemented mechanical repair: one own-service test function
+     * written as `fun name() = runBlocking { ... }` gains an explicit `: Unit`. The GitHub adapter
+     * independently fetches and validates the path and source shape before any write. Every other
+     * finding remains ticket-only because choosing a coroutine, Pact or test-count repair needs a
+     * human to understand the test's intent (ADR-0168, ADR-0031 D9). */
     suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String?
 }
 
 interface GitHubProposalPort {
     /** Rarely called in v1 — see [LlmDiagnosisPort.proposeFixDiff]. Kept for interface parity with
      * every sibling agent's [GitHubProposalPort] shape. */
-    suspend fun openProposalPr(finding: FlakyTestFinding, fixDiff: String): String
+    suspend fun openProposalPr(finding: FlakyTestFinding, fixDiff: String): String?
 
     /** The default disposition path: a flaky or silently-skipped test needs a human to read the
      * test's intent before anything changes (ADR-0168 Decision) — every finding from checks 1-3,
      * and almost every `TEST_COUNT_DRIFT` finding too, ends up here. */
-    suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String
+    suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String?
 }
 
 interface FindingRepository {

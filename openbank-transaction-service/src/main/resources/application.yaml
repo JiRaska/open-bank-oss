@@ -125,7 +125,16 @@ mp:
         # DLQ ensures processing failures on this money-path consumer are retried out-of-band
         # rather than silently dropped (ignore) or stalling the partition (fail).
         failure-strategy: dead-letter-queue
-        dead-letter-queue.topic: payment.scheme-accepted.dlq
+        # #5745: NESTED, not `dead-letter-queue.topic:`. The dotted spelling this replaces
+        # registered as ..."dead-letter-queue.topic" (quotes included) and the connector never
+        # read it — so on a workstation and in every test this money-path channel silently fell
+        # back to SmallRye's implicit `dead-letter-topic-payment-scheme-accepted`. Only the
+        # deployed pod got the right name, from the transaction-service-msg-override ConfigMap
+        # (which stays, unchanged: same value, and it is what production actually reads). Same
+        # value here, now resolving everywhere. Proven both directions by
+        # openbank-aml-service's DeadLetterQueueConfigResolutionTest.
+        dead-letter-queue:
+          topic: payment.scheme-accepted.dlq
     outgoing:
       transaction-events-out:
         connector: smallrye-kafka
@@ -153,6 +162,16 @@ openbank:
   rate-limit:
     enabled: true
     max-concurrent-requests: 150
+  # Merchant logo ingest (LogoFetcher) is OFF unless a host allowlist is supplied, and there is
+  # deliberately no key here to supply one. An endpoint that fetches an operator-named URL from
+  # inside the cluster is a server-side request forgery primitive; the allowlist is what bounds it,
+  # so enabling it has to be a decision someone makes per environment rather than a default that
+  # arrives with an upgrade. Set OPENBANK_MERCHANT_LOGO_FETCH_ALLOWED_HOSTS (comma-separated) in the
+  # environment's own manifest when that decision is taken.
+  #
+  # Do NOT write `allowed-hosts: ${VAR:}` here: an empty default does not make a property optional
+  # (SRCFG00014), it defines it as empty — which is a different thing and the case
+  # check-configproperty-supplied.py exists to catch.
   # ADR-0120 Phase 5: Temporal is the sole payment orchestrator (saga retired).
   #
   # ADR-0209 D1 (#2572): these keys used to sit under `openbank.transaction.orchestration.temporal`,

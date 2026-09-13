@@ -47,7 +47,16 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: delegation
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: documents
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyb
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyc
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: onboarding
@@ -70,6 +79,8 @@ spec:
           port: 8016
         - protocol: TCP
           port: 8111
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

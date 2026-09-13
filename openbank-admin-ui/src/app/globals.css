@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
@@ -10,7 +8,9 @@
   --sidebar-active-bg:    rgba(99,102,241,0.12);
   --sidebar-active-text:  #c7d2fe;
   --sidebar-text:         #8b9cb6;
-  --sidebar-text-muted:   #475569;
+  /* Muted navigation is still operational text. #94a3b8 reaches 7.54:1 against the
+     sidebar, whereas the previous #475569 was 2.55:1 and unreadable at its shipped size. */
+  --sidebar-text-muted:   #94a3b8;
   --sidebar-border:       rgba(255,255,255,0.04);
   --sidebar-accent:       #6366f1;
 
@@ -32,8 +32,19 @@
   /* ── Text ── */
   --text-primary:         #0f172a;
   --text-secondary:       #475569;
-  --text-tertiary:        #94a3b8;
-  --text-muted:           #94a3b8;
+  /* Used for labels, metadata and empty-state guidance across the operator console.
+     #64748b was chosen against white (4.76:1) and surface-2 (4.55:1) — the two LIGHTEST
+     backgrounds in the palette, and the only two it was ever measured on. It fails AA on
+     five others (#9749):
+         surface-4  3.86:1    surface-3  4.34:1    accent-bg 4.26:1
+         danger-bg  4.35:1    info-bg    4.37:1
+     #586779 is the lightest value that clears 4.5:1 on EVERY light-theme background,
+     worst case surface-4 at 4.69:1, and it stays lighter than --text-secondary so the
+     three-step hierarchy is unchanged. Dark theme has its own value below and is
+     unaffected. Any future change here must be measured against the DARKEST surface,
+     not the brightest. */
+  --text-tertiary:        #586779;
+  --text-muted:           var(--text-tertiary);
 
   /* ── Shorthand semantic aliases ── */
   --green:  #10b981;
@@ -42,9 +53,41 @@
   --blue:   #3b82f6;
 
   /* ── Typography ── */
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* Platform stack: no build-time network fetch or runtime third-party font origin. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --text-inverse:         #ffffff;
+
+  /* ── Foundation scales ──
+   * These are the source of truth for new primitives. Existing literal spacing
+   * is migrated tranche-by-tranche; do not introduce a competing scale. */
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: .75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --text-xs: .75rem;
+  --text-sm: .875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 400ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-modal: 50;
+  --z-toast: 60;
 
   /* ── Brand / Accent ── */
   --ob-accent:            #6366f1;
@@ -63,16 +106,20 @@
   --accent-bg:            #eef2ff;
   --accent-border:        #c7d2fe;
   --accent-text:          #4338ca;
+  /* A selected toggle fills with the accent and puts WHITE text on it, which is 4.47:1 on
+     --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
+     deliberately not --accent-hover, whose name promises an interaction state (#9749). */
+  --accent-strong:        #4f46e5;
 
   /* ── Semantic ── */
   --success:              #10b981;
   --success-bg:           #ecfdf5;
   --success-border:       #6ee7b7;
-  --success-text:         #047857;
+  --success-text:         #037454;
   --warning:              #f59e0b;
   --warning-bg:           #fffbeb;
   --warning-border:       #fcd34d;
-  --warning-text:         #b45309;
+  --warning-text:         #a64c08;
   --danger:               #ef4444;
   --danger-bg:            #fef2f2;
   --danger-border:        #fca5a5;
@@ -81,6 +128,28 @@
   --info-bg:              #eff6ff;
   --info-border:          #93c5fd;
   --info-text:            #1d4ed8;
+
+  /* Service topology palette. Domain meaning lives here so the SVG remains
+   * readable in both themes without embedding presentation colours in data. */
+  --map-core: #2563eb;
+  --map-payment: #7c3aed;
+  --map-compliance: #dc2626;
+  --map-identity: #059669;
+  --map-psd2: #d97706;
+  --map-platform: #64748b;
+  --map-cards: #db2777;
+  --map-infrastructure: #64748b;
+  --map-external: #0284c7;
+  --map-edge-sync: #94a3b8;
+  --map-edge-sync-active: #475569;
+  --map-edge-async: #c4b5fd;
+  --map-edge-async-active: #8b5cf6;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
 
   /* ── Shadows ── */
   --shadow-xs:  0 1px 2px rgba(15,23,42,.03);
@@ -125,6 +194,81 @@
   --border: #e2e8f0;
 }
 
+/* Dark theme is token-only by design. Pages that still carry literal colours
+ * remain in the migration ratchet and must not opt into a one-off dark palette.
+ * Toggling `.dark` on the document root therefore changes every shared
+ * primitive and every token-based surface coherently. */
+.dark {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --surface: #111827;
+  --surface-1: #111827;
+  --surface-2: #172033;
+  --surface-3: #243047;
+  --surface-4: #334155;
+  --border: #334155;
+  --border-strong: #475569;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-muted: var(--text-tertiary);
+  --text-inverse: #0f172a;
+  --accent: #a5b4fc;
+  --accent-hover: #c7d2fe;
+  --accent-light: #1e1b4b;
+  --accent-bg: #1e1b4b;
+  --accent-border: #4338ca;
+  --accent-text: #c7d2fe;
+  --ob-accent: var(--accent);
+  --ob-accent-hover: var(--accent-hover);
+  --ob-accent-light: var(--accent-light);
+  --ob-accent-border: var(--accent-border);
+  --ob-accent-text: var(--accent-text);
+  --success: #34d399;
+  --success-bg: #064e3b;
+  --success-border: #047857;
+  --success-text: #6ee7b7;
+  --warning: #fbbf24;
+  --warning-bg: #451a03;
+  --warning-border: #b45309;
+  --warning-text: #fcd34d;
+  --danger: #f87171;
+  --danger-bg: #450a0a;
+  --danger-border: #b91c1c;
+  --danger-text: #fecaca;
+  --info: #60a5fa;
+  --info-bg: #172554;
+  --info-border: #1d4ed8;
+  --info-text: #bfdbfe;
+  --map-core: #60a5fa;
+  --map-payment: #c4b5fd;
+  --map-compliance: #f87171;
+  --map-identity: #34d399;
+  --map-psd2: #fbbf24;
+  --map-platform: #94a3b8;
+  --map-cards: #f472b6;
+  --map-infrastructure: #94a3b8;
+  --map-external: #38bdf8;
+  --map-edge-sync: #64748b;
+  --map-edge-sync-active: #cbd5e1;
+  --map-edge-async: #8b5cf6;
+  --map-edge-async-active: #c4b5fd;
+  --map-edge-db: #38bdf8;
+  --map-edge-auth: #22d3ee;
+  --map-edge-authz: #4ade80;
+  --map-edge-push: #fb923c;
+  --map-edge-registry: #f87171;
+  --map-edge-llm: #2dd4bf;
+  --sidebar-bg: #090e17;
+  --sidebar-hover-bg: rgba(255,255,255,0.08);
+  --sidebar-active-bg: rgba(165,180,252,0.18);
+  --sidebar-active-text: #e0e7ff;
+  --sidebar-text: #cbd5e1;
+  --sidebar-text-muted: #94a3b8;
+  --sidebar-border: rgba(255,255,255,0.09);
+  --sidebar-accent: var(--accent);
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
@@ -143,6 +287,24 @@ body {
 main {
   animation: fadeIn 0.4s ease-out;
 }
+
+.ob-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: .75rem;
+  left: .75rem;
+  transform: translateY(-180%);
+  padding: .6rem .8rem;
+  border-radius: .5rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: .875rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform .15s ease-out;
+}
+.ob-skip-link:focus { transform: translateY(0); outline: 3px solid rgba(255, 255, 255, .9); outline-offset: 2px; }
+.ob-mobile-nav-overlay { display: none; }
 
 /* ── Operator application shell ── */
 .ob-app-shell {
@@ -178,6 +340,7 @@ main {
   .ob-app-shell { display: block; overflow: auto; }
   .ob-app-frame { min-height: 100dvh; }
   .ob-app-content { padding: 1rem; }
+  .ob-mobile-nav-overlay { display: block; position: fixed; z-index: 20; inset: 0; width: 100%; height: 100%; padding: 0; background: rgba(15, 23, 42, .44); border: 0; cursor: pointer; }
 }
 
 /* ── Scrollbar ── */
@@ -232,6 +395,17 @@ main {
 .badge-info    { background: var(--info-bg);    color: var(--info-text);    border: 1px solid var(--info-border); }
 .badge-neutral { background: var(--surface-3);  color: var(--text-secondary); border: 1px solid var(--border-strong); }
 .badge-accent  { background: var(--ob-accent-light); color: var(--ob-accent-text); border: 1px solid var(--ob-accent-border); }
+.badge-sm {
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.badge-detail {
+  font-weight: 600;
+  opacity: .8;
+  text-transform: none;
+}
 
 
 /* ── Button ── */
@@ -307,7 +481,9 @@ main {
   border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   background: var(--surface); color: var(--text-primary);
   font-size: 13px; font-family: inherit;
-  transition: all 0.2s ease;
+  /* Keep text and surface colours atomic across theme changes. Interpolating them independently
+     creates a short low-contrast state even when both theme endpoints meet WCAG AA. */
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   outline: none;
   box-shadow: var(--shadow-xs);
 }
@@ -468,7 +644,8 @@ main {
   font-weight: 850;
   letter-spacing: .04em;
 }
-.campaign-section-heading p { margin: .03rem 0 .18rem; color: #8190a6; font-size: .64rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.campaign-section-heading p { margin: .03rem 0 .18rem; color: var(--text-secondary); /* was #8190a6:
+   3.24:1 on white, below the 4.5:1 AA floor for this 0.64rem label (#9749). */ font-size: .64rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .campaign-section-heading h2 { color: var(--campaign-ink); font-size: .95rem; font-weight: 780; letter-spacing: -.025em; }
 .campaign-section-heading > p { margin: .08rem 0 0 auto; max-width: 19rem; color: var(--campaign-muted); line-height: 1.4; }
 .campaign-entry-card { container-type: inline-size; }
@@ -586,7 +763,7 @@ main {
 .campaign-phone-banner { background: linear-gradient(135deg, #fef3c7 0%, #ffedd5 46%, #fae8ff 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 8px 18px rgba(217,119,6,.12); }
 .campaign-phone-hero span { color: #4f46e5; display: block; font-size: 0.43rem; font-weight: 800; text-transform: uppercase; }
 .campaign-phone-hero strong { display: block; font-size: 0.62rem; line-height: 1.15; margin: 0.28rem 0; }
-.campaign-phone-hero button { background: #4f46e5; border: 0; border-radius: 0.4rem; color: #fff; font-size: 0.45rem; font-weight: 700; padding: 0.28rem 0.42rem; }
+.campaign-phone-hero .campaign-phone-cta { background: #4f46e5; border-radius: 0.4rem; color: #fff; display: inline-block; font-size: 0.45rem; font-weight: 700; padding: 0.28rem 0.42rem; text-transform: none; }
 .campaign-phone-row { display: flex; gap: 0.28rem; margin-top: 0.58rem; }
 .campaign-phone-row span { background: #e2e8f0; border-radius: 0.25rem; height: 1.45rem; flex: 1; }
 .campaign-push-card { background: rgba(255,255,255,0.95); border: 1px solid rgba(255,255,255,0.75); border-radius: 0.9rem; box-shadow: 0 12px 28px rgba(0,0,0,.18); color: #0f172a; display: flex; gap: 0.48rem; max-width: 15.5rem; padding: 0.62rem; transform: rotate(-2deg); }
@@ -804,12 +981,22 @@ main {
 
 /* Tone text colours (ADR-0208 D2), for cases where a full badge is too heavy — a tinted metric
    label, an inline verdict. Same tokens the .badge-* rules use, so a theme change moves both. */
-.tone-text-success { color: var(--success); }
-.tone-text-warning { color: var(--warning); }
-.tone-text-danger  { color: var(--danger); }
-.tone-text-info    { color: var(--info); }
+.tone-text-success { color: var(--success-text); }
+.tone-text-warning { color: var(--warning-text); }
+.tone-text-danger  { color: var(--danger-text); }
+.tone-text-info    { color: var(--info-text); }
 .tone-text-neutral { color: var(--text-secondary); }
-.tone-text-accent  { color: var(--ob-accent); }
+.tone-text-accent  { color: var(--ob-accent-text); }
+
+/* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
+   a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
+.tone-border-left { border-left-style: solid; border-left-width: 4px; }
+.tone-border-left-success { border-left-color: var(--success); }
+.tone-border-left-warning { border-left-color: var(--warning); }
+.tone-border-left-danger  { border-left-color: var(--danger); }
+.tone-border-left-info    { border-left-color: var(--info); }
+.tone-border-left-neutral { border-left-color: var(--border-strong); }
+.tone-border-left-accent  { border-left-color: var(--ob-accent); }
 
 /* ── Page header ── */
 .page-header {
@@ -853,7 +1040,7 @@ main {
 }
 
 /* ── Mono ── */
-.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.01em; }
+.mono { font-family: var(--font-mono); letter-spacing: -0.01em; }
 
 /* ── Status dot ── */
 .status-dot {
@@ -1005,9 +1192,9 @@ main {
 
 .input {
   min-height: 40px;
-  border-color: #cbd5e1;
+  border-color: var(--border-strong);
   border-radius: 9px;
-  background: rgba(255, 255, 255, .94);
+  background: var(--surface);
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99, 102, 241, .13); }
 
@@ -1023,11 +1210,53 @@ main {
   background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(248,250,252,.9));
 }
 
+.ui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: var(--space-8);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ui-empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-lg);
+  background: var(--accent-light);
+  color: var(--accent-text);
+}
+.ui-empty-state-title {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 750;
+  line-height: 1.4;
+}
+.ui-empty-state-description {
+  max-width: 42rem;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.ui-empty-state-action {
+  margin-top: var(--space-4);
+}
+
 @media (max-width: 840px) {
   .page-header { align-items: stretch; padding: 18px; }
   .page-header > :last-child:not(:only-child) { align-self: flex-start; }
   .table,
   .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .incident-filters { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 560px) {
@@ -1038,4 +1267,16 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* Documentation print/PDF export. The browser's native print pipeline keeps SVG diagrams
+   crisp and lets operators choose their paper size/destination without a server-side renderer. */
+@media print {
+  .ob-app-shell { display: block; height: auto; min-height: 0; overflow: visible; background: #fff; }
+  .ob-app-shell > aside, .ob-app-frame > header, .ob-skip-link, .qrlesspay-export-action, .docs-print-action, .docs-header-actions .btn { display: none !important; }
+  .ob-app-frame, .ob-app-content { display: block; min-height: 0; overflow: visible; padding: 0; }
+  .ob-app-content > * { width: 100%; max-width: none; }
+  .qrlesspay-doc, .docs-printable { color: #111827; }
+  .qrlesspay-doc .card, .docs-printable .card { box-shadow: none; break-inside: avoid; }
+  .qrlesspay-doc a, .docs-printable a { color: #3730a3; }
 }

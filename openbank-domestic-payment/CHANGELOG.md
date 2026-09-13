@@ -1,5 +1,122 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.0...domestic-payment-v0.20.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** guard domestic_payment_outbox created_at plausibility at INSERT ([#9293](https://github.com/JiRaska/open-bank-oss/issues/9293)) ([f8d3145](https://github.com/JiRaska/open-bank-oss/commit/f8d31451a567b73ef183fb4a4bcbe8bdcd98efe5))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.1...domestic-payment-v0.20.0) (2026-09-08)
+
+
+### Features
+
+* **domestic-payment:** carry the synthetic taint across the Kafka hop ([#8640](https://github.com/JiRaska/open-bank-oss/issues/8640)) ([462b634](https://github.com/JiRaska/open-bank-oss/commit/462b634fe7c34fa8384d7bb160a01a879b51fd83))
+* **payments:** tell the customer when a domestic payment is rejected ([#8508](https://github.com/JiRaska/open-bank-oss/issues/8508)) ([d64653d](https://github.com/JiRaska/open-bank-oss/commit/d64653dcec71a20b2906336baca85fdf8504bee2))
+
+
+### Bug Fixes
+
+* **domestic-payment:** disambiguate SOURCE_SERVICE const collisions + gate budget repair ([#8823](https://github.com/JiRaska/open-bank-oss/issues/8823)) ([2e92438](https://github.com/JiRaska/open-bank-oss/commit/2e9243887b7311b46cd4365c5112b8be1cd21c8c))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.0...domestic-payment-v0.19.1) (2026-09-03)
+
+
+### Security
+
+* **domestic-payment:** bind delegated spend atomically ([#8252](https://github.com/JiRaska/open-bank-oss/issues/8252)) ([c763440](https://github.com/JiRaska/open-bank-oss/commit/c7634401bf8e5cc8690b24015acd537c19def591))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.18.0...domestic-payment-v0.19.0) (2026-08-26)
+
+
+### Features
+
+* **domestic-payment:** persist trusted synthetic taint ([#7155](https://github.com/JiRaska/open-bank-oss/issues/7155)) ([536c84e](https://github.com/JiRaska/open-bank-oss/commit/536c84e741687963af055e23590a7c685004b675))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.17.0...domestic-payment-v0.18.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.16.1...domestic-payment-v0.17.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.16.0...domestic-payment-v0.16.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.15.0...domestic-payment-v0.16.0) (2026-08-19)
+
+
+### Features
+
+* **domestic-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5692](https://github.com/JiRaska/open-bank-oss/issues/5692)) ([73b584e](https://github.com/JiRaska/open-bank-oss/commit/73b584e972ddb73270cb0af9ab1722ac66996eb7))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.2...domestic-payment-v0.15.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+
+### Security
+
+* **deps:** resolve micrometer-core CVE-2026-40984 without a platform bump ([#5495](https://github.com/JiRaska/open-bank-oss/issues/5495)) ([b8b8d7a](https://github.com/JiRaska/open-bank-oss/commit/b8b8d7a2f28375c29949674059613e4ed8867a09))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.1...domestic-payment-v0.14.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **domestic-payment:** add eventType/sourceService to audit-consumed events ([#5255](https://github.com/JiRaska/open-bank-oss/issues/5255)) ([3b3326c](https://github.com/JiRaska/open-bank-oss/commit/3b3326caaeb1a898ce75ef5547da73d812d67ebb))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.0...domestic-payment-v0.14.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **domestic-payment:** put the authenticated actor on the wire for domestic.payment.created ([#4997](https://github.com/JiRaska/open-bank-oss/issues/4997)) ([1a333f0](https://github.com/JiRaska/open-bank-oss/commit/1a333f047781ecb360d9c5bc53920e94f4b37c04)), closes [#3994](https://github.com/JiRaska/open-bank-oss/issues/3994)
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.6...domestic-payment-v0.14.0) (2026-08-16)
+
+
+### Features
+
+* **libs-runtime:** wire outboxDispatched/outboxDead metrics into AbstractOutboxDispatcher ([#5071](https://github.com/JiRaska/open-bank-oss/issues/5071)) ([8da83b0](https://github.com/JiRaska/open-bank-oss/commit/8da83b073b07052316c56425290579ff162dcbff)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.5...domestic-payment-v0.13.6) (2026-08-16)
+
+
+### Bug Fixes
+
+* **sepa-payment,domestic-payment:** emit sanctions screening/hit metrics ([#5079](https://github.com/JiRaska/open-bank-oss/issues/5079)) ([ef730ff](https://github.com/JiRaska/open-bank-oss/commit/ef730ffffebad6165a29e8715b993b1a273060fc)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.4...domestic-payment-v0.13.5) (2026-08-16)
+
+
+### Bug Fixes
+
+* **domestic-payment:** emit paymentCompleted/paymentProcessingDuration on terminal transitions ([#5068](https://github.com/JiRaska/open-bank-oss/issues/5068)) ([ae4af48](https://github.com/JiRaska/open-bank-oss/commit/ae4af48107c953623ccef39563394a86c40989c7)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.3...domestic-payment-v0.13.4) (2026-08-10)
 
 

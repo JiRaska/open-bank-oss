@@ -91,6 +91,55 @@ spec:
               device-registration path (POST /api/v1/devices) or a mass token invalidation, not
               the push provider.
 
+        # #4363: only evaluated after the explicit, default-off fallback flag is enabled. This
+        # watches the *routed* handoff, not a target-channel delivery; SMTP acceptance/bounce is a
+        # distinct outcome on the separate EMAIL row. A supported template with no device must
+        # create a fallback request, otherwise the policy is configured but inert.
+        - alert: PushFallbackConfiguredButInert
+          expr: |
+            (
+              (
+                sum by (template) (increase(openbank_notification_push_fanouts_total{
+                  devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
+                }[15m]))
+                or on (template) (
+                  sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
+                  }) unless on (template) sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
+                  } offset 15m)
+                )
+              )
+              >
+              (
+                (
+                  sum by (template) (increase(openbank_notification_fallback_routed_total{outcome="REROUTED"}[15m]))
+                  or on (template) (
+                    sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"})
+                    unless on (template) sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m)
+                  )
+                ) or on (template) (
+                  sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
+                  }) * 0
+                )
+              )
+            )
+            and on () (max(openbank_notification_push_fallback_enabled) == 1)
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            # Subject: inbound PUSH traffic is continuous rather than a scheduled batch. The
+            # window therefore measures live request handoffs, not a periodic invocation.
+            subject_period: continuous
+            summary: "Enabled no-device push fallback did not create a routed request"
+            description: >-
+              A policy-approved PUSH template found no active device while fallback was enabled, but
+              that template has no separate EMAIL fallback record. Check notification-service logs and the
+              openbank_notification_fallback_routed_total counter; this says nothing about e-mail
+              delivery, only that the handoff was not created.
+
         # A terminal transition that found no row to write itself onto (issue #4512). The service
         # then publishes a NotificationOutcome event for a notification the table cannot show:
         # the producer's funnel is told about a message that has no durable record, which is an

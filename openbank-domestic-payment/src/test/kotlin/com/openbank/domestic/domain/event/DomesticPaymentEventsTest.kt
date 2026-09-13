@@ -18,7 +18,11 @@ import java.util.UUID
 
 class DomesticPaymentEventsTest {
 
-    private fun payment() = DomesticPayment(
+    private fun payment(
+        initiatedByPartyId: UUID? = UUID.randomUUID(),
+        delegationId: UUID? = null,
+        reservationId: UUID? = null,
+    ) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem-event",
         status = DomesticPaymentStatus.VALIDATED,
@@ -46,6 +50,9 @@ class DomesticPaymentEventsTest {
         settledAt = null,
         createdAt = Instant.parse("2026-06-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-06-01T09:00:00Z"),
+        initiatedByPartyId = initiatedByPartyId,
+        delegationId = delegationId,
+        reservationId = reservationId,
     )
 
     @Test
@@ -68,6 +75,20 @@ class DomesticPaymentEventsTest {
         assertThat(event.priority).isEqualTo(DomesticPaymentPriority.URGENT)
         assertThat(event.endToEndId).isEqualTo("DOMU42")
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.initiatedByPartyId).isEqualTo(payment.initiatedByPartyId)
+        // AuditConsumer attribution fields (#3994) — before these existed the audit trail
+        // recorded 124 real domestic-payment rows as event_type="UNKNOWN"/source_service="unknown".
+        assertThat(event.eventType).isEqualTo("DOMESTIC_PAYMENT_CREATED")
+        assertThat(event.sourceService).isEqualTo("domestic-payment")
+    }
+
+    @Test
+    fun `toCreatedEvent carries no actor when the payment was created without one`() {
+        val payment = payment(initiatedByPartyId = null)
+
+        val event = payment.toCreatedEvent(Clock.fixed(Instant.parse("2026-06-01T10:00:00Z"), ZoneOffset.UTC))
+
+        assertThat(event.initiatedByPartyId).isNull()
     }
 
     @Test
@@ -77,6 +98,26 @@ class DomesticPaymentEventsTest {
 
         val clock = Clock.fixed(now, ZoneOffset.UTC)
         assertThat(payment.toCreatedEvent(clock)).isEqualTo(payment.toCreatedEvent(clock))
+    }
+
+    @Test
+    fun `created and status events carry the same delegated spend context`() {
+        val initiator = UUID.randomUUID()
+        val delegation = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val previous = payment(initiator, delegation, reservation)
+        val current = previous.copy(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        val clock = Clock.fixed(Instant.parse("2026-06-01T10:00:00Z"), ZoneOffset.UTC)
+
+        val created = current.toCreatedEvent(clock)
+        val changed = current.toStatusChangedEvent(previous, clock)
+
+        assertThat(created.initiatedByPartyId).isEqualTo(initiator)
+        assertThat(created.delegationId).isEqualTo(delegation)
+        assertThat(created.reservationId).isEqualTo(reservation)
+        assertThat(changed.initiatedByPartyId).isEqualTo(initiator)
+        assertThat(changed.delegationId).isEqualTo(delegation)
+        assertThat(changed.reservationId).isEqualTo(reservation)
     }
 
     @Test
@@ -99,5 +140,7 @@ class DomesticPaymentEventsTest {
         assertThat(event.rejectReason).isEqualTo("SANCTIONS_HIT")
         assertThat(event.rejectDetail).isEqualTo("creditor on list")
         assertThat(event.occurredAt).isEqualTo(occurredAt)
+        assertThat(event.eventType).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
+        assertThat(event.sourceService).isEqualTo("domestic-payment")
     }
 }

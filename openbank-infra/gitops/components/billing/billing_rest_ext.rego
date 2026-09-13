@@ -45,8 +45,7 @@ allowed_reasons contains "operator-billing-write" if {
 # account-service's billing-discovery read is INBOUND from billing, and product-catalog fees are
 # read via catalog, not billing), so there is no identity-scoped grant to preserve: the
 # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
-# rest.rego gates its allow head on `not prohibited`). billing.read stays reachable to M2M via
-# base operator-read-any — the fleet-wide M2M read over-grant is tracked separately in #3734.
+# rest.rego gates its allow head on `not prohibited`).
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
@@ -56,3 +55,12 @@ prohibited if {
 	}
 }
 
+# Ordinary billing.read stays reachable to M2M via base operator-read-any, but
+# billing.approval.read is different: it exposes the maker, action and resource id of every
+# pending four-eyes decision. Deny it to every service account; some client_credentials
+# principals currently retain type HUMAN and ROLE_OPERATOR, so checking type or role alone is
+# insufficient to enforce the staff-only boundary.
+prohibited if {
+	startswith(input.principal.id, "service-account-")
+	input.action == "billing.approval.read"
+}

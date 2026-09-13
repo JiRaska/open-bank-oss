@@ -41,5 +41,10 @@ class DocumentQueryService(
 
     override suspend fun listByParty(partyRef: String): List<Document> = documentRepo.findByParty(partyRef)
 
+    override suspend fun listByPartyPaged(partyRef: String, page: Int, size: Int): List<Document> =
+        documentRepo.findByPartyPaged(partyRef, page, size)
+
+    override suspend fun countByParty(partyRef: String): Long = documentRepo.countByParty(partyRef)
+
     override suspend fun findByIdempotencyKey(key: String): Document? = documentRepo.findByIdempotencyKey(key)
 }

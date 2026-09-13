@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepa.application.port.out.FraudScoreCommand
@@ -51,6 +52,7 @@ open class SepaPaymentActivitiesImpl(
     private val schemeGatewayPort: SchemeGatewayPort,
     private val settlementPort: SettlementPort,
     private val clock: Clock,
+    private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.sepa.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
 ) : SepaPaymentActivities {
@@ -76,6 +78,23 @@ open class SepaPaymentActivitiesImpl(
                 matchedEntity = null,
             )
             return@runOnVertxContext ScreeningDecision.REVIEW
+        }
+
+        // openbank_sanctions_screenings_total / openbank_sanctions_hits_total had NO call site
+        // anywhere in this class before (issue #5049): sanctions-service itself has no "role"
+        // concept of its own (its EntityType is INDIVIDUAL/ORGANIZATION/VESSEL/AIRCRAFT, an
+        // orthogonal axis to debtor/creditor), so DomainMetrics.sanctionsScreening/sanctionsHit
+        // can only be recorded HERE, by the caller that knows which side of the payment each
+        // screened name is. One event per screened entity, not per payment -- results always
+        // has exactly one entry per role (debtor, creditor).
+        for (result in results) {
+            metrics.sanctionsScreening(result.role.name.lowercase())
+            val severity = when (result.status) {
+                ScreeningMatchStatus.HIT, ScreeningMatchStatus.ESCALATED -> "block"
+                ScreeningMatchStatus.POTENTIAL_HIT -> "review"
+                ScreeningMatchStatus.CLEAR, ScreeningMatchStatus.WHITELISTED -> null
+            }
+            if (severity != null) metrics.sanctionsHit(result.role.name.lowercase(), severity)
         }
 
         val decision = ScreeningPolicy.decide(results)
@@ -104,6 +123,15 @@ open class SepaPaymentActivitiesImpl(
         decision
     }
 
+    // Issue #3994/#5256: every payload below also carries `sourceService`, so AuditConsumer
+    // attributes the row from the producer's own claim (AttributionSource.EVENT) rather than
+    // falling through to its topic-derived table — a silent, successful default visible only by
+    // grouping `audit_entries` on a live database. The fleet sweep patched only the non-Temporal
+    // path (SepaPaymentEvents.kt, a serialised data class); these five hand-built payload strings
+    // are the SAME topic (`openbank.sepa.payment.events`, via `events-out`) and were missed
+    // because a grep for the quoted key cannot see a data class and a reader of the data class
+    // cannot see these strings.
+    //
     // #3914: every payload below carries `occurredAt` = the transitioned aggregate's `updatedAt`,
     // which `SepaPayment.transitionTo` stamps with `Instant.now(clock)` AT the state change. That
     // is the business event time; `SepaPaymentOutboxMessage.createdAt` next to it is the outbox
@@ -120,7 +148,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"VALIDATED","occurredAt":"${updated.updatedAt}"}""",
+                payload = """{"paymentId":"$paymentId","status":"VALIDATED",""" +
+                    """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -137,7 +166,7 @@ open class SepaPaymentActivitiesImpl(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = """{"paymentId":"$paymentId","status":"REJECTED","reason":"SANCTIONS_HIT",""" +
-                    """"occurredAt":"${updated.updatedAt}"}""",
+                    """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -156,7 +185,14 @@ open class SepaPaymentActivitiesImpl(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
+        if (outcome.synthetic) {
+            // #4221: a payment that was never scored is not a payment that scored clean.
+            log.warnf(
+                "Fraud scoring UNAVAILABLE for payment %s — synthetic ALLOW, this payment carries no " +
+                    "fraud verdict (see openbank_fraud_scoring_degraded{service=\"sepa-payment\"})",
+                paymentId,
+            )
+        } else if (outcome.verdict != FraudVerdict.ALLOW) {
             log.infof(
                 "Fraud SHADOW verdict %s (score=%d, rules=%s) for payment %s — observed, not enforced",
                 outcome.verdict,
@@ -196,7 +232,8 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = rejected.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"REJECTED","occurredAt":"${rejected.updatedAt}"}""",
+                    payload = """{"paymentId":"$paymentId","status":"REJECTED",""" +
+                        """"occurredAt":"${rejected.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),
             )
@@ -215,7 +252,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"PROCESSING","occurredAt":"${processing.updatedAt}"}""",
+                payload = """{"paymentId":"$paymentId","status":"PROCESSING",""" +
+                    """"occurredAt":"${processing.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -233,7 +271,7 @@ open class SepaPaymentActivitiesImpl(
                     aggregateId = completed.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
                     payload = """{"paymentId":"$paymentId","status":"COMPLETED",""" +
-                        """"occurredAt":"${completed.updatedAt}"}""",
+                        """"occurredAt":"${completed.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),
             )
@@ -298,3 +336,10 @@ open class SepaPaymentActivitiesImpl(
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 }
+
+/**
+ * This service's audit attribution (issue #3994/#5256) — the module directory without the
+ * `openbank-` prefix, matching `SepaPaymentEvents.kt`'s non-Temporal payloads and the value
+ * audit-service's own topic table maps `openbank.sepa.payment.events` to.
+ */
+private const val SOURCE_SERVICE = "sepa-payment"

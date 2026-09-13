@@ -44,6 +44,9 @@ dependencies {
     implementation("io.temporal:temporal-sdk:1.25.1")
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.65.1")
+    // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
+    // `trace` evidence) without exporting trace ids, attribute values or payloads.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
@@ -77,7 +80,26 @@ kover {
                     // CnbResource, FxWorkflowImpl, the sanctions/AML/fraud/ČNB REST-client adapters, the
                     // outbox dispatcher, and the daily ingestion scheduler gained real unit tests. Kept a
                     // few points below the measured figure for headroom, never below the prior floor.
-                    minValue = 65
+                    //
+                    // LOWERED 65 -> 60 on 2026-08-22, then RE-BASELINED 60 -> 30 by #6384.
+                    //
+                    // The 65 and the 60 were both compared against an fx+libs AGGREGATE: every
+                    // service's Kover report used to measure `com.openbank.libs.*` alongside the
+                    // service's own package, and fx's tests exercise a lot of libs code well, so
+                    // the aggregate sat far ABOVE fx alone. That is why #5719 — 13 uncovered lines
+                    // added to libs-runtime's EventRetry, zero fx files touched — moved fx from
+                    // over 65 to 60.504200% and reddened `build (openbank-fx-service)`.
+                    //
+                    // #6384 scopes every service's report to its own sources, so this floor is now
+                    // compared against fx's OWN line coverage. CI measured that on the #5719 branch
+                    // with the same exclusion applied:
+                    //     libs included  60.504200%   <- what the 65/60 floors were compared against
+                    //     libs excluded  30.905700%   <- fx's own line coverage, what 30 guards
+                    // The number drops because it is a DIFFERENT number, not because the gate got
+                    // weaker: a regression in fx's own sources still moves this figure down (proven
+                    // on #6384 by deleting fx's application+infrastructure tests — 78.618100% ->
+                    // 40.056000%, koverVerify rc=1). Ratchet up from here as fx's own tests improve.
+                    minValue = 30
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
@@ -101,17 +123,25 @@ pitest {
 }
 
 // Pact: forward broker config so the provider verification test can fetch and publish results.
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
+
 tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // Gradle's default test-JVM heap is 512m. fx-service already boots Quarkus under four distinct
+    // test configurations in one forked JVM (boot smoke, NUL-byte rejection, outbox claim, CNB
+    // scheduler); FxOutboxAtomicityIT (#8353) adds a fifth, because a class that switches
+    // `openbank.outbox.dispatch-enabled` off is a different config and so forces its OWN boot.
+    // Measured on this branch: without the bump the suite dies with `java.lang.OutOfMemoryError:
+    // Java heap space` inside the Gradle test executor after 116 of 160 tests, and the JUnit XML
+    // then reports **zero failures** — the run simply stops, which reads as a pass to anything
+    // counting failures. With it, 162/162.
+    //
+    // Same override, same reason, as openbank-account-service and openbank-lending-service.
+    // Deliberately per-module: nothing measures test heap anywhere, so a fleet default would be an
+    // unmeasured ratchet across ~50 modules to fix one. This is the third module to need it — if a
+    // fourth appears, that is the signal to raise it in build-logic and count Quarkus boots per
+    // module instead of paying for them one build file at a time.
+    maxHeapSize = "2g"
 }

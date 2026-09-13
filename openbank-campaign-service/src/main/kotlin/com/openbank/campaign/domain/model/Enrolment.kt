@@ -38,6 +38,16 @@ data class DecisionPathSelection(
     val selected: DecisionPath,
     val nextStepOrder: Int,
     val decidedAt: Instant,
+    /**
+     * The raw [DeliveryStatus] the decision was evaluated from, snapshotted at write time
+     * (ADR-0263 Phase A). [selected] is already derivable from this plus the predicate, but
+     * without it a reviewer reconstructing "why did this path fire" has to join back to the
+     * send-log row by `(campaignId, partyId, sourceStepOrder)` — sound only because
+     * `DeliveryStatus` transitions are monotonic (ADR-0239 D4), and one avoidable hop regardless.
+     * Null for every selection recorded before this field existed; that default is load-bearing,
+     * not a placeholder — see [CampaignStep.condition] for the identical precedent.
+     */
+    val observedStatus: DeliveryStatus? = null,
 )
 
 enum class DecisionPath { CONFIRMED, NOT_CONFIRMED }
@@ -123,6 +133,14 @@ enum class SendOutcome {
     SUPPRESSED_QUIET_HOURS,
     SUPPRESSED_CONSENT,
     SUPPRESSED_LIST,
+
+    /**
+     * ADR-0269 rule 2 refused this step: the party may hear about credit and must not hear it now.
+     * A recorded row, not silence — the send log is where an operator reconstructs why a journey
+     * went quiet, and "the distress floor stopped it" is the answer they need. The column is TEXT
+     * with no CHECK constraint, so this needs no migration.
+     */
+    SUPPRESSED_CREDIT_DISTRESS,
 
     /**
      * The step's ADR-0200 D1 branch condition did not hold, so nothing was attempted (#3585).

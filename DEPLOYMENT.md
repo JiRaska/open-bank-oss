@@ -165,6 +165,7 @@ Operational guardrails worth knowing before you deploy:
 ## 6. Where to go next
 
 - **What the platform is:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Evaluator's reference (topology, sizing, cost, production delta):** [`docs/deployment-reference.md`](docs/deployment-reference.md)
 - **Local spin-up:** [`README.md`](README.md#quick-start-local-docker) · [`openbank-infra`](openbank-infra)
 - **Infra-as-code & GitOps:** [`openbank-infra/aws`](openbank-infra/aws) · [`openbank-infra/gitops`](openbank-infra/gitops)
 - **Lifecycle runbooks:** [`docs/runbooks/`](docs/runbooks)

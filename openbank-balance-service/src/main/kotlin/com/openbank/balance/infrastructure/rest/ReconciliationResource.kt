@@ -45,7 +45,18 @@ class ReconciliationResource(private val reconcile: ReconcileBalancesUseCase, pr
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.reconciliation.run")
     suspend fun run(@QueryParam("asOf") asOf: String?): Response {
-        val date = asOf?.let { LocalDate.parse(it) } ?: LocalDate.now(clock)
+        // Blank means "omitted" (the fuzzer found `?asOf=` 500ing, #8832); a malformed value is a
+        // client error — IllegalArgumentException maps to 400 via libs-runtime CommonExceptionMappers,
+        // where a raw DateTimeParseException would surface as a 500.
+        val date = asOf?.takeIf { it.isNotBlank() }?.let {
+            try {
+                LocalDate.parse(it)
+            } catch (ex: java.time.format.DateTimeParseException) {
+                throw IllegalArgumentException(
+                    "query parameter 'asOf' must be an ISO-8601 date (yyyy-MM-dd), got '$it'",
+                )
+            }
+        } ?: LocalDate.now(clock)
         val report = reconcile.reconcile(date)
         return Response.status(Response.Status.CREATED).entity(report).build()
     }

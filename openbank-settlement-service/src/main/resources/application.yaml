@@ -27,6 +27,21 @@ quarkus:
     category:
       "com.openbank":
         level: DEBUG
+  # OIDC CLIENT (outbound M2M) — the token this service PRESENTS when it calls another.
+  # Distinct from `quarkus.oidc` above, which is the inbound resource-server side that VALIDATES
+  # tokens arriving here. The two blocks carry the same three field names and differ by one
+  # hyphen, which is how this went missing: the config reads correct at a glance and configures
+  # the wrong half. Any client annotated `@RegisterProvider(OidcClientRequestReactiveFilter)`
+  # mints its bearer token from HERE, and with no `quarkus.oidc-client` the filter has no client
+  # to mint from, so the call leaves unauthenticated and the callee answers 401 — not 403, which
+  # is the tell: there is no token at all, rather than a token missing a role.
+  # Enforced by .github/scripts/check-oidc-client-configured.py.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
   rest-client:
     # Local-dev defaults ONLY. The in-cluster URLs are supplied by the Rollout's env
     # (BALANCE_SERVICE_URL / LEDGER_SERVICE_URL in

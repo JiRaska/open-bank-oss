@@ -1,7 +1,8 @@
 ---
 date: 2026-08-09
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "none — the three per-change obligations are a review duty; only the registry-level reader is mechanised so far"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,15 @@ summary: "Every control that claims to do work must expose a countable artifact 
 ---
 
 # ADR-0253 — Evidence of effect: a control must be able to show it carried work
+
+**Delivery note (2026-08-19).** First mechanised reader: the `adr-delivery-evidence` gate
+(enforced) applies this ADR's third obligation — *make zero fail* — to the ADR registry itself,
+which was carrying the exact defect this ADR describes. `delivery-status` claimed work that had
+not been done and, in three cases, denied work that had; nothing read it. The gate found ADR-0232,
+ADR-0237, ADR-0244 and this ADR in one run. The three per-change obligations (name the artifact,
+emit an outcome not a state, make zero fail) remain a review duty by design — the ADR's own
+alternatives section rejects a blanket grep because the pattern is semantic — so `partial` is the
+honest status and will stay so while checkable subsets are encoded one at a time.
 
 ## Context
 

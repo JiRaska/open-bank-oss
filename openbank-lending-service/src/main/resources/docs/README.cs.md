@@ -14,6 +14,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 | [04 — Data](./04-data.md) | Data, analytika, DBA | Schéma, migrace, retence, PII pole |
 | [05 — Provoz](./05-operations.md) | DevOps, SRE, release inženýři | Build, deploy, runbooky, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | DORA, GDPR, AML, IFRS 9, EBA mapování |
+| [07 — Kalibrace rizikového modelu](./07-risk-model-calibration.md) | Úvěrové riziko, model risk, audit | Původ PD/LGD, verzování, kalibrační replay, poctivé limity |
 
 ## TL;DR
 

@@ -30,6 +30,23 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+    # Trace export to the in-cluster Langfuse (ADR-0265). MEASURED, not assumed: without this rule
+    # every callback POST to langfuse.ai-platform.svc:3000 dies on a ConnectTimeout — same
+    # namespace is NOT the same as allowed, because this pod carries an egress policy and an
+    # egress policy is deny-by-default for everything it does not name. The failure is completely
+    # silent from the outside: LiteLLM answers 200 to the caller, the pod stays 1/1 Running,
+    # ArgoCD reports Synced and Healthy, and only `/api/public/traces` returning an empty list
+    # says otherwise — which is exactly the blind spot runbook 0012 flags and #5671 tracks.
+    #
+    # The generator cannot derive this one. gen-network-policies.py emits INGRESS from declared
+    # env URLs; the caller side of a new in-cluster edge is hand-written, and this file is where.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: langfuse
+      ports:
+        - protocol: TCP
+          port: 3000
     # The deliberate internet hole: HTTPS to the LLM provider (DeepInfra). This is the only pod in
     # the fleet with 0.0.0.0/0:443 egress — the whole point of centralising the choke point here.
     - to:

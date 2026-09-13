@@ -7,6 +7,8 @@ package com.openbank.casecoordinator.application.workflow
 
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseOutcome
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidence
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.CaseState
 import com.openbank.casecoordinator.domain.model.CaseStatus
@@ -43,11 +45,13 @@ class CaseWorkflowImpl : CaseWorkflow {
 
     private val synthesis = Workflow.newActivityStub(CaseSynthesisActivity::class.java, longOptions)
     private val proposals = Workflow.newActivityStub(CaseProposalActivity::class.java, shortOptions)
+    private val deliveryProposals = Workflow.newActivityStub(CaseProposalDeliveryActivity::class.java, shortOptions)
     private val persistence = Workflow.newActivityStub(CasePersistenceActivity::class.java, shortOptions)
 
     private var status = CaseStatus.OPEN
     private val participants = linkedSetOf<String>()
     private val contributions = mutableListOf<Contribution>()
+    private val consumedSignals = mutableListOf<CaseSignalEvidence>()
     private var contestedCount = 0
     private var draftVersion = 0
     private var synthesisRequested = false
@@ -92,6 +96,14 @@ class CaseWorkflowImpl : CaseWorkflow {
 
     override fun join(signal: JoinSignal) {
         participants += signal.agentId
+        consumedEvidence(
+            Workflow.getInfo().workflowId,
+            signal.signalId,
+            signal.agentId,
+            "case.join",
+            signal.rolloutId,
+            Workflow.currentTimeMillis(),
+        )?.let(consumedSignals::add)
     }
 
     override fun contribute(signal: ContributeSignal) {
@@ -101,7 +113,17 @@ class CaseWorkflowImpl : CaseWorkflow {
             evidenceRefs = signal.evidenceRefs,
             contested = signal.contested,
             draftVersion = draftVersion,
+            signalId = signal.signalId,
+            rolloutId = signal.rolloutId,
         )
+        consumedEvidence(
+            Workflow.getInfo().workflowId,
+            signal.signalId,
+            signal.agentId,
+            "case.contribute",
+            signal.rolloutId,
+            Workflow.currentTimeMillis(),
+        )?.let(consumedSignals::add)
         if (signal.contested) contestedCount++
     }
 
@@ -142,8 +164,25 @@ class CaseWorkflowImpl : CaseWorkflow {
         summary: String,
         contested: Boolean,
     ): CaseOutcome {
+        if (Workflow.getVersion(SIGNAL_EVIDENCE_CHANGE_ID, Workflow.DEFAULT_VERSION, 1) !=
+            Workflow.DEFAULT_VERSION
+        ) {
+            persistence.recordSignalEvidence(consumedSignals)
+        }
         persistence.recordContributions(start.caseId, contributions)
-        val proposalId = proposals.emitProposal(start.caseId, eventType, summary, contested)
+        val proposalId = if (Workflow.getVersion(DELIVERY_MODE_CHANGE_ID, Workflow.DEFAULT_VERSION, 1) ==
+            Workflow.DEFAULT_VERSION
+        ) {
+            proposals.emitProposal(start.caseId, eventType, summary, contested)
+        } else {
+            deliveryProposals.emitProposalWithDelivery(
+                start.caseId,
+                eventType,
+                summary,
+                contested,
+                start.deliveryMode.name == "SHADOW",
+            )
+        }
         persistence.recordCaseClosed(start.caseId, status.name, Workflow.currentTimeMillis())
         return CaseOutcome(
             caseId = start.caseId,
@@ -163,4 +202,29 @@ class CaseWorkflowImpl : CaseWorkflow {
         "TIMEOUT: case reached its deadline with ${contributions.size} contributions, " +
             "${participants.size} participants, no synthesis requested"
     }
+
+    private companion object {
+        const val DELIVERY_MODE_CHANGE_ID = "case-proposal-delivery-mode-v1"
+        const val SIGNAL_EVIDENCE_CHANGE_ID = "case-signal-evidence-v1"
+    }
+}
+
+private fun consumedEvidence(
+    caseId: String,
+    signalId: String,
+    agentId: String,
+    capability: String,
+    rolloutId: String,
+    observedAtEpochMs: Long,
+): CaseSignalEvidence? {
+    if (signalId.isBlank()) return null // Legacy histories predate ADR-0271 correlation ids.
+    return CaseSignalEvidence(
+        signalId = signalId,
+        caseId = caseId,
+        agentId = agentId,
+        capability = capability,
+        stage = CaseSignalEvidenceStage.CONSUMED,
+        observedAtEpochMs = observedAtEpochMs,
+        rolloutId = rolloutId,
+    )
 }

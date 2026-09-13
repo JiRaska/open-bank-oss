@@ -39,6 +39,10 @@ interface RightSizingReport {
   highSavingsCount: number
   services: ServiceEfficiency[]
   vpaHasData: boolean
+  /** Null when every query answered. Non-null names the queries that did not, so an empty
+   *  `services` under a failing read is not read as "the fleet has no namespaces" (#7943). */
+  error: string | null
+  degraded: boolean
 }
 
 function prometheusBase(): string {
@@ -46,25 +50,33 @@ function prometheusBase(): string {
   return process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 }
 
+type Vector = { rows: { metric: Record<string, string>; value: number }[]; error: string | null }
+
+/** Deliberately NOT a bare array — see the resources route for the same reasoning. The `/-/ready`
+ *  probe already distinguishes an unreachable Prometheus; a ready Prometheus whose QUERIES fail
+ *  used to render as `available: true, services: []`, i.e. a perfectly efficient fleet. */
 async function queryVector(
   query: string,
   signal: AbortSignal,
-): Promise<{ metric: Record<string, string>; value: number }[]> {
+): Promise<Vector> {
   try {
     const url = `${prometheusBase()}/api/v1/query?query=${encodeURIComponent(query)}`
     const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
-    if (!res.ok) return []
+    if (!res.ok) return { rows: [], error: `prometheus responded ${res.status}` }
     const json = await res.json() as {
       status: string
       data: { result: { metric: Record<string, string>; value: [number, string] }[] }
     }
-    if (json.status !== 'success') return []
-    return json.data.result.map(r => ({
-      metric: r.metric,
-      value: parseFloat(r.value[1]),
-    })).filter(r => !isNaN(r.value))
-  } catch {
-    return []
+    if (json.status !== 'success') return { rows: [], error: `prometheus query status ${json.status}` }
+    return {
+      rows: json.data.result.map(r => ({
+        metric: r.metric,
+        value: parseFloat(r.value[1]),
+      })).filter(r => !isNaN(r.value)),
+      error: null,
+    }
+  } catch (e) {
+    return { rows: [], error: String(e) }
   }
 }
 
@@ -115,13 +127,15 @@ export async function GET() {
         highSavingsCount: 0,
         services: [],
         vpaHasData: false,
+        error: 'prometheus is not ready',
+        degraded: true,
       }, { headers: { 'Cache-Control': 'no-store' } })
     }
 
     // ── Queries: requested vs actual per namespace ────────────────────────────
     // kube-state-metrics (requests) + cAdvisor (actuals) are both part of
     // kube-prometheus-stack — no extra scrapers needed.
-    const [cpuReq, cpuUsed, memReq, memUsed, vpaCpu, vpaMem] = await Promise.all([
+    const [cpuReqQ, cpuUsedQ, memReqQ, memUsedQ, vpaCpuQ, vpaMemQ] = await Promise.all([
       // CPU requested in millicores per namespace (sum across all containers)
       queryVector(
         'sum by (namespace) (kube_pod_container_resource_requests{resource="cpu",container!=""}) * 1000',
@@ -154,15 +168,24 @@ export async function GET() {
       ),
     ])
 
-    const toMap = (rows: { metric: Record<string, string>; value: number }[]) =>
-      Object.fromEntries(rows.map(r => [r.metric.namespace ?? '', r.value]))
+    const toMap = (v: Vector) =>
+      Object.fromEntries(v.rows.map(r => [r.metric.namespace ?? '', r.value]))
 
-    const cpuReqMap  = toMap(cpuReq)
-    const cpuUsedMap = toMap(cpuUsed)
-    const memReqMap  = toMap(memReq)
-    const memUsedMap = toMap(memUsed)
-    const vpaCpuMap  = toMap(vpaCpu)
-    const vpaMemMap  = toMap(vpaMem)
+    // A failed query yields no rows, which is indistinguishable downstream from a namespace with
+    // no data — so record WHICH queries failed rather than inferring it from the shape.
+    const queries = {
+      cpuRequested: cpuReqQ, cpuUsed: cpuUsedQ,
+      memRequested: memReqQ, memUsed: memUsedQ,
+      vpaCpu: vpaCpuQ, vpaMemory: vpaMemQ,
+    }
+    const failed = Object.entries(queries).flatMap(([n, q]) => (q.error ? [`${n}: ${q.error}`] : []))
+
+    const cpuReqMap  = toMap(cpuReqQ)
+    const cpuUsedMap = toMap(cpuUsedQ)
+    const memReqMap  = toMap(memReqQ)
+    const memUsedMap = toMap(memUsedQ)
+    const vpaCpuMap  = toMap(vpaCpuQ)
+    const vpaMemMap  = toMap(vpaMemQ)
 
     // Build per-namespace report — include all namespaces that have any data
     const allNs = new Set([
@@ -241,7 +264,10 @@ export async function GET() {
       fleetMemEfficiencyPct: fleetMem,
       highSavingsCount: highSavings,
       services,
-      vpaHasData: vpaCpu.length > 0,
+      // Only meaningful when the VPA query actually answered: a failed query has no rows either.
+      vpaHasData: vpaCpuQ.error === null && vpaCpuQ.rows.length > 0,
+      error: failed.length ? failed.join('; ') : null,
+      degraded: failed.length > 0,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } finally {
     clearTimeout(timer)

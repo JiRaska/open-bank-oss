@@ -36,7 +36,9 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
@@ -67,18 +69,18 @@ kover {
     }
 }
 
-// Pact: write generated consumer contracts to pacts/ and forward broker config.
 tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // The notification suite has three @QuarkusTestProfile variants (fast scheduler, Slack
+    // oversight and default-off push fallback). Each variant forces another Quarkus bootstrap
+    // alongside Testcontainers in the same forked JVM. The Gradle default 512m heap exhausted
+    // in CI while Quarkus loaded Hibernate's parser, which then surfaced as unrelated OIDC
+    // availability failures. Keep the capacity correction local to this module: no test is
+    // skipped and fleet-wide test memory remains unchanged.
+    maxHeapSize = "2g"
 }
+
+// Pact: write generated consumer contracts to pacts/ and forward broker config.
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.

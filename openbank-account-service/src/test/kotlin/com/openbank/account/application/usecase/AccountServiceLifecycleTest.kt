@@ -21,6 +21,7 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.domain.event.AccountClosedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
@@ -38,6 +39,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -65,6 +67,7 @@ class AccountServiceLifecycleTest {
     private lateinit var sanctionsScreening: AccountSanctionsScreeningPort
     private lateinit var productCatalog: ProductCatalogPort
     private lateinit var metrics: DomainMetrics
+    private lateinit var notificationRequestPort: NotificationRequestPort
     private lateinit var service: AccountService
 
     @BeforeEach
@@ -77,6 +80,7 @@ class AccountServiceLifecycleTest {
         sanctionsScreening = mockk()
         productCatalog = mockk()
         metrics = mockk(relaxed = true)
+        notificationRequestPort = mockk(relaxed = true)
         service =
             AccountService(
                 accountRepository,
@@ -88,10 +92,11 @@ class AccountServiceLifecycleTest {
                 productCatalog,
                 metrics,
                 Clock.fixed(fixedInstant, ZoneOffset.UTC),
+                notificationRequestPort,
             )
     }
 
-    // ── Activation (ADR-0073) ─────────────────────────────────────────────────
+    // ── Activation (ADR-0267) ─────────────────────────────────────────────────
 
     @Test
     fun `activateAccount transitions PENDING_ACTIVATION to ACTIVE and publishes the exact transition`(): Unit =
@@ -288,6 +293,7 @@ class AccountServiceLifecycleTest {
         runBlocking {
             val acc = account(status = AccountStatus.ACTIVE)
             coEvery { accountRepository.findById(acc.id) } returns acc
+            coEvery { balancePort.getByAccount(acc.id) } returns emptyList()
             val updated = slot<Account>()
             coEvery { accountRepository.update(capture(updated)) } answers { firstArg() }
             val event = slot<Any>()
@@ -330,6 +336,40 @@ class AccountServiceLifecycleTest {
             .hasMessageContaining("Cannot close")
 
         coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `closeAccount refuses to close an account that still holds money`() {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { balancePort.getByAccount(acc.id) } returns listOf(
+            BalanceView(
+                accountId = acc.id,
+                currency = "CZK",
+                booked = BigDecimal("1250.00"),
+                available = BigDecimal("1250.00"),
+                reserved = BigDecimal.ZERO,
+                pending = BigDecimal.ZERO,
+                arrangedOverdraftLimit = BigDecimal.ZERO,
+                updatedAt = fixedInstant,
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                service.closeAccount(
+                    CloseAccountCommand(
+                        accountId = acc.id,
+                        reason = "customer request",
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(AccountNotEmptyException::class.java)
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+        // #4348 hazard: a refused close must never share the accountClosed count with a real one.
+        verify(exactly = 0) { metrics.accountClosed(any(), any()) }
     }
 
     @Test
@@ -617,4 +657,101 @@ class AccountServiceLifecycleTest {
         arrangedOverdraftLimit = BigDecimal.ZERO,
         updatedAt = Instant.parse("2024-01-15T11:59:00Z"),
     )
+
+    // ── customer lifecycle notifications (#8432) ─────────────────────────────
+
+    /**
+     * `ACCOUNT_OPENED`, `ACCOUNT_CLOSED` and `ACCOUNT_FROZEN` have been declared and rendered in
+     * notification-service since it was written, and **emitted by nothing** — 12 of its 23
+     * templates were in that state. These pin the producers this change adds.
+     */
+    @Test
+    fun `activateAccount tells the customer the account is usable`(): Unit = runBlocking {
+        val acc = account(status = AccountStatus.PENDING_ACTIVATION)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { accountRepository.update(any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        service.activateAccount(acc.id)
+
+        coVerify(exactly = 1) {
+            notificationRequestPort.notifyAccountOpened(acc.partyId, "CZ6508000000192000145399")
+        }
+    }
+
+    /**
+     * The decision worth reviewing: an account is announced when it becomes USABLE, not when its
+     * row appears. ADR-0267 opens onboarding accounts PENDING_ACTIVATION, which cannot debit or
+     * credit — announcing those would tell a new customer twice about accounts that move no money,
+     * then say nothing at the moment they go live.
+     */
+    @Test
+    fun `an already-ACTIVE account is not announced twice`(): Unit = runBlocking {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        service.activateAccount(acc.id)
+
+        coVerify(exactly = 0) { notificationRequestPort.notifyAccountOpened(any(), any()) }
+    }
+
+    /**
+     * The one a customer would want most, and the one never sent: an account freeze is otherwise
+     * invisible until they try to pay and fail. The operator's reason is carried because the
+     * template renders it.
+     */
+    @Test
+    fun `freezeAccount tells the customer, with the operator's reason`(): Unit = runBlocking {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { accountRepository.update(any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        service.freezeAccount(FreezeAccountCommand(acc.id, "Suspected fraud", UUID.randomUUID()))
+
+        coVerify(exactly = 1) {
+            notificationRequestPort.notifyAccountFrozen(
+                acc.partyId,
+                "CZ6508000000192000145399",
+                "Suspected fraud",
+            )
+        }
+    }
+
+    /**
+     * A refused transition must not notify. Otherwise merely ASKING to freeze a closed account
+     * would tell the customer it was frozen.
+     */
+    @Test
+    fun `a refused freeze notifies nobody`() {
+        val acc = account(status = AccountStatus.CLOSED)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+
+        assertThatThrownBy {
+            runBlocking { service.freezeAccount(FreezeAccountCommand(acc.id, "Suspected fraud", UUID.randomUUID())) }
+        }.isInstanceOf(IllegalStateException::class.java)
+
+        coVerify(exactly = 0) { notificationRequestPort.notifyAccountFrozen(any(), any(), any()) }
+    }
+
+    /**
+     * **The load-bearing one.** Opening, closing and freezing are money-path state changes with
+     * events and audit behind them. A broker hiccup must not roll one back, nor turn a completed
+     * operation into a 500 a saga retries — so the notification failure is swallowed and the
+     * transition stands.
+     */
+    @Test
+    fun `a failing notification does not undo the state change`(): Unit = runBlocking {
+        val acc = account(status = AccountStatus.PENDING_ACTIVATION)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { accountRepository.update(any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+        coEvery { notificationRequestPort.notifyAccountOpened(any(), any()) } throws
+            RuntimeException("broker unreachable")
+
+        val result = service.activateAccount(acc.id)
+
+        assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
+        coVerify(exactly = 1) { accountRepository.update(any()) }
+    }
 }

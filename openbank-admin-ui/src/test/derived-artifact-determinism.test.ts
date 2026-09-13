@@ -141,6 +141,11 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
       'infra-vulns.json',
       'package-lock.json',
       'package.json',
+      // Weekly CI snapshot from .github/scripts/security-kpis.py (ADR-0279 #15/#17/#18):
+      // deliberately absent from COMMITTED_GENERATORS — its content carries a timestamp by
+      // design (it IS a snapshot), and its provenance is the publisher workflow + refresh PR,
+      // not re-run determinism here.
+      'security-kpis.json',
       'tsconfig.json',
       'tsconfig.test.json',
     ])

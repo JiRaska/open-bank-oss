@@ -119,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: |
@@ -165,6 +165,14 @@ jobs:
           # unaffected.
           cache-read-only: true
           dependency-graph: generate-and-submit
+          # COUPLING: setup-gradle injects its own
+          # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
+          # classpath, and Gradle dependency verification checks it against
+          # gradle/verification-metadata.xml. A setup-gradle bump that raises the plugin
+          # version (v6 line moved 1.4.1 -> 1.4.2) fails this job with "Dependency
+          # verification failed for configuration 'classpath'" until the matching
+          # <component> entry is added to verification-metadata.xml — the version is not
+          # declared anywhere in this repo, so the metadata entry IS the pin record.
           # Keep detached and buildscript configurations OUT of the submitted graph (#2833).
           #
           # `configurations.all { resolutionStrategy { force(...) } }` — how

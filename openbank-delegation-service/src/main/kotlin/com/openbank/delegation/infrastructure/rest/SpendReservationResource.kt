@@ -60,6 +60,7 @@ class SpendReservationResource(private val reserveSpend: ReserveSpendUseCase) {
                 delegationId = id,
                 amount = request.toMoney(),
                 idempotencyKey = request.idempotencyKey,
+                operationType = request.operationType,
             ),
         )
         val reservationId = result.reservation.id

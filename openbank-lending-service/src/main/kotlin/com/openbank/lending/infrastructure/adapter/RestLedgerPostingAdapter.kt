@@ -28,6 +28,12 @@ import java.time.LocalDate
  * the service builds and boots with zero external dependency (the platform realization pattern,
  * ADR-0045), exactly like the analytics adapters.
  */
+// `@Unremovable` because a test asserts this bean's PRESENCE (LedgerAdapterBindingIT, #6057).
+// The test-scope `@Priority(200)` stubs outrank it, which makes it unused, and ArC would then
+// remove it for a reason unrelated to the build-time gate under test — the assertion would fail
+// against correct code. No effect in production, where nothing outranks it. `@IfBuildProperty`
+// still disables it outright when the backend is not selected, so the negative case is unaffected.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(100)

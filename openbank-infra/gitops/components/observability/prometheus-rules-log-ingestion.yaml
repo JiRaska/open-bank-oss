@@ -1,0 +1,76 @@
+# Log-pipeline liveness (issue #6236, the tail of #5734).
+#
+# WHY THIS EXISTS. `FalcoAgentSilent` used to cover this by accident: it fired when namespace
+# `falco` produced no logs for 30m, which was also true when Alloy stopped tailing or Loki stopped
+# ingesting. #6237 removed it, because tuning Falco to zero events (#6075, #6198) made silence the
+# healthy resting state and the rule a guaranteed false positive. That fix was correct and it left
+# a real gap, recorded rather than quietly inherited: nothing alerted on the log pipeline itself.
+#
+# The gap matters because of what it hides. Every rule in loki-rules-*.yaml is a LogQL query, and a
+# query over a stream that has stopped arriving returns nothing and looks exactly like a healthy
+# estate. So a dead pipeline silently disables every log-based alert at once — the runtime-security
+# rules, the silent-failure detectors, the endpoint-availability recording rule — while every
+# dashboard stays green. This estate has already paid for that shape twice (#5733, #6032).
+#
+# Measured live 2026-08-21 before this landed: ~445 log lines/second steady-state ingest, and ZERO
+# `loki_*` series in Prometheus. The metric was always there on the pod; nothing scraped it. See
+# servicemonitor-loki.yaml.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-log-ingestion-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.observability.log-ingestion
+      rules:
+        # Zero is used rather than a percentage drop because zero is the only threshold that needs
+        # no assumption about how chatty the estate happens to be — the assumption that made
+        # FalcoAgentSilent wrong. At ~445 lines/s steady state, a 10m window reading exactly zero
+        # is not a quiet period.
+        - alert: LokiLogIngestionStalled
+          expr: |
+            sum(rate(loki_distributor_lines_received_total[10m])) == 0
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            # Subject: real log traffic from every workload in the estate, not a scheduled job —
+            # measured at ~445 lines/second steady state on 2026-08-21. There is no invocation
+            # period for the 10m window to span, so `continuous` is the honest declaration rather
+            # than a duration invented to satisfy the gate.
+            subject_period: continuous
+            summary: "Loki has ingested no log lines for 10m — every log-based alert is blind"
+            description: >-
+              Loki's distributor has accepted zero log lines over 10 minutes, sustained for 15. This
+              is not one alert failing: EVERY rule in loki-rules-*.yaml is a LogQL query, so while
+              this is true they all evaluate over an empty window and report healthy. Runtime
+              security, the silent-failure detectors and endpoint availability are all dark.
+              Check the Alloy DaemonSet first (it does the tailing), then Loki's own ingester:
+              kubectl -n observability get pods -l app.kubernetes.io/name=alloy && kubectl -n observability logs loki-0 -c loki | tail
+        # The absence case, which the comparison above structurally CANNOT see: `== 0` over an
+        # absent series matches nothing, so if Loki stops exporting — pod gone, ServiceMonitor
+        # deleted, scrape failing — the stall alert reports healthy precisely when it should not.
+        # A missing series is a third state next to ingesting and stalled, and the reason this
+        # file's own subject was invisible until #6236: not zero, absent.
+        - alert: LokiMetricsAbsent
+          expr: |
+            absent(loki_distributor_lines_received_total)
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Loki is not reporting ingestion metrics — pipeline health is unverifiable"
+            description: >-
+              No `loki_distributor_lines_received_total` series for 15 minutes. Loki is down, or its
+              scrape is broken (see servicemonitor-loki.yaml). LokiLogIngestionStalled cannot fire
+              while this is true, because a comparison over an absent series matches nothing — so
+              this is the alert that means "the log pipeline's health is unknown", which is worse
+              than knowing it is stalled.
+              Check: kubectl -n observability get pods,servicemonitor -l app.kubernetes.io/name=loki

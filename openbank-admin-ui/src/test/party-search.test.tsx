@@ -53,6 +53,42 @@ describe('PartySearch', () => {
     expect(fetchSpy).not.toHaveBeenCalled() // the id IS the answer — no trigram round-trip
   })
 
+  it('cancels a superseded name lookup and clears busy state for a pasted UUID', async () => {
+    let firstSignal: AbortSignal | undefined
+    const fetchSpy = vi.fn((_url: string, init?: RequestInit) => {
+      firstSignal = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    const onSelect = vi.fn()
+
+    mount(onSelect)
+    fireEvent.keyDown(type('Novák'), { key: 'Enter' })
+    expect(await screen.findByRole('status')).toHaveTextContent(/Hledám|Searching/)
+
+    fireEvent.keyDown(type(UUID), { key: 'Enter' })
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith({ id: UUID }))
+    expect(firstSignal?.aborted).toBe(true)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels an in-flight lookup when its workflow unmounts', async () => {
+    let signal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    }))
+
+    const view = mount(vi.fn())
+    fireEvent.keyDown(type('Novák'), { key: 'Enter' })
+    expect(await screen.findByRole('status')).toBeVisible()
+
+    view.unmount()
+    expect(signal?.aborted).toBe(true)
+  })
+
   it('searches party-service by name and does not select until a row is chosen', async () => {
     const hit = { id: UUID, legalName: 'Jan Novák', email: 'jan@example.test', status: 'ACTIVE' }
     const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ data: [hit] }) }) as unknown as Response)
@@ -70,6 +106,20 @@ describe('PartySearch', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Vybrat|Select/ }))
     expect(onSelect).toHaveBeenCalledWith(hit)
+  })
+
+  it('exposes truthful search and selection state', async () => {
+    const hit = { id: UUID, legalName: 'Jan Novák', status: 'ACTIVE' }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [hit] }) }) as unknown as Response))
+
+    mount(vi.fn())
+    const input = type('Novák')
+    expect(input).toHaveAttribute('aria-controls', 'party-search-results')
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    const select = await screen.findByRole('button', { name: /Vybrat Jan Novák|Select Jan Novák/ })
+    expect(select).toHaveAttribute('type', 'button')
+    expect(select).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('renders zero matches as a search result, never as an unavailable data source', async () => {

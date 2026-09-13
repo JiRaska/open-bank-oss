@@ -1,0 +1,946 @@
+openapi: 3.1.0
+info:
+  title: OpenBank KYB Service API
+  # 1.2.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 shipped the name
+  # search (#9707); this is the next free minor as of live main.
+  version: 1.4.0
+  description: |
+    Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
+    verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
+    the onboarding case derives its signer requirement from the register's representation rule and
+    binds each identity-verified signer to the entity party as a representation mandate.
+    Customer routes are reached through the customer edge with `X-Customer-Party-Id`.
+servers:
+  - url: http://localhost:8157
+tags:
+  - name: KYB
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/kyb/schemes:
+    get:
+      tags: [KYB]
+      summary: Identifier schemes an applicant from a country may enter
+      operationId: listSchemes
+      parameters:
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+      responses:
+        '200':
+          description: Schemes the country pack (ADR-0284 D2) accepts, national first then cross-border
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  country:
+                    type: [string, 'null']
+                  pack:
+                    type: [object, 'null']
+                    properties:
+                      version:
+                        type: integer
+                      registry:
+                        type: string
+                      uboFallback:
+                        type: string
+                  schemes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Scheme'
+  /api/v1/kyb/lookup:
+    post:
+      tags: [KYB]
+      summary: Look a business identifier up in its public register
+      operationId: lookupEntity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupRequest'
+      responses:
+        '200':
+          description: Normalised register extract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryExtract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/registry/search:
+    get:
+      tags: [KYB]
+      summary: Find a company by name, optionally narrowed by town
+      description: >-
+        For the customer who does not know their identifier. Returns only what tells two companies
+        apart; a chosen row still goes through /lookup, so a search hit can never bind a case by
+        itself. `tooManyMatches` is a distinct outcome, not an error: the register refuses to
+        answer a query above its match cap (ARES: 1 000) and the customer should narrow it.
+        404 when the register for `country` declares no name search (see `supportsNameSearch`
+        on /schemes).
+      operationId: searchRegistry
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema: { type: string, example: CZ }
+        - name: name
+          in: query
+          required: true
+          description: Free text matched against the registered company name (min 3 characters)
+          schema: { type: string, minLength: 3 }
+        - name: city
+          in: query
+          required: false
+          description: Narrowing hint matched against the registered seat; the seat is often an accountant's address, so absence of a match is not absence of the company
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Candidate rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/cases:
+    post:
+      tags: [KYB]
+      summary: Start a business onboarding case
+      operationId: startCase
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartCaseRequest'
+      responses:
+        '201':
+          description: Case created (REGISTRY_VERIFIED or MANUAL_REVIEW)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+    get:
+      tags: [KYB]
+      summary: Cases a party is involved in, or the operator review queue by status
+      operationId: listCases
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+        - name: partyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CaseStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/kyb/cases/{id}:
+    get:
+      tags: [KYB]
+      summary: One case; 404 for a customer who is neither initiator nor signer
+      operationId: getCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/initiator:
+    post:
+      tags: [KYB]
+      summary: The initiator states which listed representative they are
+      operationId: matchInitiator
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchInitiatorRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/cosigners:
+    post:
+      tags: [KYB]
+      summary: Invite listed representatives to co-sign
+      operationId: inviteCosigners
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCosignersRequest'
+      responses:
+        '200':
+          description: Case with invitation tokens (initiator view)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/invitations/{token}/claim:
+    post:
+      tags: [KYB]
+      summary: An invited representative binds their own verified party to the case
+      operationId: claimInvitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimInvitationRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/sign:
+    post:
+      tags: [KYB]
+      summary: Record one signer's completed signature ceremony
+      operationId: signCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/abandon:
+    post:
+      tags: [KYB]
+      summary: The initiator abandons the case
+      operationId: abandonCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/review/resolve:
+    post:
+      tags: [KYB]
+      summary: Operator confirms a manually attested extract or power of attorney
+      operationId: resolveReview
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReviewRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/representation/{scheme}/{identifier}:
+    get:
+      tags: [KYB]
+      summary: What the attestation store says about this entity's current register rule text
+      operationId: representationDecision
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepresentationDecision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [KYB]
+      summary: Operator confirms how this entity is represented; supersedes any earlier confirmation
+      operationId: attestRepresentation
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttestRepresentationRequest'
+      responses:
+        '200':
+          description: The stored attestation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attestation'
+        '409':
+          description: The register rule text changed since the form was opened; re-read and confirm again
+  /api/v1/kyb/representation/{scheme}/{identifier}/history:
+    get:
+      tags: [KYB]
+      summary: Every confirmation ever made for this entity, superseded ones included
+      operationId: representationHistory
+      parameters:
+        - $ref: '#/components/parameters/reprScheme'
+        - $ref: '#/components/parameters/reprIdentifier'
+      responses:
+        '200':
+          description: Attestations, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Attestation'
+  /api/v1/kyb/cases/{id}/reject:
+    post:
+      tags: [KYB]
+      summary: Operator rejects the case
+      operationId: rejectCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/ubo:
+    get:
+      tags: [KYB]
+      summary: Beneficial owners of a business identifier, as its jurisdiction's register states them
+      operationId: lookupBeneficialOwners
+      description: >-
+        Always 200. `source` is the field to read first: REGISTER means a beneficial-ownership
+        register answered, SELF_DECLARATION means the jurisdiction has no queryable register and the
+        customer must declare, UNAVAILABLE means a register exists and could not be reached. An empty
+        `owners` list means something different under each, which is why a filed register statement
+        ("no individual PSC identified") is carried separately rather than collapsed into the absence.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scheme
+          in: query
+          required: true
+          schema: { type: string, example: GB_CRN }
+        - name: identifier
+          in: query
+          required: true
+          schema: { type: string, example: "OC123456" }
+      responses:
+        '200':
+          description: What is known about the entity's beneficial owners right now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboFinding' }
+        '400':
+          description: Missing or unparseable scheme/identifier
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    reprScheme:
+      name: scheme
+      in: path
+      required: true
+      schema: { type: string }
+    reprIdentifier:
+      name: identifier
+      in: path
+      required: true
+      schema: { type: string }
+    caseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    customerPartyId:
+      name: X-Customer-Party-Id
+      in: header
+      required: false
+      description: The authenticated customer, stamped by the customer edge. Required on customer routes.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The caller is not the party the route is scoped to
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: The transition is not valid in the case's current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RegistryUnavailable:
+      description: The public register could not be reached
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    SearchHit:
+      type: object
+      required: [scheme, identifier, name]
+      properties:
+        scheme: { type: string, example: CZ_ICO }
+        identifier: { type: string, example: "27074358" }
+        name: { type: string }
+        legalFormCode: { type: string, nullable: true }
+        legalForm: { type: string, nullable: true, description: Label from the country pack, when the code is known }
+        registeredAddress: { type: string, nullable: true }
+    SearchResponse:
+      type: object
+      required: [hits, totalMatches, tooManyMatches]
+      properties:
+        hits:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+        totalMatches: { type: integer, description: The register's own count; may exceed hits.length }
+        tooManyMatches: { type: boolean, description: The register refused the query as too broad; narrow it }
+    Attestation:
+      type: object
+      required: [id, scheme, identifier, ruleTextHash, parsedMode, confirmedSigners, confirmedRoles, attestedBy, attestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        scheme: { type: string }
+        identifier: { type: string }
+        ruleTextHash:
+          type: string
+          description: SHA-256 of the register rule text after case/diacritic/whitespace folding.
+        ruleText: { type: string, nullable: true }
+        parsedMode:
+          type: string
+          description: What the heuristic parser said when the operator was asked. Recorded to measure the parser, never to gate on.
+        parsedSigners: { type: integer, nullable: true }
+        confirmedSigners:
+          type: integer
+          minimum: 1
+          description: What the human decided. This is what binds an agreement.
+        confirmedRoles:
+          type: array
+          items: { type: string }
+          description: The offices that must sign. Empty means a plain count — any listed representatives may sign.
+        attestedBy: { type: string }
+        attestedAt: { type: string, format: date-time }
+        supersededAt: { type: string, format: date-time, nullable: true }
+        note: { type: string, nullable: true }
+    AttestRepresentationRequest:
+      type: object
+      required: [confirmedSigners, ruleTextHash]
+      properties:
+        confirmedSigners: { type: integer, minimum: 1 }
+        confirmedRoles:
+          type: array
+          items: { type: string }
+        ruleTextHash:
+          type: string
+          description: Hash of the text the operator actually read; a mismatch answers 409.
+        note: { type: string }
+    RepresentationDecision:
+      type: object
+      required: [state, ruleTextHash, parserMode, parserSuggestsRoles]
+      properties:
+        state:
+          type: string
+          enum: [ATTESTED, UNATTESTED, SUPERSEDED]
+          description: >-
+            SUPERSEDED means this entity HAS been confirmed before and the register text has since
+            changed — the old confirmation must not be reused.
+        ruleText: { type: string, nullable: true }
+        ruleTextHash: { type: string }
+        parserSuggestsSigners: { type: integer, nullable: true }
+        parserSuggestsRoles:
+          type: array
+          items: { type: string }
+        parserMode: { type: string }
+        attestation:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+        previous:
+          allOf: [{ $ref: '#/components/schemas/Attestation' }]
+          nullable: true
+          description: The confirmation that was superseded, so the reviewer is told what changed.
+    UboFinding:
+      type: object
+      properties:
+        scheme: { type: string }
+        identifier: { type: string }
+        source:
+          type: string
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE]
+        owners:
+          type: array
+          items: { $ref: '#/components/schemas/BeneficialOwner' }
+        registerStatements:
+          type: array
+          description: Statements the company filed, e.g. that no individual PSC has been identified.
+          items: { type: string }
+        threshold:
+          type: number
+          format: double
+          description: The jurisdiction's ownership threshold from its country pack (AMLD5 default 0.25).
+        registerName: { type: string, nullable: true }
+        sourceRef: { type: string, nullable: true }
+        requiresDeclaration:
+          type: boolean
+          description: True whenever the source is not a register — the bank still has to ask a human.
+        fetchedAt: { type: string, format: date-time }
+      required: [scheme, identifier, source, owners, registerStatements, threshold, requiresDeclaration, fetchedAt]
+    BeneficialOwner:
+      type: object
+      description: >-
+        One person or entity a register names as a beneficial owner. `band` is a band and never a
+        percentage: the UK PSC register publishes `ownership-of-shares-25-to-50-percent` and nothing
+        finer, so a precise figure would be invented rather than reported. `natureOfControl` carries
+        the register's own vocabulary verbatim.
+      properties:
+        fullName: { type: string }
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+          description: Null where the register publishes only a partial date (Companies House gives month and year).
+        nationality: { type: string, nullable: true }
+        countryOfResidence: { type: string, nullable: true }
+        band:
+          type: string
+          enum: [BELOW_THRESHOLD, PCT_25_TO_50, PCT_50_TO_75, PCT_75_TO_100, UNQUANTIFIED]
+        natureOfControl:
+          type: array
+          items: { type: string }
+        notifiedOn: { type: string, format: date, nullable: true }
+        corporate:
+          type: boolean
+          description: True when the owner is itself a company, so the ownership chain does not end here.
+      required: [fullName, band, natureOfControl, corporate]
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: [string, 'null']
+    IdentifierScheme:
+      type: string
+      enum: [CZ_ICO, SK_ICO, PL_NIP, PL_KRS, DE_HRB, AT_FN, GB_CRN, FR_SIREN, NL_KVK, LEI, EUID, EU_VAT, DUNS]
+    LegalFormClass:
+      type: string
+      enum: [SOLE_TRADER, LIMITED_COMPANY, JOINT_STOCK, PARTNERSHIP, COOPERATIVE, FOUNDATION, PUBLIC_BODY, BRANCH, OTHER]
+    EntityStatus:
+      type: string
+      enum: [ACTIVE, DISSOLVED, IN_LIQUIDATION, INSOLVENT, UNKNOWN]
+    RepresentationMode:
+      type: string
+      enum: [SOLE, JOINT_ALL, JOINT_N, UNKNOWN]
+    CaseStatus:
+      type: string
+      enum: [IDENTIFIER_ENTERED, REGISTRY_VERIFIED, INITIATOR_MATCHED, AWAITING_COSIGNERS, READY_TO_SIGN, SIGNED, ACTIVE, MANUAL_REVIEW, REJECTED, ABANDONED]
+    SignerStatus:
+      type: string
+      enum: [INVITED, IDENTIFIED, SIGNED, DECLINED]
+    Scheme:
+      type: object
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        country:
+          type: [string, 'null']
+        displayName:
+          type: string
+        checksum:
+          type: boolean
+        example:
+          type: string
+    DeclaredEntity:
+      type: object
+      required: [legalName, countryCode]
+      properties:
+        legalName:
+          type: string
+        countryCode:
+          type: string
+        legalFormClass:
+          $ref: '#/components/schemas/LegalFormClass'
+        addressLine1:
+          type: [string, 'null']
+        city:
+          type: [string, 'null']
+        postalCode:
+          type: [string, 'null']
+    LookupRequest:
+      type: object
+      required: [scheme, identifier]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        declared:
+          $ref: '#/components/schemas/DeclaredEntity'
+    StartCaseRequest:
+      type: object
+      required: [scheme, identifier, initiatorPartyId]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        initiatorPartyId:
+          type: string
+          format: uuid
+        declared:
+          $ref: '#/components/schemas/DeclaredEntity'
+    MatchInitiatorRequest:
+      type: object
+      required: [claimedName]
+      properties:
+        representativeIndex:
+          type: [integer, 'null']
+        claimedName:
+          type: string
+        dateOfBirth:
+          type: [string, 'null']
+          format: date
+    InviteCosignersRequest:
+      type: object
+      required: [representativeIndexes]
+      properties:
+        representativeIndexes:
+          type: array
+          items:
+            type: integer
+    ClaimInvitationRequest:
+      type: object
+      properties:
+        partyId:
+          type: string
+          format: uuid
+    SignRequest:
+      type: object
+      required: [signatureRef]
+      properties:
+        signatureRef:
+          type: string
+    ResolveReviewRequest:
+      type: object
+      required: [requiredSignatures]
+      properties:
+        requiredSignatures:
+          type: integer
+          minimum: 1
+        requiredSignerRoles:
+          type: array
+          items:
+            type: string
+          description: >-
+            The offices that must sign, when the register names them. Absent or empty means a plain
+            count — any listed representative may sign. Optional, and additive: the server has
+            always parsed it (ResolveReviewRequest.requiredSignerRoles), and it decides whether the
+            case goes straight to READY_TO_SIGN or waits for the named offices
+            (BusinessOnboardingCase.reviewResolved). Publishing it is what lets a generated client
+            send it at all.
+    RejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 10
+    Representative:
+      type: object
+      properties:
+        index:
+          type: integer
+        fullName:
+          type: string
+        dateOfBirth:
+          type: [string, 'null']
+          format: date
+        body:
+          type: [string, 'null']
+        role:
+          type: [string, 'null']
+        since:
+          type: [string, 'null']
+          format: date
+    RegistryExtract:
+      type: object
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        legalName:
+          type: string
+        legalFormCode:
+          type: [string, 'null']
+        legalFormClass:
+          $ref: '#/components/schemas/LegalFormClass'
+        status:
+          $ref: '#/components/schemas/EntityStatus'
+        registeredAddress:
+          type: [object, 'null']
+          properties:
+            line1:
+              type: [string, 'null']
+            city:
+              type: [string, 'null']
+            postalCode:
+              type: [string, 'null']
+            countryCode:
+              type: string
+        incorporatedOn:
+          type: [string, 'null']
+          format: date
+        taxId:
+          type: [string, 'null']
+        representatives:
+          type: array
+          items:
+            $ref: '#/components/schemas/Representative'
+        representationRule:
+          type: object
+          properties:
+            mode:
+              $ref: '#/components/schemas/RepresentationMode'
+            requiredSigners:
+              type: [integer, 'null']
+            sourceText:
+              type: [string, 'null']
+        source:
+          type: string
+        sourceRef:
+          type: [string, 'null']
+        verification:
+          type: string
+          enum: [VERIFIED, UNVERIFIED]
+        fetchedAt:
+          type: string
+          format: date-time
+    Signer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        representativeIndex:
+          type: [integer, 'null']
+        fullName:
+          type: string
+        partyId:
+          type: [string, 'null']
+          format: uuid
+        status:
+          $ref: '#/components/schemas/SignerStatus'
+        isInitiator:
+          type: boolean
+        invitedAt:
+          type: [string, 'null']
+          format: date-time
+        identifiedAt:
+          type: [string, 'null']
+          format: date-time
+        signedAt:
+          type: [string, 'null']
+          format: date-time
+        invitationToken:
+          type: [string, 'null']
+          description: Present only in the initiator's view.
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/CaseStatus'
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        initiatorPartyId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: [string, 'null']
+          format: uuid
+        requiredSignatures:
+          type: [integer, 'null']
+        requiredSignerRoles:
+          type: array
+          items: { type: string }
+          description: >-
+            The offices the attested rule requires. Empty means a plain count — any listed
+            representatives may sign. Non-empty means each office must be filled by a distinct signer.
+        signedCount:
+          type: integer
+        extract:
+          oneOf:
+            - $ref: '#/components/schemas/RegistryExtract'
+            - type: 'null'
+        signers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Signer'
+        reviewReason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

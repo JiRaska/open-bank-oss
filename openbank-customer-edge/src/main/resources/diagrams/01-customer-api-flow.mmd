@@ -7,7 +7,7 @@ sequenceDiagram
     participant KC as Keycloak
     participant Up as upstream service
 
-    App->>Nginx: HTTPS  Authorization: Bearer &lt;customer JWT&gt;
+    App->>Nginx: HTTPS  Authorization: Bearer #lt;customer JWT#gt;
     Nginx->>Edge: /customer/v1/*  (rate-limit passed)
 
     Edge->>Edge: Quarkus OIDC validates JWT<br/>(openbank-customers realm, issuer pinned)
@@ -18,9 +18,9 @@ sequenceDiagram
     end
 
     alt ownership check required (account/balance/tx/statement/payment)
-        Edge->>KC: GET /realms/openbank/protocol/openid-connect/token<br/>grant_type=client_credentials  [if M2M token expired or &lt;60 s left]
+        Edge->>KC: GET /realms/openbank/protocol/openid-connect/token<br/>grant_type=client_credentials  [if M2M token expired or <60 s left]
         KC-->>Edge: access_token + expires_in
-        Edge->>Up: GET .../accounts/{accountId}<br/>Authorization: Bearer &lt;M2M token&gt;<br/>X-Customer-Party-Id: &lt;partyId&gt;
+        Edge->>Up: GET .../accounts/{accountId}<br/>Authorization: Bearer #lt;M2M token#gt;<br/>X-Customer-Party-Id: #lt;partyId#gt;
         Up-->>Edge: account (partyId field)
         Edge->>Edge: ownsAccount? account.partyId == JWT partyId
         alt does NOT own account
@@ -33,7 +33,7 @@ sequenceDiagram
         KC-->>Edge: access_token
     end
 
-    Edge->>Up: proxied request<br/>Authorization: Bearer &lt;M2M token&gt;<br/>X-Customer-Party-Id: &lt;partyId&gt;
+    Edge->>Up: proxied request<br/>Authorization: Bearer #lt;M2M token#gt;<br/>X-Customer-Party-Id: #lt;partyId#gt;
     Up-->>Edge: 200 / 4xx / 5xx
 
     alt transport error

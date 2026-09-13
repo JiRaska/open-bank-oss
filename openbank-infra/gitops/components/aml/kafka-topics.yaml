@@ -1,5 +1,5 @@
 # AML case lifecycle events — published by aml-service (outbox), consumed by party-service
-# (KYC+AML activation gate, ADR-0073) and onboarding-service (cockpit funnel).
+# (KYC+AML activation gate, ADR-0267 §2) and onboarding-service (cockpit funnel).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:

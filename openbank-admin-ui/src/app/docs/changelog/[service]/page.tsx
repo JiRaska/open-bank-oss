@@ -14,6 +14,7 @@ import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { fetchChangelog, SERVICE_RE } from '@/lib/docs/releases'
 import { prettyLabel } from '@/lib/discovery'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 interface PageProps {
   params: Promise<{ service: string }>
@@ -30,30 +31,24 @@ export default async function ChangelogPage({ params }: PageProps) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs/api" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Changelog', 'Changelog')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FileText size={18} style={{ color: 'var(--accent)' }} />
-            {label} — Changelog
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={`${label} — Changelog`}
+        subtitle={t(
               'Historie verzí generovaná z Conventional Commits (release-please).',
               'Version history generated from Conventional Commits (release-please).',
             )}
-          </p>
-        </div>
-        <Link href="/docs/api" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        icon={<FileText aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs/api" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na API katalog', 'Back to API catalog')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       <div className="card" style={{ padding: '24px' }}>
         {!valid ? (

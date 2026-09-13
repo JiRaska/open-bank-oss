@@ -26,8 +26,8 @@ data class SanctionsEntry(
      *  Used as the pg_trgm indexed column for similarity search. */
     val searchText: String,
     val active: Boolean = true,
-    val createdAt: Instant = Instant.EPOCH,
-    val updatedAt: Instant = Instant.EPOCH,
+    val createdAt: Instant,
+    val updatedAt: Instant,
 )
 
 data class SanctionsEntryMatch(val entry: SanctionsEntry, val matchedName: String, val score: Double)

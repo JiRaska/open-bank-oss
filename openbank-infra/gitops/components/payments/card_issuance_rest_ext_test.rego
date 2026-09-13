@@ -106,3 +106,39 @@ test_card_block_denied_for_ai_agent if {
 		"action": "card.block",
 	}
 }
+
+# --- card.outbox.requeue (#4005): ROLE_ADMIN only ---
+
+# The one grant. ROLE_ADMIN matches CardOutboxAdminResource.requeueDead's @RolesAllowed exactly.
+test_card_outbox_requeue_allowed_for_admin if {
+	"admin-card-outbox-requeue" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "card.outbox.requeue",
+	}
+}
+
+# ROLE_OPERATOR must NOT reach it. This is the must-deny half, and it is the assertion that fails
+# if someone later folds card.outbox.requeue into the operator-card-write action set for tidiness:
+# replaying a dead-lettered event appends a permanent, undeletable duplicate to the audit chain,
+# so the policy must stay exactly as narrow as the @RolesAllowed it mirrors.
+test_card_outbox_requeue_denied_for_operator if {
+	count(rest.allowed_reasons) == 0 with input as {
+		"principal": {"type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "card.outbox.requeue",
+	}
+}
+
+test_card_outbox_requeue_denied_for_compliance if {
+	count(rest.allowed_reasons) == 0 with input as {
+		"principal": {"type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "card.outbox.requeue",
+	}
+}
+
+# An AI_AGENT holding ROLE_ADMIN still does not match — this extension is HUMAN-only.
+test_card_outbox_requeue_denied_for_ai_agent if {
+	count(rest.allowed_reasons) == 0 with input as {
+		"principal": {"type": "AI_AGENT", "roles": ["ROLE_ADMIN"]},
+		"action": "card.outbox.requeue",
+	}
+}

@@ -49,24 +49,21 @@ dependencies {
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
+    // RestAssured: SanctionsOutboxAtomicityIT (#8353) drives POST /screen and POST /review over
+    // real HTTP, the only way to exercise a reactive Panache write (a bare @QuarkusTest thread
+    // carries no Vert.x context). Pact's own provider verification uses HttpTestTarget, so this
+    // module had no RestAssured on its test classpath before. #8699 adds a second driver: the
+    // partial-screen defect is only observable as an HTTP status, so that test drives the real
+    // endpoint too.
+    testImplementation(libs.rest.assured.kotlin)
 }
 
 // Pact: replay the committed git-pact contracts (ADR-0063) and forward broker config when CI
 // supplies it, so a later broker migration needs no build change here.
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 kover {
     reports {

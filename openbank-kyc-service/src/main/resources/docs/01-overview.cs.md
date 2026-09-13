@@ -4,7 +4,7 @@
 
 `openbank-kyc-service` je **systém pravdy pro správu případů Know Your Customer (KYC) / Customer Due Diligence (CDD)** na platformě OpenBank. Drží:
 
-- **Agregát KycCase** — `partyId`, stav případu (OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED), úroveň rizika (LOW / MEDIUM / HIGH / VERY_HIGH), úroveň hloubkové prověrky (SDD / CDD / EDD), revizora, expiraci a seznam kontrol.
+- **Agregát KycCase** — `partyId`, stav případu (OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED) (`DOCUMENTS_REQUIRED` je deklarovaný, ale nedosažitelný — žádná operace `KycService` ho nenastavuje, viz #8535; ponechán, protože odebrání hodnoty z publikovaného enumu je rozbíjející zúžení kontraktu, #8618), úroveň rizika (LOW / MEDIUM / HIGH / VERY_HIGH), úroveň hloubkové prověrky (SDD / CDD / EDD), revizora, expiraci a seznam kontrol.
 - **KycCheck** — výsledek jednotlivé kontroly uvnitř případu: IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA, každá se stavem (PENDING / PASSED / FAILED / MANUAL_REVIEW), volitelnou poznámkou k výsledku a referencí poskytovatele.
 - **Compliance obohacující pole** (V2) — zdroj prostředků / majetku, účel obchodního vztahu, očekávaný obrat, PEP samoprohlášení, skutečný majitel, poskytovatel/reference screeningu, datum příští periodické revize a metadata eskalace.
 

@@ -37,7 +37,7 @@ graph TB
     uc[Application<br/>SddMandateService<br/>in/out ports]
     dom[Domain<br/>SddMandate + MandateLifecycle<br/>CollectionAuthorisationPolicy<br/>RefundPolicy]
     persist[Persistence<br/>SddMandateRepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>SddOutboxDispatcher<br/>@Scheduled every 5s]
+    outbox["Outbox<br/>SddOutboxDispatcher<br/>@Scheduled every 5s"]
     sched[Scheduler<br/>MandateExpiryScheduler<br/>cron, disabled by default]
   end
 

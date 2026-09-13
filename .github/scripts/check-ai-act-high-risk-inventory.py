@@ -55,6 +55,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 INVENTORY = REPO / "openbank-libs" / "governance" / "ml-systems.yaml"
 
@@ -134,6 +136,18 @@ def scan_module(module: str, repo: pathlib.Path = None) -> list[str]:
     return hits
 
 
+def missing_credit_plane(repo: pathlib.Path | None = None) -> list[str]:
+    """CREDIT_PLANE entries with no `src/main/kotlin` — modules this gate would vouch for unseen.
+
+    scan_module() returns no hits for a directory that does not exist, which is right for a
+    single scan and wrong for the load-bearing claim: measured 2026-09-13 (#6253), pointing the
+    first entry at a non-existent module left this gate exit 0 printing "the credit plane
+    (openbank-lending-service-RENAMED, …) carries no model inference". A rename would do the same.
+    """
+    repo = repo or REPO
+    return [m for m in CREDIT_PLANE if not (repo / m / "src" / "main" / "kotlin").is_dir()]
+
+
 def self_test() -> int:
     """Falsify the inference-site scanner.
 
@@ -203,13 +217,25 @@ def self_test() -> int:
         fails.append(f"the real inventory no longer holds {CREDIT_SYSTEM_ID!r} — this gate's "
                      f"subject is gone and it would report clean about nothing")
 
+    # EXISTENCE (#6253): a credit-plane module that is not there must fail, not scan clean.
+    td = pathlib.Path(tempfile.mkdtemp())
+    (td / "openbank-anacredit-service" / "src" / "main" / "kotlin").mkdir(parents=True)
+    if missing_credit_plane(td) != ["openbank-lending-service"]:
+        fails.append(f"a missing credit-plane module was not reported: {missing_credit_plane(td)}")
+    (td / "openbank-lending-service" / "src" / "main" / "kotlin").mkdir(parents=True)
+    if missing_credit_plane(td) != []:
+        fails.append(f"a complete credit plane reported missing modules: {missing_credit_plane(td)}")
+    # ...and the live tree: both declared modules must exist today, or the gate is vouching for nothing.
+    if missing_credit_plane() != []:
+        fails.append(f"the real repo lacks credit-plane module(s): {missing_credit_plane()}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
     print(f"self-test ok: AI-Act high-risk inventory is falsifiable "
-          f"(11 cases + a live read of {len(inv)} declared system(s))")
+          f"(13 cases + a live read of {len(inv)} declared system(s))")
     return 0
 
 
@@ -230,6 +256,16 @@ def main() -> int:
             "inventory. The Annex III(5)(b) entry is what the platform's non-applicability claim "
             "rests on — deleting it does not make the obligation go away.",
         )
+        return 1
+
+    missing = missing_credit_plane()
+    for module in missing:
+        print(
+            f"::error::check-ai-act-high-risk-inventory: CREDIT_PLANE names '{module}', which has no "
+            "src/main/kotlin. The Annex III(5)(b) check below would report that module clean without "
+            "reading a line of it. Update CREDIT_PLANE to where the credit plane actually lives.",
+        )
+    if missing:
         return 1
 
     failures = 0
@@ -274,6 +310,14 @@ def main() -> int:
                 "a deployed plane. An AI system absent from the Annex IV inventory is undeclared, "
                 "which is the inventory obligation failing rather than a naming problem.",
             )
+
+    # The module corpus the inference scan walks. Measured 2026-09-03: renaming a service away
+    # left this gate green, and a glob that stops matching reads exactly like a fleet with no
+    # undeclared inference. The floor is a COLLAPSE detector — it catches a broken glob or a
+    # moved source root, not the loss of a single module.
+    gatelib.subjects(sum(1 for d in REPO.glob("openbank-*")
+                         if (d / "src" / "main" / "kotlin").is_dir()),
+                     "modules with a Kotlin source root, scanned for inference")
 
     if failures:
         return 1

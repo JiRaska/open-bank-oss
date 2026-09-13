@@ -18,6 +18,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import org.junit.jupiter.api.BeforeEach
@@ -63,6 +64,8 @@ import java.util.UUID
  * broker replay is missing fails with `MissingStateChangeMethod` and publishes a **FAILURE**, which
  * blocks an otherwise-healthy pair — strictly worse than publishing nothing. When you add an
  * interaction to one class, add it to both in the same commit.
+ * The `DelegationRevoked` interaction is the negative authorization case: after consumption the
+ * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
 @PactBroker
@@ -103,11 +106,14 @@ class DelegationEventPactBrokerProviderVerificationTest {
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
             resourceId = RESOURCE,
             capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            approvalPolicy = ApprovalPolicy.N_OF_M,
+            requiredApprovals = 3,
             validFrom = VALID_FROM,
             validTo = null,
             perTransactionLimit = EventMoney(BigDecimal("1500.00"), "CZK"),
@@ -122,6 +128,7 @@ class DelegationEventPactBrokerProviderVerificationTest {
     fun produceAccountRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
@@ -139,6 +146,7 @@ class DelegationEventPactBrokerProviderVerificationTest {
     fun produceCardActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,
@@ -158,6 +166,7 @@ class DelegationEventPactBrokerProviderVerificationTest {
     fun produceCardRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,

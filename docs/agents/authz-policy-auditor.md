@@ -73,10 +73,19 @@ vs. `tool_tiers` drift) proactively covering a related, not-yet-incident-causing
   per-service `*-opa-bundle.yaml` copies `gen-*-opa-bundle.sh` mechanically derives from them — a
   regression at the source is the primary defense; the generated copies are supposed to be
   mechanically regenerated, not independently authored.
-- The `LlmDiagnosisPort` and `GitHubProposalPort` adapters are stubs pending the shared LiteLLM
-  gateway and GitHub App installation-token wiring, the same bootstrap state every sibling agent
-  shipped with. `proposeFixDiff` returns `null` unconditionally BY DESIGN here (not just pending
-  integration) — this agent never proposes a fix diff for a security-policy defect.
+- The `LlmDiagnosisPort` adapter is a stub pending the shared LiteLLM gateway. `proposeFixDiff`
+  returns `null` unconditionally BY DESIGN here (not just pending integration) — this agent never
+  proposes a fix diff for a security-policy defect.
+- **`GitHubProposalPort` is unwired and REFUSES — no finding of this agent reaches GitHub today**
+  (#5897). Both methods return `null`, and `DiagnoseAndProposeActivityImpl` then leaves the finding
+  `DIAGNOSED` with a null `proposalUrl`: it is never counted in a run's `findingsProposed` and never
+  presented as awaiting a human. It previously returned a fabricated
+  `https://github.com/openbank/openbank/issues/pending-authz-policy-auditor-<id>` URL and moved the
+  finding to `PROPOSED` — which on this agent meant an authorization-policy defect nobody had filed
+  being reported as filed and awaiting the `two_person_review` its charter requires. `openProposalPr`
+  refuses **permanently** (ADR-0167: never a fix PR on an authorization policy); `openTicket`
+  refuses because no `github-token` config exists in this service. Follows
+  `openbank-mcp-service`'s `UnwiredProposalPort` (#3900).
 - `repo-root` (`AUTHZ_POLICY_AUDITOR_REPO_ROOT`) must point at a mounted, up-to-date checkout of
   `main` for the `PolicyScanPort` checks to be meaningful — the deployment-side checkout-mount
   wiring (a sidecar or init-container `git pull`) is tracked separately and not yet part of this

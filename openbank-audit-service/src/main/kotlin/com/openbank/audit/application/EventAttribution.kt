@@ -4,6 +4,8 @@
 
 package com.openbank.audit.application
 
+import com.openbank.libs.analytics.TopicProducers
+
 /**
  * Broker-side addressing for one consumed audit record (#3994).
  *
@@ -37,11 +39,11 @@ data class EventAddress(
  *
  * **Why a table and not a derivation.** The sibling sink derives the service from the topic's
  * domain segment (`openbank.<domain>.…` -> `openbank-<domain>-service`) and that is right for its
- * purpose, but it is WRONG for nine of the twenty-one topics audited here — `openbank.cards.events`
+ * purpose, but it is WRONG for eight of the twenty topics audited here — `openbank.cards.events`
  * is produced by card-issuance-service, `openbank.payments.swift.event` by swift-service,
- * `openbank.customer.audit` by customer-edge, `openbank.security.*` by security-scanner, and
- * `accounts`/`transactions`/`documents` are plural where the module is singular. A derivation that
- * is wrong nine times out of twenty-one does not under-attribute: it writes a plausible,
+ * `openbank.customer.audit` by customer-edge, `openbank.security.ict.incident` by security-scanner,
+ * and `accounts`/`transactions`/`documents` are plural where the module is singular. A derivation
+ * that is wrong eight times out of twenty does not under-attribute: it writes a plausible,
  * confident, FALSE service name into a tamper-evident evidentiary record, which is strictly worse
  * than the `"unknown"` it replaces. So every value here is verified against the module that
  * actually declares the outgoing channel, and [AttributionSource] keeps a derived value
@@ -58,33 +60,16 @@ data class EventAddress(
  * which is what `customer-edge` (the one producer that populates the field today) already writes.
  */
 object TopicAttribution {
-
-    private val TOPIC_TO_SERVICE = mapOf(
-        "openbank.accounts.account.created" to "account-service",
-        "openbank.transactions.transaction.initiated" to "transaction-service",
-        "openbank.balance.events" to "balance-service",
-        "openbank.party.events" to "party-service",
-        "openbank.kyc.events" to "kyc-service",
-        "openbank.consent.events" to "consent-service",
-        "openbank.customer.audit" to "customer-edge",
-        "openbank.clearing.batch.event" to "clearing-service",
-        "openbank.security.ict.incident" to "security-scanner",
-        "openbank.security.scan.event" to "security-scanner",
-        "openbank.cards.events" to "card-issuance-service",
-        "openbank.dispute.events" to "dispute-service",
-        "openbank.domestic.payment.events" to "domestic-payment",
-        "openbank.sepa.payment.events" to "sepa-payment",
-        "openbank.statement.event" to "statement-service",
-        "openbank.sanctions.screening.event" to "sanctions-service",
-        "openbank.sepa.instant.events" to "sepa-instant",
-        "openbank.fx.conversion.completed" to "fx-service",
-        "openbank.documents.document.event" to "document-service",
-        "openbank.payments.swift.event" to "swift-service",
-        "openbank.lending.events" to "lending-service",
-    )
+    // The topic -> producing-module table moved to openbank-libs-domain
+    // (com.openbank.libs.analytics.TopicProducers) so analytics-sink reads the SAME rows rather
+    // than deriving a name from the topic's domain segment — a derivation that produced
+    // `openbank-transactions-service`, a module that does not exist. The values are unchanged:
+    // `source_service` is chain-hashed into `record_hash` and audit_entries is append-only, so a
+    // moved value would be a new spelling, not a refactor. The reasoning for each row lives with
+    // the table.
 
     /** Topics with a verified producer entry. Visible for the coverage test. */
-    val mappedTopics: Set<String> get() = TOPIC_TO_SERVICE.keys
+    val mappedTopics: Set<String> get() = TopicProducers.mappedTopics
 
     /**
      * The service that produces [topic], or null when the topic is not one of ours.
@@ -92,8 +77,5 @@ object TopicAttribution {
      * Null rather than a guess: an unrecognised topic keeps `"unknown"`, which is honest, instead
      * of acquiring a service name derived from a naming convention it may not follow.
      */
-    fun sourceService(topic: String?): String? {
-        if (topic.isNullOrBlank()) return null
-        return TOPIC_TO_SERVICE[topic]
-    }
+    fun sourceService(topic: String?): String? = TopicProducers.sourceService(topic)
 }

@@ -1,0 +1,936 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# probe.sh — the shell probes this repo keeps getting wrong, each with a known-positive check
+# it must pass before its answer is allowed to count.
+#
+# WHY THIS EXISTS
+#   A probe fails by reporting CLEAN. That is the whole problem: a broken linter invocation, a
+#   date parsed in the wrong zone, a column index that shifted — none of them error, all of them
+#   return a plausible nothing, and nothing downstream can tell "found no problem" from "could not
+#   look". Eight measured instances in this repo, all of which printed a green answer:
+#
+#     * `find <dir> -newermt "-60 minutes"` is ALWAYS empty on BSD/macOS (no GNU relative dates).
+#       An actively-committing worktree was reported idle.
+#     * `date -j -f "%Y-%m-%dT%H:%M:%SZ" "$t" +%s` silently ignores the trailing `Z` and parses as
+#       LOCAL time — 2h off in CEST. It flagged 53 branches as having post-merge commits; the true
+#       count was 0.
+#     * `git rev-parse origin/<branch>` reads the local remote-tracking ref, and a plain `git fetch`
+#       never prunes. It claimed a deleted remote branch still existed.
+#     * `gh pr checks | awk '$2!="pass"'` — job names contain spaces, so `$2` is a WORD OF THE NAME,
+#       never the status. Every conclusion drawn from it was noise, and the matching
+#       `until [ "$(… | awk '$2=="pending"' | wc -l)" -eq 0 ]` wait loop exited instantly.
+#     * `actionlint "$f" | grep -oE 'SC[0-9]+'` post-filtered away a YAML syntax error, so the
+#       harness printed "no new findings" about a file it had just broken.
+#     * `actionlint $CHANGED` with a newline-joined list passes ONE argument; actionlint errors, and
+#       an `[ -n "$out" ]` branch printed "(empty = clean)".
+#     * counting `in_progress` workflow runs to judge CI saturation counts 189 runs whose jobs all
+#       completed and whose run record never transitioned.
+#     * `git rev-list -1 --before=2026-08-09 <ref>` fills the bare date with the CURRENT TIME OF DAY,
+#       so a date-pinned baseline lands INSIDE the window and answers differently every hour. The
+#       same command text returned three different baselines in one session; the period report built
+#       on it published +24 and +66 where the truth was +28 and +77.
+#
+# THE RULE THIS FILE ENCODES
+#   Before trusting a probe's silence, run it against a known-positive. Every function here ships
+#   with one, `--selftest` runs them all, and each case asserts BOTH directions — the probe finds
+#   the thing that is there, and does not find the thing that is not. A probe that cannot fail is
+#   decoration, and this file is where that stops being a slogan.
+#
+#   The self-test is deliberately hermetic: it builds its own fixtures in a temp dir and touches no
+#   network, so it runs identically on ubuntu-latest and on the self-hosted macOS runners — which is
+#   the point, since every trap above is a BSD-vs-GNU divergence that only one of those two exposes.
+#
+# Usage:
+#   source .github/scripts/lib/probe.sh
+#   probe_utc_epoch "2026-08-22T14:25:39Z"
+#   bash .github/scripts/lib/probe.sh --selftest
+
+# Intentionally NOT `set -e` at file scope: this is sourced, and inheriting errexit into a caller
+# that does not expect it is its own silent failure mode.
+
+# ---------------------------------------------------------------------------------------------
+# probe_utc_epoch <iso8601-with-Z> -> unix seconds on stdout
+#
+# BSD `date -j -f` ignores a literal `Z` in the format string and parses in the LOCAL zone. `-u` is
+# what makes it read as UTC, and it must be present on BOTH the parse and the output. GNU `date -d`
+# handles the offset itself. Getting this wrong is a whole-hours error that looks like real data.
+probe_utc_epoch() {
+  local stamp="$1"
+  if date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$stamp" +%s 2>/dev/null; then return 0; fi
+  date -u -d "$stamp" +%s 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_files_modified_since <dir> <minutes> -> matching paths on stdout
+#
+# `-mmin -N` is portable; `-newermt "-N minutes"` is GNU-only and returns EMPTY on BSD rather than
+# erroring. `.git` is excluded because its internals churn on every read-only command, which makes
+# an idle worktree look busy — the opposite error, and just as misleading.
+probe_files_modified_since() {
+  local dir="$1" minutes="$2"
+  find "$dir" -type f -not -path '*/.git/*' -mmin "-$minutes" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_remote_branch_exists <branch> [remote] -> exit 0 if it exists ON THE REMOTE
+#
+# `git rev-parse origin/<b>` and `git branch -r --contains` read the LOCAL remote-tracking ref, and
+# a plain `git fetch` never prunes deleted branches. Only `ls-remote` asks the server.
+probe_remote_branch_exists() {
+  local branch="$1" remote="${2:-origin}"
+  [ -n "$(git ls-remote --heads "$remote" "$branch" 2>/dev/null)" ]
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_pr_failing_checks <pr> [repo] -> "<bucket>\t<name>" for every non-passing check
+#
+# Never parse the human table: job names contain spaces, so a positional column is a word of the
+# NAME, not the status. `--json` is the only stable read. `skipping` is excluded because a skipped
+# required context is a THIRD state (absent), not a failure — see probe_pr_missing_contexts.
+probe_pr_failing_checks() {
+  local pr="$1" repo="${2:-}"
+  local args=("$pr" --json "name,bucket")
+  [ -n "$repo" ] && args+=(-R "$repo")
+  gh pr checks "${args[@]}" 2>/dev/null |
+    jq -r '.[] | select(.bucket!="pass" and .bucket!="skipping") | "\(.bucket)\t\(.name)"'
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_zombie_runs [repo] [min_age_hours] -> "<id>\t<created_at>\t<name>" per wedged run
+#
+# A run whose record says `in_progress` while every one of its jobs is `completed` is wedged in
+# GitHub's own state machine, and neither `POST /actions/runs/{id}/cancel` nor `.../force-cancel`
+# can clear it -- both answer HTTP 500 (3/3 sampled, #6472). Subtracting them is the only correct
+# handling before any statement about CI saturation.
+#
+# AGE IS PART OF THE TEST, NOT A TIDY-UP. "Every job completed" alone is NOT sufficient, and the
+# first version of this probe shipped without the age bound and over-counted because of it: a live
+# run whose remaining jobs have not been CREATED yet also has every existing job completed. Two
+# false positives measured on 2026-08-22 within minutes of each other -- a `Services CI` run with
+# 30/30 jobs successful and still fanning out, and four runs created 90 seconds earlier. The
+# corrected census: 184 in_progress, of which 177 older than 24h (genuinely wedged, all created in
+# a 2026-08-06..08-10 window) and 6 under an hour old (simply running).
+#
+# 24h is not arbitrary and it is not a heuristic about "old": nothing in Actions creates a job a
+# day after the run started, so past that bound "all created jobs are done" and "all jobs are
+# done" cannot differ.
+#
+# It is also what makes the probe cheap. Filtering on the list payload first costs 2 API calls;
+# asking the jobs endpoint per run, as the first version did, costs N+1 -- 185 calls to answer one
+# question.
+#
+# THE ROOT CAUSE, for whoever reads this next: every one of the three workflows that produced 164
+# of the 177 (`Auto-retry spot-killed CI runs` 72, `main red watch` 53, `Dependabot auto-merge` 39)
+# has the same shape -- an event-triggered guard whose jobs skip on almost every run, so ALL of its
+# jobs are `completed/skipped`. That is a GitHub-side transition failure, not a defect in those
+# workflows. It appears fixed upstream: recent all-skipped runs of `main red watch` complete
+# normally, and exactly one run has wedged since 2026-08-10.
+# probe_utc_cutoff <hours_ago> -> an ISO-8601 UTC instant that many hours in the past
+#
+# Split out of probe_zombie_runs so it is reachable from --selftest without the network. Portable
+# across BSD `date -v` and GNU `date -d`, and ALWAYS `-u`: the Actions API reports created_at in
+# UTC, and comparing it against a local wall-clock string is the whole-hours error that once
+# flagged 53 branches as having post-merge commits when the true count was 0 (see probe_utc_epoch).
+probe_utc_cutoff() {
+  local hours="$1"
+  date -u -v-"${hours}"H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "${hours} hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_commit_before_utc <iso8601-with-Z> [ref] [-C <dir>] -> the newest commit SHA strictly
+# before that instant, on stdout; non-zero (and silent on stdout) if it cannot be established.
+#
+# `--before=2026-08-09` does NOT mean midnight. Git's approxidate fills a bare date with the
+# CURRENT TIME OF DAY, so the cutoff walks forward as the day does and the answer changes between
+# two runs of identical command text. Measured 2026-09-06 at local 16:33 in this repo:
+#
+#     --before=2026-08-09               -> a commit at 2026-08-09T16:30:51+02:00  (inside the window)
+#     --before="2026-08-09 00:00"       -> local midnight, not UTC
+#     --before=2026-08-09T00:00:00Z     -> correct
+#
+# A report built on the bare form drifted its own baseline across one session (ADR 242 -> 246 -> 248,
+# gates 122 -> 133 -> 140), published every delta wrong, and "corrected" a previous report that had
+# been right. So this probe takes an explicit zoned instant and, before answering, VERIFIES that the
+# commit it found really does precede the cutoff — a baseline nobody can see is a baseline nobody
+# should trust. `--first-parent` keeps the answer on the mainline rather than on a merged side branch
+# whose commit dates can straddle the boundary. Note `--until` is INCLUSIVE of the instant given,
+# so the probe asks for one second earlier: a commit landing exactly on the boundary belongs to the
+# window, not to the baseline.
+probe_commit_before_utc() {
+  local cutoff="$1" ref="${2:-origin/main}" dir="."
+  if [ "${3:-}" = "-C" ]; then dir="${4:-.}"; fi
+
+  case "$cutoff" in
+    *T*Z) : ;;
+    *)
+      echo "probe_commit_before_utc: cutoff '$cutoff' is not an explicit UTC instant" \
+           "(want 2026-08-09T00:00:00Z) — a bare date resolves to the current time of day" >&2
+      return 2
+      ;;
+  esac
+
+  # `--until` is INCLUSIVE: a commit whose date equals the cutoff to the second is kept, which for
+  # a "state as of the start of the window" baseline is off by one commit. Measured against a
+  # fixture holding a commit exactly at the boundary — the fail-closed check below caught it. Ask
+  # for one second earlier instead of hand-waving that an exact hit "won't happen".
+  local cutoff_s prev_s prev_iso sha
+  cutoff_s="$(probe_utc_epoch "$cutoff")"
+  [ -n "$cutoff_s" ] || { echo "probe_commit_before_utc: cannot parse cutoff '$cutoff'" >&2; return 2; }
+  prev_s=$((cutoff_s - 1))
+  prev_iso="$(date -u -r "$prev_s" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+              || date -u -d "@$prev_s" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  [ -n "$prev_iso" ] || { echo "probe_commit_before_utc: cannot format the cutoff" >&2; return 2; }
+
+  sha="$(git -C "$dir" rev-list -1 --until="$prev_iso" --first-parent "$ref" 2>/dev/null)"
+  [ -n "$sha" ] || { echo "probe_commit_before_utc: no commit before $cutoff on $ref" >&2; return 1; }
+
+  # Fail closed rather than hand back a baseline from inside the window.
+  local commit_s
+  commit_s="$(git -C "$dir" show -s --format=%ct "$sha" 2>/dev/null)"
+  if [ -z "$commit_s" ] || [ -z "$cutoff_s" ] || [ "$commit_s" -ge "$cutoff_s" ]; then
+    echo "probe_commit_before_utc: $sha is not before $cutoff — refusing to report a baseline" \
+         "that would silently include the window it is supposed to exclude" >&2
+    return 1
+  fi
+  echo "$sha"
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_commit_touches_path <sha> <repo-root-relative-path> [-C <dir>]
+#   -> the changed path(s) on stdout; exit 0 = touched, 1 = looked and it does not, 2 = COULD NOT LOOK
+#
+# `git show <sha> -- <path>` exits 0 and prints nothing in THREE different situations, and neither
+# the status nor the output separates them: the commit genuinely does not touch that file; the path
+# is misspelled; or the path is written relative to the repo root while the command runs from a
+# subdirectory. Measured on this repo — `git show --stat <sha> -- 'openbank-admin-ui/src/app/...'`
+# from inside `openbank-admin-ui/` and the same command against a path that has never existed both
+# answered `exit=0, 0 bytes`, byte for byte identical to each other and structurally identical to a
+# true "unchanged". Pathspec arguments resolve against the CWD, while `git status`/`git diff`
+# --name-only PRINT repo-root-relative paths — so copying a path out of one command's output into
+# another's argument is wrong exactly when you are not at the root, which in a monorepo is most of
+# the time. Under a subdirectory it reads as "this commit did not change that file", and a whole
+# investigation proceeds from a negative the probe was never able to establish.
+#
+# Two things this does that the bare command cannot:
+#   * anchors the pathspec at the repo root with the `:/` magic prefix, so the answer does not
+#     depend on where it was run from;
+#   * FAILS CLOSED (exit 2, loud on stderr) when the path names no file in either the commit's tree
+#     or its parent's — i.e. separates "no diff" from "no such path", which is the distinction the
+#     bare command does not have.
+probe_commit_touches_path() {
+  local sha="$1" path="$2" dir="."
+  if [ "${3:-}" = "-C" ]; then dir="${4:-.}"; fi
+
+  [ -n "$sha" ] && [ -n "$path" ] || {
+    echo "probe_commit_touches_path: usage: <sha> <repo-root-relative-path> [-C <dir>]" >&2; return 2; }
+
+  # A pathspec the caller pre-decorated defeats the anchoring below, and an absolute path is
+  # meaningless to `<rev>:<path>`. Reject both rather than silently answering about something else.
+  case "$path" in
+    :*) echo "probe_commit_touches_path: pass a plain repo-root-relative path, not a pathspec" \
+             "('$path') — this probe adds the ':/' anchor itself" >&2; return 2 ;;
+    /*) echo "probe_commit_touches_path: '$path' is absolute; pass it relative to the repo root" >&2
+        return 2 ;;
+    ./*|../*) echo "probe_commit_touches_path: '$path' is CWD-relative, which is the bug this probe" \
+                   "exists to prevent; pass it relative to the repo root" >&2; return 2 ;;
+  esac
+
+  # `<rev>:<path>` is itself repo-root-relative for a path with no leading `./`, so this existence
+  # check is already CWD-independent. A file the commit ADDS is absent from the parent and a file it
+  # DELETES is absent from the commit, so either tree containing it is enough to prove the pathspec
+  # names something real. A root commit has no parent; `cat-file -e` just fails, which is handled.
+  local in_commit=0 in_parent=0
+  git -C "$dir" cat-file -e "${sha}:${path}" 2>/dev/null && in_commit=1
+  git -C "$dir" cat-file -e "${sha}^:${path}" 2>/dev/null && in_parent=1
+  if [ "$in_commit" = "0" ] && [ "$in_parent" = "0" ]; then
+    echo "probe_commit_touches_path: '$path' exists in neither $sha nor its parent — the pathspec" \
+         "names no file, so an empty diff would carry no information. Check the spelling, and note" \
+         "the path must be relative to the REPO ROOT, not to \$PWD." >&2
+    return 2
+  fi
+
+  local out
+  out="$(git -C "$dir" show --format= --name-only "$sha" -- ":/$path" 2>/dev/null)"
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+probe_zombie_runs() {
+  local repo="${1:-JiRaska/open-bank-oss}"
+  local min_age_hours="${2:-24}"
+  local page=1 ids cutoff
+
+  cutoff="$(probe_utc_cutoff "$min_age_hours")"
+  if [ -z "$cutoff" ]; then
+    echo "probe_zombie_runs: could not compute a UTC cutoff — refusing to report a census that" \
+         "would silently include live runs" >&2
+    return 1
+  fi
+
+  while [ "$page" -le 10 ]; do
+    # `gh api --jq` takes exactly ONE argument and does NOT accept jq's `--arg`: passing it dies
+    # with "accepts 1 arg(s), received 4". With the old `2>/dev/null` that error was swallowed,
+    # `ids` came back empty, and `[ -z "$ids" ] && break` left the loop on page 1 — so this probe
+    # reported a clean census of zero while 87 wedged runs sat on page 1 alone. That is precisely
+    # the failure this library exists to prevent, in the library itself. The cutoff is interpolated
+    # into the filter instead, and its shape is asserted first so a malformed value cannot become
+    # jq source.
+    case "$cutoff" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) echo "probe_zombie_runs: cutoff $cutoff is not an ISO-8601 UTC instant — refusing to" \
+              "build a jq filter from it" >&2; return 1 ;;
+    esac
+
+    # stderr is captured, never discarded: a failed call must not be indistinguishable from a page
+    # with no wedged runs.
+    local err rc
+    err="$(mktemp)"
+    ids="$(gh api "repos/$repo/actions/runs?status=in_progress&per_page=100&page=$page" \
+      --jq ".workflow_runs[] | select(.created_at < \"$cutoff\") | \"\\(.id)\\t\\(.created_at)\\t\\(.name)\"" \
+      2>"$err")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "probe_zombie_runs: gh api failed on page $page (exit $rc): $(head -1 "$err")" >&2
+      rm -f "$err"
+      return 1
+    fi
+    rm -f "$err"
+    [ -z "$ids" ] && break
+    while IFS=$'\t' read -r id created name; do
+      [ -z "$id" ] && continue
+      # Still confirmed per run: age alone would also catch a genuinely long-running job, which is
+      # slow but healthy and must not be subtracted from a saturation count.
+      #
+      # The same two traps as the page call above, and they were left here when that one was fixed.
+      # `2>/dev/null` made a failed jobs call identical to "this run is not wedged", so the run was
+      # dropped from the census silently -- the under-counting direction of the very bug this
+      # function is named after. And `gh api ... | grep -q` reports GREP's status, so even without
+      # the redirect the failure could not be seen: the exit code has to be read off the assignment,
+      # never off the pipeline (the repo's own "measure the exit code, not the pipeline's" rule).
+      local jerr jrc jout
+      jerr="$(mktemp)"
+      jout="$(gh api "repos/$repo/actions/runs/$id/jobs" \
+        --jq 'if (.jobs|length) > 0 and (all(.jobs[]; .status == "completed")) then "wedged" else empty end' \
+        2>"$jerr")"
+      jrc=$?
+      if [ "$jrc" -ne 0 ]; then
+        echo "probe_zombie_runs: gh api failed on jobs for run $id (exit $jrc):" \
+             "$(head -1 "$jerr") — refusing to report a partial census" >&2
+        rm -f "$jerr"
+        return 1
+      fi
+      rm -f "$jerr"
+      case "$jout" in *wedged*) printf '%s\t%s\t%s\n' "$id" "$created" "$name" ;; esac
+    done <<<"$ids"
+    page=$((page + 1))
+  done
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_lint_findings <linter-command> <file>... -> the linter's own finding lines
+#
+# Two traps in one wrapper. A newline-joined file list passed unquoted arrives as ONE argument, so
+# the linter errors on a path that does not exist and an `[ -n "$out" ]` test reads the error as
+# clean — hence the per-file loop. And post-filtering a linter's output to a finding-code pattern
+# discards the failures that are not findings (a syntax error is not an `SC` code), so the exit
+# status is surfaced instead of being swallowed by a pipeline.
+probe_lint_findings() {
+  local linter="$1"
+  shift
+  local file status=0 out
+  for file in "$@"; do
+    [ -e "$file" ] || { echo "probe: no such file: $file" >&2; status=1; continue; }
+    if ! out="$($linter "$file" 2>&1)"; then status=1; fi
+    [ -n "$out" ] && printf '%s\n' "$out"
+  done
+  return $status
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_each <name-of-list-var> -> one item per line, safely, from a whitespace-separated string
+#
+# `for n in $LIST` does NOT word-split in zsh — the loop body runs ONCE with the whole string. The
+# command inside then answers about a nonsense argument, and with stderr discarded that reads as a
+# uniform negative: a PR-merge watcher reported `merged=0/29` for forty minutes while the true
+# count was 20. Nothing errored, and the number was plausible.
+#
+# Usage:  while read -r item; do …; done < <(probe_each MY_LIST)
+probe_each() {
+  local __name="$1" __raw
+  eval "__raw=\${$__name-}"
+  printf '%s\n' $__raw | awk 'NF'
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_edit_applied <file> <sed-or-perl-expression> -> exit 0 only if the file actually CHANGED
+#
+# An in-place edit that matches nothing is silent and exits 0. When such an edit is a test's
+# NEGATIVE case ("revert the fix and prove the suite fails"), the unchanged file re-runs the fixed
+# code, the suite passes, and the reading is "the fix does nothing" — the opposite of the truth.
+# Measured 2026-09-12 on an admin-ui contrast fix: a `sed` revert did not match the conditional
+# expression, so the negative case passed and briefly looked like a no-op change.
+probe_edit_applied() {
+  local file="$1" expr="$2" before after
+  before="$(shasum "$file" 2>/dev/null | awk '{print $1}')"
+  sed -i '' "$expr" "$file" 2>/dev/null || sed -i "$expr" "$file" 2>/dev/null
+  after="$(shasum "$file" 2>/dev/null | awk '{print $1}')"
+  [ -n "$before" ] && [ "$before" != "$after" ]
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_falsify <mutate-cmd> <restore-cmd> <check-cmd> -> exit 0 only if CHECK fails under MUTATION
+#
+# "Verify by effect" has its own failure mode: the sabotage is itself a probe, and a sabotage of the
+# wrong SHAPE leaves the subject untouched, so the check stays green and the reading is "this gate
+# is inert". Twice in one session: `java.time.Instant.EPOCH` against a gate whose regex is the
+# import form, and a bare `const val SOURCE_SERVICE` against a gate that matches emission sites.
+# Both times the gate was fine and the sabotage was wrong.
+#
+# This runs CHECK three times — clean, mutated, restored — and demands pass/fail/pass. A mutation
+# that changes nothing cannot satisfy it.
+probe_falsify() {
+  local mutate="$1" restore="$2" check="$3"
+  eval "$check" >/dev/null 2>&1 || { echo "probe_falsify: CHECK already fails before mutation" >&2; return 1; }
+  eval "$mutate" >/dev/null 2>&1 || { echo "probe_falsify: MUTATE command failed" >&2; return 1; }
+  if eval "$check" >/dev/null 2>&1; then
+    eval "$restore" >/dev/null 2>&1
+    echo "probe_falsify: CHECK still passes under mutation — the sabotage, not the subject, is suspect" >&2
+    return 1
+  fi
+  eval "$restore" >/dev/null 2>&1 || { echo "probe_falsify: RESTORE command failed" >&2; return 1; }
+  eval "$check" >/dev/null 2>&1 || { echo "probe_falsify: CHECK does not pass after restore" >&2; return 1; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_gh_json <gh-args…> -> the JSON on stdout; non-zero WITHOUT printing on any failure
+#
+# `gh … --json` answers HTTP 502/504 on a large query (measured: `gh pr list --limit 200` with
+# statusCheckRollup). The error goes to stderr and stdout is EMPTY, so `| jq length` reads 0 and a
+# full queue reports as no PRs. Never let an empty stdout from `gh` mean "none".
+probe_gh_json() {
+  local out rc
+  out="$(command gh "$@" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    echo "probe_gh_json: \`gh $*\` failed (rc=$rc) or returned nothing — UNKNOWN, not empty" >&2
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------------------------
+# self-test
+# ---------------------------------------------------------------------------------------------
+# Every case asserts BOTH directions. A probe that only ever sees its known-positive can still be
+# a probe that says yes to everything, and that failure mode is exactly as silent as the one this
+# file exists to prevent.
+
+_probe_selftest() {
+  # See the probe_remote_branch_exists case below: run-gates.py exports GIT_INDEX_FILE (a private
+  # index per gate, so concurrent gates cannot race for .git/index.lock), and any git command this
+  # self-test runs inside its own temp repos would inherit it and write against the wrong index.
+  # Only reached via direct execution (`--selftest`), never when the file is sourced.
+  unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY
+
+  local failures=0
+  local executed=0
+  _check() {
+    executed=$((executed + 1))
+    if [ "$2" = "1" ]; then
+      echo "  [ok] $1"
+    else
+      echo "  [FAIL] $1"
+      failures=$((failures + 1))
+    fi
+  }
+
+  # --- probe_utc_epoch --------------------------------------------------------------------
+  # 2026-08-22T00:00:00Z is 1787356800 (cross-checked against python3 datetime, not against this
+  # file's own arithmetic — an expected value derived from the thing under test proves nothing).
+  local epoch
+  epoch="$(probe_utc_epoch "2026-08-22T00:00:00Z")"
+  _check "probe_utc_epoch parses Z as UTC (got '$epoch')" \
+    "$([ "$epoch" = "1787356800" ] && echo 1 || echo 0)"
+
+  # A probe returning a constant, or one that silently fell back to `date` with no input, would
+  # still pass the case above. One hour later must be exactly 3600 more.
+  local epoch2
+  epoch2="$(probe_utc_epoch "2026-08-22T01:00:00Z")"
+  _check "probe_utc_epoch advances by exactly 3600s over one hour" \
+    "$([ "$((epoch2 - epoch))" = "3600" ] && echo 1 || echo 0)"
+
+  # THE known-negative for this probe: the original bug was a parse in the LOCAL zone, so the
+  # property that was actually violated is TZ-invariance. Two zones 9h apart must agree, and the
+  # broken form (`date -j -f` with no `-u`) must NOT — otherwise this case is vacuous because the
+  # environment happens to be UTC, and it would then pass against the very code it exists to reject.
+  local tokyo utc
+  tokyo="$(TZ=Asia/Tokyo probe_utc_epoch "2026-08-22T00:00:00Z")"
+  utc="$(TZ=UTC probe_utc_epoch "2026-08-22T00:00:00Z")"
+  _check "probe_utc_epoch is TZ-invariant (UTC=$utc Tokyo=$tokyo)" \
+    "$([ "$tokyo" = "$utc" ] && echo 1 || echo 0)"
+
+  if date -j -f "%Y-%m-%dT%H:%M:%SZ" "2026-08-22T00:00:00Z" +%s >/dev/null 2>&1; then
+    local broken_tokyo broken_utc
+    broken_tokyo="$(TZ=Asia/Tokyo date -j -f "%Y-%m-%dT%H:%M:%SZ" "2026-08-22T00:00:00Z" +%s 2>/dev/null)"
+    broken_utc="$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "2026-08-22T00:00:00Z" +%s 2>/dev/null)"
+    _check "the BSD trap is reproduced: the no-'-u' form is NOT TZ-invariant ($broken_utc vs $broken_tokyo)" \
+      "$([ "$broken_tokyo" != "$broken_utc" ] && echo 1 || echo 0)"
+  else
+    echo "  [note] GNU date: the BSD '-j' local-parse trap does not exist on this platform"
+  fi
+
+  # --- probe_files_modified_since ---------------------------------------------------------
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/.git"
+  : >"$tmp/fresh.txt"
+  : >"$tmp/.git/churn.txt"
+  # An old file, stamped explicitly. `touch -t` is portable; `-d` is not.
+  : >"$tmp/old.txt"
+  touch -t 202001010000 "$tmp/old.txt"
+
+  local found
+  found="$(probe_files_modified_since "$tmp" 60)"
+  _check "probe_files_modified_since FINDS a file just written" \
+    "$(grep -q 'fresh.txt' <<<"$found" && echo 1 || echo 0)"
+  _check "probe_files_modified_since does NOT find a 2020 file" \
+    "$(grep -q 'old.txt' <<<"$found" && echo 0 || echo 1)"
+  _check "probe_files_modified_since excludes .git churn" \
+    "$(grep -q 'churn.txt' <<<"$found" && echo 0 || echo 1)"
+  rm -rf "$tmp"
+
+  # --- probe_remote_branch_exists ---------------------------------------------------------
+  # Hermetic: a real local repo acting as the remote, so this runs with no network. The known-
+  # negative is the load-bearing half — it is what a stale local tracking ref gets wrong.
+  #
+  # `env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE` is not defensive boilerplate. run-gates.py
+  # hands every gate a PRIVATE copy of the repo index via GIT_INDEX_FILE, so that concurrent gates
+  # cannot race for .git/index.lock — and that variable is inherited by any git command this
+  # fixture runs, including the ones building a brand-new repo in a temp dir. The commit then
+  # writes against the WRONG index, `git branch probe-present` has nothing to branch from, and the
+  # self-test fails only under the runner while passing when invoked directly. Found exactly that
+  # way: green by hand, red in run-gates, and the difference was one exported variable.
+  local origin clone
+  origin="$(mktemp -d)"
+  clone="$(mktemp -d)"
+  (
+    cd "$origin" || exit 1
+    git init -q -b main .
+    git -c user.email=probe@example.com -c user.name=probe -c commit.gpgsign=false commit -q --allow-empty -m init
+    git branch probe-present
+  ) >/dev/null 2>&1
+  git clone -q "$origin" "$clone" >/dev/null 2>&1
+  (
+    cd "$clone" || exit 1
+    probe_remote_branch_exists "probe-present" && echo PRESENT
+    probe_remote_branch_exists "probe-absent" && echo ABSENT
+  ) >"$clone/.probe-out" 2>/dev/null
+  _check "probe_remote_branch_exists finds a branch that is on the remote" \
+    "$(grep -q PRESENT "$clone/.probe-out" && echo 1 || echo 0)"
+  _check "probe_remote_branch_exists rejects a branch that is not" \
+    "$(grep -q ABSENT "$clone/.probe-out" && echo 0 || echo 1)"
+
+  # The specific regression: delete the branch on the remote WITHOUT pruning the clone, so the
+  # local tracking ref still exists. `git rev-parse` says yes; the probe must say no.
+  (cd "$origin" && git branch -D probe-present) >/dev/null 2>&1
+  local stale_local=0 probe_answer=0
+  (cd "$clone" && git rev-parse --verify -q "refs/remotes/origin/probe-present") >/dev/null 2>&1 && stale_local=1
+  (cd "$clone" && probe_remote_branch_exists "probe-present") && probe_answer=1
+  _check "the stale local tracking ref does still exist (the trap is reproduced)" "$stale_local"
+  _check "probe_remote_branch_exists is NOT fooled by the stale tracking ref" \
+    "$([ "$probe_answer" = "0" ] && echo 1 || echo 0)"
+  rm -rf "$origin" "$clone"
+
+  # --- probe_lint_findings ----------------------------------------------------------------
+  # The list-as-one-argument trap: a caller passing a newline-joined list must not read as clean.
+  local lint_tmp
+  lint_tmp="$(mktemp -d)"
+  : >"$lint_tmp/a.txt"
+  : >"$lint_tmp/b.txt"
+  local joined status
+  joined="$lint_tmp/a.txt"$'\n'"$lint_tmp/b.txt"
+  probe_lint_findings true "$joined" >/dev/null 2>&1
+  status=$?
+  _check "probe_lint_findings FAILS on a newline-joined list (never reads as clean)" \
+    "$([ "$status" != "0" ] && echo 1 || echo 0)"
+  probe_lint_findings true "$lint_tmp/a.txt" "$lint_tmp/b.txt" >/dev/null 2>&1
+  status=$?
+  _check "probe_lint_findings succeeds when the files are passed properly" \
+    "$([ "$status" = "0" ] && echo 1 || echo 0)"
+  rm -rf "$lint_tmp"
+
+  # --- probe_utc_cutoff (the age half of probe_zombie_runs, #6472) --------------------
+  # The age bound is not a tidy-up: "every job completed" alone also matches a LIVE run whose
+  # remaining jobs have not been created yet, which is how the first version of the census
+  # over-counted. So the cutoff itself is held to both directions.
+  local cut now_s cut_s delta
+  cut="$(probe_utc_cutoff 24)"
+  ran+=("probe_utc_cutoff: shape" "probe_utc_cutoff: 24h back" "probe_utc_cutoff: TZ-invariant")
+  _check "probe_utc_cutoff returns a Z-suffixed UTC instant (got '$cut')" \
+    "$(printf '%s' "$cut" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && echo 1 || echo 0)"
+  now_s="$(date -u +%s)"
+  cut_s="$(probe_utc_epoch "$cut")"
+  delta=$(( now_s - cut_s ))
+  _check "probe_utc_cutoff 24 is 24h back within a minute (delta=${delta}s)" \
+    "$([ "$delta" -ge 86340 ] && [ "$delta" -le 86460 ] && echo 1 || echo 0)"
+  # These are two separate calls to the live clock, so an exact string equality is flaky at a
+  # second boundary. A timezone regression is hours apart; allow one second only for that clock
+  # tick while still rejecting local-wall-clock arithmetic.
+  local tokyo_cut utc_cut tokyo_s utc_s cutoff_skew
+  tokyo_cut="$(TZ=Asia/Tokyo probe_utc_cutoff 24)"
+  utc_cut="$(TZ=UTC probe_utc_cutoff 24)"
+  tokyo_s="$(probe_utc_epoch "$tokyo_cut")"
+  utc_s="$(probe_utc_epoch "$utc_cut")"
+  cutoff_skew=$(( tokyo_s - utc_s ))
+  [ "$cutoff_skew" -lt 0 ] && cutoff_skew=$(( -cutoff_skew ))
+  _check "probe_utc_cutoff is TZ-invariant within live-clock rounding (skew=${cutoff_skew}s)" \
+    "$([ "$cutoff_skew" -le 1 ] && echo 1 || echo 0)"
+
+  # --- probe_zombie_runs ------------------------------------------------------------------
+  # These were "network-bound, unexercised" until 2026-09-03, and that gap let the probe ship
+  # broken: it passed jq's `--arg` to `gh api --jq`, which rejects it, and `2>/dev/null` turned the
+  # error into an empty page. It reported ZERO wedged runs while 177 existed. `gh` is a shell
+  # function here, so the whole thing is hermetic — no network, no fixtures on disk.
+
+  # `gh` is a shell function here, so this is hermetic — no network, no fixtures on disk. The stub
+  # parses argv properly rather than doing string surgery on "$*": a first attempt sliced the filter
+  # out of the joined arguments, mangled it, and jq exited 3 on every call. That mattered less for
+  # what it broke than for what it revealed — BOTH negative assertions passed while every call was
+  # failing, because an absence assertion is satisfied when everything is absent. The
+  # known-positive is the only reason it was caught.
+  gh() {
+    local url="" filter="" body=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        api)   shift ;;
+        --jq)  filter="$2"; shift 2 ;;
+        *)     url="$1"; shift ;;
+      esac
+    done
+    case "$url" in
+      */actions/runs/1/jobs*) body='{"jobs":[{"status":"completed"},{"status":"completed"}]}' ;;
+      */actions/runs/3/jobs*) body='{"jobs":[{"status":"completed"},{"status":"in_progress"}]}' ;;
+
+      # A run whose jobs list is EMPTY satisfies `all(.jobs[]; ...)` vacuously — jq's `all` over an
+      # empty array is true — so without the `(.jobs|length) > 0` guard this would be reported
+      # wedged. The guard was written but never falsified until this fixture existed.
+      */actions/runs/4/jobs*) body='{"jobs":[]}' ;;
+      *page=1*) body='{"workflow_runs":[
+        {"id":1,"created_at":"2026-08-09T10:00:00Z","name":"wedged-old"},
+        {"id":2,"created_at":"2099-01-01T00:00:00Z","name":"fresh"},
+        {"id":3,"created_at":"2026-08-09T10:00:00Z","name":"old-but-live"},
+        {"id":4,"created_at":"2026-08-09T10:00:00Z","name":"old-no-jobs"}]}' ;;
+
+      *) body='{"workflow_runs":[]}' ;;
+    esac
+    printf '%s' "$body" | jq -r "$filter"
+  }
+  if command -v jq >/dev/null 2>&1; then
+    local zr
+    zr="$(probe_zombie_runs owner/repo 24 2>/dev/null)"
+    _check "probe_zombie_runs returns the wedged old run (known-positive)" \
+      "$(printf '%s' "$zr" | grep -q 'wedged-old' && echo 1 || echo 0)"
+    _check "probe_zombie_runs excludes a run newer than the cutoff" \
+      "$(printf '%s' "$zr" | grep -q 'fresh' && echo 0 || echo 1)"
+    # The false positive the probe was burned by: old, but a job is still running — slow and
+    # healthy, and subtracting it would understate real load.
+    _check "probe_zombie_runs excludes an old run with a job still in flight" \
+      "$(printf '%s' "$zr" | grep -q 'old-but-live' && echo 0 || echo 1)"
+
+    _check "probe_zombie_runs excludes an old run whose jobs list is empty (vacuous-all guard)" \
+      "$(printf '%s' "$zr" | grep -q 'old-no-jobs' && echo 0 || echo 1)"
+
+  else
+    echo "  [note] probe_zombie_runs fixture cases need jq and were NOT run"
+  fi
+  # No jq needed, and this is the case that would have caught the shipped bug: a failing call must
+  # be distinguishable from a page with nothing on it.
+  gh() { echo "accepts 1 arg(s), received 4" >&2; return 1; }
+  probe_zombie_runs owner/repo 24 >/dev/null 2>&1
+  _check "probe_zombie_runs FAILS loudly when gh errors (never reads as a clean census)" \
+    "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
+  unset -f gh
+
+
+  # The PAGE call and the PER-RUN JOBS call are two separate `gh` invocations, and fixing only the
+  # first leaves the second able to fail silently — it drops the run from the census, which is the
+  # under-counting direction of the same defect. This stub answers the page and fails the jobs call,
+  # so it is red unless BOTH calls surface their failure. It also pins the pipeline trap: while the
+  # jobs call ended in `| grep -q wedged` the status read was grep's, so this case passed even with
+  # the redirect removed.
+  if command -v jq >/dev/null 2>&1; then
+    gh() {
+      local url="" filter=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          api)   shift ;;
+          --jq)  filter="$2"; shift 2 ;;
+          *)     url="$1"; shift ;;
+        esac
+      done
+      case "$url" in
+        */jobs*) echo "HTTP 500" >&2; return 1 ;;
+        *page=1*) printf '%s' '{"workflow_runs":[{"id":1,"created_at":"2026-08-09T10:00:00Z","name":"x"}]}' | jq -r "$filter" ;;
+        *) printf '%s' '{"workflow_runs":[]}' | jq -r "$filter" ;;
+      esac
+    }
+    probe_zombie_runs owner/repo 24 >/dev/null 2>&1
+    _check "probe_zombie_runs FAILS loudly when the per-run JOBS call errors" \
+      "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
+    unset -f gh
+  fi
+
+
+  # probe_pr_failing_checks remains network-bound with no hermetic fixture: its subject is a live
+  # PR's check rollup. Declared rather than silently skipped — an unexercised probe is a third
+  # state, and pretending it passed is the failure this file is about.
+  echo "  [note] probe_pr_failing_checks is network-bound and unexercised here"
+
+  # Counted, never hard-coded: a literal here would keep reporting a full corpus after someone
+  # deleted half the cases, which is the exact shape min_subjects exists to catch (#4339).
+  # --- probe_commit_before_utc (the bare-date baseline drift) --------------------------
+  # Hermetic fixture: 48 hourly EMPTY commits across 2026-08-08 and 2026-08-09, all in UTC. The
+  # cutoff is 2026-08-09T00:00:00Z and the only correct answer is the commit at 2026-08-08T23:00Z.
+  #
+  # Do NOT reach for a timezone shift as the control here. Measured across five zones: the bare
+  # date resolves to that date at the CURRENT LOCAL TIME OF DAY, and since the local wall clock
+  # shifts by the same offset as the zone, the resulting instant is IDENTICAL for UTC, Prague,
+  # Tokyo and Kiritimati — only a zone whose local calendar date has rolled over (Honolulu) picks
+  # a different commit. A TZ-based control is therefore true only some hours of the day, which is
+  # how it first shipped here and went red the next morning. The drift is over the CLOCK, not over
+  # the map, so the control below compares the bare form against the probe instead.
+  local crepo
+  crepo="$(mktemp -d)"
+  (
+    cd "$crepo" || exit 1
+    git init -q -b main .
+    git config user.email probe@example.invalid
+    git config user.name "probe selftest"
+    # A developer machine sets commit.gpgsign=true globally; inheriting it here makes the fixture
+    # block on pinentry locally while passing on CI, which is the opposite of hermetic.
+    git config commit.gpgsign false
+    git config tag.gpgsign false
+    local h d
+    for d in 08 09; do
+      for h in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23; do
+        GIT_AUTHOR_DATE="2026-08-${d}T${h}:00:00Z" GIT_COMMITTER_DATE="2026-08-${d}T${h}:00:00Z" \
+          git commit -q --allow-empty -m "c 2026-08-${d}T${h}:00Z"
+      done
+    done
+  ) >/dev/null 2>&1
+
+  local want_subject picked picked_subject
+  want_subject="c 2026-08-08T23:00Z"
+  picked="$(TZ=UTC probe_commit_before_utc "2026-08-09T00:00:00Z" main -C "$crepo")"
+  picked_subject="$(git -C "$crepo" show -s --format=%s "$picked" 2>/dev/null)"
+  _check "probe_commit_before_utc picks the last commit before the cutoff (got '$picked_subject')" \
+    "$([ "$picked_subject" = "$want_subject" ] && echo 1 || echo 0)"
+
+  # The fixture holds a commit at exactly 2026-08-09T00:00:00Z. `--until` would keep it (it is
+  # inclusive), which is off by one commit for a baseline; this case is why the probe asks for one
+  # second earlier, and it caught that during development rather than in a published report.
+  _check "probe_commit_before_utc excludes a commit landing exactly ON the cutoff" \
+    "$([ "$picked_subject" != "c 2026-08-09T00:00Z" ] && echo 1 || echo 0)"
+
+  # TZ-invariance is the property the bug actually violated: the answer must not depend on where
+  # the machine thinks it is, nor on what time of day the probe happens to run.
+  local picked_tokyo
+  picked_tokyo="$(TZ=Asia/Tokyo probe_commit_before_utc "2026-08-09T00:00:00Z" main -C "$crepo")"
+  _check "probe_commit_before_utc is TZ-invariant" \
+    "$([ "$picked_tokyo" = "$picked" ] && echo 1 || echo 0)"
+
+  # THE vacuity control: the probe must DISAGREE with the broken form on this fixture. If they
+  # agreed, every case above would pass against a probe that merely reimplements the bug.
+  local bare_utc
+  bare_utc="$(cd "$crepo" && TZ=UTC git rev-list -1 --before=2026-08-09 main 2>/dev/null)"
+  _check "the probe and the bare-date form disagree (the trap is reproduced, not assumed)" \
+    "$([ -n "$bare_utc" ] && [ "$bare_utc" != "$picked" ] && echo 1 || echo 0)"
+
+  # And the defect itself: under UTC the bare date resolves to 2026-08-09 at the current time of
+  # day, so it returns a commit from INSIDE the window it was meant to exclude. Deterministic:
+  # the fixture holds an hourly commit through all of 2026-08-09, so whatever the clock says there
+  # is always one at or after the window start and at or before the resolved cutoff.
+  local bare_s cutoff_s2
+  bare_s="$(git -C "$crepo" show -s --format=%ct "$bare_utc" 2>/dev/null)"
+  cutoff_s2="$(probe_utc_epoch "2026-08-09T00:00:00Z")"
+  _check "the bare-date form lands INSIDE the window (bare=$(git -C "$crepo" show -s --format=%s "$bare_utc" 2>/dev/null))" \
+    "$([ -n "$bare_s" ] && [ "$bare_s" -ge "$cutoff_s2" ] && echo 1 || echo 0)"
+
+  # The probe must refuse a bare date outright rather than quietly resolving it.
+  local rejected=0
+  probe_commit_before_utc "2026-08-09" main -C "$crepo" >/dev/null 2>&1 || rejected=1
+  _check "probe_commit_before_utc REJECTS a bare date instead of guessing a time of day" "$rejected"
+
+  # Fail closed when no commit precedes the cutoff, rather than returning the oldest one.
+  local none_out none_status=0
+  none_out="$(probe_commit_before_utc "2020-01-01T00:00:00Z" main -C "$crepo" 2>/dev/null)" || none_status=1
+  _check "probe_commit_before_utc fails closed when nothing precedes the cutoff" \
+    "$([ "$none_status" = "1" ] && [ -z "$none_out" ] && echo 1 || echo 0)"
+  rm -rf "$crepo"
+
+  # --- probe_each -------------------------------------------------------------------------
+  # bash DOES word-split, so this cannot reproduce the zsh behaviour that caused the incident.
+  # What it pins is the property the caller needs either way: one line PER ITEM, whatever shell
+  # the script is read by.
+  # shellcheck disable=SC2034  # read INDIRECTLY, by name, inside probe_each — which is the whole
+  # point of the helper: the caller passes a variable NAME, not its value. shellcheck cannot see
+  # through that, and passing the value instead would reintroduce the very word-splitting this
+  # probe exists to prevent.
+  PROBE_TEST_LIST="alpha beta gamma"
+  local each_n
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each yields one line per item (got $each_n, want 3)" \
+    "$([ "$each_n" = "3" ] && echo 1 || echo 0)"
+  # shellcheck disable=SC2034  # indirect read — see above
+  PROBE_TEST_LIST="   solo   "
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each collapses padding to one item (got $each_n, want 1)" \
+    "$([ "$each_n" = "1" ] && echo 1 || echo 0)"
+  # shellcheck disable=SC2034  # indirect read — see above
+  PROBE_TEST_LIST=""
+  each_n="$(probe_each PROBE_TEST_LIST | wc -l | tr -d ' ')"
+  _check "probe_each yields nothing for an empty list (got $each_n, want 0)" \
+    "$([ "$each_n" = "0" ] && echo 1 || echo 0)"
+
+  # --- probe_edit_applied -----------------------------------------------------------------
+  local edit_dir; edit_dir="$(mktemp -d)"
+  printf 'alpha\nbeta\n' > "$edit_dir/f.txt"
+  _check "probe_edit_applied accepts an edit that changes the file" \
+    "$(probe_edit_applied "$edit_dir/f.txt" 's/alpha/ALPHA/' && echo 1 || echo 0)"
+  _check "probe_edit_applied REJECTS an expression that matches nothing" \
+    "$(probe_edit_applied "$edit_dir/f.txt" 's/no-such-token/x/' && echo 0 || echo 1)"
+  rm -rf "$edit_dir"
+
+  # --- probe_falsify ----------------------------------------------------------------------
+  local fals_dir; fals_dir="$(mktemp -d)"
+  printf 'GOOD\n' > "$fals_dir/subject"
+  _check "probe_falsify accepts a mutation the check can detect" \
+    "$(probe_falsify "printf 'BAD\n' > '$fals_dir/subject'" \
+                     "printf 'GOOD\n' > '$fals_dir/subject'" \
+                     "grep -q GOOD '$fals_dir/subject'" && echo 1 || echo 0)"
+  _check "probe_falsify REJECTS a mutation the check cannot see (the sabotage missed)" \
+    "$(probe_falsify "printf 'x\n' > '$fals_dir/unrelated'" \
+                     "rm -f '$fals_dir/unrelated'" \
+                     "grep -q GOOD '$fals_dir/subject'" && echo 0 || echo 1)"
+  _check "probe_falsify refuses when the check already fails before any mutation" \
+    "$(probe_falsify "true" "true" "grep -q GOOD '$fals_dir/absent'" && echo 0 || echo 1)"
+  rm -rf "$fals_dir"
+
+  # --- probe_gh_json ----------------------------------------------------------------------
+  # Stubbed: no network, no token. The known-negative is the point — an errored `gh` with empty
+  # stdout must be UNKNOWN, never an empty result set.
+  local gh_dir; gh_dir="$(mktemp -d)"
+  printf '#!/bin/sh\nprintf "[]"\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json returns the payload when gh succeeds" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 1 || echo 0)"
+  printf '#!/bin/sh\necho "HTTP 504" >&2\nexit 1\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json FAILS (never prints empty) when gh errors" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 0 || echo 1)"
+  printf '#!/bin/sh\nexit 0\n' > "$gh_dir/gh"; chmod +x "$gh_dir/gh"
+  _check "probe_gh_json FAILS on an EMPTY success — 'no results' and 'could not ask' differ" \
+    "$(PATH="$gh_dir:$PATH" probe_gh_json pr list >/dev/null 2>&1 && echo 0 || echo 1)"
+  rm -rf "$gh_dir"
+  # --- probe_commit_touches_path ----------------------------------------------------------
+  # The fixture mirrors the real shape: a monorepo with a nested module, so the trap (a pathspec
+  # written relative to the repo root, evaluated from inside a subdirectory) is reproducible rather
+  # than assumed. `sub/src/a.txt` is the one the commit under test changes; `sub/src/b.txt` it does
+  # not; `sub/src/added.txt` it creates, which is the case an existence check against the commit's
+  # PARENT alone would get wrong.
+  local prepo tsha
+  prepo="$(mktemp -d)"
+  (
+    cd "$prepo" || exit 1
+    git init -q -b main .
+    git config user.email probe@example.invalid
+    git config user.name "probe selftest"
+    git config commit.gpgsign false
+    git config tag.gpgsign false
+    mkdir -p sub/src
+    printf 'one\n' > sub/src/a.txt
+    printf 'keep\n' > sub/src/b.txt
+    git add sub/src/a.txt sub/src/b.txt
+    git commit -q -m base
+    printf 'two\n' > sub/src/a.txt
+    printf 'new\n' > sub/src/added.txt
+    git add sub/src/a.txt sub/src/added.txt
+    git commit -q -m change
+  ) >/dev/null 2>&1
+  tsha="$(git -C "$prepo" rev-parse HEAD 2>/dev/null)"
+
+  # Known-positive, from the repo ROOT.
+  local touched
+  touched="$(probe_commit_touches_path "$tsha" "sub/src/a.txt" -C "$prepo" 2>/dev/null)"
+  _check "probe_commit_touches_path finds a path the commit changes (got '$touched')" \
+    "$([ "$touched" = "sub/src/a.txt" ] && echo 1 || echo 0)"
+
+  # Known-negative: a file that exists and the commit leaves alone must be exit 1 with NO output —
+  # distinct from the exit 2 below. A probe that always said "touched" would pass the case above.
+  local untouched_out untouched_status=0
+  untouched_out="$(probe_commit_touches_path "$tsha" "sub/src/b.txt" -C "$prepo" 2>/dev/null)" \
+    || untouched_status=$?
+  _check "probe_commit_touches_path reports exit 1 for a file the commit leaves alone" \
+    "$([ "$untouched_status" = "1" ] && [ -z "$untouched_out" ] && echo 1 || echo 0)"
+
+  # THE case this probe exists for: run from the SUBDIRECTORY with the same repo-root-relative path.
+  # The answer must be identical to the one from the root — that is the CWD-invariance the bare
+  # command does not have.
+  local touched_from_sub
+  touched_from_sub="$(cd "$prepo/sub" && probe_commit_touches_path "$tsha" "sub/src/a.txt" 2>/dev/null)"
+  _check "probe_commit_touches_path is CWD-invariant (root='$touched' sub='$touched_from_sub')" \
+    "$([ -n "$touched_from_sub" ] && [ "$touched_from_sub" = "$touched" ] && echo 1 || echo 0)"
+
+  # VACUITY CONTROL: the naive form must DISAGREE with the probe on this fixture. Without this the
+  # case above could pass against a probe that merely reimplements the bug — and it is the exact
+  # command measured on the real repo: exit 0, zero bytes, indistinguishable from "unchanged".
+  local naive_out naive_status=0
+  naive_out="$(cd "$prepo/sub" && git show --format= --name-only "$tsha" -- 'sub/src/a.txt' 2>/dev/null)" \
+    || naive_status=$?
+  _check "the naive CWD-relative form answers exit 0 with empty output (the trap is reproduced)" \
+    "$([ "$naive_status" = "0" ] && [ -z "$naive_out" ] && echo 1 || echo 0)"
+
+  # And the discrimination the bare command structurally lacks: a path that names no file at all is
+  # exit 2 ("could not look"), never exit 0/1 ("looked, found nothing"). Same fixture, same commit,
+  # so the only difference from the known-negative above is that the path is not real.
+  local missing_out missing_status=0
+  missing_out="$(probe_commit_touches_path "$tsha" "sub/src/NENI.txt" -C "$prepo" 2>/dev/null)" \
+    || missing_status=$?
+  _check "probe_commit_touches_path fails CLOSED (exit 2) on a pathspec that names no file" \
+    "$([ "$missing_status" = "2" ] && [ -z "$missing_out" ] && echo 1 || echo 0)"
+
+  # A file the commit ADDS exists only in the commit's tree, not its parent's. An existence check
+  # written against the parent alone would call this "no such path" and refuse a real answer.
+  local added
+  added="$(probe_commit_touches_path "$tsha" "sub/src/added.txt" -C "$prepo" 2>/dev/null)"
+  _check "probe_commit_touches_path handles a file the commit ADDS (got '$added')" \
+    "$([ "$added" = "sub/src/added.txt" ] && echo 1 || echo 0)"
+
+  # A CWD-relative path is refused outright rather than answered about, because from `sub/` the
+  # path `src/a.txt` would resolve against the root and name nothing — the silent-negative shape.
+  local rel_status=0
+  (cd "$prepo/sub" && probe_commit_touches_path "$tsha" "./src/a.txt" >/dev/null 2>&1) || rel_status=$?
+  _check "probe_commit_touches_path REJECTS a CWD-relative path instead of answering about it" \
+    "$([ "$rel_status" = "2" ] && echo 1 || echo 0)"
+  rm -rf "$prepo"
+
+  echo "SUBJECTS=$executed  # self-test assertions executed"
+
+  if [ "$failures" -gt 0 ]; then
+    echo "SELF-TEST FAILED: $failures probe(s) do not behave as documented."
+    return 1
+  fi
+  echo "SELF-TEST OK: $executed assertion(s); every probe exercised here was run against a"
+  echo "  known-positive AND a known-negative. probe_pr_failing_checks is declared unexercised"
+  echo "  above and is NOT covered by that statement."
+  return 0
+}
+
+# Executed directly rather than sourced?
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  case "${1:-}" in
+    --selftest) _probe_selftest; exit $? ;;
+    *) echo "usage: source this file, or run it with --selftest" >&2; exit 2 ;;
+  esac
+fi

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_incentive
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 13 months
+evidenceExported: true
+databaseLineage:
+  ownedDatabases:
+    - openbank_incentive

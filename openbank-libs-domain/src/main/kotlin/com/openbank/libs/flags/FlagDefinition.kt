@@ -34,14 +34,14 @@ data class FlagDefinition(
     val fourEyes: Boolean = classification == FlagClassification.MONEY_PATH,
 ) {
     /** True once [expiresAt] has passed — surfaced by CI and the admin-ui stale badge. */
-    fun isExpired(asOf: Instant = Instant.EPOCH): Boolean = expiresAt != null && asOf.isAfter(expiresAt)
+    fun isExpired(asOf: Instant): Boolean = expiresAt != null && asOf.isAfter(expiresAt)
 
     /**
      * Static validation of a single definition (the CI gate runs this over every
      * parsed flag and fails the build on any non-empty result). Returns the list
      * of human-readable violations; empty = valid.
      */
-    fun validate(asOf: Instant = Instant.EPOCH): List<String> = buildList {
+    fun validate(asOf: Instant): List<String> = buildList {
         if (!KEBAB_CASE.matches(key)) add("flag key '$key' must be non-blank kebab-case")
         if (owner.isBlank()) add("flag '$key' has no owner")
         if (classification == FlagClassification.MONEY_PATH && !fourEyes) {

@@ -218,6 +218,72 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2026-09-30"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
+    # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
+    # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
+    # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
+    # That generated document is not being produced. Across three independent CI runs and every
+    # service that REACHES the script — one with no committed openapi.yaml is skipped a step
+    # earlier by the workflow's own guard (openbank-simulation, run 33949966927) — billing,
+    # interest, swift (run 33949966927),
+    # document (33949973656), customer-edge (33949914172) — the script printed
+    #
+    #   ##[notice] <svc>: no generated schema at <svc>/build/openapi-generated/openapi.yaml
+    #              ... Not a finding.
+    #
+    # and returned 0 BEFORE reaching its count line ("{checked} request schema(s) compared,
+    # {findings} finding(s)"), so no count is emitted at all. Zero request schemas have been
+    # compared. Verification note: the word is "compared", not "checked" — grepping the wrong
+    # one returns empty across every run and reads as a confirmation while measuring nothing.
+    #
+    # CAUSE SETTLED 2026-09-05 by running the same command locally (isolated Gradle home,
+    # BUILD SUCCESSFUL in 12m24s): store-schema-directory is relative TO THE SUBPROJECT, not to
+    # the repo root, so "<svc>/build/openapi-generated" wrote to
+    #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
+    # a directory nothing reads. The document was produced the whole time, one level away.
+    # Fixed in _service-ci.yml by passing "build/openapi-generated".
+    #
+    # FIRST REAL OUTPUT, same run, one service: "2 request schema(s) compared, 21 finding(s)"
+    # — openbank-interest-service publishes InterestRateConfig with ratePercent, tierMin,
+    # tierMax, validFrom, validTo, calculationMethod, none of which exist on the request DTO,
+    # while the DTO's annualRate, dayCount, effectiveFrom/To, minBalance/maxBalance and
+    # rateType are unpublished. Same shape as kyc #5895: a client generated from that document
+    # cannot call the endpoint.
+    #
+    # FLEET NUMBER, measured the same day by building all 52 services that carry an
+    # openapi.yaml (one Gradle invocation, --continue, BUILD SUCCESSFUL in 25m14s) and running
+    # this checker over each generated document:
+    #
+    #   121 request schemas compared    122 findings    17 of 52 services affected
+    #   88 parsed-not-published (a DTO property the spec omits)
+    #   34 published-not-parsed (a spec property no DTO has -- a client sends it, it is ignored)
+    #
+    #   pid 27 · interest 21 · domestic-payment 13 · dispute 12 · standing-order 10 · sca 8 ·
+    #   consent 8 · sepa-payment 6 · clearing 6 · balance 3 · kyc 2 · then 1 each for party,
+    #   lending, document, transaction, sanctions, swift.  35 services are clean.
+    #
+    # MONEY PATH is in the published-not-parsed half, which is the half a client acts on:
+    #   CreateSepaPaymentRequest.currencyCode, .requestedExecutionDate
+    #   CreateDomesticPaymentRequest.currencyCode, .message
+    #   PlaceHoldRequest.expiresAt
+    # each declared in the spec, absent from the DTO -- sent by a generated client and silently
+    # dropped. So the backlog behind this date is REAL and was never a false-positive-rate
+    # question. 122 is the number to burn down (issue #8828); advisory until it is near zero.
+    #
+    # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
+    # would graduate a check that examines nothing, and the green would then be load-bearing.
+    # A missing generated document currently reads identically to a clean service — the same
+    # "could not look" encoded as "looked and found nothing" that check-fleet-attestations.sh
+    # deliberately separates (it exits 2 and says "NOT a verdict"). This script does not.
+    #
+    # The work behind this date is therefore a BUILD fix — find why the Quarkus scanner writes
+    # no document — plus making the missing-document case distinguishable from a clean one.
+    # Only then is a false-positive measurement even meaningful.
+    blocked_on: "the gate is a no-op: the generated schema it compares against is not produced by
+      the build, so it returned 'Not a finding' with 0 request schemas checked on every service
+      that built in runs 33949966927 / 33949973656 / 33949914172 (measured 2026-09-05). Flipping
+      it would enforce a check that examines nothing. Fix the build so Quarkus emits
+      build/openapi-generated/openapi.yaml, and make a missing document distinguishable from a
+      clean service, before this date means anything."
     # openapi_route_conformance (above) is ROUTE SET ONLY — it does not read schemas, so aml's
     # invented request/response fields passed it clean (#2312). This is the request half of that
     # gap, using the document Quarkus itself generates
@@ -253,8 +319,8 @@ change_requirements:
       - "a CNPG cluster declaring barmanObjectStore -> the managed bucket has a matching
          aws_eks_pod_identity_association in db-backups.tf"
     gate: db-backup-associations
-    enforced: advisory
-    target_enforce_date: "2026-08-15"   # ADR-0144
+    enforced: enforce
+    enforced_since: "2026-08-16"        # ADR-0144 — producer has run enforced in CI
     ci_producer: "openbank-infra/scripts/check-db-backup-associations.py"
     # Backup credentials arrive via EKS Pod Identity, granted per (namespace, serviceAccount) by
     # a HAND-MAINTAINED map in db-backups.tf. Nothing linked that map to the gitops manifests, so
@@ -272,14 +338,52 @@ change_requirements:
     # cannot key a for_each; a tofu plan of that design read "0 to add, 35 to destroy"), and
     # yamldecode cannot parse the 30-of-42 multi-doc manifests. Same lesson as the OPA generator
     # gate (#1184): the list must be checked mechanically, not remembered.
+  cnpg_backup_declared:
+    applies_to: "every CNPG Cluster manifest under openbank-infra/gitops"
+    requires:
+      - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
+         openbank.io/backup-exempt-reason with a non-empty reason"
+    gate: cnpg-backup-declared-gate
+    # GRADUATED EARLY, 13 days before its 2026-09-15 date, because the same PR made the gate
+    # able to fail at all. It carried `mode: enforced` from the day it was added (#4993) while
+    # invoking its checker without --enforce, so a finding exited 0 and the gate was green by
+    # construction. Leaving this record on `advisory` after fixing that would have reproduced,
+    # in the very PR that reports it, the drift the sibling entry below documents.
+    #
+    # The graduation condition is met and was measured, not assumed: 0 findings across all 61
+    # CNPG Cluster manifests on 2026-09-02, and the gate is falsifiable — stripping the
+    # `backup:` block from a real cluster manifest takes it red.
+    enforced: enforced
+    ci_producer: "openbank-infra/scripts/check-cnpg-backup-declared.py"
+    # The sibling of db_backup_association, for the case that rule CANNOT see. Its producer
+    # scans for clusters that DECLARE a barmanObjectStore and skips the rest (`if not dest:
+    # continue`), so a database that never asked to be backed up is not a mismatched pair and
+    # is passed over. The rule that exists to make an unrecoverable database visible is
+    # therefore blind to the most unrecoverable kind.
+    #
+    # Measured against the sandbox 2026-08-16, two independent probes agreeing: 59 live CNPG
+    # clusters, 57 with a recovery point, 0 declared-but-unrecoverable, 2 with no backup
+    # declared at all -- while db_backup_association reported clean across all of it.
+    #
+    # The exemption is an ANNOTATION ON THE CLUSTER, not an entry in a list kept beside the
+    # manifests: a separate list is free to drift from what it describes with nothing to
+    # notice, and an annotation cannot outlive the cluster it excuses.
+    #
+    # Advisory until 2026-09-15 for one specific reason, not caution: exactly one cluster is
+    # in scope and unresolved -- engagement-db -- and whether it should be backed up or is
+    # genuinely disposable is an owner's decision, not something a contributor should settle
+    # to unblock a gate. Enforcing before that answer would fail every PR on an open question.
+    # glitchtip-pg is live and also unbacked, but is deployed by a third-party chart and is
+    # outside the gitops tree, so no gitops-scoped rule can reach it; that gap needs a runtime
+    # control and is not silently counted as covered here.
   db_change:
     detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
     require:
       - "new Flyway migration (forward)"
       - "rollback note in PR"
     gate: db-migration
-    enforced: advisory
-    target_enforce_date: "2026-08-15"   # ADR-0144
+    enforced: enforce
+    enforced_since: "2026-08-16"        # ADR-0144 — rollback/forward-only guard graduated
     # The rollback note lives IN the migration, as a `-- Rollback:` comment — single-line or
     # spanning the following comment lines. blocked_on used to call for a PR-BODY-parsing check,
     # but the established practice is in-file (96 of 214 migrations when the gate was written,
@@ -296,11 +400,62 @@ change_requirements:
       - "breaking event change ships as a NEW versioned event (-vN topic, ADR-0006), never an in-place edit"
     gate: schema-compat
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-10-31. The date could not be met and this file already
+    # said so: the GRADUATION EVIDENCE block below records 40 findings across 5 commits that would
+    # have been RED under --enforce, and states "a ruling is needed first" on whether an added
+    # non-nullable field is a real replay break. A ruling plus a 40-finding burn-down is not three
+    # days of work, and leaving the date would have failed EVERY PR in the repo via
+    # gate-graduation-guard rather than failing this rule.
+    target_enforce_date: "2026-10-31"   # ADR-0144
+    # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
+    # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
+    # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
+    # in 90 days touching a file that contains `DomainEvent(`, found with `git grep -l`, not by
+    # path name — gives 60 property-set deltas and **40 findings** across 5 commits, every one
+    # of the "added as non-nullable T with no default, breaking on REPLAY" class:
+    #   fc33a87176 (#2662, explicit DomainEvent.occurredAt)          27
+    #   da16beed4a (#8232, delegation monotonic lifecycle)            8
+    #   f75fe6d3af (#3411, delegation validity window)                3
+    #   069039649b (#2923, ConsentRevoked.scopes)                     1
+    #   d6e95d78a7 (#2709, YearCloseAttestedEvent.occurredAt)         1
+    # Under --enforce those five commits would have been RED. So this rule is NOT ready to
+    # graduate on 2026-09-15 on evidence; a ruling is needed first on whether an added
+    # non-nullable field is a real replay break here (it is, for a consumer replaying the
+    # topic from the beginning) or whether the outbox always writes fresh, in which case the
+    # check is too strict and the checker changes, not the date.
+    #
+    # HOW THE ZERO HAPPENED, because the failure mode is reusable: the advisory path exits 0
+    # and emits its findings as `::warning::`, so any measurement that reads the exit code, or
+    # greps a checked-out commit where `.github/scripts/check-event-schema-compat.py` did not
+    # yet exist, sees a clean 0. The second agent reproduced that false-clean before catching
+    # it. Replay a checker by importing TODAY'S copy and feeding it `git show c^:path` /
+    # `git show c:path` — never by running the script as it existed at the commit.
+    #
+    # Two caveats worth carrying, because the first four attempts at this measurement all
+    # produced clean-looking numbers that meant nothing:
+    #   * it only became meaningful after #8713 fixed a parser blind spot — a KDoc inside a
+    #     constructor parameter list hid the parameter after it, so 15 properties fleet-wide
+    #     were invisible and REMOVING one produced no finding at all;
+    #   * selecting commits by path name (`*Event*.kt`, `*/events/*`) gave 40 commits of which
+    #     ZERO touched an event file. Select the population from the code, never from names.
+    #
+    # NOT evidenced: no commit in the window REMOVED or retyped a field, so those paths rest on
+    # the gate's own --self-test (17 cases), not on history.
     # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
     # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
     # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
-    # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
+    # eventType renames), *.avsc files (field default rules), and — since ADR-0260 picked
+    # JSON Schema as the fleet's event-schema format, not Avro — */schema/*.schema.json files
+    # (compare_json_schema: removed properties, type changes, a property becoming required, all
+    # compared per-`oneOf`-branch so a header-discriminated topic's several message shapes are
+    # each checked). The JSON Schema path is the ONLY compatibility check reachable for a
+    # producer whose event class does not extend DomainEvent — e.g.
+    # openbank-document-service's DocumentGenerated/SignatureCeremonyCompleted, structurally
+    # invisible to the DomainEvent comparator the same way SepaPaymentCreatedEvent is on the
+    # money-path side. Still no rules.yaml gate registration change: this is the SAME `gate:
+    # schema-compat` / `event_change` rule extended to a new input shape, not a new gate — a
+    # second advisory entry for the identical detect scope would be the #3009 duplicate-gate
+    # mistake. Flip to enforced = --enforce.
     ci_producer: ".github/scripts/check-event-schema-compat.py"
   event_consumer_liveness:
     # ADR-0160 mechanism 1. standing-order-service published standing-order.due.v1 every day
@@ -328,14 +483,21 @@ change_requirements:
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
     # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
     allowlist:
-      - topic: "openbank.psd2.events"
-        reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+      # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
+      # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
+      # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the
+      # entry anticipated — onboarding-service's business funnel projection
+      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6) and analytics-sink's
+      # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
+      # the gate fails on a stale entry under --enforce, in both directions.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
-      - topic: "openbank.delegation.events"
-        reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
       - topic: "proposal-events"
-        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). Nothing is published today and three facts say so: the topic is declared nowhere under openbank-infra/, the service is absent from auto-deploy.yml's ALL_SERVICES, and no KafkaUser exists for it. The intended consumer is the oversight/review surface that ADR-0244 D7 describes, not yet built — the producer ships first so the wire shape is stable before consumers land, same shape as the delegation.events and engagement.events entries above. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
+        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
+      - topic: "openbank.loyalty.events"
+        reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
+      - topic: "openbank.wealth.events"
+        reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
   lineage_code_audit:
@@ -499,13 +661,16 @@ change_requirements:
     detect: ["money-path <service> trust-boundary paths in the PR diff"]
     require:
       - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
-    gate: threat-model-diff
-    enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
-    # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
-    # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
-    # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
-    # pass --enforce to the script in ci.yml (one-line change).
+    gate: threat-model-updated-on-trust-boundary-change
+    enforced: enforced
+    # GRADUATED in #3431, after the #3438 scope fix took the false-positive rate from 7-of-60
+    # to 2-of-60 (both survivors real). This block said `advisory` with a target_enforce_date
+    # of 2026-09-15 and described findings as "::warning annotations" with the flip still to
+    # come — all three were already untrue. The gate runs `mode: enforced` AND passes
+    # --enforce (both are required, #2392), so findings are ::error and fail the build.
+    # Corrected 2026-09-02, found by reading gates.yaml against this file rather than either
+    # alone: nothing cross-checks a rule's `enforced:` against the mode of the gate that
+    # implements it, so this record could drift for as long as it did.
     ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
   mp_messaging_dotted_keys:
     # SmallRye reactive-messaging config written as a DOTTED key
@@ -518,12 +683,31 @@ change_requirements:
     gate: dotted-mp-messaging-keys
     enforced: advisory
     target_enforce_date: "2026-09-30"   # ADR-0144
-    blocked_on: "16 findings fleet-wide as of 2026-08-08 (#3931), across kyc/sdd/psd2/ledger/
-      onboarding/anacredit — NOT the 1 this line claimed while carrying no date; the claim was never
-      re-measured because an advisory gate's own justification note is not itself gated. The script
-      supports --enforce, so graduating is a one-word change once the findings are cleared — and
-      the right sequencing is #3928 first: widen the ENFORCED check-kafka-dotted-keys.py to the
-      whole class and retire this advisory duplicate, rather than graduating two overlapping gates."
+    # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
+    # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
+    # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
+    #
+    # 171 is not "the debt grew 10x" — the two gates count different things, which IS the point:
+    #   * kafka-dotted-key-ratchet (ENFORCED) baselines today's set as an operational decision
+    #     (#2945) and fails only on a NEW occurrence. It reports clean: 11 baselined, 0 new.
+    #   * dotted-mp-messaging-key-guard (ADVISORY, this rule) has NO baseline at all and counts
+    #     every occurrence, including the ones its enforced sibling deliberately accepted.
+    #
+    # So graduating this on 2026-09-30 would fail the build on 171 occurrences the enforced gate
+    # has already decided to keep. The previous note's recommendation — retire the advisory
+    # duplicate rather than graduate two overlapping gates — is therefore confirmed by
+    # measurement. What is NOT established here is how many of the 171 are genuine defects
+    # rather than the accepted set; that needs a ruling on the Kafka semantics and is the real
+    # work behind this date.
+    blocked_on: "graduating would fail the build on 175 occurrences (re-measured 2026-09-05;
+      an earlier note said 171, which was wrong). Only 24 of the 175 are even in the enforced
+      sibling's watch set — kafka-dotted-key-ratchet reads group.id and auto.offset.reset,
+      incoming only — and 11 of those it baselines (#2945). The remaining ~151 are
+      value.deserializer / value.serializer / key.serializer / client.id / bootstrap.servers
+      keys the enforced gate has never looked at: UNASSESSED, not deliberately accepted, so the
+      earlier note's attribution overstated that gate's decision by an order of magnitude.
+      #3928 and #3931, which the previous note sequenced on, are both closed. The action is
+      still to retire this duplicate rather than flip it, but the ~151 need a ruling first."
     # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
@@ -540,15 +724,18 @@ change_requirements:
     require:
       - "a role-only write rule is named operator-<domain>-write, or pins its caller with input.principal.id"
     gate: role-only-write-rule-naming
-    enforced: advisory
-    target_enforce_date: "2026-10-31"   # ADR-0144
-    blocked_on: "8 role-only WRITE rules do not follow the naming convention and are baselined in
-      the script, so nothing will ever propose adding them to shared_m2m_write_prohibition.reasons.
-      The count was 18 in the first revision; re-deriving it empirically (rather than by hand) found
-      10 of those were not reachable by the shared identity at all — they bar service-accounts
-      outright, gate on a role that account does not hold, or are reads. Graduating needs each of
-      the remaining 8 renamed and its real callers confirmed; AUTHZ_ENFORCE is true on most of these
-      services, so registering one without that is a money-path outage, not a test failure."
+    # GRADUATED with a baseline, caught by the mirror direction of check-advisory-gate-registration
+    # (#7941): the gate has run `mode: enforced` while this rule still read advisory with a stale
+    # target date — the permanent-advisory defect ADR-0144 exists to prevent, with a fleet-wide
+    # graduation-check outage armed on the date (#7897).
+    enforced: enforce
+    enforced_since: "2026-09-05"
+    # The enforcement carries a baseline: 8 role-only WRITE rules predate the naming convention and
+    # are baselined in the script (the count was 18 in the first revision; re-deriving empirically
+    # found 10 unreachable by the shared identity — they bar service-accounts outright, gate on a
+    # role it does not hold, or are reads). NEW violations fail; the 8 shrink as each is renamed and
+    # its real callers confirmed — AUTHZ_ENFORCE is true on most of these services, so renaming one
+    # without that confirmation is a money-path outage, not a test failure.
     ci_producer: ".github/scripts/check-operator-write-naming.py"
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
@@ -589,8 +776,28 @@ change_requirements:
       - "compliance scorecard reflects current live/partial/planned status"
     gate: docs-currency
     enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
-    blocked_on: "no CI checker for section-documentation currency (not yet written) — likely needs a docs-touched-when-page-touched heuristic, not a strict diff rule"
+    # MOVED 2026-09-12, 2026-09-15 -> 2026-11-30. Longer than the sibling move above because the
+    # blocker is different in kind: this rule has NO producer and, per the measurement below, the
+    # rule as written cannot have one that is worth running — a docs-touched-when-page-touched
+    # gate fails 95% of admin-ui page commits. What is missing is a decidable DEFINITION of
+    # currency scoped to changed controls, which is design work, not a checker. The `blocked_on`
+    # field below already said this; the date did not reflect it.
+    target_enforce_date: "2026-11-30"   # ADR-0144
+    # MEASURED 2026-09-04, and the number is the argument: 451 commits in 30 days touch an
+    # admin-ui `page.tsx`, and of a 60-commit sample only 3 (5%) also touch docs/, a .mmd
+    # diagram or process.yaml. So the rule as written — "the section's documentation updated
+    # in the same PR" — would fail 95% of admin-ui page commits, and the
+    # docs-touched-when-page-touched heuristic this note proposes would fail exactly the same
+    # 95%: it IS that rule. A gate that reddens 19 of every 20 PRs in a tree is not a control,
+    # it is a thing people learn to click past (the same reasoning that keeps
+    # check-entity-column-names.py checking a decidable convention instead of guessing).
+    #
+    # What is missing is therefore not a checker but a DEFINITION of currency that a machine
+    # can decide and that a normal page edit does not violate — e.g. scoping to pages whose
+    # documented CONTROLS changed, rather than to any page edit. Until that exists this date
+    # cannot be met by writing code, and moving it without saying so would make this record
+    # the fourth stale one found this week.
+    blocked_on: "the rule as written is not enforceable: measured 2026-09-04, a strict or heuristic docs-touched-when-page-touched gate fails 95% of admin-ui page commits (451 page.tsx commits in 30 days; 3 of a 60-commit sample also touched docs). Needs a decidable definition of currency scoped to changed controls, not a checker"
   clock_injection:
     # ADR-0100 (DST Layer 1): no Instant.now() / LocalDateTime.now() / System.currentTimeMillis()
     # in domain or application layer of money-path services. All time must flow from an injected
@@ -686,18 +893,59 @@ money_path_services:
   - openbank-sdd-service                  # issue #1478: SddCollectionDebitConsumer posts a real debit via
                                            # TransactionServiceClient for every authorised direct-debit collection
                                            # (#1027, merged) — moves funds directly, not adjacent to it like
-                                           # sca/consent/vop below. Four-eyes not yet assessed for this service;
-                                           # revisit under issue #938's follow-up sweep.
+                                           # sca/consent/vop below. Threat model:
+                                           # docs/threat-models/openbank-sdd-service.md.
+                                           # four-eyes assessed (#8359): sdd.approve (B2B mandate confirmation —
+                                           # the act that authorises all future debits on a mandate) WIRED via
+                                           # four_eyes.actions below. sdd.authorise assessed, NOT wired: it is
+                                           # the bulk authorisation of inbound collections whose DESIGNED caller
+                                           # is clearing automation (sdd_rest_ext.rego header documents that
+                                           # caller is simply not built yet — the consent.activate "plausibly
+                                           # could" case), so gating it today buys nothing (no caller exists)
+                                           # and plants the exact trap the four_eyes.verbs guardrail describes
+                                           # for the day that caller ships. When it does, the operator
+                                           # authorise-by-hand path gets its OWN distinct action and THAT is
+                                           # gated. sdd.create/update/delete are edge-reachable customer
+                                           # self-service (M2M grant in edge-service-sdd) with effect on FUTURE
+                                           # debits only — ungateable per the guardrail, same shape as
+                                           # standing-order order CRUD. The debit itself is event-driven
+                                           # (SddCollectionDebitConsumer), no HTTP PEP on that path.
   - openbank-interest-service              # issue #1478: capitalize()/write-off post real GL journals
                                            # (LendingJournalFactory-equivalent), and withholding-tax remittance
-                                           # (#999, in progress) will book a cash leg via transaction-service.
-                                           # Four-eyes not yet assessed for this service; revisit under issue
-                                           # #938's follow-up sweep.
-  - openbank-sca-service                  # four-eyes assessed (issue #938 follow-up), NOT wired: device.enroll and
-                                           # scaChallenge.consume are both real-payment/self-service actions with a
-                                           # confirmed M2M automated caller (customer-edge) — gating either would brick
-                                           # production automation once enforcement is ever flipped on, not just close
-                                           # the risky operator-console gap. See the four_eyes.verbs guardrail note below.
+                                           # (#999, merged) books a cash leg via transaction-service.
+                                           # Threat model: docs/threat-models/openbank-interest-service.md.
+                                           # four-eyes assessed (#8359): interest.create (manual accrue,
+                                           # capitalize — posts real GL journals, rate-config create — shapes
+                                           # all future accrual amounts, withholding remittance assemble —
+                                           # triggers the real cash leg) and interest.trigger (manual mass
+                                           # accrual) WIRED via four_eyes.actions below; both are human-only
+                                           # (operator-interest-write excludes service accounts outright AND
+                                           # the interest_rest_ext prohibition vetoes them at the allow head;
+                                           # fleet audit found no M2M writer — agent-service's client is
+                                           # read-only). The daily accrual / monthly capitalization schedulers
+                                           # and the remittance settlement consumer call the use cases
+                                           # IN-PROCESS, so the HTTP-layer gate never touches automation.
+                                           # interest.delete (deactivateRateConfig) NOT wired: it stops future
+                                           # accrual — reduces money movement, standing-order pause precedent.
+                                           # interest.read/list are reads. Runs AUTHZ_ENFORCE=true (flipped in
+                                           # #3695); four-eyes enforcement stays off fleet-wide
+                                           # (authz.four-eyes.enforce, ADR-0155) — wiring sets the flag only.
+  - openbank-sca-service                  # four-eyes assessed (issue #938 follow-up) and WIRED since #8360
+                                           # via ADR-0280's per-action service-account exemptions: device.enroll
+                                           # and scaChallenge.consume are in four_eyes.actions below, with
+                                           # four_eyes.exemptions carrying their verified M2M callers
+                                           # (service-account-openbank-edge for both, the shared backend client
+                                           # for scaChallenge.consume's delegation/document ceremonies, #3734).
+                                           # What remains gated is exactly the path the stalemate left open:
+                                           # the human ops-console caller (operator-sca-write) — enroll a device
+                                           # on behalf of a party, or spend an approved challenge — pauses for a
+                                           # second approver once authz.four-eyes.enforce (ADR-0155) is enabled,
+                                           # while the SCA settlement gate and self-service enrollment keep
+                                           # flowing. Threat model: docs/threat-models/openbank-sca-service.md.
+                                           # four_eyes.exemptions exists to close this class of stalemate — do
+                                           # not use it to exempt a HUMAN principal, and do not exempt a
+                                           # service-account id whose client is shared with a human-reachable
+                                           # flow.
   - openbank-consent-service               # four-eyes wired (issue #938 follow-up) on consent.grant/consent.revoke.
                                             # UPDATED (ADR-0206): no longer exclusively human-operator — the shared
                                             # M2M principal may now call both, but ONLY for
@@ -715,12 +963,19 @@ money_path_services:
   - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                             # money itself — money-path for the same reason consent/vop are. Threat
                                             # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
-                                            # delegation.offer/revoke/suspend are self-service or fraud-signal actions
-                                            # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
-                                            # the fraud pipeline, not an operator console, so there is no
-                                            # maker/checker pair to gate yet. Revisit when the operator
-                                            # backoffice surface ships.
-  - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+                                            # delegation.offer/revoke are self-service with SCA-bound ceremonies on both
+                                            # ends. The bank-side suspend was justified here as landing "via the fraud
+                                            # pipeline, not an operator console" — that is NOT true (#4403): fraud scoring
+                                            # is shadow-only and drives no suspension, so this exemption rested on a
+                                            # control that does not exist. The exemption still holds on the narrower and
+                                            # true ground that no operator suspend endpoint has shipped, so there is no
+                                            # maker/checker pair to gate yet. Revisit when the operator backoffice
+                                            # surface ships, and do not re-derive it from the fraud pipeline.
+  - openbank-fraud-service                # ADR-0084: v4 rule engine live; scoring is SHADOW-ONLY on every rail. The domestic-payment
+                                           # enforcement gate (issue #667) was MERGED AND THEN DELETED by 189fe7b03 (PR #2122,
+                                           # closing issue #1917) — this comment credited it as merely flag-gated until #4403.
+                                           # No fraud verdict changes any payment outcome today: the four wired rails call
+                                           # POST /fraud/score and log the result. See ADR-0084's 2026-08-09 correction block.
                                            # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                            # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
                                            # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
@@ -771,6 +1026,16 @@ money_path_services:
                                             # a gate (TPP revocation, consent termination by an operator) are not
                                             # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                             # joins the #3679 cohort.
+  - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                            # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                            # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                            # may move, which is money-path for the same reason sca/consent/vop/
+                                            # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                            # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                            # repair money movement; card.create/activate are SCA-bound customer
+                                            # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                            # without the cardholder's SCA today — add a verb here when one ships.
+                                            # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -786,7 +1051,9 @@ money_path_services:
 #
 # Targets are REFERENCE defaults, not calibrated against real production incident or
 # traffic history — this is a reference implementation with no live customer traffic (same
-# honesty disclosure as the openbank-lending-service PD/LGD placeholders). Revisit once the
+# honesty disclosure as the openbank-lending-service PD/LGD placeholders — those are now
+# governed by the calibration process in openbank-lending-service docs
+# 07-risk-model-calibration, issue #8364). Revisit once the
 # load-benchmark / DR-drill scope of issue #669 produces real numbers.
 slo:
   availability_target: "99.9"           # percent of non-error requests, uniform fleet-wide
@@ -978,6 +1245,18 @@ four_eyes:
   actions:
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
+                                         # playbook version. Confirmed no M2M caller — the only allow
+                                         # rule for this action (rest.rego commstyle-publish) requires
+                                         # HUMAN + (ROLE_COMMS_APPROVER or ROLE_ADMIN) and explicitly
+                                         # excludes any service-account-* principal id; D6 deliberately
+                                         # never grants commstyle.publish to a service account
+                                         # (shared_m2m_matrix_write_grants stays empty for it). Also
+                                         # enforced at the application layer, independently: the
+                                         # draft's own maker can never be the caller here
+                                         # (CommunicationStyleService.publish), D3's literal "the
+                                         # maker can never approve their own version" — two separate
+                                         # checks, not one restated twice.
     - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                          # Confirmed no M2M caller — the only allow rule for this
                                          # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -1009,6 +1288,67 @@ four_eyes:
                                          # counterpart transaction.merge-sweep is already gated by the
                                          # `sweep` verb — so both halves of the merge flow now pause
                                          # for a second approver, or neither does.
+    - sdd.approve                       # #8359: confirm a B2B direct-debit mandate
+                                         # (POST /api/v1/sdd/mandates/{id}/confirm) — the SDD B2B control
+                                         # point: a wrongly-confirmed mandate authorises every future
+                                         # collection against the debtor. Exact action, not the `approve`
+                                         # verb: the verb would ALSO flag lending.approve (already
+                                         # maker-checker in-app — an OPA second-approver pause on top
+                                         # would stall the designed checker flow the day enforcement
+                                         # flips) and pull non-money-path dispatch.approve into the
+                                         # four-eyes-verb-grantable gate. GUARDRAIL check: human-only —
+                                         # the edge rule (edge-service-sdd) deliberately excludes
+                                         # sdd.approve ("a bank-side verification act, the edge exposes
+                                         # no route for it"), operator-sdd-write excludes every
+                                         # service-account-* principal, and the role_action_matrix
+                                         # grants no sdd write at all. The money-moving sdd.authorise
+                                         # is deliberately NOT gated — see the money_path_services
+                                         # entry for the reasoning.
+    - interest.create                   # #8359: bundles every operator write on the interest money
+                                         # path — manual accrue, capitalize (posts real GL journals),
+                                         # rate-config create (a mis-set rate moves money at scale on
+                                         # every future accrual — the runtime analogue of vop's
+                                         # max-edit-distance), and withholding remittance assemble
+                                         # (triggers the real cash leg to the finanční úřad via the
+                                         # settlement consumer). GUARDRAIL check: human-only, twice
+                                         # over — operator-interest-write excludes service-account-*
+                                         # and the interest_rest_ext prohibition vetoes the write set
+                                         # for ANY service account at the allow head; fleet audit found
+                                         # no M2M writer (agent-service's InterestServiceClient is
+                                         # read-only). The accrual/capitalization SCHEDULERS call the
+                                         # use cases in-process — they never pass the HTTP PEP, so this
+                                         # gate cannot pause them.
+    - interest.trigger                  # #8359: accrueAll (POST /api/v1/interest/accrue/all) — manual
+                                         # mass accrual posting GL journals en masse. Same human-only
+                                         # caller set as interest.create above (same allow rule, same
+                                         # prohibition). The daily accrual scheduler is in-process and
+                                         # unaffected.
+    - device.enroll                     # #8360 / ADR-0280: enrol a device credential. Gated for every
+                                         # caller EXCEPT the exemptions below — the risky path is the
+                                         # human ops-console enroll-on-behalf (operator-sca-write), not
+                                         # the customer self-service the edge M2M drives.
+    - scaChallenge.consume              # #8360 / ADR-0280: spend an approved challenge (the ADR-0021
+                                         # settlement gate). Gated for every caller except the exempt
+                                         # automation identities below — a lone operator must not be
+                                         # able to consume a challenge outside a real ceremony.
+                                         # Exact actions, not verbs: `enroll`/`consume` happen to be
+                                         # fleet-unique today, but a verb suffix would silently trap
+                                         # any FUTURE money-path `*.consume` automation action.
+  #
+  # exemptions (ADR-0280): per-action list of principal ids for which four_eyes_required does NOT
+  # fire — the verified M2M automation callers that must keep flowing when the action is gated.
+  # rest.rego evaluates this map in every four-eyes clause; an action with no entry (or a bundle
+  # whose rules.yaml predates the key) has no exemptions. Admission bar, checked at review: the id
+  # must be a `service-account-*` identity with an in-repo identity-scoped allow rule for exactly
+  # this action (the sca_rest_ext.rego pattern), never a role, never a human principal, and never
+  # the shared backend client for an action only SOME of its users automate — the shared client's
+  # exemption below covers consume because BOTH its callers (delegation grant-accept,
+  # document-signing) are ceremonies, and no human path rides that identity.
+  exemptions:
+    device.enroll: [service-account-openbank-edge]                 # customer self-service enrollment
+    scaChallenge.consume:                                          # ADR-0021 settlement gate + ceremonies
+      - service-account-openbank-edge                              # scaGate before every money-path forward
+      - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
 
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
@@ -1037,6 +1377,21 @@ feature_flags:
 coverage:
   tool: kover
   ratchet_only: true
+  # ADR-0273: one privacy-preserving evidence envelope joins CI execution, real Testcontainers
+  # starts, performance/mutation runs and sandbox synthetics.  It is additive: raw JUnit and Kover
+  # stay independently consumable until the projection has proven itself across the fleet.
+  test_intelligence:
+    schema: openbank-libs/governance/test-intelligence-run.schema.json
+    producer: .github/scripts/collect-test-run-evidence.py
+    fleet_ci: .github/workflows/_service-ci.yml
+    runtime_library: openbank-libs-testing
+    projection: openbank-admin-ui
+    states: [passed, failed, skipped, not-run, stale, blocked, unknown]
+    provenance_required: [commit, workflow, run_attempt, collected_at]
+    testcontainers_runtime_proof: required-when-shared-resource-is-used
+    run_history: immutable-per-attempt-artifact-30-days
+    browser_failure_diagnostics: metadata-only-authenticated-artifact-7-days
+    compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
     money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)
@@ -1083,7 +1438,23 @@ coverage:
     # 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that wasn't.)
     # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
     # transaction 46%, balance 55%, ledger 65%, fx 73%.
-    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
+    # Re-measured 2026-09-03 against the last weekly run (33289385445, 2026-08-30). The previous
+    # text named account/transaction/balance/ledger and was wrong in BOTH directions: account
+    # (49 -> 70) and transaction (46 -> 76) have since cleared, while interest, sanctions and
+    # sepa-payment were never named and are below. ledger has gone the wrong way, 65 -> 63.
+    #
+    #     balance   60%  (46/76)      account     70%  (103/146)
+    #     interest  60%  (36/60)      fx          72%  (62/85)
+    #     ledger    63%  (180/283)    domestic    74%  (49/66)
+    #     sanctions 69%  (34/49)      sdd         75%  (46/61)
+    #     sepa-pay  69%  (44/63)      transaction 76%  (80/104)
+    #                                 sepa-instant 77% (35/45)
+    #                                 fraud       89%  (41/46)
+    #
+    # So the flip is blocked by FIVE services, not four, and the two the record has been
+    # pointing at for a month are no longer among them. Read the weekly run before quoting a
+    # number here; these move.
+    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; balance 60, interest 60, ledger 63, sanctions 69 and sepa-payment 69 are below it as of run 33289385445 (2026-08-30)"
   dast:
     tool: "OWASP ZAP baseline (zaproxy/action-baseline)"   # ADR-0030 D3
     enforced: advisory                  # report-only first cut; no fail_action, no PR gate
@@ -1152,7 +1523,39 @@ provenance:
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
   target_enforce_date: "2026-09-30"   # ADR-0144
-  blocked_on: "all four enforce_criteria below must hold; see that list for the specific gap"
+  # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
+  # said neither did; the other two cannot be met by waiting, because nothing measures them.
+  #
+  #   1. every service's latest release carries a green evidence bundle — NOT MEASURED, and
+  #      not measurABLE as things stand: verify-release-evidence.yml verifies ONE tag per week
+  #      (schedule default: "the newest release"). The 2026-08-31 run verified exactly
+  #      fx-service-v0.14.1. A weekly single-tag check never becomes a fleet statement, however
+  #      long it runs. Fleet coverage needs a different producer.
+  #   2. fleet-attestation green — SATISFIED. Locally the script exits 2 (0 verified, 64 could
+  #      not be checked) purely because cosign/KMS are absent, and it says so itself: "Exit 2 =
+  #      'could not run', NOT a verdict." In CI it prints
+  #      "FLEET ATTESTATION GATE: PASS — every declared openbank-* image is attested"
+  #      (run 33952524397). Do not read the local exit code as a fleet verdict.
+  #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
+  #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
+  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reports Enforce,
+  #      Ready, age 60d.
+  #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
+  #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
+  #      provenance checker. A condition on the behaviour of a gate that was never built has no
+  #      truth value; it cannot be satisfied by waiting. Same shape as the finops_tiers gap
+  #      (#8799), one level up: there rules.yaml named a gate missing from the manifest, here it
+  #      predicates graduation on one that was never named at all.
+  #
+  # So the honest state is 2 of 4 met, 1 unmeasurable with today's producers, and 1 vacuous.
+  # 2026-09-30 cannot be met by waiting; it needs a fleet-coverage producer for criterion 1 and
+  # either a real gate or a rewritten criterion 4.
+  blocked_on: "measured 2026-09-05: criteria 2 (fleet-attestation, PASSES in CI run 33952524397)
+    and 3 (kyverno rule live in Enforce, Ready 60d) ALREADY HOLD — this record said neither did.
+    Criterion 1 is not measurable as things stand (verify-release-evidence.yml checks one tag per
+    week, not fleet coverage), and criterion 4 is vacuous: no `provenance` gate exists in
+    gates.yaml or any workflow, so 'the advisory gate has run clean' has no subject. The date
+    needs a fleet-coverage producer and a rewritten or implemented criterion 4, not more time."
   enforce_criteria:
     - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
     - "the fleet-attestation gate passes: .github/scripts/check-fleet-attestations.sh is GREEN against origin/main (see fleet_attestation_gate below) -- this is a HARD precondition, not a judgement call"
@@ -1182,8 +1585,8 @@ provenance:
     # therefore it was verified".
     basis: declared_images_not_running_pods
     enforcement_rule: >-
-      No image-provenance policy (verify-openbank-image-signatures,
-      verify-openbank-image-sbom-attestation, or any successor) may be set to
+      No image-provenance policy (verify-openbank-image-sbom-attestation, which since
+      2026-09-13 also carries the image-signature check, or any successor) may be set to
       validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
       green run of it. An unattested image is never rejected at the moment it is created --
       only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
@@ -1229,6 +1632,7 @@ dependencies:
         - openbank-flaky-test-hunter/
         - openbank-ap2-service/
         - openbank-mcp-service/
+        - openbank-communication-service/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
@@ -1254,7 +1658,10 @@ dependencies:
         - openbank-flaky-test-hunter
         - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
         - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
+        - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
+                                             # itself, but the ADR's own binding decision places it
+                                             # "under ADR-0197 like the rest of that plane"
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
@@ -1441,6 +1848,49 @@ authz_policy:
 # ---------------------------------------------------------------------------------------
 # Scheduled-method invariants (issue #2148, fleet sweep #2187).
 # ---------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------
+# Temporal worker disable-switch naming (audit Top-50 E46). Every service that registers a
+# Temporal worker at StartupEvent carries a switch so tests / the fuzz harness / DR manifests
+# can boot without Temporal. The name MUST be derivable: `openbank.<service>.worker.enabled`.
+# An invented-per-service name forces every consumer to hard-code a drifting name list — the
+# 2026-08-18 fuzz run shipped 6 "failures" that never sent a request, partly on this.
+# Enforced by .github/scripts/check-temporal-worker-switch-naming.py (gate
+# temporal-worker-switch-naming). Allowlist entries fail stale in either direction.
+# ---------------------------------------------------------------------------------------
+temporal_worker_switch_naming:
+  convention: "openbank.<service>.worker.enabled"
+  allowlist: []
+  # The one pre-convention name, lending's `lending.origination.worker.enabled`, was renamed
+  # to `openbank.lending.worker.enabled` in the same audit follow-up that introduced the gate;
+  # the allowlist mechanism stays (and fails stale in either direction) for the next exception
+  # that genuinely cannot be renamed.
+
+ci_watches:
+  lane_scoped_population: true
+  # A watch that asserts a verdict about ONE lane of a workflow (one trigger event, one
+  # subject) must draw its population from that lane only. Drawn from every lane, it is green
+  # about a different subject and reads the thing it exists to catch as background noise.
+  #
+  # Measured 2026-09-13 on auto-deploy-red-watch.yml (#9130): ten consecutive SCHEDULED
+  # auto-deploy failures over 27 hours, no fleet-health issue, the watch green throughout. Its
+  # population was the three newest completed runs of any event, and auto-deploy's `push` lane
+  # (the services one merge touched) lands green between scheduled ticks —
+  # `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` was `stuck = false`. Worse, the not-stuck
+  # branch closed an open issue on ANY green run, so a lucky escalation would have been tidied
+  # away by the next merge while money-path services stayed pinned. The watch's own issue text
+  # describes exactly that trap.
+  #
+  # Rule: filter the population to the lane (server-side where the API allows it), bound the
+  # query (a watch that paginates history to look at three runs is the rate-limit outage it
+  # reports on — this one was failing on the installation limit the same morning), close only
+  # on the same lane's green, and keep the decision in a script with a --self-test whose
+  # known-positive is the interleaved fixture.
+  #
+  # Whether the other watches (main-red-watch, service-build-stall-watch,
+  # merged-past-red-check-watch) share this class is a thing to MEASURE, not assert: each has
+  # a different trigger shape and main-red-watch already filters on head_branch + event.
+  ci_producer: .github/scripts/detect-auto-deploy-stuck.py   # gate auto-deploy-red-watch-declaration
+
 scheduled_methods:
   no_runblocking_in_scheduled_body: true
   # Quarkus invokes a plain (non-`suspend`) @Scheduled method on a bare `executor-thread`,
@@ -1476,12 +1926,6 @@ scheduled_methods:
   # idiom as the ktlint/detekt baselines and event_consumer_liveness.allowlist. A stale entry
   # is itself a violation.
   runblocking_allowlist:
-    - method: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt#scheduledSweep"
-      reason: >-
-        agent-service has NO Hibernate Reactive on its classpath (build.gradle.kts: the
-        proposals store is plain Agroal JDBC, deliberately not the reactive stack). The sweep
-        drives blocking OPA/MCP/LLM clients and needs to stay on a worker thread — the same
-        bridge ChatEndpoint uses. `suspend` here would move blocking I/O onto an event loop.
     - method: "openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt#scheduled"
       reason: >-
         analytics-sink deliberately DROPS hibernate-reactive-panache, reactive-pg-client and
@@ -1569,6 +2013,54 @@ scheduled_methods:
 # A failed weekly run opens a new issue. Once failure rate DCG stabilises, this
 # graduates to an enforced PR gate.
 # ---------------------------------------------------------------------------------------
+postgres_extensions:
+  # An UNTRUSTED extension cannot be created by the role Flyway connects as. PostgreSQL splits
+  # extensions into trusted (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent`, … — a database OWNER
+  # may create them) and untrusted (`vector`, `postgis`, `postgres_fdw`, `plpython3u`, … —
+  # SUPERUSER only). Every local path connects as superuser (Dev Services, PostgreSQLContainer,
+  # docker-compose), so a migration creating an untrusted extension is GREEN on every laptop and in
+  # CI, and fails only in the cluster, where CloudNativePG hands the application a non-superuser
+  # role. The pod then crashloops on what reads as a migration bug, and nothing in the diff points
+  # at the connecting ROLE.
+  #
+  # Measured against the exact image the fleet runs (ghcr.io/cloudnative-pg/postgresql:18.1, which
+  # already bundles pgvector 0.8.1) while adding semantic retrieval to copilot-service:
+  #   as owner:      ERROR: permission denied to create extension "vector"
+  #                  HINT:  Must be superuser to create this extension.
+  #   as superuser:  CREATE EXTENSION
+  #   as owner, already installed: NOTICE: extension "vector" already exists, skipping
+  #
+  # BOTH halves are required, and the third line above is why they compose: the CNPG `Database`
+  # resource creates the extension over the operator's superuser connection, and the migration's
+  # `CREATE EXTENSION IF NOT EXISTS` short-circuits before the permission check, which is what keeps
+  # local dev and the test containers working. Delete the resource and the deployed migration fails
+  # at its first statement; delete the migration line and every developer's database breaks.
+  untrusted_needs_cnpg_database_resource: true
+  gate: untrusted-pg-extension
+  enforced: true
+  ci_producer: ".github/scripts/check-untrusted-pg-extension.py"
+  # Classification is per-extension and must be VERIFIED the way the pgvector one was — by running
+  # CREATE EXTENSION as a non-superuser against the real image — not inferred from documentation.
+  # The list lives in the checker; adding an entry there is the deliberate act.
+
+litellm_gateway:
+  # LiteLLM parses `--config` ONCE at startup and the ConfigMap is a plain volume mount, so a config
+  # edit reaches the pod's filesystem and changes nothing: the proxy keeps serving the model list it
+  # booted with. The caller of a newly added route gets `model not found` while ArgoCD reports
+  # Synced and Healthy and the ConfigMap in the cluster genuinely contains the new route — the same
+  # silent-degradation shape as an `optional: true` secret ref.
+  #
+  # The manifest has carried "BUMP THIS whenever litellm-config.yaml changes" in a comment since
+  # #1919. Prose is not a control: three routes were added in one week (llama-3.3, llama-guard,
+  # bge-m3) and each depended on somebody remembering it.
+  config_change_requires_revision_bump: true
+  revision_annotation: "openbank.tech/litellm-config-revision"
+  gate: litellm-config-revision
+  enforced: true
+  ci_producer: ".github/scripts/check-litellm-config-revision.py"
+  # Any DIFFERENT value rolls the pod, so the gate deliberately does not check direction or
+  # monotonicity — a legitimate revert must not be blocked by a numbering rule.
+
 perf_gate:
   pilot_services:
     - openbank-product-catalog
@@ -1683,6 +2175,33 @@ incluster_hostnames:
   enforced_since: "2026-08-07"        # #3931
   original_target_enforce_date: "2026-10-31"   # ADR-0144 — met early
   ci_producer: .github/scripts/check-incluster-hostnames.py
+
+noop_outcomes:
+  # ADR-0252 phase 0 (#4348). `PushResult.skipped()` — returned whenever the APNs adapter is
+  # disabled — carried `success = true`, and the fan-out asked `count { success }`. Every push in
+  # an environment without APNs credentials was therefore counted as delivered: the row committed
+  # SENT with `sentAt` set, and the outcome event announced a delivery that never left the process.
+  #
+  # It was unrecoverable from telemetry for three reasons that generalise to every adapter of this
+  # shape: the disabled path is the QUIET one so there is no error to find; the channel emitted no
+  # metric of its own so nothing disagreed with the row; and a 200 from APNs means *accepted*, not
+  # delivered — the provider issues no receipt, so delivery is not observable server-side at all.
+  #
+  # THE RULE: a skipped / disabled / dry-run / no-op outcome gets its OWN enum value and must never
+  # share a boolean with a real success. Name the metric for what can actually be established —
+  # `accepted`, never `delivered` — and alert on the success state ("adapter skipping and accepting
+  # nothing"), because at 100% skip there is no error rate to alert on.
+  distinct_enum_value_required: true
+  aggregation_must_not_fold_noop_into_success: true
+  sanctioned_shape: "PushSendOutcome { ACCEPTED, SKIPPED, FAILED }"
+  #
+  # The baseline in the script is EMPTY: the fleet measured clean on 2026-08-22 (notification was
+  # fixed by #4348; billing's BillingAssessment.skipped never had a success boolean beside it). So
+  # this gate carries no remediation debt and exists purely to keep the class from recurring — an
+  # empty baseline is the stronger claim, and --self-test is what makes it evidence rather than an
+  # assertion, since a gate that has never gone red proves nothing by being green.
+  baseline_is_empty_by_measurement: true
+  ci_producer: .github/scripts/check-noop-not-success.py
 
 kafka_dotted_keys:
   # SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
@@ -1832,6 +2351,14 @@ ci_runners:
       image_builds: dind
       ephemeral_per_job: true
       isolation_rationale: "separate low-capped pool so a scan/cron burst cannot starve the merge-required build lane (ARC has no job preemption — dedicated capacity is the only priority lever)"
+    dr:                                # quarterly resilience lanes: dr-restore-verify, chaos drill, attestation evidence (ADR-0277)
+      scale_set: openbank-dr
+      cloud_write_credentials: false    # no IRSA/cloud role on the pod SA at all
+      secrets: none
+      cluster_api: restore_verify_namespaces_only   # Role+RoleBinding in gitops components/platform, Kyverno-pinned
+      ephemeral_per_job: true
+      triggers: [schedule, workflow_dispatch]       # NEVER PR code — excluded from pr_jobs_allowed_pools by construction
+      isolation_rationale: "cluster-reachable lane for DORA restore/chaos evidence; a credentialled lane PR code must never reach (#6458 class, ADR-0277)"
     deploy:                            # ECR push + ArgoCD sync; post-merge only
       scale_set: openbank-deploy
       credentials: irsa                 # pod ServiceAccount IRSA scoped to ECR push + ArgoCD
@@ -1869,8 +2396,13 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-08-31"   # ADR-0144
-  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
+  target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
+                                      # blocker unresolved and turned an enforced gate red on every
+                                      # PR regardless of its diff. Extending the horizon is the
+                                      # sanctioned move here; the alternative -- flipping `enforced`
+                                      # to satisfy the date -- would claim a control this repo does
+                                      # not have.
+  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -2001,12 +2533,17 @@ finops_tiers:
   # t0_baseline and need no explicit entry.
   declared:
     openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
-    # ADR-0173 D3 reconciliation (2026-07-29): card-issuance carries a live HTTPScaledObject
-    # with an openbank.io/finops-tier: T1 label and was missing here. Not money-path, so T1
-    # is declarable on the evidence of the live scaled object + classifier-measured idle —
-    # HELD AT min:1 (warm floor) pending a cold-start SLO re-measurement on the current path,
-    # the same hold product-catalog carries below.
-    openbank-card-issuance-service: T1      # live HTTPScaledObject (payments/card-issuance-http), held at min:1 — see ADR-0173 D3
+    # card-issuance was declared T1 here on 2026-07-29 (ADR-0173 D3) on the stated premise
+    # "Not money-path". That premise expired: ADR-0283 phase 0 (#8808) added
+    # openbank-card-issuance-service to money_path_services, because it ships the card
+    # AUTHORISATION decision. A money-path service inherits T0 from t0_baseline and needs no
+    # entry, so the declaration is removed rather than rewritten to T0.
+    #
+    # Nothing about the running workload changes, and that is the point: the live
+    # HTTPScaledObject payments/card-issuance-http is min:1 / max:3 and the Deployment is 1/1,
+    # i.e. it already never scales to zero — the T0 mechanism, not T1's. All three sources
+    # agreed on always-on; only this line said otherwise, and it was the one producing
+    # `check-finops-tiers` POLICY FINDING "money-path service declared 'T1' (below T0)".
     # sdd-service and interest-service ALSO carry T1-labeled HTTPScaledObjects (sdd/ and
     # interest/ namespaces) — but both are money_path_services, so they inherit T0 via
     # t0_baseline and a T1 label on the deployment is the drift ADR-0173 D3 describes:
@@ -2078,8 +2615,13 @@ finops_tiers:
   # idle 95% of the time with no money-path justification) raises a FinOps finding /
   # tracking issue (ADR-0052), not a silent drift.
   gate: finops-tier-drift
-  enforced: advisory                      # ADR-0057; -> block when the classifier lands
-  target_enforce_date: "2026-09-30"   # ADR-0144
+  # Graduated together with the gate itself. `.github/gates/gates.yaml` registers
+  # finops-tier-drift as `mode: enforced`, so the control BLOCKS from the moment this PR
+  # lands; leaving `advisory` here is the permanent-advisory failure ADR-0144 exists to
+  # prevent, and the stale target date would additionally fail check-gate-graduation.sh on
+  # EVERY PR the day it passed, over a control that already enforces (#7897).
+  enforced: enforce
+  enforced_since: "2026-09-12"        # ADR-0144
   blocked_on: "the measured-signal classifier shipped 2026-07-29 (finops-tier-classifier CronJob, daily report in the admin-ui) — the advisory gate now reads its findings; 3 services have a declared tier today (notification-service T2, product-catalog T0, card-issuance T1-held-at-min:1)"
   # Added by issue #2392: the rule carried `enforced`/`target_enforce_date` but never named the
   # script that produces the finding, so nothing tied the advisory CI step to this deadline.
@@ -2202,6 +2744,15 @@ gitops_ref_integrity:
   # layer down. Verified by REVERT: with #1232's ExternalSecret removed the guard fails
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
+
+pr_build_cloud_credentials:
+  script: .github/scripts/check-pr-build-cloud-credentials.py
+  wired_into: .github/gates/gates.yaml    # gate id pr-build-cloud-credentials, group security, enforced
+  rule: >-
+    The reusable `_service-ci.yml` build job, which executes pull-request code on GitHub-hosted
+    runners, must not assume a cloud role or log in to a cloud registry. Credentialed cache,
+    contract and deployment work belongs only to a separately trusted lane.
+  basis: untrusted_code_must_not_receive_deploy_credentials
 
 oidc_secret_convention:
   script: .github/scripts/check-oidc-secret-convention.py
@@ -2435,6 +2986,17 @@ readiness_attestations:
   ref_must_resolve_to: >
     a URL, a #issue, an existing repo path, or runbook-NNNN matching docs/runbooks/NNNN-*.md.
     An entry whose ref resolves to nothing is treated as absent — a sentence is not evidence.
+  exercise_attestation_keys: [restore_drill, dr_drill]
+  exercise_ref_rule: >
+    restore_drill and dr_drill assert that an EXERCISE happened on a date, so a runbook-NNNN
+    ref is rejected for them (gate readiness-attestation-format, R7): a runbook is the plan,
+    undated and byte-identical whether or not anyone ever ran it. Cite the drill record — an
+    entry in docs/bcp/dr-test-log.md or docs/bcp/chaos-test-log.md dated the same day, a run
+    URL, or a #issue — and a drill-log ref whose log carries no entry for that date is
+    rejected too, because a log the attestation names but never received the record is the
+    same silence as no evidence. Measured 2026-08-19 (#5673): the fleet's only drill
+    attestation cited runbook-0003, which is the PostgreSQL 16->18 major-upgrade procedure,
+    and it was raising a money-path readiness dimension from 2 to 3. ADR-0242, ADR-0253.
   enforcement: >
     AUTHORING defects FAIL the build (missing field, non-date, future date, unknown service,
     unknown attestation key, unresolvable ref): each is introduced and fixable by the PR that
@@ -2493,6 +3055,10 @@ authz:
         - ledger.read
         - lending.list
         - lending.read
+        # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+        # than relying on the generic operator ".read" rule so the worklist route is granted
+        # explicitly, the same way every other list action in this matrix is.
+        - merchant.list
         - notification.list
         - notification.read
         # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -2522,6 +3088,7 @@ authz:
         - account.search
         - account.unfreeze
         - account.update
+        - balance.approval.decide
         - balance.credit
         - balance.debit
         - balance.hold
@@ -2555,6 +3122,12 @@ authz:
         - ledger.replay
         - ledger.reverse
         - ledger.trigger
+        - kyb.case.list                    # ADR-0284: business onboarding review queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.lookup
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         - lending.approve
         - lending.collateralDecide
         - lending.collateralRegister
@@ -2563,8 +3136,16 @@ authz:
         - lending.repay
         - lending.reschedule
         - lending.writeoff
+        # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+        # trading name, a logo, a shop location — never anything customer-derived, and not
+        # reachable through customer-edge.
+        - merchant.delete
+        - merchant.update
         - party.approval.decide
         - party.consent.update
+        - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+        - party.mandate.read
+        - party.mandate.revoke
         - party.merge
         - party.update
         - sanctions.approval.decide
@@ -2572,12 +3153,14 @@ authz:
         - sanctions.create
         - sanctions.trigger
         - sanctions.update
+        - sctInstPayment.approval.decide
         - sctInstPayment.create
         - sepaPayment.approval.decide
         - sepaPayment.create
         - sepaPayment.handleReturn
         - sepaPayment.transitionStatus
         - settlement.create
+        - swift.approval.decide
         - transaction.create
         - transaction.reverse
         - opsmessage.compose
@@ -2628,6 +3211,11 @@ authz:
       grant:
         - kyc.case.approve
         - kyc.case.reject
+        - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
         - audit.read
@@ -2656,6 +3244,34 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
+    # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
+    # here rather than only in the realm; this is that declaration, and it is deliberately ONE
+    # read action rather than the role's full duty set. What is missing is missing on purpose:
+    #
+    #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
+    #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
+    #   has no service-account exclusion, and cannot express one. Both of those actions are write
+    #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
+    #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
+    #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
+    #   that the bank's voice is set by people. Granting either through the matrix would add a
+    #   second permit path that drops that exclusion — a silent widening no policy layer can veto
+    #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
+    #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
+    #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+    #
+    #   commstyle.approval.read is safe and is here: its rule
+    #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
+    #   already, so this entry is a provable subset of today's effective grant and changes no
+    #   decision — the same seeding property the matrix was built on.
+    #
+    # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
+    # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
+    # editor duty has no action name for the matrix to key on. Declaring the editor role here
+    # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+    ROLE_COMMS_APPROVER:
+      grant:
+        - commstyle.approval.read
 
 # PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
 # `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
@@ -2759,6 +3375,7 @@ shared_m2m_matrix_write_grants:
     - account.search
     - account.unfreeze
     - account.update
+    - balance.approval.decide
     - balance.credit
     - balance.debit
     - balance.hold
@@ -2788,6 +3405,9 @@ shared_m2m_matrix_write_grants:
     - interest.create
     - interest.delete
     - interest.trigger
+    - kyb.case.reject
+    - kyb.case.review.resolve
+    - kyb.lookup
     - ledger.create
     - ledger.replay
     - ledger.reverse
@@ -2800,10 +3420,14 @@ shared_m2m_matrix_write_grants:
     - lending.repay
     - lending.reschedule
     - lending.writeoff
+    - merchant.delete
+    - merchant.update
     - opsmessage.approval.decide
     - opsmessage.compose
     - party.approval.decide
     - party.consent.update
+    - party.mandate.grant
+    - party.mandate.revoke
     - party.merge
     - party.update
     - sanctions.approval.decide
@@ -2811,14 +3435,92 @@ shared_m2m_matrix_write_grants:
     - sanctions.create
     - sanctions.trigger
     - sanctions.update
+    - sctInstPayment.approval.decide
     - sctInstPayment.create
     - sepaPayment.approval.decide
     - sepaPayment.create
     - sepaPayment.handleReturn
     - sepaPayment.transitionStatus
     - settlement.create
+    - swift.approval.decide
     - transaction.create
     - transaction.reverse
+
+# Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
+# An action whose OWN allow rule in rest.rego excludes service-account principals
+# (`not startswith(input.principal.id, "service-account-")`) must not also be reachable through
+# `authz.role_action_matrix`, because `matrix-allows` gates on principal.type == "HUMAN" plus the
+# role and nothing else — and a client_credentials JWT is classified HUMAN. Where both are true,
+# the two artifacts contradict each other and one of them is wrong: the rule says machines are
+# kept out, the matrix lets them in, and `allow` is a disjunction so the matrix wins.
+#
+# This is NOT the same question shared_m2m_matrix_write_grants asks. That register records that a
+# write action is M2M-reachable and accepted; it is indifferent to whether the action's own rule
+# was written to forbid exactly that. Both entries below are ALREADY declared there, so the reach
+# itself is a reviewed decision — what nothing recorded until now is that `rest.rego` states the
+# opposite, so anyone reading the rule alone concludes machines are excluded when they are not.
+#
+# Measured with `opa eval` on the derived data, 2026-09-12:
+#   service-account-openbank-services + ROLE_OPERATOR -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows"]                       (allowed)
+#   a human operator                                  -> opsmessage.compose
+#       allowed_reasons = ["matrix-allows", "operator-compose-message"]
+# The bespoke rule fires for the person and not for the machine — doing precisely its job — while
+# the matrix carries the machine regardless.
+#
+# Resolving an entry means deciding which control is real: drop the matrix grant (and its
+# shared_m2m_matrix_write_grants line), or drop the now-decorative exclusion from the rego rule.
+# Declaring it here is neither — it records that the contradiction is known and unresolved.
+matrix_sa_excluded_action_grants:
+  gate: matrix-sa-excluded-actions
+  enforced: enforced
+  ci_producer: ".github/scripts/check-matrix-excluded-actions.py"
+  adr: ADR-0176                          # both entries are that ADR's operator-messaging actions
+  declared:
+    - action: opsmessage.compose
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]   # ROLE_ADMIN reaches it through the single inherits hop
+      rule: operator-compose-message
+      reason: >
+        ADR-0176 D5 wrote the exclusion so a machine cannot compose customer messages, and the
+        matrix grant predates the measurement that showed matrix-allows bypasses it. Unresolved:
+        needs a decision on whether operator messaging keeps a machine-reachable path at all.
+      issue: 3765
+    - action: opsmessage.approval.decide
+      roles: [ROLE_OPERATOR, ROLE_ADMIN]
+      rule: operator-decide-message-approval
+      reason: >
+        Checker half of the same four-eyes flow, same cause. Sharper than its sibling: this is the
+        approval decision, so a machine-reachable path here is a machine that can approve.
+      issue: 3765
+
+# gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
+# check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
+# `openbank-infra/gitops/components/keycloak/*realm-template*.json`. Two other tracked realm
+# JSONs — openbank-infra/docker/keycloak/realm/openbank-realm.json (local dev) and
+# .github/workflows/keycloak/openbank-realm.json (CI/api-fuzz) — grant roles to the shared
+# M2M service account (`service-account-openbank-services`) and neither was read by any check.
+# Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
+# realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
+# third, unreviewed answer to "what does the shared client hold".
+realm_devci_artifact_parity:
+  detect: [
+    "openbank-infra/gitops/components/keycloak/*realm-template*.json",
+    "openbank-infra/docker/keycloak/realm/openbank-realm.json",
+    ".github/workflows/keycloak/openbank-realm.json",
+  ]
+  require:
+    - "every realm role the docker-dev or CI realm JSON declares also exists in the deployed gitops template"
+    - "every realm role the docker-dev or CI realm JSON grants a service-account-* principal is also granted to that principal in the deployed gitops template"
+  gate: realm-devci-artifact-parity
+  # ADVISORY, and deliberately not on a graduation path to enforce: whether the docker/CI
+  # realms should track the template, and the #3246 owner-gated Vault reconcile that would
+  # make the template authoritative in practice, are both open policy calls (issue #2540)
+  # this gate does not make. The date below is the review point for the DETECTOR (is the
+  # comparison still accurate, has either open question resolved), not a promise to flip
+  # --enforce — same shape as pr_file_overlap below.
+  enforced: advisory
+  target_enforce_date: "2027-02-16"   # ADR-0144 — review the detector, not a flip to enforce
+  ci_producer: ".github/scripts/check-realm-devci-artifact-parity.py"
 
 # ---------------------------------------------------------------------------------------
 pr_file_overlap:
@@ -2865,3 +3567,83 @@ pr_file_overlap:
     - ".github/workflows/ci.yml"
     - ".github/workflows/auto-deploy.yml"
     - "openbank-infra/gitops/"
+
+# ---------------------------------------------------------------------------
+# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+#
+# This matrix is an independent authorization boundary, intersected with each
+# principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
+# Empty is intentional: the policy and PEP may be reviewed without silently creating
+# a production grant. Every entry requires a separate authorization review.
+agent_case_capability_matrix: []
+
+# ---------------------------------------------------------------------------
+# AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)
+#
+# The repo runs scheduled, unattended agents that open PRs around the clock. Until now the
+# only thing keeping unattended work off the money path was a PreToolUse hook on the
+# maintainer's laptop — which does not exist in a cloud session or on a runner, and which a
+# command-string matcher cannot see through anyway. `main`'s ruleset does not supply the
+# control either: required_approving_review_count is 0 and the admin bypass actor is the
+# same identity an agent authenticates as.
+#
+# So the rule lives here and is enforced as a required check. A red required check cannot be
+# cleared by the agent that tripped it and cannot be cleared by `--auto`.
+#
+# The PROTECTED SERVICE SET IS DERIVED from money_path_services above (prefix/suffix
+# stripped), so onboarding a money-path service extends the guard with no edit here.
+# `extra_protected_tokens` is a hand-kept list of external FACTS — services that are high
+# blast radius without being money-path by that list's definition. The gate's SCOPE is not
+# hand-kept: an undeclared machine account fails the check rather than passing it.
+autonomous_agent_prs:
+  detect:
+    - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
+  require:
+    - an agent-authored PR that touches a protected path fails the check and waits for a human
+    - a machine account in neither agent_accounts nor automation_accounts fails the check — it must be classified first
+    - an unreadable author, branch or file list is exit 2 (undetermined), never a pass
+  gate: agent-pr-guard
+  enforced: block
+  ci_producer: .github/scripts/check-agent-pr-guard.py
+  # Autonomous coding agents. Adding a login here is a governance-path change, which this
+  # very guard blocks an agent from making.
+  agent_accounts:
+    - openbank-agent-bot[bot]
+  # Deterministic automation. These legitimately touch money-path paths and their content is
+  # generated rather than authored; blocking them deadlocks the release queue for no safety.
+  automation_accounts:
+    - release-please[bot]
+    - openbank-gitops-bot[bot]
+    - dependabot[bot]
+    - github-actions[bot]
+  # Coverage for an agent running under a HUMAN account, which is the state today — every
+  # open PR in this repo is authored by the maintainer's login. Without this an identity-only
+  # scope would cover nothing at all.
+  agent_branch_prefixes:
+    - agent/
+    - codex/
+  # High blast radius, not money-path by the list above.
+  extra_protected_tokens:
+    - payment
+    - kyc
+    - party
+    - card-issuance
+    - aml
+    - tax
+    - dispute
+  # Governance sources and gate machinery: a gate can be defanged by editing its script
+  # without touching any YAML, so the scripts directory is in scope alongside the manifests.
+  governance_path_globs:
+    - openbank-libs/governance/*
+    - .github/gates/*
+    - .github/scripts/*
+    # An agent's PROMPT is its program. `.github/agent-prompts/` holds the instructions the
+    # scheduled issue worker and PR steward actually execute — "never merge", "never close an
+    # issue", "run the guard's self-test before picking". An agent able to edit these could
+    # delete its own restraints in a diff that looks like a docs tweak.
+    #
+    # This was MISSING and asserted to be present: #6453 and runbook 0015 both claimed the
+    # prompts were protected "so the worker cannot edit its own mandate". Nobody had run the
+    # guard against those paths, and it tripped no clause at all (measured 2026-08-22 on #6512,
+    # a PR touching only this directory, which the guard waved through).
+    - .github/agent-prompts/*

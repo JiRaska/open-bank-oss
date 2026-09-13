@@ -5,7 +5,14 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.9.0
+  # 1.17.0 -> 1.18.0 (#5962): additive — declare EXPIRED on the withdrawal-proposal list filter,
+  # matching WithdrawalProposalStatus, which has carried it since the enum's introduction.
+  # 1.16.0 -> 1.17.0 (#9044): additive — optional termsVersion/termsUrl/termsEffectiveFrom on
+  # OpenAccountRequest and the Account response. termsVersion is use-case-REQUIRED for
+  # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
+  # opening other account types are unaffected; term-deposit openings come only from
+  # customer-edge, updated in the same change).
+  version: 1.18.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -62,6 +69,23 @@ paths:
                 enum: ['true']
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+          description: >
+            Well-formed request refused by policy — e.g. product not eligible
+            (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
+            (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
+            neither the matched name nor the party (#8512).
+        '503':
+          description: >
+            Sanctions screening temporarily unavailable; the opening gate fails
+            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       tags: [Accounts]
       summary: List accounts for a party
@@ -424,7 +448,9 @@ paths:
         The propose-only flow (ADR-0232 D8): a delegate holding SAVINGS_PROPOSE_WITHDRAW
         creates a withdrawal proposal. Returns 202 with the proposal and the approvalId
         of the paired pending approval — the owner's SCA-bound decision is the only
-        path to execution. Authorize action `account.read`.
+        path to execution. Authorize action `account.read`. Idempotent (ADR-0295): a retry
+        while the original is still PENDING and unexpired replays the ORIGINAL proposal and its
+        approvalId instead of stacking a second executable instruction.
       operationId: proposeSavingsWithdrawal
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -458,7 +484,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
       responses:
         '200':
           description: Proposals
@@ -591,6 +617,333 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounts/{accountId}/nickname:
+    patch:
+      tags: [Accounts]
+      summary: Set or clear the account's customer-chosen display label
+      operationId: renameAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameAccountRequest'
+      responses:
+        '200':
+          description: Nickname set or cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations:
+    get:
+      tags: [Accounts]
+      summary: List account authorizations
+      operationId: listAccountAuthorizations
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Authorizations granted on the account
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Grant an account authorization
+      description: >-
+        Idempotent (ADR-0295): a retry carrying the identical tuple (party, role, limits,
+        validity) while the original grant is still ACTIVE replays the ORIGINAL grant instead of
+        stacking a duplicate authority row. A revoke followed by an identical re-grant is a new
+        grant and persists normally.
+      operationId: grantAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantAuthorizationRequest'
+      responses:
+        '201':
+          description: Authorization granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/effective:
+    get:
+      tags: [Accounts]
+      summary: Everyone who can act on the account, from both authorization stores
+      description: |
+        The account owner's transparency view. Unlike `/authorizations`, which returns only the
+        `account_authorizations` table, this unifies BOTH stores the payment guard consults —
+        bank mandates and customer delegation grants — so an owner is not shown a half-truth
+        about who can take money out.
+
+        Customer-facing through the customer-edge, which stamps the validated caller party in
+        `X-Customer-Party-Id`. When that header is present the caller MUST own the account;
+        a mismatch returns 404, and an unknown account returns an empty list, so neither
+        response distinguishes "not yours" from "does not exist".
+      operationId: listEffectiveAccountAccess
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Caller party stamped by the customer-edge; enforces owner-only when present.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessResponse'
+        '404':
+          description: Account not found, or not owned by the customer-scoped caller
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/check:
+    get:
+      tags: [Accounts]
+      summary: Check whether a party holds an active account role
+      operationId: checkAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: role
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/AuthorizationRole'
+      responses:
+        '200':
+          description: Authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized]
+                properties:
+                  authorized:
+                    type: boolean
+        '400':
+          description: partyId or role is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/{authorizationId}:
+    delete:
+      tags: [Accounts]
+      summary: Revoke an account authorization
+      operationId: revokeAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: authorizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeAuthorizationRequest'
+      responses:
+        '200':
+          description: Revoked authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            No such authorization on this account. Returned both when the authorization id does
+            not exist and when it exists on a DIFFERENT account, with an identical body, so the
+            endpoint cannot be used to probe which authorization ids exist (#5913). Before this
+            was documented the same two cases answered 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/accounts/{accountId}/pockets:
+    get:
+      tags: [Accounts]
+      summary: List currency pockets of an account
+      operationId: listCurrencyPockets
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Active and historical currency pockets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Add a currency pocket to an account
+      description: >-
+        Natural-key enforced (ADR-0295): one pocket per (account, currency) — a repeat is a loud
+        400, never a duplicate row (`uq_account_pockets_acc_ccy`, V7).
+      operationId: addCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPocketRequest'
+      responses:
+        '201':
+          description: Currency pocket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/resolve:
+    get:
+      tags: [Accounts]
+      summary: Resolve the pocket used to settle a payment currency
+      operationId: resolveCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+        - name: policy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [REJECT, AUTO_CREATE, CONVERT_TO_PRIMARY]
+            default: CONVERT_TO_PRIMARY
+      responses:
+        '200':
+          description: Pocket routing decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResolutionResponse'
+        '400':
+          description: Currency or policy is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/{currency}:
+    delete:
+      tags: [Accounts]
+      summary: Close a non-primary currency pocket
+      operationId: closeCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+      responses:
+        '200':
+          description: Closed currency pocket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/approvals:
+    get:
+      tags: [Accounts]
+      summary: List pending account approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals for account lifecycle actions, oldest first. This is the
+        read side consumed by the unified approval inbox; deciding remains on
+        PATCH /api/v1/accounts/approvals/{id}. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending account approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/accounts/approvals/{id}:
     patch:
       tags: [Accounts]
@@ -623,22 +976,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -682,6 +1020,228 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    AuthorizationRole:
+      type: string
+      enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    GrantAuthorizationRequest:
+      type: object
+      required: [partyId, role, validFrom, grantedBy]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        grantedBy:
+          type: string
+          format: uuid
+
+    RevokeAuthorizationRequest:
+      type: object
+      required: [revokedBy, reason]
+      properties:
+        revokedBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+
+    AccountAccessResponse:
+      type: object
+      description: |
+        One party's effective ability to act on the account. Carries the party id and nothing else
+        identifying — the caller resolves a display name from a party the customer already knows,
+        so this cannot turn an account id into a person's details.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+          description: |
+            Which store the entry came from. OWNER is the account holder; BANK_MANDATE is an
+            operator-set `account_authorizations` row; CUSTOMER_DELEGATION is a grant the customer
+            issued themselves and can revoke.
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means the entry carries no ceiling of
+            its own — NOT that it is unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
+
+    AuthorizationResponse:
+      type: object
+      required: [id, accountId, partyId, role, validFrom, status, grantedBy, grantedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, REVOKED, EXPIRED]
+        grantedBy:
+          type: string
+          format: uuid
+        grantedAt:
+          type: string
+          format: date-time
+
+    AddPocketRequest:
+      type: object
+      required: [currencyCode]
+      properties:
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    PocketResponse:
+      type: object
+      required: [id, accountId, currencyCode, isPrimary, status, openedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        currencyCode:
+          type: string
+        isPrimary:
+          type: boolean
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PocketListResponse:
+      type: object
+      required: [pockets]
+      properties:
+        pockets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PocketResponse'
+
+    PocketResolutionResponse:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [USE_EXISTING, CREATE_NEW, CONVERT_TO_PRIMARY, REJECTED]
+        pocketCurrency:
+          type: string
+          nullable: true
+        convertFrom:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes account approval. makerId identifies who requested the gated action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated account action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     OpenAccountRequest:
       type: object
       required: [partyId, productId, accountType, currencyCode, legalName]
@@ -693,13 +1253,26 @@ components:
           type: string
         accountType:
           type: string
-          enum: [CURRENT, SAVINGS, LOAN, ESCROW]
+          enum: [CURRENT, SAVINGS, LOAN, ESCROW, TERM_DEPOSIT]
         currencyCode:
           type: string
           example: CZK
         legalName:
           type: string
           description: Legal name of the account holder for sanctions screening (ADR-0032 §C).
+        termsVersion:
+          type: string
+          description: >-
+            Terms version the account is opened under (#9044). REQUIRED when accountType is
+            TERM_DEPOSIT (400 otherwise) — a term deposit must never open without a record of
+            the terms it was opened under.
+        termsUrl:
+          type: string
+          description: Snapshot of the terms document URL at opening (#9044).
+        termsEffectiveFrom:
+          type: string
+          format: date
+          description: Snapshot of the terms document effective-from date at opening (#9044).
 
     CloseAccountRequest:
       type: object
@@ -734,7 +1307,7 @@ components:
           type: string
         status:
           type: string
-          enum: [ACTIVE, FROZEN, CLOSED, PENDING]
+          enum: [PENDING_ACTIVATION, ACTIVE, DORMANT, FROZEN, CLOSED]
         openedAt:
           type: string
           format: date-time
@@ -753,6 +1326,28 @@ components:
           type: string
           format: date
           nullable: true
+        nickname:
+          type: string
+          nullable: true
+        termsVersion:
+          type: string
+          nullable: true
+          description: Terms version the account was opened under (#9044); null = pre-V24 account.
+        termsUrl:
+          type: string
+          nullable: true
+        termsEffectiveFrom:
+          type: string
+          format: date
+          nullable: true
+
+    RenameAccountRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          maxLength: 60
 
     ProposeWithdrawalRequest:
       type: object

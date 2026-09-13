@@ -11,11 +11,15 @@ import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
 import com.openbank.consent.domain.model.GranteeType
 import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.quarkus.runtime.StartupEvent
 import io.smallrye.mutiny.Uni
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -27,11 +31,14 @@ import java.util.UUID
 class ConsentExpirationJobTest {
 
     private val consentRepo = mockk<ConsentRepository>()
+    private val metrics = mockk<DomainMetrics>()
+    private val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
     private val fixedClock = Clock.fixed(Instant.parse("2026-06-29T05:05:00Z"), ZoneOffset.UTC)
 
     private val job = ConsentExpirationJob().also {
         it.consentRepo = consentRepo
         it.clock = fixedClock
+        it.domainMetrics = metrics
     }
 
     private fun consent(
@@ -124,5 +131,29 @@ class ConsentExpirationJobTest {
         job.buildSweepPipeline(threshold).await().indefinitely()
 
         assertThat(thresholdSlot.captured).isEqualTo(threshold)
+    }
+
+    @Test
+    fun `sweep registers heartbeat and records success only after completed pipeline`(): Unit = runBlocking {
+        every { metrics.registerWorkflowLiveness(any(), any()) } returns liveness
+        every { consentRepo.findExpiredActive(any()) } returns Uni.createFrom().item(emptyList())
+
+        job.registerLiveness(StartupEvent())
+        job.sweepExpiredConsents()
+
+        verify(exactly = 1) { metrics.registerWorkflowLiveness("consent-expiration-sweep", any()) }
+        verify(exactly = 1) { liveness.recordSuccess() }
+    }
+
+    @Test
+    fun `sweep failure records no liveness success`(): Unit = runBlocking {
+        every { metrics.registerWorkflowLiveness(any(), any()) } returns liveness
+        every { consentRepo.findExpiredActive(any()) } returns
+            Uni.createFrom().failure(IllegalStateException("db down"))
+
+        job.registerLiveness(StartupEvent())
+        job.sweepExpiredConsents()
+
+        verify(exactly = 0) { liveness.recordSuccess() }
     }
 }

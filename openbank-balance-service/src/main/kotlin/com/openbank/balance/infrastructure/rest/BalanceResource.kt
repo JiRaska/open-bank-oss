@@ -37,7 +37,7 @@ import java.util.UUID
  * initialize) are restricted to the service identity used by the transaction saga and account
  * onboarding plus human operators; the overdraft-limit override is restricted to supervisor/admin
  * (limit overrides are a supervisory action per [Roles.SUPERVISOR]). Enforced by Quarkus OIDC and
- * locked by BalanceResourceSecurityTest.
+ * locked by `BalanceSecurityContractTest`.
  *
  * Authz migration (ADR-0034 Phase 5, issue #266): every endpoint now carries a resource-scoped
  * [Authorize] OPA check on top of its coarse [RolesAllowed] gate — `AUTHZ_ENFORCE=true` in gitops

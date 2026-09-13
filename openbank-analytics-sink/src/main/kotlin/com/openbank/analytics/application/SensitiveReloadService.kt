@@ -4,6 +4,7 @@
 
 package com.openbank.analytics.application
 
+import com.openbank.analytics.application.port.out.ProposalDecisionPhase
 import com.openbank.analytics.application.port.out.ProposalStore
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.MakerCheckerViolation
@@ -63,7 +64,12 @@ class SensitiveReloadService {
 
     suspend fun approve(id: String, checker: String, reason: String?): Proposal<BackfillRequest> {
         val proposal = require(id)
+        // Compute the transition first: it is pure (validates PROPOSED + four-eyes, no I/O), so an
+        // invalid call (wrong state, self-approval) throws here and never touches the claim below —
+        // it must not burn the one claim a later, legitimate decision needs. Only a proposal that
+        // WOULD be validly approved right now goes on to contend for the claim.
         val approved = proposal.approve(checker, Instant.now(clock), reason)
+        claimOrThrow(id, ProposalDecisionPhase.DECIDE)
         store.save(approved)
         log.infof(
             "reload approved id=%s by=%s (proposer=%s)",
@@ -75,7 +81,9 @@ class SensitiveReloadService {
     }
 
     suspend fun reject(id: String, checker: String, reason: String?): Proposal<BackfillRequest> {
-        val rejected = require(id).reject(checker, Instant.now(clock), reason)
+        val proposal = require(id)
+        val rejected = proposal.reject(checker, Instant.now(clock), reason)
+        claimOrThrow(id, ProposalDecisionPhase.DECIDE)
         store.save(rejected)
         log.infof("reload rejected id=%s by=%s", id.sanitizeForLog(), checker.sanitizeForLog())
         return rejected
@@ -83,12 +91,16 @@ class SensitiveReloadService {
 
     /**
      * Executes an APPROVED proposal: runs the actual reload, then marks it EXECUTED so it cannot run
-     * twice. The maker-checker invariant is upheld by [Proposal.markExecuted] (only APPROVED → EXECUTED).
+     * twice. The maker-checker invariant is upheld by [Proposal.markExecuted] (only APPROVED → EXECUTED)
+     * plus the [ProposalDecisionPhase.EXECUTE] claim, which is won BEFORE [BackfillService.run] so two
+     * concurrent callers cannot both trigger the (expensive, side-effecting) backfill itself — only
+     * the claim's winner ever reaches [BackfillService.run].
      */
     suspend fun execute(id: String): BackfillReport {
         val proposal = require(id)
-        // Transition first (fails fast if not APPROVED), persist, then load.
+        // Pure transition first — fails fast (and claims nothing) if not APPROVED.
         val executing = proposal.markExecuted(Instant.now(clock))
+        claimOrThrow(id, ProposalDecisionPhase.EXECUTE)
         val report = backfill.run(proposal.action)
         store.save(executing)
         log.infof(
@@ -105,4 +117,18 @@ class SensitiveReloadService {
 
     private suspend fun require(id: String): Proposal<BackfillRequest> =
         store.get(id) ?: throw MakerCheckerViolation("no such proposal: $id")
+
+    /**
+     * The compare-and-set gate a decision/execution must win before it is persisted (or, for
+     * [ProposalDecisionPhase.EXECUTE], before the real backfill runs). See [ProposalStore.claim]'s
+     * KDoc: without this, two concurrent calls can both observe the same pre-transition state, both
+     * pass [Proposal]'s own state check, and both write — a lost update on this four-eyes control
+     * (ADR-0023 F3). Called only AFTER the pure domain transition has already validated the call, so
+     * an invalid call never consumes the claim a legitimate later call would need.
+     */
+    private suspend fun claimOrThrow(id: String, phase: ProposalDecisionPhase) {
+        if (!store.claim(id, phase)) {
+            throw MakerCheckerViolation("proposal '$id' $phase was already claimed by another decision")
+        }
+    }
 }

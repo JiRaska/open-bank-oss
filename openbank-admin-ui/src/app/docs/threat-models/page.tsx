@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ShieldAlert, ShieldCheck, AlertTriangle, FileText } from 'lucide-react'
 import { loadThreatModelIndex, missingThreatModels } from '@/lib/governance/docs'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,30 +26,24 @@ export default async function ThreatModelRegistryPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Threat modely', 'Threat models')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldAlert size={18} style={{ color: 'var(--accent)' }} />
-            {t('Registr threat modelů', 'Threat Model Registry')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Registr threat modelů', 'Threat Model Registry')}
+        subtitle={t(
               `STRIDE threat modely pro služby na peněžní cestě (ADR-0030). Pokrytí money-path: ${moneyPathCovered}/${moneyPathTotal}.`,
               `STRIDE threat models for money-path services (ADR-0030). Money-path coverage: ${moneyPathCovered}/${moneyPathTotal}.`,
             )}
-          </p>
-        </div>
-        <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na dokumentaci', 'Back to docs')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       {/* Coverage gap — money-path services without a threat model yet */}
       {missing.length > 0 && (
@@ -59,7 +54,7 @@ export default async function ThreatModelRegistryPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
             <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
-            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--warning)' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--warning-text)' }}>
               {t('Money-path služby bez threat modelu', 'Money-path services missing a threat model')}
             </span>
           </div>
@@ -103,7 +98,7 @@ export default async function ThreatModelRegistryPage() {
                   {m.moneyPath && (
                     <span style={{
                       fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px',
-                      background: 'var(--danger-bg)', color: 'var(--danger)',
+                      background: 'var(--danger-bg)', color: 'var(--danger-text)',
                       border: '1px solid var(--danger)30', textTransform: 'uppercase', letterSpacing: '0.04em',
                     }}>
                       {t('Peněžní cesta', 'Money path')}

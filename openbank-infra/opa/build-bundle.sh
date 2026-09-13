@@ -49,7 +49,10 @@ cp "$AGENTS_YAML" "$STAGE/agents/data.yaml"
 cp "$RULES_YAML" "$STAGE/rules/data.yaml"
 for dir in "$POLICIES_DIR" "$LIBS_POLICIES_DIR"; do
 	for f in "$dir"/*.rego; do
-		case "$f" in *_test.rego) continue;; esac
+		# case_collaboration.rego belongs only to the case-coordinator bundle (ADR-0271 D8).
+		# Including it here would couple every shared MCP/REST policy consumer to its root and
+		# silently turn a case-policy edit into a fleet rollout.
+		case "$f" in *_test.rego|*/case_collaboration.rego) continue;; esac
 		cp "$f" "$STAGE/"
 	done
 done

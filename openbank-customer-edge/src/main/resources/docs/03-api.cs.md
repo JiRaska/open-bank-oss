@@ -54,6 +54,9 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /devices` | `accounts:read` | vypsat zařízení (tokeny se nikdy nevrací) |
 | `POST /onboarding/start` | *(anonymní)* | vytvořit party `PENDING_ACTIVATION` |
 | `POST /onboarding/account` | `accounts:read` | otevřít první účet po KYC bráně |
+| `GET /products/term-deposits` | `accounts:read` | zobrazit aktivní veřejné nabídky termínovaných vkladů |
+| `GET /products/term-deposits/{productId}` | `accounts:read` | detail nabídky a podmínek |
+| `POST /term-deposits` | `accounts:read` | založit účet termínovaného vkladu po KYC |
 
 ## Vybrané requesty
 
@@ -97,6 +100,16 @@ Content-Type: application/json
 ### Otevření prvního účtu po KYC
 
 `POST /onboarding/account` vyžaduje `ROLE_CUSTOMER`. Edge načte party z party-service a přepošle na account-service **jen pokud `status == ACTIVE`**, přičemž injektuje `partyId` z JWT.
+
+### Termínované vklady
+
+Aplikace nabídky načte přes `GET /products/term-deposits`; edge z operátorského katalogu propustí
+jen produkty `ACTIVE`, veřejné a platné k dnešnímu dni. Nabídka obsahuje sazbu, pevnou délku,
+limity vkladu, podmínky předčasného výběru a odkazy na podmínky. Pro založení se volá
+`POST /term-deposits` pouze s `{ "productId": "…" }` a hlavičkou `Idempotency-Key`. Edge odvodí
+`TERM_DEPOSIT` i měnu z nabídky, nikoli z klientského JSONu, a použije stejnou KYC bránu `ACTIVE`
+i autoritativní jméno jako u založení účtu. Založení účtu je oddělené od jeho financování: aplikace
+pak použije běžný tok financování účtu.
 
 ## Chybový model
 

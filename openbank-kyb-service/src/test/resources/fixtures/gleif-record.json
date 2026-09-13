@@ -1,0 +1,19 @@
+{
+  "data": {
+    "type": "lei-records",
+    "id": "529900T8BM49AURSDO55",
+    "attributes": {
+      "lei": "529900T8BM49AURSDO55",
+      "entity": {
+        "legalName": { "name": "Deutsche Bank Aktiengesellschaft", "language": "de" },
+        "legalAddress": { "language": "de", "addressLines": ["Taunusanlage 12"], "city": "Frankfurt am Main", "country": "DE", "postalCode": "60325" },
+        "registeredAs": "HRB30000",
+        "category": "GENERAL",
+        "legalForm": { "id": "6QQB", "other": null },
+        "status": "ACTIVE",
+        "creationDate": "1870-03-10T00:00:00Z"
+      },
+      "registration": { "status": "ISSUED" }
+    }
+  }
+}

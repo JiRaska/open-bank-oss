@@ -5,6 +5,7 @@
 
 package com.openbank.agent.application
 
+import com.openbank.agent.infrastructure.security.InMemoryNonceStore
 import org.assertj.core.api.Assertions.assertThat
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -91,7 +92,7 @@ class AgentSvidVerifierTest {
     @Test
     fun `a valid cert and PoP yield the CN as the agent id`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val t = ts()
         assertThat(v.verify(p.leafPem, pop(p.leafKey, t, "n1"), t, "n1", now))
             .isEqualTo(SvidResult.Verified("ui-assistant"))
@@ -99,14 +100,14 @@ class AgentSvidVerifierTest {
 
     @Test
     fun `no CA configured disables SVID`() {
-        val result = AgentSvidVerifier(Optional.empty(), skew).verify("c", "s", ts(), "n", now)
+        val result = AgentSvidVerifier(Optional.empty(), skew, InMemoryNonceStore()).verify("c", "s", ts(), "n", now)
         assertThat(result).isEqualTo(SvidResult.Disabled)
     }
 
     @Test
     fun `CA configured but no cert presented is Disabled, not Rejected (staged rollout fallback)`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         // No SVID headers at all → caller falls back to the D3a binding (svid.enforced decides), so a
         // CA being configured must not hard-reject callers that don't yet present certs (PR5b-2).
         assertThat(v.verify(null, null, null, null, now)).isEqualTo(SvidResult.Disabled)
@@ -115,14 +116,14 @@ class AgentSvidVerifierTest {
     @Test
     fun `a present cert with missing PoP headers is rejected`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         assertThat(v.verify(p.leafPem, null, ts(), "n", now)).isInstanceOf(SvidResult.Rejected::class.java)
     }
 
     @Test
     fun `a tampered PoP signature is rejected`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val t = ts()
         val tampered = pop(p.leafKey, t, "n1").dropLast(4) + "AAAA"
         assertThat(v.verify(p.leafPem, tampered, t, "n1", now))
@@ -132,7 +133,7 @@ class AgentSvidVerifierTest {
     @Test
     fun `a PoP signed over a different nonce is rejected`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val t = ts()
         val sigForN1 = pop(p.leafKey, t, "n1")
         assertThat(v.verify(p.leafPem, sigForN1, t, "n2", now))
@@ -143,7 +144,7 @@ class AgentSvidVerifierTest {
     fun `a cert from an untrusted CA is rejected`() {
         val trusted = pki("ui-assistant")
         val other = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(trusted.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(trusted.caPem), skew, InMemoryNonceStore())
         val t = ts()
         assertThat(v.verify(other.leafPem, pop(other.leafKey, t, "n"), t, "n", now))
             .isEqualTo(SvidResult.Rejected("certificate not issued by the trusted agent CA"))
@@ -152,7 +153,7 @@ class AgentSvidVerifierTest {
     @Test
     fun `an expired cert is rejected`() {
         val p = pki("ui-assistant", ttl = Duration.ofMinutes(5))
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val later = now.plus(Duration.ofMinutes(10))
         val t = ts(later)
         assertThat(v.verify(p.leafPem, pop(p.leafKey, t, "n"), t, "n", later))
@@ -162,7 +163,7 @@ class AgentSvidVerifierTest {
     @Test
     fun `a stale timestamp is rejected`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val staleTs = ts(now.minusSeconds(120))
         assertThat(v.verify(p.leafPem, pop(p.leafKey, staleTs, "n"), staleTs, "n", now))
             .isEqualTo(SvidResult.Rejected("stale or future timestamp"))
@@ -171,7 +172,7 @@ class AgentSvidVerifierTest {
     @Test
     fun `a replayed nonce is rejected on second use`() {
         val p = pki("ui-assistant")
-        val v = AgentSvidVerifier(Optional.of(p.caPem), skew)
+        val v = AgentSvidVerifier(Optional.of(p.caPem), skew, InMemoryNonceStore())
         val t = ts()
         val sig = pop(p.leafKey, t, "n1")
         assertThat(v.verify(p.leafPem, sig, t, "n1", now)).isEqualTo(SvidResult.Verified("ui-assistant"))
@@ -182,7 +183,7 @@ class AgentSvidVerifierTest {
     fun `a base64-encoded cert and CA verify the same as raw PEM (on-the-wire transport)`() {
         val p = pki("ui-assistant")
         val b64 = { s: String -> Base64.getEncoder().encodeToString(s.toByteArray(Charsets.UTF_8)) }
-        val v = AgentSvidVerifier(Optional.of(b64(p.caPem)), skew)
+        val v = AgentSvidVerifier(Optional.of(b64(p.caPem)), skew, InMemoryNonceStore())
         val t = ts()
         assertThat(v.verify(b64(p.leafPem), pop(p.leafKey, t, "n1"), t, "n1", now))
             .isEqualTo(SvidResult.Verified("ui-assistant"))

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -247,6 +247,40 @@ paths:
         '403':
           description: Caller does not have an audit-reading role
 
+  /api/v1/audit/anchors/verification-key:
+    get:
+      tags: [Audit]
+      summary: Get the public key for offline audit-anchor verification (ADR-0031 D5)
+      operationId: getAnchorVerificationKey
+      description: >
+        Returns KMS-held PEM material for the requested immutable key identifier only when it is
+        recorded on an anchor. Rotation retains each historic KMS key in the workload's explicit
+        IAM policy until its anchors age out.
+      parameters:
+        - name: keyId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Immutable KMS key identifier recorded on the anchor to verify.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Public verification material for KMS-backed anchors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorVerificationKeyResponse'
+        '401':
+          description: Unauthenticated
+        '400':
+          description: keyId query parameter is required
+        '403':
+          description: Caller does not have an audit-reading role
+        '404':
+          description: No public verification key exists for the requested recorded key
+
 components:
   securitySchemes:
     bearerAuth:
@@ -315,12 +349,12 @@ components:
 
     AnchorVerificationResponse:
       type: object
-      required: [status, anchorCount, verifiedCount, unsignedCount]
+      required: [status, anchorCount, verifiedCount, unsignedCount, unverifiableCount]
       properties:
         status:
           type: string
-          enum: [INTACT, BROKEN]
-          description: INTACT when every anchor's signature and attested head verify.
+          enum: [INTACT, BROKEN, UNVERIFIED, NO_ANCHORS]
+          description: INTACT only when every anchor's signature and attested head verify; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
         anchorCount:
           type: integer
           format: int64
@@ -332,11 +366,30 @@ components:
           type: integer
           format: int64
           description: Anchors stored without a signature (signer unavailable at capture).
+        unverifiableCount:
+          type: integer
+          format: int64
+          description: Signed anchors whose historical key cannot be verified by this runtime.
         firstBroken:
           nullable: true
           description: The first anchor that failed verification; null when status is INTACT.
           allOf:
             - $ref: '#/components/schemas/AnchorBreak'
+
+    AnchorVerificationKeyResponse:
+      type: object
+      required: [keyId, algorithm, publicKeyPem]
+      description: Public material for offline verification of one KMS-backed audit-anchor signature.
+      properties:
+        keyId:
+          type: string
+          description: KMS key identifier recorded on anchor rows.
+        algorithm:
+          type: string
+          enum: [ECDSA_SHA_256]
+        publicKeyPem:
+          type: string
+          description: PEM-encoded SubjectPublicKeyInfo public key.
 
     AnchorBreak:
       type: object

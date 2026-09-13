@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
 import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.mockk.every
 import io.mockk.mockk
@@ -18,6 +19,7 @@ import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -114,14 +116,23 @@ class WithholdingRemittanceSettlementConsumerTest {
         verify(exactly = 1) { remitUseCase.settle(remittanceId) }
     }
 
+    /**
+     * The contract this test asserted before #5698 was "does not throw" — i.e. a refused booking was
+     * ACKED, so a due tax remittance silently never moved and nothing downstream could tell. It now
+     * asserts the opposite: the failure is retried [EventRetry.DEFAULT_MAX_ATTEMPTS] times and then
+     * rethrown for the connector to dead-letter. Both halves matter — the attempt count is what
+     * distinguishes a real retry from a single call that happens to throw.
+     */
     @Test
-    fun `a non-2xx-non-409 response does not settle the batch and does not throw`(): Unit = runBlocking {
+    fun `a non-2xx-non-409 response is retried and rethrown, never settled or acked`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
             Uni.createFrom().item(Response.status(500).build())
 
-        consumer.consume(record())
+        assertThatThrownBy { runBlocking { consumer.consume(record()) } }
+            .isInstanceOf(WithholdingRemittanceBookingFailedException::class.java)
+            .hasMessageContaining("did not move money")
 
-        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }
         verify(exactly = 0) { remitUseCase.settle(any()) }
     }
 

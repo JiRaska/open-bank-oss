@@ -5,6 +5,7 @@
 package com.openbank.libs.web
 
 import com.openbank.libs.synthetic.SyntheticTaint
+import io.opentelemetry.api.baggage.Baggage
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.client.ClientRequestContext
 import jakarta.ws.rs.client.ClientRequestFilter
@@ -35,10 +36,9 @@ import org.jboss.logging.MDC
  * ## Why MDC is the source
  *
  * The inbound filter publishes its decision to the JAX-RS `ContainerRequestContext`, which a client
- * filter cannot see, and to the MDC, which it can. A reactive hop that loses MDC therefore drops
- * the taint — again the safe direction. A request-scoped holder with explicit context propagation
- * would be tighter, and is the follow-up; it is not free, because a request-scoped bean injected
- * into a client filter that runs outside a request context is an error rather than a `false`.
+ * filter cannot see, to MDC, and to trusted OpenTelemetry baggage. The baggage fallback survives
+ * reactive context propagation where MDC does not. Both rails can only originate from the inbound
+ * trust decision; a caller-provided baggage value is never read at the edge.
  */
 @ApplicationScoped
 class SyntheticTaintClientFilter : ClientRequestFilter {
@@ -46,7 +46,10 @@ class SyntheticTaintClientFilter : ClientRequestFilter {
     override fun filter(requestContext: ClientRequestContext) {
         // Only ever ADDS the header, never removes one: an outbound call made by a canary-owned
         // service account may legitimately carry its own taint that this hop knows nothing about.
-        if (MDC.get(MDC_SYNTHETIC) == "true") {
+        val baggageTainted = SyntheticTaint.isTainted(
+            Baggage.current().getEntryValue(SyntheticTaint.BAGGAGE_KEY),
+        )
+        if (MDC.get(MDC_SYNTHETIC) == "true" || baggageTainted) {
             requestContext.headers.putSingle(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.headerValue())
         }
     }

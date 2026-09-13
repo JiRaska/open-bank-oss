@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -15,11 +16,12 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
     private lateinit var postgres: PostgreSQLContainer<*>
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer(PGVECTOR_IMAGE)
             .withDatabaseName("openbank_copilot")
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "started")
         return mapOf(
             "quarkus.datasource.reactive.url" to
                 "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}",
@@ -33,6 +35,22 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "stopped")
+        }
     }
 }
+
+/**
+ * Stock postgres plus pgvector, and nothing else — the V3 migration needs the `vector` extension or
+ * Flyway aborts and every @QuarkusTest in this module fails with what looks like a Quarkus startup
+ * error rather than a missing extension. `postgres:18-alpine` does not carry it. Same major version
+ * as before, so nothing else about these tests changes.
+ *
+ * DockerImageName.asCompatibleSubstituteFor is required: Testcontainers checks the image name
+ * against the module's expected one (`postgres`) and refuses an unrecognised repository outright.
+ */
+internal val PGVECTOR_IMAGE: org.testcontainers.utility.DockerImageName =
+    org.testcontainers.utility.DockerImageName.parse("pgvector/pgvector:pg18")
+        .asCompatibleSubstituteFor("postgres")

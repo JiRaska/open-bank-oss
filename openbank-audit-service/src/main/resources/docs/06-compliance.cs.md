@@ -38,7 +38,7 @@ audit-service je služba **compliance domény** (`governance.yaml: dataDomain: c
 
 **Ven:**
 - Read API → admin-ui (auditoři/admini/compliance), intra-OpenBank, role-gated.
-- `audit_outbox` → Kafka re-emit (compliance/SIEM stream) — zapojeno v kódu, odchozí kanál zatím nenakonfigurován ([05](./05-operations.md)).
+- Žádný odchozí Kafka re-emit — dříve mrtvá aparatura re-emitu `audit_outbox` byla odstraněna jako nepoužívaný kód (#5126); audit-service nepublikuje žádnou vlastní doménovou událost.
 
 Žádná data neopouštějí region EU/EHP.
 
@@ -76,8 +76,6 @@ Smazání před expirací je blokováno na úrovni databáze (pravidlo `no_delet
 - ✅ Neměnné úložiště: odmítnutí UPDATE/DELETE na úrovni DB
 - ✅ Rate limiting: `openbank.rate-limit` (200 concurrent)
 - ✅ Security headers: CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, nosniff, referrer/permissions policy
-- ✅ Resilience: outbox dispatcher s bulkhead/circuit-breaker/retry/timeout
 - ✅ Observability: Prometheus + OpenTelemetry + SmallRye Health
 - ✅ Secrets: env-injektované, dev placeholdery se nikdy nešipují (Vault, ADR-0017)
-- ⚠️ Odchozí re-emit kanál (`audit-events-out`) zatím nenakonfigurován — spící ([05](./05-operations.md))
 - ✅ Pole datastore v `governance.yaml` odpovídají kódu (`primaryDatastore: PostgreSQL`, `databaseName: openbank_audit`; tabulky v `public`)

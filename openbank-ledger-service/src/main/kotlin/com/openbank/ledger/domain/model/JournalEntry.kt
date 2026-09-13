@@ -23,6 +23,13 @@ data class JournalEntry(
     val createdBy: UUID,
     val version: Long,
     val reversalOf: UUID? = null,
+    /**
+     * ADR-0252 taint: this entry was posted by a bank-owned synthetic (canary) customer, not a real
+     * one. Assigned once, at posting, from the trusted request-scoped decision — never from a
+     * caller-supplied field. It excludes the entry from the regulatory aggregates ([LedgerScope])
+     * and from nothing else; the posting itself is a real double-entry posting in every other way.
+     */
+    val synthetic: Boolean = false,
 ) {
     init {
         requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }
@@ -103,6 +110,13 @@ data class JournalEntry(
             createdBy = reversedBy,
             version = 0L,
             reversalOf = id,
+            // A reversal of a synthetic entry is itself synthetic. Dropping the taint here would
+            // leave the compensating half inside the real population while the original sat
+            // outside it — so a real-only trial balance would carry the reversal's legs alone and
+            // be skewed by exactly the original's net, with debits and credits still agreeing
+            // globally (the same shape as the #939 status-filter defect, which is why that class
+            // of break is invisible to the balanced check).
+            synthetic = synthetic,
         )
     }
 }

@@ -7,6 +7,8 @@ package com.openbank.copilot.infrastructure.persistence
 import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
+import com.openbank.copilot.it.PGVECTOR_IMAGE
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -26,11 +28,12 @@ class PostgresConversationStoreIT {
     class Resource : QuarkusTestResourceLifecycleManager {
         private lateinit var postgres: PostgreSQLContainer<*>
         override fun start(): Map<String, String> {
-            postgres = PostgreSQLContainer("postgres:18-alpine")
+            postgres = PostgreSQLContainer(PGVECTOR_IMAGE)
                 .withDatabaseName("openbank_copilot")
                 .withUsername("openbank")
                 .withPassword("openbank")
             postgres.start()
+            TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "started")
             return mapOf(
                 "quarkus.datasource.reactive.url" to
                     "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}",
@@ -43,7 +46,10 @@ class PostgresConversationStoreIT {
             )
         }
         override fun stop() {
-            if (::postgres.isInitialized) postgres.stop()
+            if (::postgres.isInitialized) {
+                postgres.stop()
+                TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "stopped")
+            }
         }
     }
 

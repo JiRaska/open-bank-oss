@@ -30,6 +30,19 @@ kind: Application
 metadata:
   name: glitchtip
   namespace: argocd
+  annotations:
+    # WHY THE EXEMPTION LIVES HERE AND NOT ON THE CLUSTER: the runtime-conformance backup control
+    # honours this annotation on the CNPG Cluster itself, which is the right home for it. This
+    # chart renders its own Cluster and its `postgresql.cluster` passthrough accepts only
+    # `instances` and `storage` — there is no values key that can put an annotation on that object,
+    # so the primary route is unreachable here. The control joins this Application to the cluster
+    # by the tracking-id the live object already carries, so this excuses exactly glitchtip-pg and
+    # stops excusing anything the day this Application renders no cluster.
+    #
+    # WHY IT IS EXEMPT: GlitchTip holds pseudonymous crash events with a short retention, all of
+    # which are re-sent by devices in the field; losing the database costs visibility, not records.
+    # It holds no customer, money-path or regulatory data, so it has no recovery-point requirement.
+    openbank.io/backup-exempt-reason: "crash-event sink only — pseudonymous, short-retention, re-emitted by clients; no customer or money-path data"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

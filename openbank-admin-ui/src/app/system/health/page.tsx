@@ -12,6 +12,10 @@ import type { ServiceSnapshot, ServiceConfigResponse } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { cn } from '@/lib/utils'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
+import { OperationalEvidence } from '@/components/observability/OperationalEvidence'
 
 const POLL = 15_000
 
@@ -20,7 +24,8 @@ export default function SystemHealthPage() {
   const [configMap, setConfigMap]   = useState<Record<string, ServiceConfigResponse | null>>({})
   const [govMap, setGovMap]         = useState<Record<string, GovernanceManifestEntry>>({})
   const [govTimestamp, setGovTimestamp] = useState<string | null>(null)
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading]       = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -80,30 +85,30 @@ export default function SystemHealthPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span>{t('Systém', 'System')}</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Zdraví', 'Health')}</span>
-          </div>
-          <h1 className="page-title">{t('Zdraví systému', 'System Health')}</h1>
-          <p className="page-subtitle">{t('Živý stav · automatická obnova každých', 'Live status · auto-refresh every')} {POLL / 1000}s</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <PageHeader
+        icon={<Activity size={20} aria-hidden="true" />}
+        title={t('Zdraví systému', 'System Health')}
+        subtitle={`${t('Živý stav · automatická obnova každých', 'Live status · auto-refresh every')} ${POLL / 1000}s`}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Clock size={12} /> {lastRefreshed.toLocaleTimeString()}
+              <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing}>
-            <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
+          <button type="button" className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing} aria-busy={refreshing} aria-label={t('Obnovit zdraví systému', 'Refresh system health')}>
+            <RefreshCw size={13} aria-hidden="true" className={cn(refreshing && 'animate-spin')} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
+
+      <OperationalEvidence />
+
+      <ContextualInsights dashboardUid="openbank-slo" panels={HEALTH_INSIGHTS}
+        titleCs="Dopad na zákazníky" titleEn="Customer impact"
+        descriptionCs="Dostupnost klíčových platebních cest a tempo čerpání jejich chybového rozpočtu."
+        descriptionEn="Availability of critical payment journeys and the rate at which they consume error budget."
+        />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
@@ -149,7 +154,8 @@ function SummaryCard({ label, count, total, icon, color, bg, border }: {
 }
 
 function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snapshot: ServiceSnapshot; resilience: ServiceConfigResponse | null; governance?: GovernanceManifestEntry; govTimestamp?: string | null }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { name, port, info, health, rateLimitMax, rateLimitRemaining, apiVersion, latencyMs, reachable } = snapshot
 
   const isUp = reachable && health?.status === 'UP'
@@ -244,7 +250,7 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
             </div>
             {govTimestamp && (
               <div style={{ fontSize: '9px', color: 'var(--text-tertiary)' }} title="Metadata freshness">
-                {new Date(govTimestamp).toLocaleTimeString()}
+                {new Date(govTimestamp).toLocaleTimeString(dateLocale)}
               </div>
             )}
           </div>
@@ -363,8 +369,8 @@ function TechStackChips({ stack }: { stack: ServiceStack }) {
             ? `Quarkus ${stack.quarkus.version} LTS, supported until ${stack.quarkus.supportUntil ?? 'unknown'}`
             : `Quarkus ${stack.quarkus.version} (non-LTS)`}
           style={stack.quarkus.lts
-            ? { background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }
-            : { background: 'var(--warning-bg)', color: 'var(--warning)', border: 'none' }}
+            ? { background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }
+            : { background: 'var(--warning-bg)', color: 'var(--warning-text)', border: 'none' }}
         >
           Quarkus {stack.quarkus.version}{stack.quarkus.lts ? ' LTS' : ''}
         </span>

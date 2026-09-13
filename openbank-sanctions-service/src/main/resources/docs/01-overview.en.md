@@ -40,8 +40,8 @@ When a payment service initiates a transfer, it calls `POST /api/v1/sanctions/sc
 
 | Use case | API | Event |
 |---|---|---|
-| Screen a party before payment | `POST /api/v1/sanctions/screen` | `SanctionsCheckCompleted` |
-| Review a potential hit | `POST /api/v1/sanctions/review` | `SanctionsReviewSubmitted` |
+| Screen a party before payment | `POST /api/v1/sanctions/screen` | `SanctionChecked` |
+| Review a potential hit | `POST /api/v1/sanctions/review` | `SanctionReviewed` |
 | List all confirmed hits | `GET /api/v1/sanctions/hits` | — |
 | List hits awaiting review | `GET /api/v1/sanctions/pending` | — |
 | Enable / configure a list | `PUT /api/v1/sanctions/lists/{id}` | — |

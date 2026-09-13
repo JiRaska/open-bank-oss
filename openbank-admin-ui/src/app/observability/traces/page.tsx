@@ -15,57 +15,15 @@ import { Activity, RefreshCw, GitBranch, Clock, ChevronRight } from 'lucide-reac
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-
-interface TraceSummary {
-  traceID: string
-  rootServiceName?: string
-  rootTraceName?: string
-  startTimeUnixNano?: string
-  durationMs?: number
-}
-
-interface FlatSpan {
-  spanId: string
-  parentSpanId?: string
-  name: string
-  service: string
-  startNano: number
-  endNano: number
-}
+import { PageHeader } from '@/components/ui/PageHeader'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import { parseTempoSearch, parseTempoTrace, type FlatSpan, type TraceSummary } from '@/lib/observability/tempo-evidence'
 
 // Stable per-service hue so the same service keeps its colour across spans.
 function serviceColor(service: string): string {
   let h = 0
   for (let i = 0; i < service.length; i++) h = (h * 31 + service.charCodeAt(i)) % 360
   return `hsl(${h}, 62%, 48%)`
-}
-
-function attrString(attrs: { key: string; value?: { stringValue?: string } }[] | undefined, key: string): string | undefined {
-  return attrs?.find(a => a.key === key)?.value?.stringValue
-}
-
-// Flatten an OTLP trace (Tempo /api/traces/{id}) into a sorted span list.
-// Handles both `scopeSpans` (new) and `instrumentationLibrarySpans` (older).
-function flattenTrace(otlp: unknown): FlatSpan[] {
-  const batches = (otlp as { batches?: unknown[] })?.batches ?? []
-  const spans: FlatSpan[] = []
-  for (const batch of batches as Record<string, unknown>[]) {
-    const resource = batch.resource as { attributes?: { key: string; value?: { stringValue?: string } }[] } | undefined
-    const service = attrString(resource?.attributes, 'service.name') ?? 'unknown'
-    const scopes = (batch.scopeSpans ?? batch.instrumentationLibrarySpans ?? []) as Record<string, unknown>[]
-    for (const scope of scopes) {
-      for (const s of (scope.spans ?? []) as Record<string, string>[]) {
-        const startNano = Number(s.startTimeUnixNano ?? 0)
-        const endNano = Number(s.endTimeUnixNano ?? 0)
-        if (!startNano) continue
-        spans.push({
-          spanId: s.spanId, parentSpanId: s.parentSpanId,
-          name: s.name ?? '(span)', service, startNano, endNano: endNano || startNano,
-        })
-      }
-    }
-  }
-  return spans.sort((a, b) => a.startNano - b.startNano)
 }
 
 function fmtDuration(ms: number): string {
@@ -75,13 +33,15 @@ function fmtDuration(ms: number): string {
 }
 
 export default function TraceExplorerPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [traces, setTraces] = useState<TraceSummary[] | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
   const [spans, setSpans] = useState<FlatSpan[] | null>(null)
   const [spansLoading, setSpansLoading] = useState(false)
+  const [spansUnavailable, setSpansUnavailable] = useState<UnavailableKind | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const loadTraces = useCallback(async () => {
@@ -98,8 +58,11 @@ export default function TraceExplorerPage() {
         setTraces(null)
         return
       }
-      const json = await res.json()
-      const list: TraceSummary[] = Array.isArray(json?.traces) ? json.traces : []
+      const list = parseTempoSearch(await res.json())
+      if (!list) {
+        setUnavailable({ kind: 'error' })
+        return
+      }
       setTraces(list)
       if (list.length === 0) setUnavailable({ kind: 'no_data' })
       setLastRefresh(new Date())
@@ -116,14 +79,25 @@ export default function TraceExplorerPage() {
   const openTrace = useCallback(async (traceID: string) => {
     setSelected(traceID)
     setSpans(null)
+    setSpansUnavailable(null)
     setSpansLoading(true)
     try {
       const res = await fetch(`/api/tempo/api/traces/${traceID}`, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) { setSpans([]); return }
-      const json = await res.json()
-      setSpans(flattenTrace(json))
+      // A failed span fetch used to `setSpans([])`, which rendered the same "No data yet" panel
+      // as a trace that genuinely carries no spans — so a 502 from Tempo read to the operator as
+      // "this trace is empty". Keep the two apart (issue #5904).
+      if (!res.ok) {
+        setSpansUnavailable(res.status === 502 ? 'unreachable' : 'error')
+        return
+      }
+      const parsed = parseTempoTrace(await res.json())
+      if (!parsed) {
+        setSpansUnavailable('error')
+        return
+      }
+      setSpans(parsed)
     } catch {
-      setSpans([])
+      setSpansUnavailable('unreachable')
     } finally {
       setSpansLoading(false)
     }
@@ -137,31 +111,47 @@ export default function TraceExplorerPage() {
   return (
     <AuthGuard permission="system:view">
       <div>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Trasování', 'Tracing')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <GitBranch size={18} style={{ color: 'var(--accent)' }} />
-              {t('Trace Explorer', 'Trace Explorer')}
-            </h1>
-            <p className="page-subtitle">
-              {t(
-                'Sleduj jeden požadavek napříč službami — distribuované trasy z Tempa s časováním každého spanu.',
-                'Watch a single request hop across services — distributed traces from Tempo with per-span timing.',
-              )}
-            </p>
-          </div>
-          <button onClick={loadTraces} className="btn btn-secondary" disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <RefreshCw size={14} className={loading ? 'spin' : undefined} />
+        <PageHeader
+          icon={<GitBranch size={18} aria-hidden="true" />}
+          title={t('Trace Explorer', 'Trace Explorer')}
+          subtitle={t('Sleduj jeden požadavek napříč službami — distribuované trasy z Tempa s časováním každého spanu.', 'Watch a single request hop across services — distributed traces from Tempo with per-span timing.')}
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Trasování', 'Tracing')}</span></div>}
+          actions={<button type="button" onClick={loadTraces} className="btn btn-secondary" disabled={loading} aria-busy={loading} aria-label={t('Obnovit trasy z Tempa', 'Refresh traces from Tempo')} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <RefreshCw size={14} aria-hidden="true" className={loading ? 'spin' : undefined} />
             {t('Obnovit', 'Refresh')}
-          </button>
-        </div>
+          </button>}
+        />
 
-        {unavailable && !traces?.length ? (
+        {!selected && !unavailable && !loading && (
+          <ExplorerGuide compact title={t('Najděte nejpomalejší předávku', 'Find the slowest hand-off')}>
+            {t(
+              'Vyberte trasu a čtěte waterfall zleva doprava. Dlouhý span ukazuje, kde požadavek čekal; změna barvy znamená přechod do další služby. Explorer doporučuje začít u nejdelšího pruhu, ne u nejhlasitějšího logu.',
+              'Select a trace and read the waterfall from left to right. A long span shows where the request waited; a colour change marks a hand-off to another service. Explorer recommends starting with the longest bar, not the loudest log.',
+            )}
+          </ExplorerGuide>
+        )}
+
+        {/*
+          Three distinct states, never collapsed into one another (issue #5904):
+          LOADING  — the first fetch is still in flight and we have nothing yet. Before this
+                     branch existed the page fell straight through to the grid and rendered an
+                     empty "Recent traces ()" card, which is byte-for-byte what a successful
+                     but empty search also renders. An operator could not tell "still asking"
+                     from "Tempo holds no traces".
+          EMPTY    — the search succeeded and returned zero traces (`kind: 'no_data'`). This is
+                     currently the HONEST state for admin-ui and openbank-app, which emit no
+                     spans at all (#5735); browser instrumentation is proposed in #5847.
+          FAILED   — the search could not be answered (`unreachable` / `error`).
+          A refresh over an existing list deliberately does NOT re-enter the loading branch —
+          `traces` is still populated, so the list stays put and only the button spins.
+        */}
+        {loading && !traces && !unavailable ? (
+          <div className="card" data-testid="trace-list-loading" role="status" aria-live="polite"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '48px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={15} className="spin" aria-hidden="true" />
+            {t('Načítám trasy z Tempa…', 'Loading traces from Tempo…')}
+          </div>
+        ) : unavailable && !traces?.length ? (
           <DataUnavailable
             kind={unavailable.kind}
             service="tempo (observability)"
@@ -169,9 +159,22 @@ export default function TraceExplorerPage() {
             lang={t('cs', 'en') as 'cs' | 'en'}
           />
         ) : (
+          <>
+          {unavailable && traces?.length ? (
+            <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service="tempo (observability)"
+                feature={t('Aktualizace distribuovaných tras', 'Distributed trace refresh')}
+                lang={t('cs', 'en') as 'cs' | 'en'}
+                detail={t('Zobrazen je poslední ověřený seznam tras; novější trasy mohou chybět.', 'Showing the last verified trace list; newer traces may be missing.')}
+                dense
+              />
+            </div>
+          ) : null}
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 340px) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
             {/* Trace list */}
-            <div className="card" style={{ padding: '8px' }}>
+            <div className="card" role="region" aria-label={t('Seznam posledních tras', 'Recent traces list')} style={{ padding: '8px' }}>
               <div style={{
                 fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em',
                 color: 'var(--text-tertiary)', fontWeight: 700, padding: '8px 10px 6px',
@@ -182,7 +185,7 @@ export default function TraceExplorerPage() {
                 {(traces ?? []).map(tr => {
                   const active = tr.traceID === selected
                   return (
-                    <button key={tr.traceID} onClick={() => openTrace(tr.traceID)}
+                    <button key={tr.traceID} type="button" onClick={() => openTrace(tr.traceID)} aria-pressed={active} aria-label={`${tr.rootServiceName ?? t('neznámá služba', 'unknown service')} — ${tr.rootTraceName ?? tr.traceID.slice(0, 12)}`}
                       style={{
                         textAlign: 'left', border: 'none', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', gap: '8px',
@@ -203,7 +206,7 @@ export default function TraceExplorerPage() {
                           {fmtDuration(tr.durationMs)}
                         </span>
                       )}
-                      <ChevronRight size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                      <ChevronRight aria-hidden="true" size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                     </button>
                   )
                 })}
@@ -213,13 +216,15 @@ export default function TraceExplorerPage() {
             {/* Waterfall */}
             <div className="card" style={{ padding: '20px', minWidth: 0 }}>
               {!selected ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
-                  <Activity size={15} /> {t('Vyber trasu vlevo pro zobrazení span waterfall.', 'Pick a trace on the left to see the span waterfall.')}
+                <div role="status" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
+                  <Activity aria-hidden="true" size={15} /> {t('Vyber trasu vlevo pro zobrazení span waterfall.', 'Pick a trace on the left to see the span waterfall.')}
                 </div>
               ) : spansLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
-                  <RefreshCw size={14} className="spin" /> {t('Načítám spany…', 'Loading spans…')}
+                <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
+                  <RefreshCw aria-hidden="true" size={14} className="spin" /> {t('Načítám spany…', 'Loading spans…')}
                 </div>
+              ) : spansUnavailable ? (
+                <DataUnavailable kind={spansUnavailable} service="tempo (observability)" feature={t('Spany trasy', 'Trace spans')} lang={t('cs', 'en') as 'cs' | 'en'} dense />
               ) : !spans?.length ? (
                 <DataUnavailable kind="no_data" feature={t('Spany trasy', 'Trace spans')} lang={t('cs', 'en') as 'cs' | 'en'} dense />
               ) : (
@@ -229,7 +234,7 @@ export default function TraceExplorerPage() {
                       {selected.slice(0, 24)}…
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      <Clock size={12} /> {fmtDuration(traceTotal / 1e6)} · {spans.length} {t('spanů', 'spans')}
+                      <Clock aria-hidden="true" size={12} /> {fmtDuration(traceTotal / 1e6)} · {spans.length} {t('spanů', 'spans')}
                     </span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -267,11 +272,12 @@ export default function TraceExplorerPage() {
               )}
             </div>
           </div>
+          </>
         )}
 
         {lastRefresh && (
           <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString()}
+            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
           </div>
         )}
       </div>

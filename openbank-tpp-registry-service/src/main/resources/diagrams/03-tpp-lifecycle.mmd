@@ -1,9 +1,23 @@
 %% title: TPP Lifecycle
+%%
+%% The first block is implemented. Every edge labelled PLANNED has no code path today (#6489):
+%% nothing writes SUSPENDED or REVOKED, and the EBA register sync is a stub that reports
+%% "EBA sync not yet implemented — manual registration only" rather than syncing.
+%% checkAuthorization denies every status that is not ACTIVE, so the check is already correct
+%% for all four states — what is missing is a way to reach two of them.
 stateDiagram-v2
-    [*] --> ACTIVE : EBA sync — new TPP\nor manual registration
-    ACTIVE --> ACTIVE : EBA sync update\n(roles/certs refreshed)
-    ACTIVE --> SUSPENDED : NCA suspension\nor cert expired
+    [*] --> ACTIVE : manual registration\n(POST /api/v1/tpp-registry)
     ACTIVE --> BLACKLISTED : fraud / regulatory action\n(blacklisted_at set)
-    SUSPENDED --> ACTIVE : NCA reinstatement
-    SUSPENDED --> BLACKLISTED : escalation
     BLACKLISTED --> [*] : permanent — cannot be reactivated
+
+    [*] --> ACTIVE : PLANNED — EBA sync, new TPP
+    ACTIVE --> ACTIVE : PLANNED — EBA sync update\n(roles/certs refreshed)
+    ACTIVE --> SUSPENDED : PLANNED — NCA suspension\nor cert expired
+    SUSPENDED --> ACTIVE : PLANNED — NCA reinstatement
+    SUSPENDED --> BLACKLISTED : PLANNED — escalation
+
+    note right of SUSPENDED
+        No writer today (#6489).
+        A withdrawn authorisation is
+        currently recorded as BLACKLISTED.
+    end note

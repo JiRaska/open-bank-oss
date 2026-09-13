@@ -101,4 +101,56 @@ class AccountAuthorizationLifecycleIT {
 
         assertThat(authStatus(authId)).describedAs("account_authorizations.status after revoke").isEqualTo("REVOKED")
     }
+
+    /**
+     * #5913. `AuthorizationNotFoundException` had no mapper, so it fell through to libs-runtime's
+     * `GenericExceptionMapper` and a miss answered **500 INTERNAL_ERROR** — measured on the
+     * authenticated-fuzz lane, run 33720692606, traceId 0466cbbc-17c8-4dee-b40a-94c5bfdcd5d9.
+     *
+     * `AuthorizationServiceTest` already asserts the exception TYPE against a mocked repository
+     * and passes against the broken code: the type was never in doubt, the STATUS was. Only a
+     * request through the real endpoint can tell a 404 from a 500, which is why this lives here.
+     */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-0000000000aa", roles = ["ROLE_OPERATOR"])
+    fun `revoking an authorization that does not exist answers 404, not 500`() {
+        val accountId = openAccount()
+
+        Given {
+            contentType("application/json")
+            body("""{"revokedBy":"$operator","reason":"customer request"}""")
+        } When {
+            delete("/api/v1/accounts/$accountId/authorizations/${UUID.randomUUID()}")
+        } Then {
+            statusCode(404)
+            body("code", org.hamcrest.Matchers.equalTo("AUTHORIZATION_NOT_FOUND"))
+        }
+    }
+
+    /**
+     * The sibling case: the id resolves to a real row, on somebody else's account. It must answer
+     * 404 with the SAME body as the unknown-id case above — a different status or message here
+     * would make the endpoint an existence oracle for authorization ids.
+     */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-0000000000aa", roles = ["ROLE_OPERATOR"])
+    fun `revoking an authorization that belongs to another account answers 404`() {
+        val ownerAccount = openAccount()
+        val otherAccount = openAccount()
+        val authId = grant(ownerAccount)
+
+        Given {
+            contentType("application/json")
+            body("""{"revokedBy":"$operator","reason":"customer request"}""")
+        } When {
+            delete("/api/v1/accounts/$otherAccount/authorizations/$authId")
+        } Then {
+            statusCode(404)
+            body("code", org.hamcrest.Matchers.equalTo("AUTHORIZATION_NOT_FOUND"))
+        }
+
+        assertThat(authStatus(authId))
+            .describedAs("a refused cross-account revoke must not have transitioned the row")
+            .isEqualTo("ACTIVE")
+    }
 }

@@ -6,6 +6,7 @@ package com.openbank.cardissuance.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardissuance.application.port.out.CardRepository
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -48,11 +49,12 @@ class PartyEventConsumer {
             return
         }
 
-        try {
+        // Retried, then RETHROWN for the connector to dead-letter (#5698). A swallowed failure here
+        // leaves card PII in place while the log records the erasure as done — a GDPR Art. 17 breach
+        // that no metric, dashboard or DLQ would show. anonymizeByPartyId is idempotent.
+        EventRetry.withRetry(log, "PARTY_ERASED card anonymisation", partyId) {
             cardRepository.anonymizeByPartyId(partyId)
             log.infof("[party-events-in] GDPR Art. 17: anonymised card PII for party %s", partyId)
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to anonymise card PII for party %s", partyId)
         }
     }
 }

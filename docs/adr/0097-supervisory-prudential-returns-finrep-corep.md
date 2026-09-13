@@ -32,13 +32,12 @@ Author(s): @JiRaska
   the Phase 2 starting point, and no *other* real COREP template turns out to be free of the same
   capital/risk-weighting dependency — geographical-breakdown and ALMM/maturity-ladder templates were
   evaluated and rejected for the same reason one layer down (exposure-class/RW data, or contractual
-  maturity-bucket data, that this platform also does not have). **Capital-structure GL data does not exist
-  in `openbank-ledger-service` today** (no share capital, share premium, retained earnings, or reserve
-  accounts are seeded anywhere; `GlAccountType.EQUITY` is a valid enum value but is never populated by any
-  Flyway migration) — every own-funds row is therefore reported as an **explicit, flagged zero**
-  (`CorepCell.isDataGap = true` with a `gapReason`), never a silently omitted row or a guessed value. The
-  mapper picks up real EQUITY-typed lines automatically (and clears the gap flag) the day the ledger gains
-  real capital accounts, with no mapper code change needed. **Still not built, at all:** every other COREP
+  maturity-bucket data, that this platform also does not have). Capital-structure data was originally
+  absent, so every own-funds row was an explicit flagged zero. Ledger migration V25 now supplies
+  dedicated 6000-6060 EQUITY source accounts and the mapper derives CET1, Tier 1 and own funds from
+  their posted balances. It never substitutes assets minus liabilities. A trial balance without any
+  recognised capital source remains an explicit gap; an absent optional category (for example AT1) in
+  an otherwise recognised structure is a genuine zero. **Still not built, at all:** every other COREP
   template (C 02.00 requirements, C 05.01 transitional provisions, large exposures, leverage ratio, etc.),
   EBA XBRL/DPM taxonomy output, and the ČNB transmission channel. Tracked in issue #605.
 

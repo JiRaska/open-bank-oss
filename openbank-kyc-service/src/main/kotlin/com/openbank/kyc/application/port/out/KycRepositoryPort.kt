@@ -41,6 +41,44 @@ interface KycCaseRepository {
      */
     suspend fun findActiveByPartyId(partyId: UUID): KycCase?
 
+    /**
+     * Of [partyIds], the subset that has **any** KYC case — terminal, active or erased-but-retained.
+     *
+     * Deliberately not [findActiveByPartyId]'s question. The reconciliation behind this
+     * (issue #5698) asks whether the party was ever projected into KYC at all, so a REJECTED or
+     * APPROVED case counts as present: those parties were handled, and a party whose case closed is
+     * not the stranded-onboarding defect. Only the total absence of a row is.
+     *
+     * Batched rather than a lookup per id — the caller scans the whole party register on every
+     * tick, and the per-id shape would make a monitoring job the heaviest reader of kyc-db.
+     * An empty [partyIds] returns an empty set without touching the database.
+     *
+     * [partyIds] is UNBOUNDED by contract: the caller's candidate set is limited only by its own
+     * page cap, so an implementation must not assume it fits one statement. The JPA implementation
+     * chunks at `KycRepository.ID_BATCH_SIZE`, keeping the bind-parameter count of any single
+     * statement constant no matter how large the register grows — `IN :ids` expands to one bind
+     * per id, and PostgreSQL's wire protocol caps a statement at 65,535 of them.
+     */
+    suspend fun findPartyIdsWithAnyCase(partyIds: Collection<UUID>): Set<UUID>
+
+    /**
+     * Creation time of the OLDEST KYC case in the store, or null when no case has ever existed.
+     *
+     * This is the reconciliation's eligibility cutoff, derived rather than declared (issue #9726).
+     * `PartyEventConsumer` — the thing that opens a case when a party is created — was added on
+     * 2026-06-26; every party created before it existed has no case and never could have had one,
+     * so counting those as stranded customers puts a permanent floor under
+     * `openbank_kyc_orphaned_parties` and makes the alert structurally unable to clear. The date
+     * itself must not be hardcoded: the first case this store holds IS the first moment the
+     * auto-open path demonstrably worked, and it moves with the environment instead of with a
+     * comment someone has to remember to update.
+     *
+     * Returning null must NOT be read as "everything is ineligible" — an empty or wiped kyc-db
+     * would then silence the control completely, which is the reporting-clean failure the whole
+     * of #5698 is about. The caller treats null as "no cutoff available, report every orphan".
+     */
+    suspend fun earliestCaseCreatedAt(): Instant?
+
     suspend fun listAll(page: Int, size: Int): List<KycCase>
 
     /** Filter by [status]. Used by the onboarding cockpit funnel view (ADR-0068). */
@@ -55,6 +93,19 @@ interface KycCaseRepository {
 
     /** Transactional-outbox counterpart of [update] — see [save] with a [KycEvent]. */
     suspend fun update(case: KycCase, event: KycEvent): KycCase
+
+    /**
+     * OPEN cases whose `expires_at` is at or before [threshold], oldest first, capped at [limit].
+     *
+     * Deliberately OPEN only, not every non-terminal status (#8548). A case in `UNDER_REVIEW` has
+     * its mandatory checks recorded and is waiting on a four-eyes decision — expiring it from a
+     * timer would silently clear a compliance decision out of the reviewer's queue, which is a
+     * process choice for a human to make, not a sweep to default.
+     *
+     * [limit] bounds one tick: an unbounded first run over a backlog that has accumulated since the
+     * service was written would load every stale case into memory at once.
+     */
+    suspend fun findExpirableOpenCases(threshold: Instant, limit: Int): List<KycCase>
 
     suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
 

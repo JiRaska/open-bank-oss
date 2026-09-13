@@ -7,8 +7,6 @@
     <ID>MagicNumber:ExceptionMappers.kt$BadRequestMapper$400</ID>
     <ID>MagicNumber:ExceptionMappers.kt$NotFoundMapper$404</ID>
     <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$5_000</ID>
-    <ID>MagicNumber:SctInstOutboxRepositoryImpl.kt$SctInstOutboxRepositoryImpl$4000</ID>
-    <ID>TooManyFunctions:SctInstOutboxRepositoryImpl.kt$SctInstOutboxRepositoryImpl : SctInstOutboxRepositoryPanacheRepository</ID>
     <ID>TooManyFunctions:SctInstPaymentService.kt$SctInstPaymentService : SubmitSctInstPaymentUseCaseGetSctInstPaymentUseCaseRecallSctInstPaymentUseCase</ID>
   </CurrentIssues>
 </SmellBaseline>

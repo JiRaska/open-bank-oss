@@ -44,6 +44,10 @@ class NotificationEntity : PanacheEntity() {
     @Column(name = "correlation_id")
     var correlationId: UUID? = null
 
+    /** Nullable generic idempotency key; V14's partial unique index applies only when present. */
+    @Column(name = "deduplication_key")
+    var deduplicationKey: UUID? = null
+
     @Column(name = "sent_at")
     var sentAt: Instant? = null
 

@@ -9,12 +9,14 @@ import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -24,6 +26,7 @@ import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
 import com.openbank.libs.contact.ContactConsentPort
 import com.openbank.libs.contact.ContactCounterPort
 import com.openbank.libs.contact.ContactPolicyGate
@@ -31,6 +34,7 @@ import com.openbank.libs.contact.ContactSuppressionPort
 import com.openbank.libs.contact.SuppressionEntry
 import com.openbank.libs.contact.SuppressionReason
 import com.openbank.libs.contact.SuppressionScope
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -54,6 +58,7 @@ class CampaignJourneyActivitiesTest {
         id = campaignId,
         name = "test",
         goal = "loans",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("actives", 1),
         steps = listOf(CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         state = CampaignState.ACTIVE,
@@ -188,6 +193,22 @@ class CampaignJourneyActivitiesTest {
             clock = { noon },
         )
 
+        // A REAL adapter over a real registry alongside the real gate: the deny-reason -> metric-tag
+        // mapping is pinned where it actually runs, exactly as the deny-reason -> SendOutcome one is.
+        val registry = SimpleMeterRegistry()
+        val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+        fun stepOutcome(outcome: String): Double = registry.find(CampaignMetricsAdapter.STEP_OUTCOMES_METRIC)
+            .tag("outcome", outcome)
+            .counter()
+            ?.count() ?: 0.0
+
+        fun sends(channel: String, outcome: String): Double = registry.find(CampaignMetricsAdapter.SENDS_METRIC)
+            .tag("channel", channel)
+            .tag("outcome", outcome)
+            .counter()
+            ?.count() ?: 0.0
+
         val activities =
             CampaignJourneyActivitiesImpl(
                 campaigns,
@@ -196,6 +217,8 @@ class CampaignJourneyActivitiesTest {
                 gate,
                 notificationSend,
                 bannerPlacement,
+                metrics,
+                CreditOfferGatePort { true },
                 dryRun = false,
             )
     }
@@ -293,6 +316,10 @@ class CampaignJourneyActivitiesTest {
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.sendsRequested).isZero()
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_CAP)
+        assertThat(h.stepOutcome("suppressed_cap")).isEqualTo(1.0)
+        // A suppression is not a send at all — it must not touch the series that says work is
+        // still leaving this service.
+        assertThat(h.sends("email", "handed_off")).isEqualTo(0.0)
     }
 
     @Test
@@ -304,6 +331,8 @@ class CampaignJourneyActivitiesTest {
             },
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_CONSENT)
+        assertThat(h.stepOutcome("suppressed_consent")).isEqualTo(1.0)
+        assertThat(h.stepOutcome("suppressed_cap")).isEqualTo(0.0)
     }
 
     @Test
@@ -367,6 +396,7 @@ class CampaignJourneyActivitiesTest {
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.sendsRequested).isZero()
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_LIST)
+        assertThat(h.stepOutcome("suppressed_list")).isEqualTo(1.0)
     }
 
     @Test
@@ -377,5 +407,37 @@ class CampaignJourneyActivitiesTest {
         }.isInstanceOf(ContactGateUnavailableException::class.java)
         assertThat(h.recorded).isEmpty()
         assertThat(h.sendsRequested).isZero()
+        // A gate OUTAGE is not a policy outcome, and must not be recorded as one: counting it as a
+        // suppression would make a consent-service failure read as customers opting out.
+        assertThat(h.stepOutcome("suppressed_other")).isEqualTo(0.0)
+        assertThat(h.stepOutcome("suppressed_consent")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `an allowed send counts as handed off on the channel it actually used`() {
+        val h = Harness()
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.sends("email", "handed_off")).isEqualTo(1.0)
+        // `handed_off`, never `delivered`: this service holds no delivery credentials, so what it
+        // can establish is that notification-service accepted the request.
+        assertThat(h.sends("email", "dry_run")).isEqualTo(0.0)
+        assertThat(h.sends("email", "failed")).isEqualTo(0.0)
+        assertThat(h.sends("push", "handed_off")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a fallback to push is counted on push, not on the channel that was denied`() {
+        val h = Harness().apply {
+            emailConsent = false
+            pushConsent = true
+            fallbackToPush = true
+        }
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.sends("push", "handed_off")).isEqualTo(1.0)
+        assertThat(h.sends("email", "handed_off")).isEqualTo(0.0)
     }
 }

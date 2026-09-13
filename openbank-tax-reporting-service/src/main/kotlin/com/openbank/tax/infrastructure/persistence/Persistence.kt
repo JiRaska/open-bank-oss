@@ -54,7 +54,7 @@ class ObservedRemittanceEntity : PanacheEntityBase {
     var dueDate: LocalDate = LocalDate.EPOCH
 
     @Column(name = "observed_at", nullable = false)
-    var observedAt: Instant = Instant.EPOCH
+    var observedAt: Instant = Instant.now()
 }
 
 @Entity

@@ -35,7 +35,13 @@ ADR-0029):
    from the OpenAPI diff (`oasdiff`), never forced equal to the release version.
 4. **DB change ⇒ Flyway migration + rollback note. Event change ⇒ schema versioned backward-compatibly.**
    **Config change ⇒ no duplicate YAML keys** in `application.yaml` — SmallRye/SnakeYAML keep only the
-   *last* of a repeated mapping key and silently drop the rest (CI enforces this).
+   *last* of a repeated mapping key and silently drop the rest (CI enforces this). The same trap
+   reaches `.github/gates/gates.yaml` and every YAML a gate parses with `yaml.safe_load`, and there
+   it is worse: **a guard that READS a document cannot be the thing that notices the document is
+   malformed.** Two PRs added `budget_seconds` to the same five gates within an hour on 2026-09-05;
+   `gate-observability-declarations` read the duplicate, saw a budget, called it declared and passed,
+   while `yamllint` reddened `main` for the whole queue. `check-duplicate-yaml-keys.sh` now covers
+   that path too.
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
@@ -58,6 +64,11 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+
+Autonomous work is WIP-limited across every prefix in
+`rules.yaml: autonomous_agent_prs.agent_branch_prefixes` (currently `agent/` and `codex/`). Before
+opening one of those PRs, count all open PRs under those prefixes. At the limit of three, tend or
+reuse existing work instead of opening another PR unless the user explicitly directs the new PR.
 
 ## Build
 
@@ -89,7 +100,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Always fast-jar, never uber-jar.** Service Dockerfiles use `-Dquarkus.package.jar.type=fast-jar`
   and COPY `quarkus-app/`; an uber-jar leaves `quarkus-app/` empty → crashlooping pod.
 - **`@ConfigProperty` optional fields must be `Optional<String>`,** not plain `String`, or a missing
-  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`.
+  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`. **`defaultValue = ""`
+  is NOT a way to make one optional** — measured 2026-08-21, SmallRye answers `SRCFG00014: required
+  but it could not be found in any config source`, so an empty default leaves the property exactly
+  as required as no default at all. Nor does bean scope help: validation happens once at STARTUP in
+  `ConfigRecorder.validateConfigProperties`, over every injection point, so an `@ApplicationScoped`
+  bean's laziness defers nothing and the service simply does not boot. This bullet had existed for
+  months and audit-service shipped the shape anyway (#5844) — prose is not a control, so
+  `check-configproperty-supplied.py` now enforces both halves, plus the sibling case where
+  `application.yaml` DEFINES the value as empty (`key: ${VAR:}`), which no `defaultValue` rescues.
+  Two things made #5844 cost days rather than minutes, and both generalise: a module CI never
+  rebuilt stays red on `main` unseen, and **a service that cannot boot reports its tests as
+  SKIPPED** — that module read `1 failed, 15 skipped` instead of 143 failures, and a skip count
+  scans as a pass. Read the SKIPPED number, not just the failure count.
 - **Kotlin JUnit5 + `runBlocking` silent drop.** `fun foo() = runBlocking { }` infers a non-`Unit`
   return type and JUnit5 ignores the method. Write `fun foo(): Unit = runBlocking { }` or use a
   coroutine test runner.
@@ -105,6 +128,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `Panache.getSession().flatMap { it.merge(entity) }` (the upsert SDD's `SddMandateRepositoryImpl`
   already documents). Invisible to unit tests that mock the repository — consent-service shipped this
   way and every revoke/reject/activate 500'd, caught only by a real-DB IT (ADR-0126 D3, #1521).
+- **A missing row is TWO different defects, and the POOLED SEQUENCE tells them apart without any
+  logging.** "The log says it happened and there is no row" is either an INSERT that was never
+  attempted (an upstream branch returned early) or one that was attempted and lost (rolled back,
+  or never reached the WAL) — opposite fixes, and no error line distinguishes them because neither
+  path logs. Every table here carries a Hibernate `<table>_seq` with `increment_by 50`, and a JVM
+  draws a block **only** when allocating an id for a `persist`, so the gaps in the surviving ids are
+  a free record of how many inserts were attempted. On #4512 the ids either side of the missing
+  window were 1351 and 1601 with exactly four blocks burned between them (1401/1451/1501/1551) —
+  one per fan-out — which converts "no row" into "four inserts were attempted and lost" in a single
+  `select last_value from pg_sequences` plus a `min/max(id)`. Read it *before* enabling SQL logging;
+  it is retrospective (the sequence state survives long after logs and metrics age out) whereas
+  `log_statement` only ever answers about the future. The companion query for the same class of
+  defect is the orphan join — an outbox row whose aggregate id has no row in the entity table.
 - **A `Panache.withTransaction`/`withSession` reactive repo can't be called from a bare
   `@QuarkusTest` thread** — `runBlocking { repo.save(...) }` throws `No current Vertx context found`.
   Only a real HTTP request carries a Vert.x context: drive the flow through the REST endpoint
@@ -129,6 +165,41 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
   trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
   (the caller supplies the argument, compile-time checked), which is half of every naive grep.
+- **An entity property with no explicit `@Column(name = ...)` asks for a column no migration here
+  ever creates — and it is wrong for every MULTI-WORD property while right for every single-word
+  one, so the class reads as internally consistent.** Hibernate's implicit name is the property
+  name verbatim and Postgres folds an unquoted identifier to lower case, so `createdAt` resolves to
+  `createdat` while the migration wrote `created_at`. Only six services set
+  `physical-naming-strategy: CamelCaseToUnderscoresNamingStrategy`; in the other ~46 the name must
+  be spelled out. consent-service's `SuppressionEntity` had six of ten columns wrong, and
+  `GET /api/v1/suppressions/party/{partyId}` answered **500 on every call from the day it shipped**
+  (`SQLGrammarException: column se1_0.createdat does not exist (42703)`). Nothing could see it: the
+  unit tests mock the repository so no SQL is issued, health probes never touch the table so the pod
+  stays Ready, and the two sibling entities in the same package DO name their columns — so the file
+  next door looked like the convention was being followed. It took schemathesis fuzzing the running
+  service to find it. `check-entity-column-names.py` enforces it (gate `entity-column-names`).
+  Note what that gate must NOT do: deriving "does this column exist" from the DDL needs real parsing
+  (partitioned tables, custom enum types, ALTER/RENAME chains) and two attempts produced 12 and then
+  ~40 false findings against correct code — including all of sanctions-service, whose columns are
+  named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
+  regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
+  checks the convention, which is fully decidable.
+- **A NUL byte (U+0000) reaching Postgres is a 500, and it arrives ESCAPED — so a raw-byte scan of
+  the request finds nothing and reports clean.** Postgres cannot store U+0000 in any `text`/`varchar`
+  column (`invalid byte sequence for encoding "UTF8": 0x00`, SQLState 22021); Hibernate raises it at
+  flush, far past every handler, so `GenericExceptionMapper` renders a well-formed `INTERNAL_ERROR`
+  body — which is why "it did not crash" and "the response parsed" both pass against it. Rejected
+  fleet-wide now by `libs-runtime`'s `NulByteGuards` (#5913), and two things about it generalise.
+  First, the carrier: five services, **six** operations, and two of them carried the NUL in a QUERY
+  PARAMETER, not a body — those requests have no entity at all, so a Jackson-only guard is
+  structurally green about them. Enumerate the carriers from the fuzz artifacts before choosing where
+  a guard goes. Second, the wire form: inside JSON the character is the six ASCII characters of a
+  `\u0000` escape, legal JSON that Jackson decodes happily, so only the DECODED value answers the
+  question — scanning the stream for byte `0x00` sees nothing, and scanning for the escape as text
+  false-positives on a doubly-escaped backslash. Sibling of the `value too long` / duplicate-key
+  cases in the same issue, which are deliberately NOT this: a length limit is per-column and a
+  `ConstraintViolationException` is 409-or-400 depending on which constraint, so neither is decidable
+  fleet-wide. U+0000 is, because no valid request can carry it and no column can accept it.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -273,6 +344,54 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
   fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
   "contract".
+- **A consumer that rethrows does NOT dead-letter unless that channel configures it — SmallRye's
+  default `failure-strategy` is `fail`, which STOPS the channel.** Measured 2026-08-19: 44 incoming
+  channels fleet-wide, **4** had a DLQ. So the #5698 sweep, which converted ~30 consumers from
+  catch-and-ack to retry-then-rethrow across a dozen services, was on its way to trading silent data
+  loss for a halted consumer — the exact outcome the original swallow comments were written to avoid
+  — while every KDoc in it said "the connector dead-letters". Wire the DLQ in the same change that
+  introduces the rethrow: `failure-strategy`, an **explicit per-service topic**, the `KafkaTopic` CR
+  (topics are not auto-created) and the KafkaUser Write ACL. All four, or the rethrow wedges on the
+  DLQ send instead (#5745, #5751).
+  Two traps inside that. **The topic key is dotted, and the sibling bullet above applies** — but the
+  conclusion the fleet drew from it was wrong. Several services carried a comment asserting an
+  explicit DLQ topic was impossible *because* SmallRye quotes dotted leaf keys; true premise, wrong
+  conclusion. Measured through the real `YamlConfigSource`: the dotted one-liner
+  (`dead-letter-queue.topic: x`) is inert, the **nested** form resolves fine —
+  ```yaml
+  dead-letter-queue:
+    topic: openbank.dlq.<service>.<channel>
+  ```
+  the same idiom already used for `value: deserializer:`. That false constraint suppressed the correct
+  fix fleet-wide, and left transaction-service's money-path `payment-scheme-accepted` carrying the
+  inert form — correct in the deployed pod only because its msg-override ConfigMap supplied the value,
+  wrong locally and in every test. And **the implicit topic name is derived from the CHANNEL name,
+  which repeats across services**: account-service and card-issuance-service both consume
+  `delegation-events-in` with no override, so they already dead-letter into one shared topic and any
+  alert scoped to one counts the other's records (#5752).
+- **A comment asserting current CONFIGURATION goes stale exactly like a report asserting current
+  remote state.** Two agents in one session measured "this channel has no DLQ", wrote it into a KDoc,
+  and were falsified within the hour by the PR that wired it — the same shape as the `NotificationOutcomeConsumer`
+  KDoc they had just corrected for claiming a failure was "bounded and visible" when `PENDING` is also
+  what an in-flight outcome shows. Write the **mechanism the code controls** ("the record is nacked;
+  the connector's configured `failure-strategy` decides what follows") and let `application.yaml` answer
+  what the value is today. A comment that names a config value is a claim with a shelf life, and nothing
+  re-checks it.
+
+- **A fuzz/DAST job list showing a service is NOT evidence the service was tested — read what each
+  job actually did.** The 2026-08-18 API-fuzz run reported 7 failures of 23 and exactly ONE was a
+  finding about an HTTP surface; the other six never sent a request, and both failure kinds render
+  identically in the job list. Two harness causes, both worth knowing: the datasource `username:`
+  in `application.yaml` is often a config EXPRESSION (`${POSTGRES_USER:openbank}`), and taken
+  verbatim into `docker run -e POSTGRES_USER=` / `pg_isready -U` it can never succeed — vop and
+  settlement had therefore NEVER been fuzzed; and six services register a Temporal worker at
+  `StartupEvent`, so with no Temporal present transaction-service failed to boot outright while
+  lending, sepa-payment and domestic-payment retried past the deadline. Every registrar carries a
+  disable switch, and since the `temporal-worker-switch-naming` gate (2026-09) all of them follow
+  one convention — `openbank.<service>.worker.enabled` — so the harness derives the property from
+  each registrar's own `@ConfigProperty` rather than listing names. This matters beyond the lane: the `pentest`
+  attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
+  fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -293,6 +412,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   and `McpEndpoint` do.
 
 ### Flyway
+- **An UNTRUSTED extension cannot be created by the role Flyway connects as — the migration is green
+  on every laptop and crashloops in the cluster.** Postgres splits extensions into trusted
+  (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent` — a database OWNER may create them) and untrusted
+  (`vector`, `postgis`, `postgres_fdw`, `plpython3u` — SUPERUSER only). Every local path connects as
+  superuser (Dev Services, `PostgreSQLContainer`, compose); CNPG hands the deployed app a
+  non-superuser role. Measured against the fleet's own image
+  (`ghcr.io/cloudnative-pg/postgresql:18.1`, pgvector 0.8.1 already bundled): as owner
+  `ERROR: permission denied to create extension "vector"`, as superuser `CREATE EXTENSION`, and as
+  owner against an already-installed one `NOTICE: … already exists, skipping`. That last line is why
+  the two halves compose — a CNPG `Database` resource (`spec.extensions[]`, applied by the operator
+  over its superuser connection) creates it, and `CREATE EXTENSION IF NOT EXISTS` in the migration
+  short-circuits before the permission check, which is what keeps local dev working. Both are
+  load-bearing: drop the resource and the deployed migration dies at line 1; drop the migration line
+  and every developer's database breaks. Enforced by `check-untrusted-pg-extension.py`
+  (`rules.yaml: postgres_extensions`).
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
 - **Committing migrations does not run them: `migrate-at-start` defaults to FALSE.**
@@ -429,6 +563,33 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
   say which realm you read.
 
+- **A backup that has never been configured reports the same "success" as one that works — CNPG's
+  archiver is a NO-OP with a success exit code when no `barmanObjectStore` exists, and both
+  `ContinuousArchiving=True ContinuousArchivingSuccess` and `pg_stat_archiver` agree with it.**
+  Measured on engagement-db 2026-08-19, before its backup landed: `archived_count=12`,
+  `failed_count=0`, last success two days earlier — and **zero objects in the bucket**, because
+  there was no bucket to write to. Every WAL sat `.done` in `archive_status/`. Nothing in
+  Kubernetes, in Postgres or in the alert set could distinguish "archived to S3" from "archived
+  to nowhere"; the only probe that separates them is `aws s3 ls <destinationPath>`. Same family as
+  the push adapter whose `PushResult.skipped()` carried `success = true` — a silent no-op sharing
+  a flag with real success — and the reason `cnpg-backup-declared-gate` exists at all: the enforced
+  sibling only inspects clusters that ALREADY declare a destination, so a database that never asked
+  is invisible to it. **Verify a backup by listing the objects, never by reading a condition.**
+- **WAL archiving is not a backup, and the cluster looks green in between.** A recovery point needs
+  a BASE backup plus WAL; with archiving freshly working and no base backup,
+  `ContinuousArchiving=True` while `firstRecoverabilityPoint` is empty — restoring is impossible and
+  the only field that says so is one nobody alerts on. After enabling backup on a cluster, force the
+  first base backup (an unmanaged `kind: Backup`) instead of waiting for the ScheduledBackup, and
+  assert `status.firstRecoverabilityPoint` is set.
+- **EKS Pod Identity credentials are injected at ADMISSION, so adding an association does nothing
+  for a pod that is already running — and CNPG's 30-minute grace period makes the fix cost minutes,
+  not seconds.** engagement-db-1 had been up 7 days when its association was created; WAL archiving
+  kept failing `barman-cloud-wal-archive: Unable to locate credentials, exit status 4` until the pod
+  was deleted and re-admitted (failures stopped at 17:14:30, first success from the new pod at
+  17:14:45). `terminationGracePeriodSeconds` is 1800 and the smart shutdown waits, so budget ~4
+  minutes of downtime for that single-instance restart, not 30 seconds. Distinct from #1759, where
+  the association existed and the agent merely missed injecting during a node roll.
+
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,
 Kyverno admission-vs-runtime, `cosign attest` being additive — live in
@@ -480,6 +641,15 @@ fire from *outside* it, so they stay here:
   taxonomy and registry-guard suites fail on an "empty manifest" that reads exactly like a
   main-branch regression but is only a missing artifact. Full green = pretest + suite, not the
   suite alone.
+- **A bare `@` in an unquoted mermaid node label is a syntax error, and the error points at the
+  wrong text.** Mermaid 11 lexes `@` as the node-metadata shorthand (`id@{...}`), so
+  `outbox[Outbox<br/>Dispatcher<br/>@Scheduled every 5s]` fails to parse — while the caret in the
+  message lands on unrelated earlier text on the same line (`Hibernate Reactive / Panache`, which
+  is valid), sending you after the wrong token. Quote the label. Sibling: a literal `;` in a
+  `sequenceDiagram` message or `Note` is a statement separator — write `#59;`. Both render as a red
+  "Mermaid render failed" box in the Service Docs page, which nothing in CI loads: 40 of 248 blocks
+  across 21 services were broken that way, found only when someone opened one. Now enforced by the
+  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
 
 ### Multi-agent / parallel work
 - **Commit and push early — a `/private/tmp` worktree can vanish mid-edit.** Several agent
@@ -514,6 +684,28 @@ fire from *outside* it, so they stay here:
   Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
   a competing PR squash-merges it still lists the overlap as a diff even when the content already
   agrees. Read the content, not the diff.
+- **`git checkout <ref> -- <file>` is a WHOLE-FILE take, and it reads in the diff exactly like an
+  ordinary conflict resolution.** Resolving a conflict that way took `main`'s version of one page
+  entire and dropped 112 lines — including the feature the branch existed for. The PR stayed titled
+  "protect document template drafts" while protecting nothing, and nothing in the diff said so: the
+  file simply equalled main's. Same class three times in one queue (#9685); the other two were
+  smaller but identical in shape — one side's implementation taken wholesale, the other side's
+  tests left asserting behaviour that no longer exists.
+  **Two rules, and the second is the one that actually caught them.** Prefer a union merge to a
+  whole-file take when both sides changed the file; where the whole-file take really is right
+  (main carries an equivalent implementation), *say so in the commit message*, because that
+  sentence is the only thing distinguishing a considered decision from an accident. Then, after
+  resolving ANY merge, run the WHOLE module suite — not the tests you touched. In the worst of the
+  three, the single edited test was green while the suite was already red on a file never opened;
+  in another the assertion was e2e, so a local green proved nothing at all.
+  **Deliberately NOT a gate, and the measurement is why.** The mechanical signature is exact (a
+  file where the merge's blob equals main's while the branch had changed it), but across 69 open
+  PRs it fired 577 times over 21 PRs — mostly lockfiles and migrations legitimately superseded.
+  Narrowed to "a symbol the branch declared that exists nowhere in the merged tree" it gives 3 rows,
+  of which **1 is real**: symbol-level detection cannot tell a deletion from a rename, which is
+  inherent rather than a tuning problem. Same conclusion as `entity-column-names`: a gate that
+  cries wolf about correct code is worth less than nothing. Run it as a one-off audit after a bulk
+  conflict-resolution session instead.
 - **A merge git calls CLEAN can still DELETE content — it reports no conflict when two sides add
   neighbouring entries to the same list, and keeps only one.** Not a conflict resolved badly:
   nothing to resolve, nothing printed, exit 0. Twice on 2026-08-02, both while merging `main` into
@@ -569,14 +761,57 @@ mechanics, gate declaration, log-reading, bot signing, runner isolation. It load
 touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
 `rules.yaml`, an `application.yaml`, or merging a PR from anywhere.
 
+### Shell probes
+- **A probe fails by reporting CLEAN — source `.github/scripts/lib/probe.sh` instead of
+  re-deriving one.** BSD tools take GNU-ish input, do not error, and return a plausible nothing, so
+  a broken probe is indistinguishable from a clean subject. The library carries the ones this repo
+  has actually got wrong — `probe_utc_epoch` (BSD `date -j -f` ignores the trailing `Z` and parses
+  as LOCAL time: 53 branches falsely flagged), `probe_files_modified_since` (`-newermt "-60 minutes"`
+  is *always* empty on BSD, so a busy worktree reads as idle), `probe_remote_branch_exists`
+  (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
+  `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
+  `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
+  linter's output hides the failures that are not findings), `probe_commit_touches_path` (below),
+  and `probe_zombie_runs`.
+  Each is held to a known-positive **and** a known-negative by the enforced
+  `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`git show <sha> -- <path>` exits 0 and prints NOTHING in three different situations, and in a
+  monorepo the likeliest one is that you were standing in the wrong directory.** Pathspec arguments
+  resolve against `$PWD`, while `git status` / `--name-only` PRINT repo-root-relative paths — so
+  copying a path out of one command's output into another's argument is wrong exactly when you are
+  not at the root. Measured from inside `openbank-admin-ui/`: the root-relative path answered
+  `exit=0, 0 bytes`, the same as a path that has never existed, and the same as a genuine
+  "unchanged" — three states, one indistinguishable answer, and the two failures read as the
+  negative finding you were testing for. Use `probe_commit_touches_path <sha> <repo-root-path>`,
+  which anchors the pathspec with git's `:/` magic prefix (CWD-independent) and separates exit 1
+  ("looked; it does not") from exit 2 ("that path names no file — could not look"). The `:/` prefix
+  alone is NOT the whole fix: it cures the CWD dependence and still answers `exit 0`, empty, for a
+  misspelled path. Same family as the `--before=<bare date>` and `date -j -f` traps above; caught
+  twice within one session on #9736, the second time by `git add` erroring loudly where `git show`
+  had not.
+- **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
+  record never transitioned while every one of its jobs is `completed`, the oldest from
+  2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`
+  answer HTTP 500 on every one. Subtract them with `probe_zombie_runs` before any statement about
+  saturation. Three automation workflows account for 163 of the 189.
+
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
   regressions.
 
 ### ADR registry
+- **A stale derived ADR file reddens EVERY open PR, and each one reads as its own failure.**
+  `check-adr-registry.sh` is enforced, so when `CURRENT.md` drifted on `main` (2026-09-11: ADR-0300
+  absent from its tag listings, ADR-0285 still `planned`, the standing count 279 vs 280) the
+  `gates (registry-kotlin-data)` shard was red on every open PR — and `Validate manifests` was red
+  too, with the single message *"One or more gate shards failed"*, i.e. one cause reported twice.
+  It was found only because a test-only PR touching no ADR failed that gate. **When a gate fails on
+  a PR whose diff cannot plausibly reach it, run that gate against bare `origin/main` first** — one
+  worktree and one command, and it distinguishes "my branch is broken" from "main is broken" before
+  any branch is touched (#9711 innocent, fixed by #9720).
 - **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
-  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  failing check restores the four derived files (`README.md`, `DIGEST.md`, `CURRENT.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
   then disagrees with what you committed, failing the gate on content you never wrote (#3983).
   **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
@@ -595,6 +830,12 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
   after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
   regeneration template.
+- **Don't regenerate by hand — `bash .github/scripts/regen-derived.sh`** runs every generator, in
+  dependency order (derived data before the bundles that embed it), for the sources your branch
+  actually changed; `--all` does the lot unconditionally. It deliberately runs **no checker**, so
+  the regenerate → commit → check order above is structural rather than something you have to
+  remember. Its inventory is held to the generators that exist by the `regen-derived-inventory`
+  gate, in both directions, so a generator added later cannot be silently left out of it.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
@@ -611,6 +852,14 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `gh release create --notes` and `-f body=`; for an edit, `-F body=@file`.
   If you did use `--body`, re-read what was published (`gh pr view <n> --json body`) — grep it
   for `()` and for the phrases you meant to include.
+  **And `--body-file` has its own consequence: GitHub applies `.github/PULL_REQUEST_TEMPLATE.md`
+  only when no body is supplied, so a PR opened this way never carries the `## Security checklist`
+  section — which the enforced `security-checklist-money-path` gate requires on any PR touching a
+  money-path service.** The two rules are both right and cannot both be followed without a third
+  step: append that block to the body file yourself. Measured 2026-09-05: 50 of 67 open PRs had no
+  such section at all (#8757). The remediation is now cheap — the gate reads the LIVE body since
+  #8940, so editing the description and re-running is enough, where it previously needed an
+  otherwise-pointless empty commit to re-emit the event.
 - **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
   a git repository`,** which reads like a content or permissions problem rather than a cwd one.
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
@@ -644,6 +893,28 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   close that; only a merge queue or up-to-date-branch enforcement would, and the repo has
   deliberately chosen detection over prevention. So the re-check above is still required — but
   a branch that has been sitting is the risk, not a branch that was created early.
+- **`oasdiff` compares a spec to its own PREVIOUS version, never to the implementation — so a spec
+  enum that was wrong from the first commit is wrong forever, and every gate stays green.** The
+  version axis is watched from both ends and the *truth* axis from neither.
+  `openbank-kyc-service` published `checkType` as
+  `[IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]` against a domain
+  `CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }`: three
+  names misspelled, `ADDRESS` (a check `createCase` creates on every case) unpublished, and
+  `SOURCE_OF_FUNDS` a value that has never existed in the code. Its `UpdateCheckRequest` was
+  fiction in the same way — `required: [result]` with `result` carrying the status enum, against a
+  DTO of `(status: String, result: String?)`. So no client generated from that document could call
+  the endpoint at all, and nothing anywhere said so (#5895). It is not one service:
+  `check-openapi-enum-vs-domain.py` (gate `openapi-enum-domain-drift`, pairs a spec enum with the
+  Kotlin enum it serves by value overlap) found **27 more across 16 services** (#5962), several
+  advertising values the code lacks — which a generated client will send and the service will 400.
+  **Two consequences worth carrying.** Correcting one is *breaking* to `oasdiff` (removed enum
+  values) while being unbreakable in fact — the server is byte-identical — so it takes the
+  `correction` class in `check-api-contract.py`: MINOR, no URL major. That reclassification is
+  **mechanical, not declared**, and it only applies while the PR touches *nothing else* in that
+  service, so **put the drift test outside the service directory** or the gate demands a MAJOR it
+  also forbids. And when a downstream spec republishes the same vocabulary, it is evidence about
+  which side is canonical: `openbank-customer-edge` already carried the domain spelling verbatim,
+  which settled all five kyc names before any judgement call was needed.
 - **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
   Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
   scans *open* PRs — but the number is just as easily consumed by something that landed while your
@@ -675,14 +946,16 @@ repo is the single source of truth.
   - **Reading them: start at `docs/adr/DIGEST.md`, not at the ADRs.** It is the whole
     decision history as one line per ADR (~16k tokens vs ~400k for the fleet). Read it,
     then open only the ADRs it points you at. Grepping the fleet finds whichever ADR
-    matched a keyword, not the one that decided the thing.
+    matched a keyword, not the one that decided the thing. `docs/adr/CURRENT.md` is the
+    same lines with superseded/rejected ADRs dropped and the rest grouped by domain tag —
+    read it for what the rules ARE, the digest for how they got that way.
   - **Writing one: `docs/adr/new.sh "Title"`.** Never hand-copy an existing ADR — the
     header is a validated YAML front-matter block (`docs/adr/SCHEMA.md`), with closed
     enums and a closed tag vocabulary (`docs/adr/tags.txt`), and `new.sh` also allocates
     a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
     are rejected by CI on purpose.
   - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
-    `README.md`, `DIGEST.md` and `index.json` are DERIVED — never hand-edit them.
+    `README.md`, `DIGEST.md`, `CURRENT.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in
   `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching

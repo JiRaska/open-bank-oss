@@ -9,7 +9,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
-  Info, CheckCircle2, CircleDashed, CircleDot, Lock, Users, Search, Loader2,
+  Info, CheckCircle2, CircleDashed, Lock, Users, Search, Loader2,
   AlertOctagon, ChevronRight, Sparkles, Hand, Fingerprint,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -20,10 +20,15 @@ import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
+import { ContextualInsights } from '@/components/insights/ContextualInsights'
+import { AI_INSIGHTS } from '@/components/insights/catalog'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
+type PhaseStatus = 'complete' | 'active' | 'blocked' | 'planned'
 
 interface Agent {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
@@ -32,9 +37,13 @@ interface Agent {
 }
 interface Decision { id: string; title: string; status: DStatus; detail: string }
 interface Compliance { framework: string; requirement: string; control: string; status: DStatus }
+interface PhaseRoadmap { number: number; status: PhaseStatus; title: string; outcome: string }
+interface ControlMaturity { current: number; total: number; label: string; achieved: string[]; remaining: string }
 interface GovData {
   adrRef: string; adrStatus: string; phase: number; totalPhases: number; phaseLabel: string
   enforcement: string; policyDefault: string; agentsActing: number
+  phaseRoadmap: PhaseRoadmap[]
+  controlMaturity: ControlMaturity
   chartersAvailable: boolean; agentCount: number; agents: Agent[]
   toolTiers: Record<string, string[]>
   decisions: Decision[]; decisionSummary: { built: number; partial: number; planned: number; total: number }
@@ -49,6 +58,15 @@ interface AgentCostEntry {
   budgetMonthlyUsd: number | null
   budgetUsedPct: number | null
   burnRate: 'low' | 'normal' | 'high' | 'exceeded'
+}
+
+interface MetricsCoverage {
+  source: string
+  retentionHours: number
+  dataFrom: string
+  dataTo: string
+  lastSuccessfulLoad: string | null
+  windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
 }
 
 interface FinOpsAnomaly {
@@ -84,28 +102,21 @@ function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string)
 }
 
 // ── Status visual helpers ───────────────────────────────────────────────────
-const STATUS_CFG: Record<DStatus, { color: string; bg: string; border: string; en: string; cs: string; icon: React.ReactNode }> = {
-  built:   { color: '#16a34a', bg: '#dcfce7', border: '#86efac', en: 'Built',   cs: 'Hotovo',   icon: <CheckCircle2 size={13} /> },
-  partial: { color: '#d97706', bg: '#fef9c3', border: '#fde047', en: 'Partial', cs: 'Částečně', icon: <CircleDot size={13} /> },
-  planned: { color: '#6366f1', bg: '#ede9fe', border: '#c4b5fd', en: 'Planned', cs: 'Plánováno', icon: <CircleDashed size={13} /> },
+const STATUS_CFG: Record<DStatus, { tone: Tone; en: string; cs: string }> = {
+  built: { tone: 'success', en: 'Built', cs: 'Hotovo' },
+  partial: { tone: 'warning', en: 'Partial', cs: 'Částečně' },
+  planned: { tone: 'accent', en: 'Planned', cs: 'Plánováno' },
 }
 
-function StatusPill({ status, large }: { status: DStatus; large?: boolean }) {
+function StatusPill({ status }: { status: DStatus }) {
   const { language } = useLanguage()
   const c = STATUS_CFG[status]
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
-      fontSize: large ? '12px' : '10px', fontWeight: 700, padding: large ? '3px 10px' : '2px 8px',
-      borderRadius: '10px', color: c.color, background: c.bg, border: `1px solid ${c.border}`,
-      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-      {c.icon}{language === 'cs' ? c.cs : c.en}
-    </span>
-  )
+  return <StatusBadge status={status} tone={c.tone} label={language === 'cs' ? c.cs : c.en} withDot />
 }
 
-function Card({ children, accent }: { children: React.ReactNode; accent?: string }) {
+function Card({ children, accent, id }: { children: React.ReactNode; accent?: string; id?: string }) {
   return (
-    <div style={{ background: 'var(--surface)', border: accent ? `1px solid ${accent}40` : '1px solid var(--border)',
+    <div id={id} style={{ background: 'var(--surface)', border: accent ? `1px solid ${accent}40` : '1px solid var(--border)',
       borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
       {children}
     </div>
@@ -116,7 +127,7 @@ function SectionTitle({ icon, children, sub }: { icon: React.ReactNode; children
   return (
     <div style={{ marginBottom: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ color: '#6366f1' }}>{icon}</span>
+        <span style={{ color: 'var(--accent-text)' }}>{icon}</span>
         <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{children}</span>
       </div>
       {sub && <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '6px 0 0' }}>{sub}</p>}
@@ -126,8 +137,8 @@ function SectionTitle({ icon, children, sub }: { icon: React.ReactNode; children
 
 function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neutral' }) {
   const map = {
-    allow:   { color: '#16a34a', bg: '#dcfce7' },
-    deny:    { color: '#dc2626', bg: '#fee2e2' },
+    allow:   { color: 'var(--success-text)', bg: 'var(--success-bg)' },
+    deny:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
     neutral: { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
   }[tone]
   if (!items.length) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
@@ -144,8 +155,10 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
+  const [costCoverage, setCostCoverage] = useState<MetricsCoverage | null>(null)
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -168,8 +181,9 @@ function IAOpsContent() {
       if (!govRes.ok) { setUnavailable({ kind: 'error' }); return }
       setData(await govRes.json())
       if (aiCostRes.ok) {
-        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[] }
+        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[]; coverage?: MetricsCoverage }
         setAgentCosts(ac.agents ?? [])
+        setCostCoverage(ac.coverage ?? null)
       }
       if (anomalyRes.ok) {
         const an = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
@@ -183,12 +197,15 @@ function IAOpsContent() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   useEffect(() => {
     if (!data || typeof window === 'undefined') return
     const fragment = window.location.hash.slice(1)
-    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh') return
+    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh' && fragment !== 'agent-roster') return
 
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(fragment)?.scrollIntoView?.({ block: 'start' })
@@ -222,7 +239,9 @@ function IAOpsContent() {
     return <DataUnavailable kind={unavailable.kind} service="iaops" feature={t('AI governance', 'AI governance')} lang={language} />
   }
 
-  const planeColor = (p: string) => p === 'control' ? '#6366f1' : '#0891b2'
+  const planeTone = (p: string) => p === 'control'
+    ? { text: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' }
+    : { text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' }
   const planeLabel = (p: string) => p === 'control'
     ? t('Dohled a provoz', 'Oversight & operations')
     : p === 'development'
@@ -235,34 +254,31 @@ function IAOpsContent() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">IAOps</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('IAOps — governance AI', 'IAOps — AI Governance')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
-              'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString()}</span>}
-          <button onClick={load} disabled={loading}
+      <PageHeader
+        icon={<Bot size={20} aria-hidden="true" />}
+        title={t('Řídicí centrum agentů', 'Agent Control Room')}
+        subtitle={t(
+          'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
+          'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
+        )}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString(dateLocale)}</span>}
+          <button onClick={load} disabled={loading} type="button" aria-busy={loading}
+            aria-label={t('Obnovit IAOPS', 'Refresh IAOPS')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
+
+      <ContextualInsights dashboardUid="openbank-ai" panels={AI_INSIGHTS}
+        titleCs="Cena a spolehlivost AI" titleEn="AI cost and reliability"
+        descriptionCs="Kolik agentní provoz stojí, jak rychle odpovídá a kdy se požadavky neprovedly."
+        descriptionEn="What agent operations cost, how quickly they respond and when requests were not executed." />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
@@ -318,15 +334,15 @@ function IAOpsContent() {
           <AgentMeshExplainer language={language} />
 
           {/* ── A. Governance posture (hero) ── */}
-          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(8,145,178,0.04))',
+          <div style={{ background: 'linear-gradient(135deg, var(--accent-bg), color-mix(in srgb, var(--info-bg) 55%, var(--surface)))',
             border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '22px 24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              <Bot size={18} style={{ color: '#6366f1' }} />
+              <Bot size={18} style={{ color: 'var(--accent-text)' }} />
               <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {t('Stav governance', 'Governance posture')}
+                {t('Schválená governance roadmapa', 'Governance-approved roadmap')}
               </span>
               <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-                background: '#ede9fe', color: '#6366f1' }}>{data.adrRef} · {data.adrStatus}</span>
+                background: 'var(--accent-bg)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{data.adrRef} · {data.adrStatus}</span>
             </div>
 
             {/* Governing principle */}
@@ -339,10 +355,10 @@ function IAOpsContent() {
 
             <div className="grid-4">
               {[
-                { label: t('Fáze (ADR-0031)', 'Phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: data.phaseLabel, color: '#6366f1' },
-                { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`), color: '#d97706' },
-                { label: t('Agentů jedná', 'Agents acting'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno`, `${data.agentCount} charters defined`), color: '#16a34a' },
-                { label: t('Roadmapa D1–D9', 'Roadmap D1–D9'), value: `${data.decisionSummary.built}/${data.decisionSummary.total}`, sub: t(`${data.decisionSummary.partial} částečně · ${data.decisionSummary.planned} plánováno`, `${data.decisionSummary.partial} partial · ${data.decisionSummary.planned} planned`), color: '#0891b2' },
+                { label: t('Fáze roadmapy (ADR-0031)', 'Roadmap phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: t(`${data.phaseLabel} · není živá runtime atestace`, `${data.phaseLabel} · not live runtime evidence`) },
+                { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`) },
+                { label: t('Autonomní změnoví agenti', 'Autonomous state-changing agents'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno · není to živé počítadlo aktivity`, `${data.agentCount} charters defined · not a live activity count`) },
+                { label: t('Governance kontroly', 'Governance controls'), value: `${data.controlMaturity.current}/${data.controlMaturity.total}`, sub: t('Kontroly, ne oprávnění k autonomní změně', 'Controls, not authority for autonomous change') },
               ].map(k => (
                 <div key={k.label} className="stat-card">
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>{k.value}</div>
@@ -352,20 +368,65 @@ function IAOpsContent() {
               ))}
             </div>
 
+            <div style={{ marginTop: '14px', padding: '12px 14px', borderRadius: '10px', background: 'var(--info-bg)', border: '1px solid var(--info-border)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)' }}>
+                {t(
+                  `${data.controlMaturity.current} z ${data.controlMaturity.total} ochranných pilířů je postavených.`,
+                  `${data.controlMaturity.current} of ${data.controlMaturity.total} protective control families are built.`,
+                )}
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: '4px 0 0' }}>
+                {t(
+                  `${data.controlMaturity.label} To není povolení k autonomní změně — ta zůstává na ${data.phase}/${data.totalPhases}, dokud neexistuje nezávisle ověřený provozní důkaz.`,
+                  `${data.controlMaturity.label} This is not permission for autonomous change — that remains at ${data.phase}/${data.totalPhases} until independently verified operational evidence exists.`,
+                )}
+              </p>
+            </div>
+
             {/* What / Why / How */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginTop: '16px' }}>
               {[
-                { h: t('Co děláme', 'What we run'), b: t('Dvě populace agentů na jednom řízeném základu: control (dohled — AML/sankce/GDPR, jen návrhy) a development (jeden agent na doménu, otevírá PR, nemerguje).', 'Two agent populations on one governed substrate: control (oversight — AML/sanctions/GDPR, proposals only) and development (one agent per domain, opens PRs, never merges).') },
+                { h: t('Co děláme', 'What we run'), b: t('Dohledové agenty a frontu pro lidské rozhodnutí. Vývojové PR workflow je další řízený krok — jeho stav ukazuje roadmapa níže.', 'Oversight agents and a queue for human decisions. Development PR workflow is the next governed step — its status is shown in the roadmap below.') },
                 { h: t('Proč', 'Why'), b: t('Regulace (EU AI Act, DORA, GDPR, PCI) vyžaduje human oversight, záznamy a logování. Tyto kontroly nejsou ergonomie, jsou to compliance.', 'Regulation (EU AI Act, DORA, GDPR, PCI) mandates human oversight, record-keeping and logging. These controls are not ergonomics — they are the compliance surface.') },
                 { h: t('Jak', 'How'), b: t('Každá akce agenta projde stejnými branami jako člověk: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.', 'Every agent action passes the same gates as a human: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.') },
               ].map(x => (
                 <div key={String(x.h)} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px 14px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#6366f1', marginBottom: '4px' }}>{x.h}</div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)', marginBottom: '4px' }}>{x.h}</div>
                   <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55 }}>{x.b}</div>
                 </div>
               ))}
             </div>
           </div>
+
+          <Card>
+            <SectionTitle icon={<GitBranch size={16} />}
+              sub={t('Schválená governance roadmapa: změna fáze vyžaduje nezávisle ověřené provozní důkazy. Tato stránka je transparentní plán, ne živá runtime atestace.', 'Governance-approved roadmap: a phase change requires independently verified operational evidence. This page is a transparent plan, not a live runtime attestation.')}>
+              {t('Jak bezpečně roste autonomie', 'How autonomy safely grows')}
+            </SectionTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+              {(data.phaseRoadmap ?? []).map(item => {
+                const tone: Record<PhaseStatus, { bg: string; border: string; text: string }> = {
+                  complete: { bg: 'var(--success-bg)', border: 'var(--success-border)', text: 'var(--success-text)' },
+                  active: { bg: 'var(--accent-bg)', border: 'var(--accent-border)', text: 'var(--accent-text)' },
+                  blocked: { bg: 'var(--warning-bg)', border: 'var(--warning-border)', text: 'var(--warning-text)' },
+                  planned: { bg: 'var(--surface-2)', border: 'var(--border)', text: 'var(--text-secondary)' },
+                }
+                const color = tone[item.status]
+                const label: Record<PhaseStatus, string> = {
+                  complete: t('uzavřeno', 'completed'), active: t('aktuální', 'current'),
+                  blocked: t('kritéria nesplněna', 'criteria unmet'), planned: t('plánováno', 'planned'),
+                }
+                return <div key={item.number} style={{ padding: '13px', borderRadius: '10px', border: `1px solid ${color.border}`, background: color.bg }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t('Fáze', 'Phase')} {item.number}</strong>
+                    <span style={{ color: color.text, fontSize: '10px', fontWeight: 800 }}>{label[item.status]}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '5px' }}>{item.title}</div>
+                  <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>{item.outcome}</p>
+                </div>
+              })}
+            </div>
+          </Card>
 
           {/* Tool tiers — what MCP/the bot can & cannot do */}
           {Object.keys(data.toolTiers).length > 0 && (
@@ -392,7 +453,7 @@ function IAOpsContent() {
           )}
 
           {/* ── B. Agent roster ── */}
-          <Card>
+          <Card id="agent-roster">
             <SectionTitle icon={<Users size={16} />}
               sub={data.chartersAvailable
                 ? t('Chartery z agents.yaml — jediná strojově čitelná pravda (konzumuje ji OPA gate i runtime).', 'Charters from agents.yaml — the single machine-readable source of truth (consumed by the OPA gate and the runtime).')
@@ -410,8 +471,8 @@ function IAOpsContent() {
                     ['customer', t('Klientské služby', 'Customer services')],
                   ] as const).map(([filter, label]) => (
                     <button key={filter} onClick={() => setCrewFilter(filter)} aria-pressed={crewFilter === filter}
-                      style={{ padding: '6px 10px', borderRadius: '9px', border: crewFilter === filter ? '1px solid #818cf8' : '1px solid var(--border)',
-                        background: crewFilter === filter ? '#eef2ff' : 'var(--surface)', color: crewFilter === filter ? '#4338ca' : 'var(--text-secondary)',
+                      style={{ padding: '6px 10px', borderRadius: '9px', border: crewFilter === filter ? '1px solid var(--accent-border)' : '1px solid var(--border)',
+                        background: crewFilter === filter ? 'var(--accent-bg)' : 'var(--surface)', color: crewFilter === filter ? 'var(--accent-text)' : 'var(--text-secondary)',
                         fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
                       {label}
                     </button>
@@ -434,18 +495,19 @@ function IAOpsContent() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '16px' }}>
                 {visibleAgents.map(a => {
                   const persona = getAgentPersona(a.id, language)
+                  const plane = planeTone(a.plane)
                   const costEntry = agentCosts.find(c => c.agentId === a.id)
                   const budgetPct = costEntry?.budgetUsedPct ?? null
                   const budgetColor = budgetPct == null ? 'var(--text-tertiary)'
-                    : budgetPct > 100 ? '#dc2626'
-                    : budgetPct > 80  ? '#d97706'
-                    : '#16a34a'
+                    : budgetPct > 100 ? 'var(--danger-text)'
+                    : budgetPct > 80  ? 'var(--warning-text)'
+                    : 'var(--success-text)'
                   const isExceeded = costEntry?.burnRate === 'exceeded'
                   const isFinopsAgent = a.id === 'finops-agent'
                   return (
                     <article key={a.id}
                       style={{ position: 'relative', overflow: 'hidden', padding: '18px', borderRadius: '16px',
-                        border: `1px solid ${isExceeded ? '#fca5a5' : `${persona.accent}30`}`,
+                        border: `1px solid ${isExceeded ? 'var(--danger-border)' : `${persona.accent}30`}`,
                         background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`,
                         boxShadow: '0 6px 18px rgba(15,23,42,0.05)', transition: 'transform .15s ease, box-shadow .15s ease' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '14px' }}>
@@ -462,8 +524,8 @@ function IAOpsContent() {
                                 </Link>
                                 {isExceeded && (
                                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700,
-                                    padding: '2px 6px', borderRadius: '8px', background: '#fee2e2', color: '#dc2626' }}>
-                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+                                    padding: '2px 6px', borderRadius: '8px', background: 'var(--danger-bg)', color: 'var(--danger-text)', border: '1px solid var(--danger-border)' }}>
+                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--danger-text)', display: 'inline-block' }} />
                                     {t('Budget!', 'Budget!')}
                                   </span>
                                 )}
@@ -503,33 +565,32 @@ function IAOpsContent() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', marginBottom: costEntry ? '10px' : '12px' }}>
                         <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '10px',
-                          color: planeColor(a.plane), background: `${planeColor(a.plane)}16`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          color: plane.text, background: plane.bg, border: `1px solid ${plane.border}`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           {planeLabel(a.plane)}
                         </span>
-                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: '#fef9c3', color: '#92400e' }}>
+                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>
                           <Hand size={9} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
                         {isFinopsAgent && (
-                          <button onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
-                            style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '8px', border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
-                            {t('Spustit analýzu', 'Trigger Analysis')}
-                          </button>
+                          <span role="status" style={{ fontSize: '10px', fontWeight: 650, padding: '3px 8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}>
+                            {t('Analýza zatím není připojená k HITL backendu', 'Analysis is not connected to the HITL backend yet')}
+                          </span>
                         )}
                       </div>
 
-                      {/* Cost / Budget column */}
+                      {/* Cost / Budget column: a missing budget is an explicit state, never an implied zero. */}
                       {costEntry && (
                         <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: '10px' }}>
                           <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            {t('Náklady / Budget', 'Cost / Budget')}
+                            {t('Náklady / rozpočet', 'Cost / Budget status')}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              24h: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['24h'].partial ? `${costCoverage.windows['24h'].availableHours}h / 24h` : '24h'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
                             </span>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              7d: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['7d'].partial ? `${costCoverage.windows['7d'].availableHours}h / 7d` : '7d'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
                             </span>
                             {budgetPct != null && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '120px' }}>
@@ -541,7 +602,17 @@ function IAOpsContent() {
                                 </span>
                               </div>
                             )}
+                            {budgetPct == null && (
+                              <span role="status" style={{ fontSize: '10px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                                {t('Měsíční rozpočet není nastaven; intenzita používá denní prahy.', 'Monthly budget is not configured; burn rate uses daily thresholds ($1 / $5 / $10).')}
+                              </span>
+                            )}
                           </div>
+                          {costCoverage && (
+                            <div role="status" style={{ marginTop: '7px', fontSize: '9px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                              {costCoverage.source} · retention {costCoverage.retentionHours}h · {costCoverage.dataFrom} → {costCoverage.dataTo} · last successful load {costCoverage.lastSuccessfulLoad ?? 'unavailable'}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -573,7 +644,7 @@ function IAOpsContent() {
                           <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Vyžaduje člověka', 'Requires human')}</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                             {a.requiresHuman.map(r => (
-                              <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: '#fef9c3', color: '#92400e' }}>{r}</span>
+                              <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>{r}</span>
                             ))}
                           </div>
                         </div>
@@ -595,17 +666,14 @@ function IAOpsContent() {
             icon={<AlertOctagon size={16} />}
             title={t('Cost anomálie', 'Cost Anomalies')}
             subtitle={t(
-              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Agent navrhuje, schvaluje člověk — HITL backend přijde v P4 (tlačítka zatím logují do konzole).',
-              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). The agent proposes; a human approves — HITL backend arrives in P4 (buttons currently log to console).',
+              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Tento přehled je pouze pro čtení: anomálie zatím nevytvářejí návrhy ve schvalovací frontě.',
+              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). This view is read-only: anomalies do not yet create proposals in the approval queue.',
             )}
             findings={costAnomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(
               'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
               'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
             )}
-            onApprove={id => console.log('HITL approve', id)}
-            onReject={id => console.log('HITL dismiss', id)}
-            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Dismiss') }}
           />
 
           {/* ── D. AI audit trail ── */}
@@ -629,13 +697,13 @@ function IAOpsContent() {
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success-text)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <CheckCircle2 size={13} /> {t('Živé', 'Live now')}
                 </div>
                 <ul style={{ margin: '0 0 12px', paddingLeft: '16px' }}>
                   {data.auditTrail.live.map(x => <li key={x} style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '3px' }}>{x}</li>)}
                 </ul>
-                <div style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <CircleDashed size={13} /> {t('Plánováno', 'Planned')}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '16px' }}>
@@ -666,6 +734,7 @@ function IAOpsContent() {
             </SectionTitle>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <textarea
+                aria-label={t('Popis alertu pro RCA', 'Alert description for RCA')}
                 value={rcaAsk}
                 onChange={e => setRcaAsk(e.target.value)}
                 disabled={rcaLoading}
@@ -686,8 +755,8 @@ function IAOpsContent() {
                 disabled={rcaLoading || !rcaAsk.trim()}
                 style={{
                   alignSelf: 'flex-end', padding: '8px 16px', borderRadius: '8px', border: 'none',
-                  background: rcaLoading || !rcaAsk.trim() ? 'var(--surface-2)' : '#6366f1',
-                  color: rcaLoading || !rcaAsk.trim() ? 'var(--text-tertiary)' : '#fff',
+                  background: rcaLoading || !rcaAsk.trim() ? 'var(--surface-2)' : 'var(--accent)',
+                  color: rcaLoading || !rcaAsk.trim() ? 'var(--text-tertiary)' : 'var(--text-inverse)',
                   fontSize: '12px', fontWeight: 700, cursor: rcaLoading || !rcaAsk.trim() ? 'default' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap',
                 }}
@@ -698,8 +767,8 @@ function IAOpsContent() {
               </button>
             </div>
             {rcaError && (
-              <div style={{ fontSize: '12px', color: '#dc2626', padding: '8px 12px',
-                background: '#fee2e2', borderRadius: '8px', border: '1px solid #fca5a5' }}>
+              <div role="alert" style={{ fontSize: '12px', color: 'var(--danger-text)', padding: '8px 12px',
+                background: 'var(--danger-bg)', borderRadius: '8px', border: '1px solid var(--danger-border)' }}>
                 {rcaError}
               </div>
             )}
@@ -733,7 +802,7 @@ function IAOpsContent() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {data.decisions.map(dec => (
                 <div key={dec.id} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 800, fontFamily: 'monospace', color: '#6366f1', minWidth: '28px' }}>{dec.id}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 800, fontFamily: 'monospace', color: 'var(--accent-text)', minWidth: '28px' }}>{dec.id}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{dec.title}</span>
@@ -775,8 +844,8 @@ function IAOpsContent() {
             </div>
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '12px 0 0', lineHeight: 1.5 }}>
               {t(
-                'Pozn.: Fáze 1 je advisory + audit-only — kontroly jsou zavedené, ale enforcement (OPA block) ještě neběží. EU AI Act se klasifikuje per agent; oversight/dev agenti jsou proposal-only (pravděpodobně limited risk). Žádný agent se nedotýká scoringu úvěruschopnosti.',
-                'Note: Phase 1 is advisory + audit-only — controls are in place but enforcement (OPA block) is not yet live. EU AI Act is classified per agent; oversight/dev agents are proposal-only (likely limited risk). No agent touches creditworthiness scoring.',
+                'Pozn.: Fáze 1 je vynucovaná, je-li PDP dostupný: policy gate je deny-by-default a OPA blokuje nepovolené volání nástrojů. Při výpadku PDP se režim degraduje na advisory. Fáze 2 zůstává read-only a proposal-only — každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
+                'Note: Phase 1 is enforced while the PDP is available: the policy gate is deny-by-default and OPA blocks disallowed tool calls. A PDP outage degrades the gate to advisory. Phase 2 remains read-only and proposal-only — a human decides every proposal. EU AI Act is classified per agent; no agent touches creditworthiness scoring.',
               )}
             </p>
           </Card>

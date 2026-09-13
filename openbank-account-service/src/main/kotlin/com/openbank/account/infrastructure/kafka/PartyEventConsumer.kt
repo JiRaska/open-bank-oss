@@ -9,9 +9,11 @@ import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.port.`in`.OpenAccountCommand
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.PartyMandateProjection
 import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.delay
@@ -28,10 +30,14 @@ private data class PartyEvent(
     val partyType: String,
     val legalName: String,
     val status: String,
+    val mandateId: UUID?,
+    val agentPartyId: UUID?,
+    val authority: String?,
+    val requiredSignatures: Int?,
 )
 
 /**
- * Onboarding account lifecycle driven by party domain events (ADR-0073).
+ * Onboarding account lifecycle driven by party domain events (ADR-0267).
  *
  * - PARTY_CREATED (INDIVIDUAL) → open a PENDING_ACTIVATION multi-currency CURRENT account
  *   (one IBAN + primary CZK pocket) plus a SAVINGS account, so a fresh customer can try
@@ -91,6 +97,7 @@ class PartyEventConsumer(
     @ConfigProperty(name = "openbank.welcome-bonus.currency", defaultValue = "CZK")
     private val welcomeBonusCurrency: String,
     private val notificationRequestPort: NotificationRequestPort,
+    private val partyMandateRepository: PartyMandateProjectionRepository,
 ) {
     private val log = Logger.getLogger(PartyEventConsumer::class.java)
 
@@ -131,6 +138,12 @@ class PartyEventConsumer(
             partyType = node.path("partyType").asText(""),
             legalName = node.path("legalName").asText("").trim(),
             status = node.path("status").asText(""),
+            mandateId = node.path("mandateId").takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            agentPartyId = node.path("agentPartyId").takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            authority = node.path("authority").takeUnless { it.isMissingNode || it.isNull }?.asText(),
+            requiredSignatures = node.path("requiredSignatures").takeUnless { it.isMissingNode || it.isNull }?.asInt(),
         )
     }
 
@@ -141,8 +154,28 @@ class PartyEventConsumer(
             // party via PARTY_UPDATED / KYC_STATUS_CHANGED, both carrying the new `status`.
             "PARTY_UPDATED", "KYC_STATUS_CHANGED" -> reconcileToPartyStatus(event.partyId, event.status)
             "PARTY_ERASED" -> handleErased(event.partyId)
+            "PARTY_MANDATE_GRANTED" -> projectMandate(event)
+            "PARTY_MANDATE_REVOKED" -> partyMandateRepository.revoke(
+                requireNotNull(event.mandateId) { "PARTY_MANDATE_REVOKED is missing mandateId" },
+            )
             else -> Unit // a type we don't project — nothing to do, ack.
         }
+    }
+
+    private suspend fun projectMandate(event: PartyEvent) {
+        partyMandateRepository.upsert(
+            PartyMandateProjection(
+                id = requireNotNull(event.mandateId) { "PARTY_MANDATE_GRANTED is missing mandateId" },
+                principalPartyId = event.partyId,
+                agentPartyId = requireNotNull(event.agentPartyId) {
+                    "PARTY_MANDATE_GRANTED is missing agentPartyId"
+                },
+                authority = requireNotNull(event.authority) { "PARTY_MANDATE_GRANTED is missing authority" },
+                // Null is retained deliberately: historic/incomplete facts can never authorize.
+                requiredSignatures = event.requiredSignatures,
+                active = event.status == "ACTIVE",
+            ),
+        )
     }
 
     /**
@@ -252,19 +285,22 @@ class PartyEventConsumer(
         log.infof("GDPR Art. 17: anonymised legalName for erased party %s (%d account(s))", partyId, count)
     }
 
-    // Fire the one-time welcome bonus as the account goes live. Best-effort: a failure here must not
-    // wedge the consumer or block activation (the account is already ACTIVE). Idempotent downstream
-    // (keyed on the account id), so a retry on the next event re-delivery is safe rather than doubling.
-    // On a successful grant, also notify the party (in-app feed + push) — itself best-effort.
+    // Fire the one-time welcome bonus as the account goes live. Idempotent downstream (keyed on the
+    // account id), so a retry or a redelivery cannot double-credit.
     private suspend fun grantWelcomeBonus(accountId: UUID, partyId: UUID) {
         if (!welcomeBonusEnabled) return
-        try {
-            welcomeBonusPort.grantWelcomeBonus(accountId, welcomeBonusAmount, welcomeBonusCurrency)
-            log.infof("Granted welcome bonus %s %s to account %s", welcomeBonusAmount, welcomeBonusCurrency, accountId)
-        } catch (e: Exception) {
-            log.errorf(e, "Welcome bonus grant failed for account %s (will retry on next ACTIVE event)", accountId)
-            return
-        }
+        // The old code caught this and logged "will retry on next ACTIVE event". There IS no next
+        // ACTIVE event — a party activates once — so the customer simply never got the money, and
+        // the only trace was an ERROR line (#5698). It now propagates.
+        //
+        // Deliberately NOT wrapped in EventRetry here: consume() already runs this whole path
+        // through withBoundedRetry, and nesting the two multiplies the attempts (4 x 3 = 12 calls
+        // to the payment path for one event, which the test caught). One retry loop per message.
+        welcomeBonusPort.grantWelcomeBonus(accountId, welcomeBonusAmount, welcomeBonusCurrency)
+        log.infof("Granted welcome bonus %s %s to account %s", welcomeBonusAmount, welcomeBonusCurrency, accountId)
+        // best-effort: the money is already booked and the event is complete without this. A failed
+        // notification costs the customer a push, not their balance — the one shape of failure a
+        // handler may swallow, and it is stated here rather than left to a bare catch.
         try {
             notificationRequestPort.notifyIncomingCredit(partyId, welcomeBonusAmount, welcomeBonusCurrency)
         } catch (e: Exception) {

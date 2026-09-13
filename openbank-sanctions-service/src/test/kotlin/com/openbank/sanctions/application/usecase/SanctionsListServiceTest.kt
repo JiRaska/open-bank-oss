@@ -4,10 +4,10 @@
 
 package com.openbank.sanctions.application.usecase
 
-import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
+import com.openbank.sanctions.application.port.out.ListImportResult
+import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
+import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
 import com.openbank.sanctions.domain.model.SanctionsList
-import com.openbank.sanctions.domain.model.SanctionsListChangeSet
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
@@ -18,7 +18,6 @@ import jakarta.ws.rs.NotFoundException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -34,14 +33,11 @@ class SanctionsListServiceTest {
 
     private val repo = mockk<SanctionsListRepositoryImpl>()
     private val importer = mockk<SanctionsImportService>()
-    private val outbox = mockk<SanctionsOutboxRepository>()
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
-    private val service = SanctionsListService(repo, importer, outbox, clock)
-
-    @BeforeEach
-    fun stubOutbox() {
-        coEvery { outbox.persistStandalone(any()) } returns Unit
+    private val publisher = mockk<SanctionsChangePublisher> {
+        coEvery { publishPending(any(), any()) } returns SanctionsPublicationOutcome.NO_CHANGES
     }
+    private val service = SanctionsListService(repo, importer, clock, publisher)
 
     // ──── listAll / getById ─────────────────────────────────────────────────
 
@@ -157,69 +153,6 @@ class SanctionsListServiceTest {
 
     // ──── refresh ────────────────────────────────────────────────────────────
 
-    // ── ADR-0256 D1 storm guard ──────────────────────────────────────────────────────────
-    // An upstream schema reformat rewrites every row and is indistinguishable, entry by entry,
-    // from "the whole list changed". Without the guard the diff raises SANCTIONS_LIST_CHANGED and
-    // the consumer re-screens the entire customer book off a formatting change.
-
-    private fun changeSetOf(type: SanctionsListType, n: Int) =
-        SanctionsListChangeSet(type, changedExternalIds = (1..n).map { "id-$it" }.toSet())
-
-    @Test
-    fun `a diff above the storm threshold withholds the re-screening trigger`(): Unit = runBlocking {
-        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = 100)
-        coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
-            changeSetOf(SanctionsListType.OFAC_SDN, 80)
-        coEvery { repo.markUpdated("OFAC_SDN", 80) } returns list.copy(lastEntryCount = 80)
-
-        service.refresh("OFAC_SDN")
-
-        val published = mutableListOf<OutboxMessage>()
-        coVerify { outbox.persistStandalone(capture(published)) }
-        assertThat(published.map { it.eventType })
-            .describedAs("80 of 100 entries is a reformat, not a regime action")
-            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGE_STORM)
-        assertThat(published.single().payload)
-            .describedAs("the storm event carries counts, never the id list")
-            .doesNotContain("id-1\"")
-    }
-
-    @Test
-    fun `a diff below the storm threshold still raises the re-screening trigger`(): Unit = runBlocking {
-        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = 100)
-        coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
-            changeSetOf(SanctionsListType.OFAC_SDN, 3)
-        coEvery { repo.markUpdated("OFAC_SDN", 3) } returns list.copy(lastEntryCount = 3)
-
-        service.refresh("OFAC_SDN")
-
-        val published = mutableListOf<OutboxMessage>()
-        coVerify { outbox.persistStandalone(capture(published)) }
-        assertThat(published.map { it.eventType })
-            .describedAs("a handful of edits is exactly what the trigger exists for")
-            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGED)
-    }
-
-    @Test
-    fun `a first import is not a storm even though it changes everything`(): Unit = runBlocking {
-        // baseline null: the list has never been imported. Share is undefined, and treating that
-        // as a storm would mean a newly configured list could never raise its first trigger.
-        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = null)
-        coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
-            changeSetOf(SanctionsListType.OFAC_SDN, 5000)
-        coEvery { repo.markUpdated("OFAC_SDN", 5000) } returns list.copy(lastEntryCount = 5000)
-
-        service.refresh("OFAC_SDN")
-
-        val published = mutableListOf<OutboxMessage>()
-        coVerify { outbox.persistStandalone(capture(published)) }
-        assertThat(published.map { it.eventType })
-            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGED)
-    }
-
     @Test
     fun `refresh throws NotFoundException when list is unknown`(): Unit = runBlocking {
         coEvery { repo.findByListType("OFAC_SDN") } returns null
@@ -234,7 +167,7 @@ class SanctionsListServiceTest {
         val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml")
         coEvery { repo.findByListType("OFAC_SDN") } returns list
         coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns
-            SanctionsListChangeSet(SanctionsListType.OFAC_SDN, changedExternalIds = (1..42).map { "id-$it" }.toSet())
+            ListImportResult.imported(42)
         coEvery { repo.markUpdated("OFAC_SDN", 42) } returns list.copy(lastEntryCount = 42)
 
         val result = service.refresh("OFAC_SDN")
@@ -248,7 +181,7 @@ class SanctionsListServiceTest {
         val list = sampleList(listType = "FATF_HIGH_RISK", lastEntryCount = 7)
         coEvery { repo.findByListType("FATF_HIGH_RISK") } returns list
         coEvery { importer.importList(SanctionsListType.FATF_HIGH_RISK, any()) } returns
-            SanctionsListChangeSet(SanctionsListType.FATF_HIGH_RISK)
+            ListImportResult.skippedNotEntityBased("FATF is country-risk")
         coEvery { repo.markUpdated("FATF_HIGH_RISK", 7) } returns list
 
         service.refresh("FATF_HIGH_RISK")
@@ -261,7 +194,7 @@ class SanctionsListServiceTest {
         val list = sampleList(listType = "CNB_DOMESTIC", lastEntryCount = null)
         coEvery { repo.findByListType("CNB_DOMESTIC") } returns list
         coEvery { importer.importList(SanctionsListType.CNB_DOMESTIC, any()) } returns
-            SanctionsListChangeSet(SanctionsListType.CNB_DOMESTIC)
+            ListImportResult.skippedNotEntityBased("CNB has no feed")
         coEvery { repo.markUpdated("CNB_DOMESTIC", 0) } returns list
 
         service.refresh("CNB_DOMESTIC")
@@ -285,8 +218,7 @@ class SanctionsListServiceTest {
     fun `refresh throws IllegalStateException when markUpdated fails to persist`(): Unit = runBlocking {
         val list = sampleList(listType = "OFAC_SDN")
         coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
-            SanctionsListChangeSet(SanctionsListType.OFAC_SDN, changedExternalIds = (1..5).map { "id-$it" }.toSet())
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns ListImportResult.imported(5)
         coEvery { repo.markUpdated("OFAC_SDN", 5) } returns null
 
         assertThatThrownBy {
@@ -295,32 +227,68 @@ class SanctionsListServiceTest {
             .hasMessageContaining("Failed to persist sanctions list refresh")
     }
 
-    // ──── refreshAll ─────────────────────────────────────────────────────────
+    // ──── requestRefreshAll (#9048) ─────────────────────────────────────────
 
     @Test
-    fun `refreshAll only refreshes enabled lists`(): Unit = runBlocking {
-        val enabled = sampleList(listType = "OFAC_SDN", enabled = true)
-        val disabled = sampleList(listType = "FATF_HIGH_RISK", enabled = false)
-        coEvery { repo.listSanctionsLists() } returns listOf(enabled, disabled)
-        coEvery { repo.findByListType("OFAC_SDN") } returns enabled
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
-            SanctionsListChangeSet(SanctionsListType.OFAC_SDN, changedExternalIds = setOf("id-1"))
-        coEvery { repo.markUpdated("OFAC_SDN", 1) } returns enabled.copy(lastEntryCount = 1)
+    fun `requestRefreshAll flags enabled lists via repo and returns the count`(): Unit = runBlocking {
+        coEvery { repo.requestRefreshAll() } returns 5
 
-        val result = service.refreshAll()
-
-        assertThat(result).hasSize(1)
-        coVerify(exactly = 0) { repo.findByListType("FATF_HIGH_RISK") }
+        assertThat(service.requestRefreshAll()).isEqualTo(5)
+        coVerify { repo.requestRefreshAll() }
+        // The endpoint must never touch the importer — the imports belong to the scheduler.
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
     }
 
     @Test
-    fun `refreshAll returns empty list when nothing is enabled`(): Unit = runBlocking {
-        coEvery { repo.listSanctionsLists() } returns listOf(sampleList(enabled = false))
+    fun `requestRefreshAllLegacy flags and returns the enabled lists for the v1 shape`(): Unit = runBlocking {
+        val enabled = sampleList(listType = "OFAC_SDN", enabled = true)
+        coEvery { repo.requestRefreshAll() } returns 1
+        coEvery { repo.listSanctionsLists() } returns listOf(enabled, sampleList(enabled = false))
 
-        assertThat(service.refreshAll()).isEmpty()
+        val result = service.requestRefreshAllLegacy()
+
+        assertThat(result).containsExactly(enabled)
+        coVerify { repo.requestRefreshAll() }
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
     }
 
     // ──── scheduledRefresh ──────────────────────────────────────────────────
+
+    @Test
+    fun `scheduledRefresh refreshes a flagged list even outside its cron window`(): Unit = runBlocking {
+        // clock fixed at 2024-01-15T12:00:00Z (Monday) but this list's cron says 06:00 — without
+        // the #9048 flag it would NOT be due. The refresh-requested flag makes it due.
+        val flagged = sampleList(
+            listType = "OFAC_SDN",
+            sourceUrl = "https://example.com/sdn.xml",
+            cronHour = 6,
+            cronMinute = 0,
+        ).copy(refreshRequestedAt = Instant.parse("2024-01-15T11:58:00Z"))
+        coEvery { repo.listSanctionsLists() } returns listOf(flagged)
+        coEvery { repo.findByListType("OFAC_SDN") } returns flagged
+        coEvery {
+            importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
+        } returns ListImportResult.imported(9)
+        coEvery { repo.markUpdated("OFAC_SDN", 9) } returns flagged.copy(lastEntryCount = 9)
+
+        service.scheduledRefresh()
+
+        coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
+        // markUpdated is also what clears the flag (repo side), so the list is not re-imported
+        // on every subsequent tick.
+        coVerify { repo.markUpdated("OFAC_SDN", 9) }
+    }
+
+    @Test
+    fun `scheduledRefresh does not refresh a disabled list even when flagged`(): Unit = runBlocking {
+        val flaggedDisabled = sampleList(listType = "OFAC_SDN", enabled = false)
+            .copy(refreshRequestedAt = Instant.parse("2024-01-15T11:58:00Z"))
+        coEvery { repo.listSanctionsLists() } returns listOf(flaggedDisabled)
+
+        service.scheduledRefresh()
+
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
 
     @Test
     fun `scheduledRefresh skips lists whose cron schedule does not match now`(): Unit = runBlocking {
@@ -352,7 +320,7 @@ class SanctionsListServiceTest {
         coEvery { repo.listSanctionsLists() } returns listOf(due)
         coEvery { repo.findByListType("OFAC_SDN") } returns due
         coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns
-            SanctionsListChangeSet(SanctionsListType.OFAC_SDN, changedExternalIds = (1..123).map { "id-$it" }.toSet())
+            ListImportResult.imported(123)
         coEvery { repo.markUpdated("OFAC_SDN", 123) } returns due.copy(lastEntryCount = 123)
 
         service.scheduledRefresh()
@@ -370,13 +338,7 @@ class SanctionsListServiceTest {
         coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } throws
             IllegalStateException("boom")
         coEvery { repo.findByListType("EU_CONSOLIDATED") } returns healthy
-        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any()) } returns
-            SanctionsListChangeSet(
-                SanctionsListType.EU_CONSOLIDATED,
-                changedExternalIds = (1..5).map {
-                    "id-$it"
-                }.toSet(),
-            )
+        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any()) } returns ListImportResult.imported(5)
         coEvery { repo.markUpdated("EU_CONSOLIDATED", 5) } returns healthy.copy(lastEntryCount = 5)
 
         service.scheduledRefresh()
@@ -430,13 +392,7 @@ class SanctionsListServiceTest {
                 coEvery { repo.findByListType("OFAC_SDN") } returns due
                 coEvery {
                     importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
-                } returns
-                    SanctionsListChangeSet(
-                        SanctionsListType.OFAC_SDN,
-                        changedExternalIds = (1..7).map {
-                            "id-$it"
-                        }.toSet(),
-                    )
+                } returns ListImportResult.imported(7)
                 coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
 
                 service.scheduledRefresh()
@@ -463,13 +419,7 @@ class SanctionsListServiceTest {
                 coEvery { repo.findByListType("OFAC_SDN") } returns due
                 coEvery {
                     importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
-                } returns
-                    SanctionsListChangeSet(
-                        SanctionsListType.OFAC_SDN,
-                        changedExternalIds = (1..7).map {
-                            "id-$it"
-                        }.toSet(),
-                    )
+                } returns ListImportResult.imported(7)
                 coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
 
                 service.scheduledRefresh()
@@ -477,6 +427,41 @@ class SanctionsListServiceTest {
                 coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
             }
         }
+    }
+
+    @Test
+    fun `scheduled tick recovers pending publication outside the import cron`(): Unit = runBlocking {
+        val list = sampleList(cronHour = 6)
+        coEvery { repo.listSanctionsLists() } returns listOf(list)
+
+        service.scheduledRefresh()
+
+        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
+
+    @Test
+    fun `a failed import still publishes previously committed changes`(): Unit = runBlocking {
+        val list = sampleList(lastEntryCount = 10)
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any()) } returns ListImportResult.failedKeptExisting("fixture failure")
+        coEvery { repo.markUpdated(list.listType, 10) } returns list
+
+        service.refresh(list.listType)
+
+        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+    }
+
+    @Test
+    fun `publication failure does not mark refresh completed`() {
+        val list = sampleList()
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any()) } returns ListImportResult.imported(10)
+        coEvery { publisher.publishPending(any(), any()) } throws IllegalStateException("outbox unavailable")
+
+        assertThatThrownBy { runBlocking { service.refresh(list.listType) } }
+            .hasMessageContaining("outbox unavailable")
+        coVerify(exactly = 0) { repo.markUpdated(any(), any()) }
     }
 
     private fun sampleList(

@@ -169,8 +169,31 @@ class CloseOrchestrator(
                         Uni.createFrom().item(Unit)
                     }
                     .onFailure().recoverWithUni { e ->
-                        failed.incrementAndGet()
                         val reason = classify(e)
+                        if (reason == CloseFailureReason.NOT_VIABLE) {
+                            // Same rule as the account-level path above, and for the same reason
+                            // (#862): a debris account is SKIPPED, never FAILED, so
+                            // StatementCloseFailures does not fire on data noise.
+                            //
+                            // It is reachable here and not only there because closePocketMonth
+                            // calls accountInfo.pocketAccount AGAIN, once per pocket — the outer
+                            // guard covers the outer read, not this one. Without this branch the
+                            // same account is skipped or failed depending on WHICH of the two
+                            // reads saw the debris, and a CloseFailure row is written carrying a
+                            // `reason` the published CloseFailure schema cannot express.
+                            skipped.incrementAndGet()
+                            metrics.pocketSkipped()
+                            log.infof(
+                                "Close skipped for %s/%s %s..%s (NOT_VIABLE): %s",
+                                accountId,
+                                currency,
+                                from,
+                                to,
+                                e.message,
+                            )
+                            return@recoverWithUni Uni.createFrom().item(Unit)
+                        }
+                        failed.incrementAndGet()
                         metrics.pocketFailed(reason)
                         log.errorf(e, "Close failed for %s/%s %s..%s (%s)", accountId, currency, from, to, reason)
                         recordFailure(runId, accountId, currency, from, to, reason, e)
@@ -209,6 +232,8 @@ class CloseOrchestrator(
         // One clock read, used for both names: `failedAt` is this event's business instant, so
         // `occurredAt` must be the SAME value, not a second read. Two reads would put two "when"s
         // on one failure and let them drift under load.
+        // `sourceService` (issue #3994/#5256): see periodClosedEvent's KDoc in StatementService.kt
+        // for the full rationale — same live attribution upgrade, same hand-built JSON idiom.
         val failedAt = clock()
         val payload = """
             {"eventType":"account.statement.period.close_failed.v1",
@@ -221,7 +246,8 @@ class CloseOrchestrator(
             "failedAt":"$failedAt",
             "occurredAt":"$failedAt",
             "actorId":"${StatementEventActors.PERIOD_CLOSE}",
-            "actorType":"${EventActor.TYPE_SYSTEM}"}
+            "actorType":"${EventActor.TYPE_SYSTEM}",
+            "sourceService":"statement-service"}
         """.trimIndent().replace("\n", "")
         return outbox.append(
             StatementOutboxMessage(

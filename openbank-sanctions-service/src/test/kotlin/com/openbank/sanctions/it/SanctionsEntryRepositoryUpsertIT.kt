@@ -22,6 +22,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 /**
  * Real-Postgres verification for the #1432 fix (a PEP_GLOBAL refresh wrote ~1.9GB of WAL onto a
@@ -75,6 +76,8 @@ class SanctionsEntryRepositoryUpsertIT {
         primaryName = primaryName,
         aliases = emptyList(),
         searchText = primaryName.lowercase(),
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
 
     /** Postgres's own tuple-version marker: changes on any UPDATE that writes a new row version. */

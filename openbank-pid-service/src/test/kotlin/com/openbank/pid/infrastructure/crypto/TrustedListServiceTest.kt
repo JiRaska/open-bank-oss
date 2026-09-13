@@ -5,6 +5,9 @@
 package com.openbank.pid.infrastructure.crypto
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
@@ -60,8 +63,12 @@ class TrustedListServiceTest {
     private fun service(
         inlineList: String?,
         withAnchor: Boolean = true,
-    ): Pair<TrustedListService, RefreshableTrustStore> {
+    ): Triple<TrustedListService, RefreshableTrustStore, WorkflowLivenessRecorder> {
         val store = mockk<RefreshableTrustStore>(relaxed = true)
+        val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val metrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns liveness
+        }
         val anchorJwks = if (withAnchor) {
             Optional.of("""{"keys":[${anchor.toJson(JsonWebKey.OutputControlLevel.PUBLIC_ONLY)}]}""")
         } else {
@@ -74,50 +81,54 @@ class TrustedListServiceTest {
             trustStore = store,
             objectMapper = mapper,
             clock = testClock,
+            domainMetrics = metrics,
         )
-        return svc to store
+        svc.registerLiveness()
+        return Triple(svc, store, liveness)
     }
 
     @Test
     fun `a list signed by the trust anchor is verified and its issuers pushed to the trust store`() {
-        val (svc, store) = service(signedList())
+        val (svc, store, liveness) = service(signedList())
         svc.refresh()
         val json = slot<String>()
         verify { store.replaceDynamicTrust(capture(json)) }
         assertThat(json.captured).contains("https://pid-issuer.cz")
+        verify { liveness.recordSuccess() }
     }
 
     @Test
     fun `a list signed by the wrong key is rejected and the trust store is NOT updated`() {
-        val (svc, store) = service(signedList(signer = attacker.privateKey))
+        val (svc, store, liveness) = service(signedList(signer = attacker.privateKey))
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
+        verify(exactly = 0) { liveness.recordSuccess() }
     }
 
     @Test
     fun `an expired list is rejected`() {
-        val (svc, store) = service(signedList(exp = Instant.now(testClock).epochSecond - 7200))
+        val (svc, store, _) = service(signedList(exp = Instant.now(testClock).epochSecond - 7200))
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }
 
     @Test
     fun `a list with no exp is rejected (must be time-bounded)`() {
-        val (svc, store) = service(signedList(exp = null))
+        val (svc, store, _) = service(signedList(exp = null))
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }
 
     @Test
     fun `a list with no configured trust anchor is refused (fail-closed)`() {
-        val (svc, store) = service(signedList(), withAnchor = false)
+        val (svc, store, _) = service(signedList(), withAnchor = false)
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }
 
     @Test
     fun `no source configured is inert (static config only)`() {
-        val (svc, store) = service(inlineList = null)
+        val (svc, store, _) = service(inlineList = null)
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }

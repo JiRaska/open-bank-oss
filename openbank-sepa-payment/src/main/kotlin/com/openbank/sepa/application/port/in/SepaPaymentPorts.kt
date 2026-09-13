@@ -40,7 +40,22 @@ data class TransitionSepaPaymentStatusCommand(
     val rejectDetail: String? = null,
 )
 
-data class HandlePaymentReturnCommand(val pacs004Xml: String)
+/**
+ * An inbound pacs.004 return, together with the **server-derived** identity of the caller that
+ * presented it (issue #6056).
+ *
+ * [actorId], [actorType] and [correlationId] are resolved in the REST adapter from the
+ * `SecurityContext` and the request context that `CorrelationIdRequestFilter` populated — never
+ * from the request body. A repudiation control whose actor is supplied by the party whose action
+ * is in dispute records nothing (the shape #4754 found elsewhere in this fleet), so the pacs.004
+ * XML deliberately carries no actor field and none is read from it.
+ */
+data class HandlePaymentReturnCommand(
+    val pacs004Xml: String,
+    val actorId: String,
+    val actorType: String,
+    val correlationId: String?,
+)
 
 interface SepaPaymentUseCase {
     suspend fun createPayment(command: CreateSepaPaymentCommand): SepaPayment

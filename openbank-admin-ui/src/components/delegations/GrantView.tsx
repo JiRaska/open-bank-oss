@@ -43,6 +43,12 @@ export type Grant = {
   closedReason?: string | null
 }
 
+export function grantCounterparty(grant: Grant, direction: 'granted' | 'received') {
+  return direction === 'granted'
+    ? { id: grant.granteePartyId, name: counterpartyLabel(grant.granteeName) }
+    : { id: grant.grantorPartyId, name: counterpartyLabel(grant.grantorName) }
+}
+
 /**
  * OFFERED is the one delegation status the shared tone map cannot get right by default: it is
  * in-flight (awaiting the grantee's SCA-bound acceptance), not terminal, so it renders as a
@@ -80,7 +86,7 @@ export function counterpartyLabel(name: string | null | undefined): string | und
 }
 
 /** A ceiling of `null` means UNCAPPED for that window — never render it as zero. */
-export function formatCeiling(limit: Money | null | undefined): string {
+export function formatCeiling(limit: Money | null | undefined, locale = 'en-GB'): string {
   if (!limit || typeof limit.amount !== 'number') return '—'
-  return `${limit.amount.toLocaleString('cs-CZ')} ${limit.currency}`
+  return `${limit.amount.toLocaleString(locale)} ${limit.currency}`
 }

@@ -13,6 +13,8 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.CatalogLoanProfile
+import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -25,6 +27,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
@@ -62,6 +65,8 @@ import com.openbank.libs.lending.origination.OriginationTransitionResult
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -83,7 +88,7 @@ import java.util.UUID
 // three-line economic change in a file move. The same call CustomerEdgeResource made. Splitting the
 // servicing/provisioning loops out is a real follow-up, not a drive-by.
 @Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
-class LendingService(
+class LendingService @Inject constructor(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
     private val installments: InstallmentRepository,
@@ -98,6 +103,9 @@ class LendingService(
     private val originationConfig: OriginationConfig,
     private val workflowPort: com.openbank.lending.application.port.out.OriginationWorkflowPort,
     private val decisionEngine: OriginationDecisionService,
+    private val borrowerAccounts: com.openbank.lending.application.port.out.BorrowerAccountLookupPort,
+    private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
+    private val catalogLoanProfiles: CatalogLoanProfilePort = UnusedCatalogLoanProfilePort,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -107,6 +115,8 @@ class LendingService(
     CollateralUseCase,
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
+
+    private val log = Logger.getLogger(LendingService::class.java)
 
     private val machine = OriginationStateMachine()
 
@@ -132,7 +142,7 @@ class LendingService(
             is OriginationTransitionResult.Rejected ->
                 Uni.createFrom().failure(IllegalStateException(result.reason))
             is OriginationTransitionResult.Applied ->
-                claimTransition(existing.status, outcome.recorded.copy(status = result.newState))
+                claimDecision(existing.status, outcome.recorded.copy(status = result.newState))
                     .signalWorkflow()
                     .call { _ -> events.emit(outcome.evidence) }
         }
@@ -157,13 +167,11 @@ class LendingService(
      * resource already maps (422 on advance, 409 on decide). Nothing downstream of a refusal runs:
      * no evidence event, no workflow signal (issue #3850).
      *
-     * On success the claimed application is returned from memory. `update` returned the re-read
-     * entity, which differs in one respect worth naming: `update` writes only status and the three
-     * decision fields, so the ASSESSMENT leg's engine outputs (`decisionOutcome`, price band, reason
-     * codes, input hash) were never persisted and the re-read blanked them out of the response. That
-     * persistence gap is pre-existing and is NOT fixed here — it needs its own change and its own
-     * test. What changes is only that the response now carries the values the engine computed
-     * instead of nulls.
+     * On success the claimed application is returned from memory.
+     *
+     * This overload writes status and the three HUMAN decision fields only. The ASSESSMENT leg's
+     * engine outputs go through [claimDecision], which writes them in the same statement — see the
+     * note there for why they were previously computed and thrown away.
      */
     private fun claimTransition(from: OriginationState, updated: LoanApplication): Uni<LoanApplication> =
         applications.compareAndSetStatus(
@@ -185,8 +193,66 @@ class LendingService(
             }
         }
 
+    /**
+     * The ASSESSMENT claim: the transition AND the ADR-0213 evidence, in one conditional statement.
+     *
+     * Until this existed the engine's outputs were computed, returned in the response and emitted as
+     * a `credit.decision.evaluated` event — and never stored, because the claim wrote only status and
+     * the three human decision fields. So `decision_outcome` was NULL on every row the engine had
+     * decided, and anything reading the application back (the credit-risk console, a per-loan
+     * reconstruction) saw an application with no decision on it. The columns had been there since
+     * `V11__decision_engine_inputs.sql`. Measured by `CreditRiskConsoleIT`, which drives a real
+     * application through ASSESSMENT and then reads it back over HTTP: before this change the read
+     * returned an empty list.
+     *
+     * Writing them in the SAME statement as the transition is deliberate — two statements could leave
+     * a row in DECISION_PENDING with no decision behind it.
+     */
+    private fun claimDecision(from: OriginationState, updated: LoanApplication): Uni<LoanApplication> =
+        applications.compareAndSetDecision(updated, from).flatMap { claimed ->
+            if (claimed == 0) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Concurrent modification: application ${updated.id} is no longer in $from",
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(updated)
+            }
+        }
+
     private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
-        call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
+        call { app -> armTimers(app.id, app.status, reflectionDaysFor(app)) }
+
+    /**
+     * Reports a state entry to the durable-timer backend and **reads the answer** (#6085).
+     *
+     * The port used to return `Uni<Unit>` from both implementations, so the offline no-op's
+     * discard was indistinguishable from the Temporal adapter's success and no call site could
+     * have noticed. [TimerArmingOutcome] gives the two outcomes different values; this is the
+     * consumer that acts on the difference. A field nothing reads is a latent trap, not a control.
+     *
+     * It deliberately does not fail the chain: arming a timer accompanies the transition, it is
+     * not the transition, and refusing here would take the whole origination path down in an
+     * offline build (ADR-0028 D3). Making a *shipped* image reach this branch is what
+     * `LendingAdapterBindingVerifier` prevents, at boot, before any application exists.
+     */
+    private fun armTimers(
+        applicationId: LoanApplicationId,
+        state: OriginationState,
+        reflectionPeriodDays: Int?,
+    ): Uni<TimerArmingOutcome> =
+        workflowPort.stateEntered(applicationId, state, reflectionPeriodDays).invoke { outcome ->
+            if (outcome != TimerArmingOutcome.ARMED) {
+                log.warnf(
+                    "application %s entered %s with NO durable timer armed (%s): the document-SLA, " +
+                        "offer-expiry and reflection-period waits are unenforced for it.",
+                    applicationId.value,
+                    state,
+                    outcome,
+                )
+            }
+        }
 
     private fun Uni<LoanApplication>.emitEvidence(
         from: String,
@@ -217,6 +283,7 @@ class LendingService(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""fromState":"$from",""")
             append(""""toState":"${to.name}",""")
             append(""""actorId":"$actor",""")
@@ -236,7 +303,38 @@ class LendingService(
 
     // --- Origination --------------------------------------------------------------------------------
 
-    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
+        request.catalogOfferingId?.let { offeringId ->
+            catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
+                applyCatalogProfile(request, proposedBy, profile)
+            }
+        } ?: applyLegacy(request, proposedBy, null)
+
+    private fun applyCatalogProfile(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        profile: CatalogLoanProfile,
+    ): Uni<LoanApplication> {
+        require(request.requestedAmount.currency.code == profile.currency) {
+            "Requested currency does not match catalog"
+        }
+        require(request.termPeriods == profile.tenorMonths) { "Requested term does not match catalog" }
+        require(request.periodsPerYear == MONTHS_PER_YEAR) { "Catalog loans require monthly periods" }
+        require(request.method == profile.method) { "Requested amortization method does not match catalog" }
+        require(profile.minPrincipal == null || request.requestedAmount.amount >= profile.minPrincipal) {
+            "Requested amount is below the catalog minimum"
+        }
+        require(profile.maxPrincipal == null || request.requestedAmount.amount <= profile.maxPrincipal) {
+            "Requested amount exceeds the catalog maximum"
+        }
+        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+    }
+
+    private fun applyLegacy(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        catalogSnapshot: com.openbank.lending.domain.model.CatalogLoanSnapshot?,
+    ): Uni<LoanApplication> {
         complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
@@ -264,10 +362,11 @@ class LendingService(
             ageYears = request.ageYears,
             residency = request.residency,
             employmentTenureMonths = request.employmentTenureMonths,
+            catalogSnapshot = catalogSnapshot,
         )
         return applications.save(application).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
-            workflowPort.stateEntered(saved.id, state, reflectionDaysFor(saved))
+            armTimers(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
             if (originationConfig.autoApprove) straightThrough(saved) else saved
         }.call { saved ->
@@ -282,6 +381,11 @@ class LendingService(
                 ),
             )
         }
+    }
+
+    private data object UnusedCatalogLoanProfilePort : CatalogLoanProfilePort {
+        override fun resolvePublished(offeringId: UUID): Uni<CatalogLoanProfile> =
+            Uni.createFrom().failure(IllegalStateException("catalog loan profiles are not configured"))
     }
 
     /**
@@ -531,7 +635,20 @@ class LendingService(
                 }
             }
             .flatMap { saved ->
-                // Cash leaves the bank: post the disbursement to the ledger (we never mutate balances).
+                // Cash leaves the bank in two bookings, not one. The ledger journal below only ever
+                // touches internal GL accounts (Loans Receivable, Funding Clearing — see
+                // LendingJournalFactory's KDoc); it records that the bank now holds a loan asset, but
+                // it does not, and structurally cannot, move a customer's balance. Without the credit
+                // that follows it, the borrower is left owing a loan they were never paid — confirmed
+                // live: 44 active loans, 6.6M CZK principal, none of it ever reaching an account (#3931).
+                //
+                // The credit resolves the borrower's own CURRENT account and asks transaction-service
+                // to book it — the same two-step shape account-service already uses for the welcome
+                // bonus. It fails loud on either step: a lookup miss or a failed credit surfaces as a
+                // failed disbursement rather than a loan silently booked with nowhere for the money to
+                // go. (The origination state was already claimed DISBURSED above; making that claim and
+                // this credit atomic together is the pre-existing gap #3850 already tracks, not new
+                // scope here — a failure past this point needs the same operator attention #3850 does.)
                 ledger.post(
                     LedgerPosting(
                         "loan:${saved.id.value}:disbursement",
@@ -541,15 +658,46 @@ class LendingService(
                     ),
                 )
                     .flatMap {
+                        borrowerAccounts.findCurrentAccount(saved.partyId, saved.principal.currency.code)
+                    }
+                    .flatMap { accountId ->
+                        if (accountId == null) {
+                            Uni.createFrom().failure<Unit>(
+                                IllegalStateException(
+                                    "Loan ${saved.id.value}: party ${saved.partyId} has no active " +
+                                        "CURRENT account in ${saved.principal.currency.code} — " +
+                                        "disbursement booked to the ledger but the borrower was not paid",
+                                ),
+                            )
+                        } else {
+                            borrowerCredit.credit(
+                                "loan:${saved.id.value}:disbursement-credit",
+                                accountId,
+                                saved.principal,
+                            )
+                        }
+                    }
+                    .flatMap {
                         events.emit(
                             LendingOutboxMessage(
                                 aggregateId = saved.id.value,
                                 eventType = "loan.disbursed",
                                 // #3914: occurredAt is the loan's own `disbursedAt` — the instant the disbursement
                                 // happened on the aggregate — not the serialisation instant.
-                                payload = """{"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                // Issue #3994/#5256: sourceService is the strongest (EVENT-sourced) attribution
+                                // AuditConsumer.resolveSourceService reads. EventAttribution.TopicAttribution
+                                // already maps openbank.lending.events -> lending-service correctly (TOPIC-sourced),
+                                // and audit-service subscribes to this topic today (openbank-audit-service's
+                                // application.yaml consumed-topics list), so this is a live attribution upgrade.
+                                // Value matches the "lending" literal already used by the 3 previously-fixed
+                                // event types in this file/OriginationDecisionService/TerminationService — not
+                                // "lending-service" as the topic-fallback table would say (a pre-existing,
+                                // self-consistent naming choice this PR preserves rather than introduces).
+                                payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
+                                    """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
-                                    """"occurredAt":"${saved.disbursedAt.toInstant()}"}""",
+                                    """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
+                                    """"sourceService":"lending"}""",
                             ),
                         )
                     }
@@ -675,9 +823,12 @@ class LendingService(
                         eventType = "loan.interest_accrued",
                         // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
                         // markAccrued above — the recognition event itself, not the emit.
-                        payload = """{"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
+                        // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${installment.loanId.value}",""" +
+                            """"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
                             """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
-                            """"occurredAt":"${accruedAt.toInstant()}"}""",
+                            """"occurredAt":"${accruedAt.toInstant()}",""" +
+                            """"sourceService":"lending"}""",
                     ),
                 )
             }
@@ -722,11 +873,14 @@ class LendingService(
                                 // already used by TerminationService and OriginationDecisionService. Emitted
                                 // once into a local so payload and any future reuse cannot disagree.
                                 val writtenOffAt = clock.instant()
-                                val wPayload = """{"loanId":"${written.id.value}",""" +
+                                // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
+                                val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
+                                    """"loanId":"${written.id.value}",""" +
                                     """"partyId":"${written.partyId}",""" +
                                     """"writtenOff":"$outstanding",""" +
                                     """"writtenOffBy":"${request.writtenOffBy}",""" +
-                                    """"occurredAt":"$writtenOffAt"}"""
+                                    """"occurredAt":"$writtenOffAt",""" +
+                                    """"sourceService":"lending"}"""
                                 events.emit(
                                     LendingOutboxMessage(
                                         aggregateId = written.id.value,
@@ -975,12 +1129,15 @@ class LendingService(
                         eventType = "loan.rescheduled",
                         // #3914: no rescheduledAt column on Loan; clock at the completed reschedule, same
                         // house convention as write-off above.
-                        payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
+                        // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${updated.id.value}",""" +
+                            """"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
                             """"newPrincipal":"$newPrincipal",""" +
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
                             """"principalForgiveness":"${request.principalForgiveness}",""" +
-                            """"occurredAt":"${clock.instant()}"}""",
+                            """"occurredAt":"${clock.instant()}",""" +
+                            """"sourceService":"lending"}""",
                     ),
                 ).map { updated }
             }
@@ -994,22 +1151,41 @@ class LendingService(
         }
         require(registeredBy.isNotBlank()) { "Registrant identity is required" }
         val now = OffsetDateTime.now(clock)
-        return valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
-            collateral.save(
-                Collateral(
-                    loanId = loanId,
-                    type = request.type,
-                    description = request.description,
-                    marketValue = valued,
-                    haircut = request.haircut,
-                    valuedAt = now,
-                    // Four-eyes: registration alone does not make the collateral usable to reduce a
-                    // loan's LGD — see applyCollateral, which only sums APPROVED items.
-                    status = CollateralStatus.PENDING,
-                    registeredBy = registeredBy,
-                    createdAt = now,
-                ),
-            )
+        // Idempotent replay (ADR-0297, #8351): the natural key of a registration is the full
+        // caller-supplied tuple (loan, type, description, market value, haircut) while the
+        // original is still PENDING. A retried POST replays the ORIGINAL PENDING collateral
+        // instead of stacking a duplicate that a checker could approve twice — two approved
+        // identical items would double-count against the loan's LGD. Once the original is decided
+        // (APPROVED/REJECTED), an identical new registration is legitimate and persists. No DB
+        // backstop (see the ADR): a lost true-concurrency race stacks two PENDING rows, but each
+        // still needs its own checker decision, so nothing affects LGD silently.
+        return collateral.findByLoan(loanId).flatMap { existing ->
+            existing.firstOrNull {
+                it.status == CollateralStatus.PENDING &&
+                    it.type == request.type &&
+                    it.description == request.description &&
+                    it.marketValue.currency == request.marketValue.currency &&
+                    it.marketValue.amount.compareTo(request.marketValue.amount) == 0 &&
+                    it.haircut.compareTo(request.haircut) == 0
+            }?.let { twin ->
+                Uni.createFrom().item(twin)
+            } ?: valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
+                collateral.save(
+                    Collateral(
+                        loanId = loanId,
+                        type = request.type,
+                        description = request.description,
+                        marketValue = valued,
+                        haircut = request.haircut,
+                        valuedAt = now,
+                        // Four-eyes: registration alone does not make the collateral usable to reduce a
+                        // loan's LGD — see applyCollateral, which only sums APPROVED items.
+                        status = CollateralStatus.PENDING,
+                        registeredBy = registeredBy,
+                        createdAt = now,
+                    ),
+                )
+            }
         }
     }
 
@@ -1072,6 +1248,7 @@ class LendingService(
                         stage = ecl.stage,
                         horizon = ecl.horizon,
                         expectedCreditLoss = ecl.expectedCreditLoss,
+                        modelVersion = adjustedInputs.modelVersion,
                     )
                 }
             }
@@ -1168,6 +1345,7 @@ class LendingService(
                 stage = snapshot.stage,
                 expectedCreditLoss = snapshot.expectedCreditLoss,
                 createdAt = OffsetDateTime.now(clock),
+                modelVersion = snapshot.modelVersion,
             )
             // A genuine IFRS 9 stage transition (Stage 1/2/3) is a distinct signal from an ECL delta: ECL
             // can move within the same stage (PD/EAD drift), and — first cycle aside — a stage can change
@@ -1180,14 +1358,7 @@ class LendingService(
                     LendingOutboxMessage(
                         aggregateId = loan.id.value,
                         eventType = "loan.stage_changed",
-                        // partyId added for ADR-0220 D6's arrears exclusion (engagement-service's
-                        // LendingArrearsEventConsumer) — additive field, existing consumers
-                        // (anacredit-service's LoanStageEventConsumer) parse via readTree and
-                        // ignore unknown fields, so this cannot break them.
-                        payload = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
-                            """"previousStage":"${prior!!.stage}","newStage":"${snapshot.stage}",""" +
-                            """"daysPastDue":${snapshot.daysPastDue},"period":"$period",""" +
-                            """"asOf":"${snapshot.asOf}","occurredAt":"${record.createdAt.toInstant()}"}""",
+                        payload = stageChangedPayload(loan, prior!!, snapshot, period, record),
                     ),
                 )
             } else {
@@ -1213,10 +1384,7 @@ class LendingService(
                                 LendingOutboxMessage(
                                     aggregateId = loan.id.value,
                                     eventType = "loan.provisioned",
-                                    payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
-                                        """"stage":"${snapshot.stage}",""" +
-                                        """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
-                                        """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}"}""",
+                                    payload = provisionedPayload(loan, period, snapshot, delta, record),
                                 ),
                             )
                         }
@@ -1224,6 +1392,38 @@ class LendingService(
                 }
             }
         }
+
+    /**
+     * partyId added for ADR-0220 D6's arrears exclusion (engagement-service's
+     * LendingArrearsEventConsumer) — additive field, existing consumers (anacredit-service's
+     * LoanStageEventConsumer) parse via readTree and ignore unknown fields, so this cannot break
+     * them. `sourceService` (issue #3994/#5256): see the loan.disbursed sourceService comment above.
+     */
+    private fun stageChangedPayload(
+        loan: Loan,
+        prior: LoanProvisioningRecord,
+        snapshot: ProvisioningSnapshot,
+        period: String,
+        record: LoanProvisioningRecord,
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+        """"previousStage":"${prior.stage}","newStage":"${snapshot.stage}",""" +
+        """"daysPastDue":${snapshot.daysPastDue},"period":"$period","asOf":"${snapshot.asOf}",""" +
+        """"occurredAt":"${record.createdAt.toInstant()}","sourceService":"lending"}"""
+
+    /** `sourceService` (issue #3994/#5256): see the loan.disbursed sourceService comment above. */
+    private fun provisionedPayload(
+        loan: Loan,
+        period: String,
+        snapshot: ProvisioningSnapshot,
+        delta: Money,
+        record: LoanProvisioningRecord,
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}","period":"$period",""" +
+        """"stage":"${snapshot.stage}",""" +
+        """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
+        """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}",""" +
+        """"sourceService":"lending"}"""
 
     /** Outstanding principal = opening balance of the first unpaid installment, else fully repaid. */
     private fun outstandingBalance(loan: Loan, schedule: List<LoanInstallment>): Money {
@@ -1233,5 +1433,6 @@ class LendingService(
 
     private companion object {
         const val MAX_LIST_LIMIT = 100
+        const val MONTHS_PER_YEAR = 12
     }
 }

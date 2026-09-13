@@ -7,6 +7,7 @@ package com.openbank.productcatalog.infrastructure.insurance
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 class InsuranceTermLifeInteroperabilityAdapterTest {
@@ -15,7 +16,7 @@ class InsuranceTermLifeInteroperabilityAdapterTest {
     private val adapter = InsuranceTermLifeInteroperabilityAdapter()
 
     @Test
-    fun `projects every required version two reference-pack concern without changing exact money text`() {
+    fun `round trips every version two reference-pack concern without changing exact money text`() {
         val attributes = catalogJson.toObject(mapper.readTree(TERM_LIFE_ATTRIBUTES))
 
         val acord = adapter.toAcordProfile(attributes)
@@ -39,7 +40,31 @@ class InsuranceTermLifeInteroperabilityAdapterTest {
                 "limits",
                 "deductibles",
                 "underwritingQuestions",
+                "premium",
             )
+        assertThat(adapter.fromAcordProfile(acord)).isEqualTo(attributes)
+        assertThat(adapter.fromTmf620Profile(tmf)).isEqualTo(attributes)
+    }
+
+    @Test
+    fun `rejects external fields and duplicate TMF characteristics instead of silently dropping them`() {
+        val attributes = catalogJson.toObject(mapper.readTree(TERM_LIFE_ATTRIBUTES))
+        val acord = adapter.toAcordProfile(attributes).toMutableMap().apply { put("beneficiary", "unknown") }
+        val nestedAcord = adapter.toAcordProfile(attributes).toMutableMap().apply {
+            val coverage = (getValue("coverage") as Map<String, Any>).toMutableMap()
+            put("coverage", coverage.apply { put("beneficiary", "unknown") })
+        }
+        val tmf = adapter.toTmf620Profile(attributes).toMutableMap().apply {
+            val characteristics = (getValue("productSpecCharacteristic") as List<Map<String, Any>>).toMutableList()
+            put("productSpecCharacteristic", characteristics + characteristics.first())
+        }
+
+        assertThatThrownBy { adapter.fromAcordProfile(acord) }
+            .hasMessageContaining("unsupported field")
+        assertThatThrownBy { adapter.fromAcordProfile(nestedAcord) }
+            .hasMessageContaining("unsupported field")
+        assertThatThrownBy { adapter.fromTmf620Profile(tmf) }
+            .hasMessageContaining("duplicated")
     }
 
     private companion object {

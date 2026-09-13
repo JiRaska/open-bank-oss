@@ -54,6 +54,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
@@ -116,10 +118,16 @@ def migration_rule(service: str, rel: object, quarkus: dict, has_migrations: boo
     ]
 
 
-def findings() -> tuple[list[str], int]:
+def findings() -> tuple[list[str], int, int]:
+    """(messages, migrate-at-start services, application.yaml parsed).
+
+    The third value is the corpus. `checked` is the migrate-at-start SUBSET and a scope
+    collapse takes both, so only the parsed count can tell 'no service misconfigures Flyway'
+    from 'no service was read'."""
     messages: list[str] = []
     checked = 0
-    for path, doc in configs():
+    parsed = configs()
+    for path, doc in parsed:
         quarkus = doc.get("quarkus") or {}
         flyway = quarkus.get("flyway") or {}
         rel = path.relative_to(REPO)
@@ -155,7 +163,7 @@ def findings() -> tuple[list[str], int]:
                 f"and is not (#3080). Configure quarkus.datasource.jdbc.url instead, or set "
                 f"quarkus.flyway.datasource to a datasource NAME.",
             )
-    return messages, checked
+    return messages, checked, len(parsed)
 
 
 def selftest() -> int:
@@ -225,7 +233,8 @@ def main() -> int:
     if args.selftest:
         return selftest()
 
-    messages, checked = findings()
+    messages, checked, parsed = findings()
+    gatelib.subjects(parsed, "service application.yaml parsed")
     for line in messages:
         print(line if args.enforce else line.replace("::error", "::warning", 1))
     verdict = "clean." if not messages else f"{len(messages)} finding(s) above."

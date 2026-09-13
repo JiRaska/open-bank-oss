@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.2...sepa-payment-v0.13.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sepa-payment:** guard sepa_payment_outbox created_at plausibility at INSERT ([#9292](https://github.com/JiRaska/open-bank-oss/issues/9292)) ([be2c03d](https://github.com/JiRaska/open-bank-oss/commit/be2c03d10f87cf6c44ae4f3c9b158ab52b209096))
+* **sepa-payment:** publish the real SepaPaymentStatus vocabulary ([#9670](https://github.com/JiRaska/open-bank-oss/issues/9670)) ([5a47064](https://github.com/JiRaska/open-bank-oss/commit/5a4706490198461fb8b3f6ee907d6b3d85cadd29))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.1...sepa-payment-v0.13.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **sepa-payment:** add sourceService to the Temporal-path event payloads ([#5888](https://github.com/JiRaska/open-bank-oss/issues/5888)) ([b81eb66](https://github.com/JiRaska/open-bank-oss/commit/b81eb66bc0e9b5697ad32601171e56101e3c11c8)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.0...sepa-payment-v0.13.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sepa-payment:** resolve AML case party_id via account-service ([#8505](https://github.com/JiRaska/open-bank-oss/issues/8505)) ([#8631](https://github.com/JiRaska/open-bank-oss/issues/8631)) ([2ea7bcc](https://github.com/JiRaska/open-bank-oss/commit/2ea7bcc98365ea005ab3ed77be7994cac75024c2))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.12.0...sepa-payment-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.1...sepa-payment-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.0...sepa-payment-v0.11.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **sepa-payment:** record who processed a pacs.004 return, durably ([#6072](https://github.com/JiRaska/open-bank-oss/issues/6072)) ([f953707](https://github.com/JiRaska/open-bank-oss/commit/f9537074d808c833dc7222e10678f31d3122c516)), closes [#6056](https://github.com/JiRaska/open-bank-oss/issues/6056)
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.1...sepa-payment-v0.11.0) (2026-08-20)
+
+
+### Features
+
+* **sepa-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5691](https://github.com/JiRaska/open-bank-oss/issues/5691)) ([dc737f5](https://github.com/JiRaska/open-bank-oss/commit/dc737f572a2dc368231d255ec4741137e6cd5531))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.0...sepa-payment-v0.10.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-payment:** add sourceService to outbox events for audit attribution ([#5388](https://github.com/JiRaska/open-bank-oss/issues/5388)) ([de59515](https://github.com/JiRaska/open-bank-oss/commit/de59515cfe02746b9af2de75472b7826feb5cae9)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.4...sepa-payment-v0.10.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.3...sepa-payment-v0.9.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.2...sepa-payment-v0.9.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **sepa-payment,domestic-payment:** emit sanctions screening/hit metrics ([#5079](https://github.com/JiRaska/open-bank-oss/issues/5079)) ([ef730ff](https://github.com/JiRaska/open-bank-oss/commit/ef730ffffebad6165a29e8715b993b1a273060fc)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.1...sepa-payment-v0.9.2) (2026-08-10)
 
 

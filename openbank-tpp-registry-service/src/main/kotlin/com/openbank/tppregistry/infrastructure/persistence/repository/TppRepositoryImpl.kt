@@ -4,8 +4,15 @@
 
 package com.openbank.tppregistry.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.tpp.application.port.out.TppOutboxRepository
 import com.openbank.tppregistry.application.port.out.TppRepository
-import com.openbank.tppregistry.domain.model.*
+import com.openbank.tppregistry.domain.model.EbaRegisterSyncState
+import com.openbank.tppregistry.domain.model.TppEntry
+import com.openbank.tppregistry.domain.model.TppEvent
+import com.openbank.tppregistry.domain.model.TppRole
+import com.openbank.tppregistry.domain.model.TppStatus
 import com.openbank.tppregistry.infrastructure.persistence.entity.EbaSyncStateEntity
 import com.openbank.tppregistry.infrastructure.persistence.entity.TppEntryEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -20,18 +27,29 @@ class TppEntryPanacheRepo : PanacheRepository<TppEntryEntity>
 class EbaSyncStatePanacheRepo : PanacheRepository<EbaSyncStateEntity>
 
 @ApplicationScoped
-class TppRepositoryImpl(private val tppRepo: TppEntryPanacheRepo, private val syncRepo: EbaSyncStatePanacheRepo) :
-    TppRepository {
+class TppRepositoryImpl(
+    private val tppRepo: TppEntryPanacheRepo,
+    private val syncRepo: EbaSyncStatePanacheRepo,
+    private val outboxRepository: TppOutboxRepository,
+    private val objectMapper: ObjectMapper,
+) : TppRepository {
 
     override suspend fun findByTppId(tppId: String): TppEntry? =
         Panache.withSession { tppRepo.find("tppId", tppId).firstResult() }.awaitSuspending()?.toDomain()
 
-    override suspend fun save(entry: TppEntry): TppEntry = Panache.withTransaction {
+    // Aggregate row + outbox row in ONE transaction (issue #4007): the bare persist() inside
+    // persistInTransaction joins this session, so the registry entry and its event commit together
+    // or not at all. persist() and not merge() because TppEntryEntity extends PanacheEntity — the
+    // @Id is generated, so this is a genuine INSERT and the app-assigned-id trap that forces
+    // merge() elsewhere in the fleet does not apply. `tpp_id` is the business key, not the @Id.
+    override suspend fun save(entry: TppEntry, event: TppEvent): TppEntry = Panache.withTransaction {
         val entity = entry.toEntity()
-        tppRepo.persist(entity).replaceWith(entity.toDomain())
+        tppRepo.persist(entity)
+            .flatMap { outboxRepository.persistInTransaction(event.toOutboxMessage()) }
+            .replaceWith(entity.toDomain())
     }.awaitSuspending()
 
-    override suspend fun update(entry: TppEntry): TppEntry = Panache.withTransaction {
+    override suspend fun update(entry: TppEntry, event: TppEvent): TppEntry = Panache.withTransaction {
         tppRepo.find("tppId", entry.tppId).firstResult()
             .invoke { entity ->
                 if (entity != null) {
@@ -46,11 +64,23 @@ class TppRepositoryImpl(private val tppRepo: TppEntryPanacheRepo, private val sy
                     entity.qsealExpiresAt = entry.qsealExpiresAt
                 }
             }
-            .map { entity ->
-                entity?.toDomain()
-                    ?: throw IllegalStateException("TPP ${entry.tppId} not found for update")
+            .flatMap { entity ->
+                if (entity == null) {
+                    throw IllegalStateException("TPP ${entry.tppId} not found for update")
+                }
+                outboxRepository.persistInTransaction(event.toOutboxMessage()).replaceWith(entity.toDomain())
             }
     }.awaitSuspending()
+
+    // The outbox payload is the event's own flat envelope verbatim — the dispatcher relays these
+    // bytes to `openbank.tpp.registry.event` unchanged, plus the additive OutboxKafkaHeaders and a
+    // partition key.
+    private fun TppEvent.toOutboxMessage() = OutboxMessage(
+        aggregateId = aggregateId,
+        eventType = eventType,
+        payload = objectMapper.writeValueAsString(envelope),
+        createdAt = occurredAt,
+    )
 
     override suspend fun list(
         countryCode: String?,

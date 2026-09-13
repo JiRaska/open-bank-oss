@@ -74,8 +74,12 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     override suspend fun complete(model: ModelDescriptor, request: ModelRequest): ModelResponse {
         val base = (model.endpoint ?: error("model '${model.id}' has no endpoint (base URL) configured"))
             .trimEnd('/')
+        // Which egress backend this attempt was addressed to (#5736). Derived from the endpoint the
+        // model descriptor carries, so it follows a repoint (direct provider -> LiteLLM gateway)
+        // without a second config knob to keep in step.
+        val provider = LlmCallMetricsPort.providerOf(base)
         if (apiKey.isBlank()) {
-            metrics.recordCall(model.id, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
+            metrics.recordCall(model.id, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0, provider)
         }
         require(apiKey.isNotBlank()) {
             "agent.model.openai.api-key is empty — set the backend API key (e.g. GROQ_API_KEY) to use model '${model.id}'"
@@ -102,6 +106,7 @@ class OpenAiCompatibleModelProvider : ModelProvider {
                 0,
                 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             throw ex
         }
@@ -114,6 +119,7 @@ class OpenAiCompatibleModelProvider : ModelProvider {
                 0,
                 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             error("model backend HTTP ${resp.statusCode()} for '${model.id}'")
         }
@@ -124,6 +130,7 @@ class OpenAiCompatibleModelProvider : ModelProvider {
             parsed.usage.inputTokens,
             parsed.usage.outputTokens,
             System.nanoTime() - startedAt,
+            provider,
         )
         return parsed
     }

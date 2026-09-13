@@ -35,6 +35,25 @@
 # helping, is worse than no message: it is the reason four deploy-drift issues sat open
 # while money-path services fell five patch releases behind.
 #
+# WHY "ZERO PACTS" IS NOT BY ITSELF THE #3223 SHAPE (#6568)
+# `pb:pact-versions` counts the pacts a version published AS A CONSUMER. A version that is
+# only ever a PROVIDER in the pairs that block — openbank-product-catalog and
+# openbank-document-service are exactly that — legitimately publishes zero of them, and
+# reporting `contentless` for it is a false positive with an actively wrong remedy: the
+# message told operators to redeploy or co-deploy a counterpart that was already perfectly
+# healthy. Measured on run 32599859753: openbank-product-catalog@af04613a was called
+# "ZERO pacts ... no verification run targets it" for six services, while in the SAME log
+# openbank-card-issuance-service passed against `openbank-product-catalog | af04613... |
+# true` (verification-results/42274). A version that has verified somebody is not a version
+# nothing can verify. Six services (four money-path) sat blocked behind that sentence for
+# 40 hours.
+#
+# So the probe now asks a SECOND question of a zero-pact version: does the broker matrix
+# hold any verification result published at it? If yes it is a live provider version
+# (`provider-live`) whose real remedy is to publish the missing verification at that exact
+# sha — `verify-provider.yml` takes `ref` for precisely this ("a counterpart's deployed
+# sha"). If no, it is the #3223 bookkeeping version and nothing changes.
+#
 # WHAT THIS DOES
 # Reads a can-i-deploy CLI output on stdin, extracts every (counterpart, version) pair the
 # verdict names as currently deployed, and asks the broker one question per pair: does that
@@ -51,6 +70,11 @@
 # Prints ONE tab-separated line: <state>\t<detail>
 #   contentless  at least one named counterpart version carries no pacts at all. Durable:
 #                no reconcile tick can clear it. <detail> lists them as <svc>@<sha8>.
+#   provider-live
+#                at least one named counterpart version publishes NO pacts but DOES carry
+#                verification results — i.e. it is a live PROVIDER version, not a bookkeeping
+#                one. Durable in a different way, with a different remedy (#6568). <detail>
+#                lists them as <svc>@<sha8>.
 #   has-pacts    every named counterpart version has pacts, so the missing piece really is
 #                a verification result and waiting may genuinely help.
 #   none         the output names no counterpart version — nothing to say about it.
@@ -91,14 +115,30 @@ probe_one() { # <service> <sha> -> prints: contentless | has-pacts | unknown
   # probe failure, not an answer.
   n="$(printf '%s' "$body" | jq -r '(._links["pb:pact-versions"] // []) | length' 2>/dev/null)" || { echo unknown; return; }
   case "$n" in
+    ''|*[!0-9]*) echo unknown; return ;;
+    0)           : ;;
+    *)           echo has-pacts; return ;;
+  esac
+  # Zero pacts is ambiguous (#6568): a bookkeeping version and a provider-only version look
+  # identical here. Ask the matrix whether ANY verification result was published at this
+  # version. -g (--globoff) is required: the `q[][pacticipant]` parameter contains brackets,
+  # which curl would otherwise read as a URL glob and refuse.
+  local mbody mcount
+  mbody="$(curl -sfg --max-time 20 -u "$auth" \
+    "${PACT_BROKER_URL:-}/matrix?q[][pacticipant]=${svc}&q[][version]=${sha}&latestby=cvpv" 2>/dev/null)" \
+    || { echo unknown; return; }
+  mcount="$(printf '%s' "$mbody" \
+    | jq -r '[(.matrix // [])[] | select(.verificationResult != null)] | length' 2>/dev/null)" \
+    || { echo unknown; return; }
+  case "$mcount" in
     ''|*[!0-9]*) echo unknown ;;
     0)           echo contentless ;;
-    *)           echo has-pacts ;;
+    *)           echo provider-live ;;
   esac
 }
 
 run() {
-  local out pairs seen_any=0 saw_unknown=0 contentless=()
+  local out pairs seen_any=0 saw_unknown=0 contentless=() provider_live=()
   out="$(cat)"
   # sed -E over grep -oE: we need two capture groups per match, and BSD grep has no -P.
   pairs="$(printf '%s\n' "$out" \
@@ -111,12 +151,21 @@ run() {
     [ -n "${cp:-}" ] || continue
     seen_any=1
     case "$(probe_one "$cp" "$sha")" in
-      contentless) contentless+=("${cp}@${sha:0:8}") ;;
-      unknown)     saw_unknown=1 ;;
+      contentless)   contentless+=("${cp}@${sha:0:8}") ;;
+      provider-live) provider_live+=("${cp}@${sha}") ;;
+      unknown)       saw_unknown=1 ;;
     esac
   done <<< "$pairs"
   if [ "${#contentless[@]}" -gt 0 ]; then
     printf 'contentless\t%s\n' "$(IFS=,; echo "${contentless[*]}")"
+    return
+  fi
+  # provider-live outranks `unknown` and `has-pacts`: it is a definite fact about a definite
+  # counterpart, and its message carries no self-clearing promise, so naming it cannot restore
+  # the false reassurance this script exists to remove. It stays BELOW contentless, which is
+  # the strictly worse state.
+  if [ "${#provider_live[@]}" -gt 0 ]; then
+    printf 'provider-live\t%s\n' "$(IFS=,; echo "${provider_live[*]}")"
     return
   fi
   if [ "$saw_unknown" -eq 1 ] || [ "$seen_any" -eq 0 ]; then
@@ -135,7 +184,17 @@ if [ "${1:-}" = "--self-test" ] || [ "${1:-}" = "--selftest" ]; then
 #!/usr/bin/env bash
 url="${@: -1}"
 case "$url" in
-  *openbank-empty-service/versions/*)  echo '{"_links":{"pb:pact-versions":[]}}' ;;
+  # The matrix probe (#6568) — must be matched BEFORE the version endpoints, since both
+  # carry the service name. `openbank-empty-service` is the #3223 bookkeeping version: no
+  # pacts AND no verification results. `openbank-provider-service` is the shape #6568 was
+  # about: no pacts, but verification results published at that exact version.
+  *matrix*openbank-provider-service*) echo '{"matrix":[{"verificationResult":{"success":true}}]}' ;;
+  *matrix*openbank-empty-service*)    echo '{"matrix":[{"verificationResult":null}]}' ;;
+  *matrix*openbank-matrixless-service*) exit 7 ;;
+  *matrix*)                           echo '{"matrix":[]}' ;;
+  *openbank-empty-service/versions/*)    echo '{"_links":{"pb:pact-versions":[]}}' ;;
+  *openbank-provider-service/versions/*) echo '{"_links":{"pb:pact-versions":[]}}' ;;
+  *openbank-matrixless-service/versions/*) echo '{"_links":{"pb:pact-versions":[]}}' ;;
   *openbank-full-service/versions/*)   echo '{"_links":{"pb:pact-versions":[{"name":"a"}]}}' ;;
   *openbank-broken-service/versions/*) echo 'not json at all' ;;
   *)                                   exit 7 ;;
@@ -164,6 +223,28 @@ STUB
   case_is "mixed contentless + healthy"    contentless "$(line_for openbank-full-service "$S40_A"; line_for openbank-empty-service "$S40_A")"
   case_is "mixed contentless + unknown"    contentless "$(line_for openbank-missing-service "$S40_A"; line_for openbank-empty-service "$S40_A")"
   case_is "healthy + unknown is unknown"   unknown     "$(line_for openbank-full-service "$S40_A"; line_for openbank-missing-service "$S40_A")"
+  # ── #6568 ────────────────────────────────────────────────────────────────────────────
+  # THE NEGATIVE CONTROL FOR THIS CHANGE. A version with no pacts and no verification
+  # results must STILL be `contentless` — the fix must not make #3223 unreportable. That is
+  # the "counterpart with 0 pacts" case above, which now reaches its verdict through the
+  # matrix probe; it is asserted again here next to its twin so the pair reads as one test.
+  case_is "0 pacts + 0 verifications"      contentless   "$(line_for openbank-empty-service "$S40_A")"
+  # ... and a version with no pacts but verification results published AT IT is a live
+  # provider version, not a bookkeeping one. This is the case that mislabelled six services.
+  case_is "0 pacts + verifications"        provider-live "$(line_for openbank-provider-service "$S40_A")"
+  # contentless still DOMINATES provider-live: one genuinely unverifiable counterpart makes
+  # the block durable regardless of a healthy sibling.
+  case_is "contentless beats provider-live" contentless  "$(line_for openbank-provider-service "$S40_A"; line_for openbank-empty-service "$S40_A")"
+  # A matrix probe that fails is a probe failure, not a verdict — it must not degrade to
+  # either `contentless` or `provider-live`.
+  case_is "matrix probe fails is unknown"  unknown       "$(line_for openbank-matrixless-service "$S40_A")"
+  # provider-live outranks a failed probe elsewhere, but carries no self-clearing promise.
+  case_is "provider-live beats unknown"    provider-live "$(line_for openbank-missing-service "$S40_A"; line_for openbank-provider-service "$S40_A")"
+  # The detail must carry the FULL 40-hex sha: the remedy is a verify-provider dispatch at
+  # that exact ref, and a truncated sha is not something an operator can paste.
+  pdetail="$(PATH="$self_tmp:$PATH" bash "$me_abs" <<< "$(line_for openbank-provider-service "$S40_A")" | cut -f2)"
+  if [ "$pdetail" = "openbank-provider-service@${S40_A}" ]; then echo "  ok   provider-live detail carries the full sha"
+  else echo "  FAIL provider-live detail carries the full sha: got '${pdetail}'"; fails=$((fails + 1)); fi
   # A short sha, or a phrasing without one, must not be read as a version to probe.
   case_is "short sha is not a version"     none        "and the version of openbank-empty-service currently in sandbox (a5e5d32a)"
   # The detail field must NAME the unverifiable versions — the whole point is that an

@@ -48,6 +48,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
+    testImplementation(project(":openbank-libs-testing"))
     // @TestSecurity for the boot smoke-test's DB-touch assertion (calls /resolve with a role).
     testImplementation(libs.quarkus.test.security)
     // PidApiContractTest compares the served API against the committed openapi.yaml, which it PARSES
@@ -67,20 +69,10 @@ dependencies {
 // PidPactBrokerProviderVerificationTest stays @EnabledIfSystemProperty-skipped even on main-push,
 // and pid-service publishes no verification result — the exact `can-i-deploy` block that class
 // exists to prevent. NOTE: must be set on the test JVM fork, not the Gradle daemon.
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 kover {
     reports {

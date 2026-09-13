@@ -4,6 +4,7 @@
 
 package com.openbank.finrep.application.port.out
 
+import com.openbank.finrep.domain.model.BalanceVerdict
 import java.time.Duration
 
 /**
@@ -47,6 +48,12 @@ interface FinrepMetricsPort {
 /**
  * One rendered template's shape. `balanced` is null for frameworks that define no balance identity
  * (COREP), which the adapter renders as a distinct tag value rather than pretending it balanced.
+ *
+ * [balanceVerdict] carries WHY `balanced` has the value it has (issue #6011): the two sources
+ * agreeing, the two sources disagreeing, or the producer publishing no verdict at all. It is a
+ * separate field rather than more values on `balanced` because `balanced` is what a submission
+ * gate reads and the verdict is what an operator has to act on, and those are different questions.
+ * Null for COREP, exactly like `balanced`.
  */
 data class TemplateRender(
     val framework: RegulatoryFramework,
@@ -55,6 +62,7 @@ data class TemplateRender(
     val cells: Int,
     val dataGapCells: Int,
     val balanced: Boolean?,
+    val balanceVerdict: BalanceVerdict?,
     val duration: Duration,
 )
 

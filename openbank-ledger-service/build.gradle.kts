@@ -98,29 +98,21 @@ kover {
 // Pact: provider verification reads pact files from the shared pacts/ dir (git-pact, ADR-0063).
 System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 
-// Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the
-// (forked) test JVM. When `pactbroker.url` is unset (local `./gradlew build`) the @PactBroker
-// provider test is @EnabledIfSystemProperty-skipped and git-pact above stays the fallback;
-// publishResults + provider.version/branch tag the verification result for can-i-deploy.
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
+
 tasks.withType<Test> {
-    // Forwarded into the FORKED test JVM, which the config-time System.setProperty above does not
-    // reach — that one only ever set it on the Gradle daemon. Without it a consumer pact is written
-    // to `build/pacts` instead of the shared `pacts/` dir, where nothing commits it and
-    // `derive-pact-drift-scope.sh` reports it as an uncommitted pact (#3921). The provider
-    // verification is unaffected either way: it resolves `@PactFolder("../pacts")` relative to the
-    // module, not through this property.
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // Same class of OOM as account-service's override above it in git history (issue #4414):
+    // Gradle's default test-JVM heap is 512m, unchanged fleet-wide. ledger-service carries 14
+    // @QuarkusTest classes plus a Kotest property test (LedgerServiceIdempotencyPropertyTest)
+    // that allocates many double-entry journal fixtures per run. CI repeatedly died with
+    // `java.lang.OutOfMemoryError` inside the test JVM — repeatable on rerun, not a one-off
+    // shared-runner spike. Per-module rather than a fleet default, same reasoning as
+    // account-service/lending-service/product-catalog: nothing measures test heap anywhere, so
+    // bump the module that is actually short rather than every module that might be.
+    maxHeapSize = "2g"
 }
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via

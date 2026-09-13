@@ -35,7 +35,16 @@ data class SubLedgerBalance(
     val net: BigDecimal get() = totalCredit.subtract(totalDebit)
 }
 
-data class TrialBalance(val asOf: LocalDate, val lines: List<TrialBalanceLine>) {
+/**
+ * [scope] is carried on the result, not merely applied to it: a trial balance that does not say
+ * which population it counted is indistinguishable from one that counted the wrong population, and
+ * this one excludes synthetic activity by default (ADR-0252, [LedgerScope]).
+ */
+data class TrialBalance(
+    val asOf: LocalDate,
+    val lines: List<TrialBalanceLine>,
+    val scope: LedgerScope = LedgerScope.REAL_ONLY,
+) {
     val totalDebit: BigDecimal get() = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.totalDebit) }
     val totalCredit: BigDecimal get() = lines.fold(BigDecimal.ZERO) { acc, l -> acc.add(l.totalCredit) }
 

@@ -165,10 +165,18 @@ def attest_fresh(att: dict, svc: str, key: str, today: str) -> bool:
         ttl = int(rec.get("ttl_days", "365"))
     except ValueError:
         ttl = 365
-    # crude date diff (YYYY-MM-DD) — good enough for decay flag
-    d = [int(x) for x in rec["date"].split("-")]
-    t = [int(x) for x in today.split("-")]
-    days = (t[0] - d[0]) * 365 + (t[1] - d[1]) * 30 + (t[2] - d[2])
+    # Exact calendar arithmetic. The previous form approximated a year as 365 days and a month
+    # as 30, which let a TTL run PAST its own expiry — the one thing this mechanism exists to
+    # prevent. consent's 21-day pentest, dated 2026-07-28, is 22 real days old on 2026-08-19 and
+    # the approximation scored it (19-28)+... = 21 days, i.e. still fresh, so consent read
+    # C7=Bank-grade off an expired attestation. The Node collector already used exact dates
+    # (#2365); this is the same correction on the copy that had not received it.
+    try:
+        d = date.fromisoformat(rec["date"])
+        t = date.fromisoformat(today)
+    except ValueError:
+        return False
+    days = (t - d).days
     return 0 <= days <= ttl
 
 
@@ -315,11 +323,32 @@ def score_c4_data(short: str, att, today) -> tuple[int, str]:
     return s, f"{len(migs)} migrations, rollback_note={'y' if rollback else 'n'}"
 
 
+def is_undeployed(short: str) -> bool:
+    """True when the service has NO workload in gitops at all — not a Deployment, not a Rollout.
+
+    Distinct from "deployed but unscraped" and from "stateless". A released component with no
+    workload cannot own a CNPG cluster, a PodMonitor namespace or a NetworkPolicy, so the cells
+    that read those all report absences the service could not have avoided while it stays
+    undeployed. openbank-tax-reporting-service is the one such service today and it is
+    deliberate — `openbank-infra/aws/envs/sandbox-platform/ecr-service-repositories.tf` names it
+    as "a released component with no gitops workload, no auto-deploy entry and — correctly — no
+    repository" (#5760). Naming that state is the honest representation; it is NOT a pass, see
+    [ServiceReadiness.compute_gate].
+    """
+    return service_namespace(short, GITOPS) is None
+
+
 def score_c5_backup(short: str, att, today) -> tuple[int, str]:
     if is_stateless(declared_datastore(short, REPO)):
         # No datastore, nothing to back up. finrep scored 0 ("no CNPG cluster") for the absence
         # of a cluster it must not have — an unachievable 0 that read like a missing backup.
         return 2, "n/a — declares no datastore (stateless), nothing to back up"
+    if is_undeployed(short):
+        # Still 0 — a stateful service with no backup is not ready, and an undeployed one is not
+        # ready either. Only the EVIDENCE changes: "no CNPG cluster" reads as a backup someone
+        # forgot to configure and sends the reader to the gitops backup docs, when the cluster is
+        # absent because the entire workload is (#5760). The gate says which of the two it is.
+        return 0, "no CNPG cluster — service has no gitops workload at all"
     clusters = gitops_files_for(short, "Cluster")
     cnpg = [f for f in clusters if "postgres" in f.name or "cnpg" in read(f).lower()]
     if not cnpg:
@@ -461,7 +490,23 @@ class ServiceReadiness:
             need = 3 if (self.money_path and code in critical) else 2
             if s < need:
                 ok = False
-        self.gate = "GO" if ok else "NO-GO"
+        # A released component with no workload anywhere in gitops gets its own verdict. It is
+        # NOT a pass and can never become one from here: NOT-DEPLOYED is only ever reached in
+        # place of NO-GO — a service that clears every dimension while undeployed is impossible
+        # (C8 scores at most 1 without a namespace), and the `ok` branch is checked first anyway,
+        # so no score this state can produce is treated more leniently than before.
+        #
+        # What it buys: "not production-ready" and "not in production" are different facts and
+        # used to render identically. tax-reporting sat in the NO-GO column next to 25 services
+        # that ARE deployed and failing a control, so its actual blocker — an undecided
+        # deployment (#5760, #5706) — was invisible in every headline the matrix produced, and
+        # three of its cells read as missing controls rather than as consequences.
+        if ok:
+            self.gate = "GO"
+        elif is_undeployed(self.service):
+            self.gate = "NOT-DEPLOYED"
+        else:
+            self.gate = "NO-GO"
 
 
 def collect(short: str, att, today: str) -> ServiceReadiness:

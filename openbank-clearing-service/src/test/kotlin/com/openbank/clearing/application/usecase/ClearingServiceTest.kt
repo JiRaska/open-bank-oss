@@ -13,6 +13,7 @@ import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -58,6 +59,7 @@ class ClearingServiceTest {
         val savedItem = request.toExpectedItem()
         val itemSlot: CapturingSlot<ClearingItem> = slot()
 
+        every { itemRepo.findByPaymentId(request.paymentId) } returns Uni.createFrom().item(emptyList())
         every { itemRepo.save(capture(itemSlot)) } returns Uni.createFrom().item(savedItem)
 
         val result = service.submit(request).await().indefinitely()
@@ -70,6 +72,57 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.amount).isEqualByComparingTo(request.amount)
         assertThat(itemSlot.captured.currency).isEqualTo(request.currency)
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
+        verify(exactly = 1) { itemRepo.save(any()) }
+    }
+
+    @Test
+    fun `a retried submit for the same payment replays the existing clearing item`() {
+        // ADR-0298 (#8351): a payment enters clearing exactly once — a retry must not stack a
+        // second PENDING row that the clearing cycle would sweep into a batch and settle twice.
+        val request = SubmitPaymentRequest(
+            paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            paymentReference = "PAY-001",
+            debtorIban = "DE89370400440532013000",
+            creditorIban = "DE12500105170648489890",
+            amount = BigDecimal("125.50"),
+        )
+        val existing = request.toExpectedItem()
+
+        every { itemRepo.findByPaymentId(request.paymentId) } returns Uni.createFrom().item(listOf(existing))
+
+        val result = service.submit(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(existing)
+        verify(exactly = 0) { itemRepo.save(any()) }
+    }
+
+    @Test
+    fun `a submit that loses the unique-index race re-reads the winner`() {
+        // ADR-0298 (#8351): uq_clearing_items_payment (V9) fires on a true-concurrency race; the
+        // loser replays the winner instead of erroring the caller.
+        val request = SubmitPaymentRequest(
+            paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            paymentReference = "PAY-001",
+            debtorIban = "DE89370400440532013000",
+            creditorIban = "DE12500105170648489890",
+            amount = BigDecimal("125.50"),
+        )
+        val winner = request.toExpectedItem()
+        val violation = java.sql.SQLException(
+            "duplicate key value violates unique constraint \"uq_clearing_items_payment\" (23505)",
+            "23505",
+        )
+
+        every { itemRepo.findByPaymentId(request.paymentId) } returnsMany
+            listOf(
+                Uni.createFrom().item(emptyList()),
+                Uni.createFrom().item(listOf(winner)),
+            )
+        every { itemRepo.save(any()) } returns Uni.createFrom().failure(violation)
+
+        val result = service.submit(request).await().indefinitely()
+
+        assertThat(result).isEqualTo(winner)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
 
@@ -90,26 +143,33 @@ class ClearingServiceTest {
             clearingItem(batchId = batchId, status = ClearingStatus.IN_CLEARING),
         )
         val updatedSlot: CapturingSlot<ClearingBatch> = slot()
+        val itemsSlot: CapturingSlot<List<ClearingItem>> = slot()
         val savedBatch = batch.copy(
             status = ClearingStatus.SETTLED,
             settledAt = OffsetDateTime.parse("2026-01-20T10:15:30Z"),
             updatedAt = OffsetDateTime.parse("2026-01-20T10:15:31Z"),
         )
 
-        val settledItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
         every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
-        every { batchRepo.update(capture(updatedSlot)) } returns Uni.createFrom().item(savedBatch)
         every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
-        every { itemRepo.saveAll(any()) } returns Uni.createFrom().item(settledItems)
-        every { eventPublisher.publishBatchSettled(savedBatch) } returns Uni.createFrom().voidItem()
+        every { eventPublisher.batchSettledMessage(any()) } returns mockk()
+        every { eventPublisher.netSettlementPostMessage(any()) } returns mockk()
+        val eventsSlot: CapturingSlot<List<OutboxMessage>> = slot()
+        every {
+            batchRepo.settleWithEvents(capture(updatedSlot), capture(itemsSlot), capture(eventsSlot))
+        } returns Uni.createFrom().item(savedBatch)
 
         val result = service.settleBatch(batchId).await().indefinitely()
 
         assertThat(result).isEqualTo(savedBatch)
         assertThat(updatedSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(updatedSlot.captured.settledAt).isNotNull()
-        verify { itemRepo.saveAll(match { it.all { i -> i.status == ClearingStatus.SETTLED } }) }
-        verify { eventPublisher.publishBatchSettled(savedBatch) }
+        assertThat(itemsSlot.captured).allSatisfy { assertThat(it.status).isEqualTo(ClearingStatus.SETTLED) }
+        // ADR-0281: the batch.settled event AND the net_settlement.post command commit together.
+        assertThat(eventsSlot.captured).hasSize(2)
+        verify { eventPublisher.batchSettledMessage(any()) }
+        verify { eventPublisher.netSettlementPostMessage(any()) }
+        verify { batchRepo.settleWithEvents(any(), any(), any()) }
     }
 
     @Test
@@ -121,8 +181,8 @@ class ClearingServiceTest {
         assertThatThrownBy { service.settleBatch(batchId).await().indefinitely() }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("Batch not found: $batchId")
-        verify(exactly = 0) { batchRepo.update(any()) }
-        verify(exactly = 0) { eventPublisher.publishBatchSettled(any()) }
+        verify(exactly = 0) { batchRepo.settleWithEvents(any(), any(), any()) }
+        verify(exactly = 0) { eventPublisher.batchSettledMessage(any()) }
     }
 
     @Test
@@ -179,6 +239,33 @@ class ClearingServiceTest {
         assertThat(report.clean).isFalse()
         assertThat(report.settledItemCount).isEqualTo(2)
         assertThat(report.stuckItemIds).containsExactly(stuck.id)
+    }
+
+    @Test
+    fun `an empty cycle announces its settlement`() {
+        val batchSlot: CapturingSlot<ClearingBatch> = slot()
+        val eventSlot: CapturingSlot<OutboxMessage> = slot()
+        val settledMessage = mockk<OutboxMessage>()
+
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any()) } returns
+            Uni.createFrom().item(emptyList())
+        every { eventPublisher.batchSettledMessage(capture(batchSlot)) } returns settledMessage
+        every { batchRepo.saveWithEvent(any(), capture(eventSlot)) } answers {
+            Uni.createFrom().item(firstArg<ClearingBatch>())
+        }
+
+        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+
+        // The cycle RAN. Without an event a consumer cannot tell that from "the cycle did not
+        // run" -- distinguishing those two is why this event exists.
+        assertThat(batch.status).isEqualTo(ClearingStatus.SETTLED)
+        assertThat(batch.itemCount).isEqualTo(0)
+        assertThat(eventSlot.captured).isSameAs(settledMessage)
+        assertThat(batchSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
+
+        // Announced atomically with the insert, never through the bare save that wrote no event.
+        verify(exactly = 1) { batchRepo.saveWithEvent(any(), any()) }
+        verify(exactly = 0) { batchRepo.save(any()) }
     }
 
     @Test

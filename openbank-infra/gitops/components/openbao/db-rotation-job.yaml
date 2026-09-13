@@ -48,6 +48,9 @@ spec:
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
       # Retry up to 2 times on transient OpenBao unavailability; alert on final failure.
       backoffLimit: 2
       # Hard deadline: if the script hasn't finished in 10 minutes something is wrong.

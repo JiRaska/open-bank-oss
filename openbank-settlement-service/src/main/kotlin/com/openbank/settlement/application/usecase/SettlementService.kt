@@ -7,6 +7,8 @@ package com.openbank.settlement.application.usecase
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
+import com.openbank.settlement.application.port.out.OriginationOutcome
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.application.workflow.SettlementWorkflow
 import com.openbank.settlement.domain.model.Settlement
@@ -27,6 +29,7 @@ class SettlementService(
     private val settlementRepository: SettlementRepository,
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
+    private val metrics: SettlementMetricsPort,
     private val clock: Clock,
 ) : SettlementUseCase {
 
@@ -35,10 +38,12 @@ class SettlementService(
         settlementRepository: SettlementRepository,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
+        metrics: SettlementMetricsPort,
     ) : this(
         settlementRepository,
         temporalConfig,
         workflowClient,
+        metrics,
         Clock.systemUTC(),
     )
 
@@ -53,7 +58,14 @@ class SettlementService(
         // retried request resolves to the same row (the UUID primary key is the hard duplicate
         // guard even under a concurrent double-submit).
         val id = UUID.nameUUIDFromBytes("settlement:${command.idempotencyKey}".toByteArray())
-        val settlement = settlementRepository.findById(id) ?: createPending(command, id)
+        val existing = settlementRepository.findById(id)
+        val settlement = existing ?: createPending(command, id)
+        // `created` vs `replayed` on the ACCEPTANCE of a request — nothing has moved yet at this
+        // point, so the metric deliberately does not claim a settlement.
+        metrics.settlementOriginated(
+            settlement.currency,
+            if (existing == null) OriginationOutcome.CREATED else OriginationOutcome.REPLAYED,
+        )
 
         // (Re)start the settlement whenever it is not yet terminal: a fresh PENDING, OR an orphaned
         // PENDING left behind if a prior request created the row but failed before/while starting

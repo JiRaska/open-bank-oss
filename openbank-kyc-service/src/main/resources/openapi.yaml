@@ -3,7 +3,9 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.6.0
+  # 1.9.0 -> 1.10.0 (#9038): additive — the list operation declares the 400 it already answers
+  # for an unparseable ?status= filter.
+  version: 1.11.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -41,13 +43,15 @@ paths:
             enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
       responses:
         '200':
-          description: List of KYC cases with optional statusFilter echo
+          description: Paginated KYC cases with the applied status filter echoed when present.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/KycCaseResponse'
+                $ref: '#/components/schemas/KycCasePage'
+        '400':
+          description: >-
+            The status filter is present but not one of the declared enum values — answered 400
+            since #9038; an unparseable filter never silently degrades to the unfiltered list.
     post:
       tags: [KYC]
       summary: Open a KYC case
@@ -104,6 +108,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KycCaseResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/kyc/cases/{id}/checks/{checkType}:
     put:
@@ -117,7 +123,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]
+            enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA, REGISTRY_MATCH, REPRESENTATIVE_AUTHORITY, UBO_IDENTIFICATION]
       requestBody:
         required: true
         content:
@@ -277,27 +283,25 @@ components:
   schemas:
     OpenCaseRequest:
       type: object
-      required: [partyId, caseType]
+      required: [partyId]
       properties:
         partyId:
           type: string
           format: uuid
-        caseType:
-          type: string
-          enum: [ONBOARDING, PERIODIC_REVIEW, TRIGGERED_REVIEW]
-        riskLevel:
-          type: string
-          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
-
     UpdateCheckRequest:
       type: object
-      required: [result]
+      required: [status]
       properties:
+        status:
+          type: string
+          description: >
+            The new CheckStatus. Values are the domain `CheckStatus` constants verbatim —
+            `KycResource.updateCheck` calls `CheckStatus.valueOf(req.status)`, so anything else
+            is rejected with 400.
+          enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]
         result:
           type: string
-          enum: [PASS, FAIL, PENDING, MANUAL_REVIEW]
-        notes:
-          type: string
+          description: Free-text outcome note recorded against the check. Optional.
 
     KycCaseApprovalRequest:
       type: object
@@ -325,8 +329,29 @@ components:
         partyName:
           type: string
 
+    KycCasePage:
+      type: object
+      required: [items, total, page, size, statusFilter]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/KycCaseResponse'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+        size:
+          type: integer
+        statusFilter:
+          type: [string, 'null']
+          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED, null]
+
     KycCaseResponse:
       type: object
+      required: [id, partyId, status, riskLevel, assignedTo, checks, notes, reviewedBy, reviewedAt, expiresAt, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -334,20 +359,69 @@ components:
         partyId:
           type: string
           format: uuid
-        caseType:
-          type: string
         status:
           type: string
+          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
         riskLevel:
           type: string
+          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        subjectType:
+          type: string
+          description: ADR-0284 D5 — INDIVIDUAL (natural person) or BUSINESS (legal entity; KYB check set).
+          enum: [INDIVIDUAL, BUSINESS]
+        assignedTo:
+          type: [string, 'null']
         checks:
-          type: object
-          additionalProperties:
-            type: string
+          type: array
+          items:
+            $ref: '#/components/schemas/KycCheckResponse'
+        notes:
+          type: [string, 'null']
+        reviewedBy:
+          type: [string, 'null']
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
         createdAt:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+
+    KycCheckResponse:
+      type: object
+      required: [id, caseId, checkType, status, result, provider, performedAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        checkType:
+          type: string
+          description: >-
+            The check performed. Individual subjects carry IDENTITY, ADDRESS, PEP_SCREENING,
+            SANCTIONS_SCREENING and ADVERSE_MEDIA; business subjects carry REGISTRY_MATCH,
+            REPRESENTATIVE_AUTHORITY, UBO_IDENTIFICATION, SANCTIONS_SCREENING and ADVERSE_MEDIA
+            (ADR-0284 D5). Deliberately NOT a closed enum on the response: the set grows with new
+            subject types, and a client must tolerate a value it has not seen rather than break.
+            The request parameter below stays closed — there a caller must pick a known value.
+        status:
+          type: string
+          enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]
+        result:
+          type: [string, 'null']
+        provider:
+          type: [string, 'null']
+        performedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
           type: string
           format: date-time
 

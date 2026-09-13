@@ -18,6 +18,7 @@ import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
@@ -87,6 +88,25 @@ class CatalogBankCompatibilityTest {
         runBlocking { backfill.reconcileAfterRollingWriters() }
         assertThat(legacyName(latestDraft(offeringId))).isEqualTo("Changed by P0 rollback")
         assertThat(backfill.run()).isZero()
+    }
+
+    @Test
+    fun `startup reconciliation keeps unrelated catalog products available on a banking draft conflict`() {
+        val productId = createLegacyDraft("CURRENT_DUPLICATE_DRAFT")
+        val offeringId = mappedOffering(productId)
+        val duplicateId = duplicateDraft(latestDraft(offeringId))
+
+        try {
+            assertThatCode { backfill.runLenient() }.doesNotThrowAnyException()
+            given().get("/api/v1/products/$productId").then().statusCode(200)
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement("DELETE FROM catalog_revisions WHERE id = ?").use { statement ->
+                    statement.setObject(1, duplicateId)
+                    assertThat(statement.executeUpdate()).isEqualTo(1)
+                }
+            }
+        }
     }
 
     @Test
@@ -532,6 +552,25 @@ class CatalogBankCompatibilityTest {
             .body("""{"code":"$code","name":"$code","type":"CURRENT","currency":"EUR"}""")
             .post("/api/v1/products").then().statusCode(201).extract()
         return UUID.fromString(response.jsonPath().getString("id"))
+    }
+
+    private fun duplicateDraft(sourceId: UUID): UUID {
+        val duplicateId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO catalog_revisions " +
+                    "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
+                    "effective_to, maker_id, checker_id, reason, content_hash, created_at, updated_at, lock_version) " +
+                    "SELECT ?, offering_id, revision_no + 1, schema_id, schema_version, 'DRAFT', content, " +
+                    "effective_from, effective_to, maker_id, NULL, NULL, NULL, now(), now(), 0 " +
+                    "FROM catalog_revisions WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, duplicateId)
+                statement.setObject(2, sourceId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        return duplicateId
     }
 
     private fun publishLatestDraft(offeringId: UUID, checker: String) {

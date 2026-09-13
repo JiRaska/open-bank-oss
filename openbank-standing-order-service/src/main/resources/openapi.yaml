@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -146,9 +146,26 @@ components:
   schemas:
     CreateStandingOrderRequest:
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, frequency, startDate]
+      # Mirrors the served DTO (CreateStandingOrderRequest.kt) exactly: Kotlin non-default
+      # constructor parameters are REQUIRED (Jackson 400s when absent); parameters with a
+      # `= null` default are optional. Nullable-without-default (creditorBic, remittanceInfo,
+      # endDate) must be present but may carry null. The previous schema named fields the DTO
+      # never had (debtorAccountId, amount, currencyCode) and omitted five the DTO requires —
+      # a client following it could never succeed. Corrected under ADR-0048 D5 'correction'
+      # (#8351 burn-down: idempotencyKey was already enforced by the code and the dedup
+      # replay is covered by StandingOrderServiceTest).
+      required: [idempotencyKey, partyId, debitAccountId, creditorIban, creditorName, creditorBic, amountMinorUnits, currency, frequency, paymentType, remittanceInfo, startDate, endDate]
       properties:
-        debtorAccountId:
+        idempotencyKey:
+          description: >-
+            Caller-chosen dedup key. A retry with the same key returns the originally created
+            order instead of double-creating (findByIdempotencyKey short-circuits the create).
+          type: string
+          minLength: 1
+        partyId:
+          type: string
+          format: uuid
+        debitAccountId:
           type: string
           format: uuid
         debtorIban:
@@ -166,13 +183,21 @@ components:
           type: string
         creditorName:
           type: string
-        amount:
-          type: number
-        currencyCode:
+        creditorBic:
+          type: string
+          nullable: true
+        amountMinorUnits:
+          description: Amount in minor units (haléře/cents); the response also exposes `amount` in major units.
+          type: integer
+          format: int64
+        currency:
           type: string
         frequency:
           type: string
           enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]
+        paymentType:
+          type: string
+          enum: [SEPA_CREDIT, DOMESTIC, INTERNAL]
         startDate:
           type: string
           format: date
@@ -182,6 +207,7 @@ components:
           nullable: true
         remittanceInfo:
           type: string
+          nullable: true
 
     ApiError:
       type: object

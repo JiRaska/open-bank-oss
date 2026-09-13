@@ -43,7 +43,7 @@ graph TB
     uc[Application<br/>TransactionService<br/>PaymentSagaOrchestrator<br/>PaymentJournalFactory]
     dom[Domain<br/>Transaction / PaymentSaga<br/>SettlementDateResolver<br/>+ domain events]
     persist[Persistence<br/>PanacheTransactionRepository<br/>PanachePaymentSagaRepository<br/>Reactive Panache]
-    outbox[Outbox<br/>TransactionOutboxDispatcher<br/>@Scheduled every 5s]
+    outbox["Outbox<br/>TransactionOutboxDispatcher<br/>@Scheduled every 5s"]
     clients[REST clients<br/>LedgerCallGuard / LedgerRestClient<br/>BalanceCoverClient / FxRateClient]
   end
 

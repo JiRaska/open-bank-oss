@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+# OpenBank IaC security rules (ADR-0279 #16/#20) — Semgrep, pinned engine in CI.
+#
+# WHY SEMGREP HERE AND NOT THE PYTHON GATES: the fleet-pattern Python gates own
+# Kotlin/Quarkus source conventions (Semgrep's Kotlin support is experimental and lost
+# the annotation-context bake-off — measured 2026-09-03 on the scheduled-runBlocking and
+# Instant.EPOCH shapes, 0 findings on known-bad samples). Semgrep is GA-strong on
+# Dockerfile and YAML, which is exactly where no gate looked before: the container and
+# manifest surface (#16 container audit, #20 policy-as-code on IaC).
+#
+# Positive-detection rules only: Semgrep YAML cannot express "key X is missing", so
+# requirements like runAsNonRoot stay with the Kyverno admission policies that enforce
+# them at deploy time. These rules catch the shapes that must NEVER appear.
+rules:
+  - id: dockerfile-add-not-copy
+    languages: [dockerfile]
+    severity: WARNING
+    pattern: ADD $SRC $DST
+    message: >-
+      Use COPY, not ADD. ADD silently unpacks archives and fetches URLs — an implicit
+      behavior a supply-chain review should never have to rule out (ADR-0279 #16).
+
+  - id: dockerfile-latest-tag
+    languages: [dockerfile]
+    severity: ERROR
+    pattern-regex: 'FROM\s+\S+:latest(\s|$)'
+    message: >-
+      Never FROM :latest — the base image is part of the build's identity; pin by digest
+      like every other image reference in this estate.
+
+  - id: dockerfile-root-user
+    languages: [dockerfile]
+    severity: ERROR
+    pattern-regex: '^\s*USER\s+root\s*$'
+    message: >-
+      USER root in a service image. Runtime policies require non-root; a root USER line is
+      a defect that ships.
+
+  - id: k8s-latest-tag
+    languages: [yaml]
+    severity: ERROR
+    pattern-regex: 'image:\s*\S+:latest\s*$'
+    message: >-
+      Never deploy :latest — images are digest-pinned (ADR-0088). A mutable tag makes the
+      deployed bytes unauditable after the fact.
+
+  - id: k8s-privileged
+    languages: [yaml]
+    severity: ERROR
+    pattern: "privileged: true"
+    message: >-
+      privileged: true is never allowed in this estate — Kyverno rejects it at admission;
+      it must not reach the cluster in the first place (ADR-0279 #20).
+
+  - id: k8s-host-namespace
+    languages: [yaml]
+    severity: ERROR
+    pattern-either:
+      - pattern: "hostNetwork: true"
+      - pattern: "hostPID: true"
+      - pattern: "hostIPC: true"
+    message: >-
+      Host namespace sharing (hostNetwork/hostPID/hostIPC) breaks the pod isolation model;
+      nothing in this estate is allowed to need it.

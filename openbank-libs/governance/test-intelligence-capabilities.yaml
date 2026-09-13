@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# Machine-readable delivery boundary for ADR-0273. Blocked capabilities need both a reason and an
+# evidence pointer; the Admin UI renders them without allowing AI to promote their state.
+version: 1
+capabilities:
+  - id: provenance-required-controls
+    title: Provenance-aware required test controls
+    state: implemented
+    evidence: .github/gates/gates.yaml#test-intelligence-ecosystem
+  - id: multi-region-browser-synthetics
+    title: Outside-in browser synthetics from independent regions
+    state: external-blocked
+    blocker: No external probe fleet, non-customer identity, egress policy or alert ownership is provisioned.
+    evidence: docs/adr/0273-unified-test-intelligence-evidence-and-admin-ui.md#d8--competitive-benchmark-and-banking-safety-boundary
+  - id: durable-test-history
+    title: Durable long-horizon per-test history
+    state: ownership-blocked
+    blocker: No storage owner, authenticated ingestion boundary, deletion policy or backup objective exists; CI artifacts remain bounded to their declared retention.
+    evidence: docs/adr/0273-unified-test-intelligence-evidence-and-admin-ui.md#d3--immutable-bounded-history-not-a-premature-service
+  - id: predictive-test-selection
+    title: Predictive test ordering or selection
+    state: safety-blocked
+    blocker: No shadow recall evaluation proves that a later full required suite cannot be skipped.
+    evidence: docs/adr/0273-unified-test-intelligence-evidence-and-admin-ui.md#d8--competitive-benchmark-and-banking-safety-boundary
+  - id: ai-test-authoring
+    title: AI-assisted test authoring and selector healing
+    state: safety-blocked
+    blocker: No defect-seeding evaluation corpus, deterministic replay proof, sensitive-data filter or generated-test ownership policy exists.
+    evidence: docs/adr/0273-unified-test-intelligence-evidence-and-admin-ui.md#d8--competitive-benchmark-and-banking-safety-boundary
+  - id: visual-regression
+    title: Owned visual and cross-browser regression baselines
+    state: ownership-blocked
+    blocker: No approved baseline owner, screenshot privacy classification, retention policy or cross-browser execution grid exists.
+    evidence: docs/adr/0273-unified-test-intelligence-evidence-and-admin-ui.md#d8--competitive-benchmark-and-banking-safety-boundary

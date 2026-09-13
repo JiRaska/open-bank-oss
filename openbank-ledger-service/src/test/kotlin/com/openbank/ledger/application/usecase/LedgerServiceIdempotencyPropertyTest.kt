@@ -17,6 +17,7 @@ import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.libs.domain.money.CurrencyCode
@@ -99,10 +100,14 @@ class LedgerServiceIdempotencyPropertyTest {
 
         override suspend fun appendOutbox(messages: List<OutboxMessage>): Int = error("not exercised by postJournal")
 
-        override suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLine> = error("not exercised")
-
-        override suspend fun trialBalanceForPeriod(from: LocalDate, to: LocalDate): List<TrialBalanceLine> =
+        override suspend fun trialBalance(asOf: LocalDate, scope: LedgerScope): List<TrialBalanceLine> =
             error("not exercised")
+
+        override suspend fun trialBalanceForPeriod(
+            from: LocalDate,
+            to: LocalDate,
+            scope: LedgerScope,
+        ): List<TrialBalanceLine> = error("not exercised")
 
         override suspend fun subLedgerBalances(asOf: LocalDate, subAccountId: UUID?): List<SubLedgerBalance> =
             error("not exercised")

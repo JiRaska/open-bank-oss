@@ -31,6 +31,17 @@ choreographed across three services, each owning one slice of the truth:
 - **sca-service** — passkey/SCA device enrollment, which happens *after* KYC approval
   (ADR-0066), and is what makes a party fully operational.
 
+> **Correction, 2026-09-05 (issue #8535).** The `DOCUMENTS_REQUIRED` stage described above, and the
+> `KYC_DOCUMENTS_REQUIRED` funnel column in §4.2, were never implemented: no kyc-service operation
+> ever set that status, so the cockpit column could only ever read zero — which reads as "nobody is
+> stuck on documents" rather than "this is not built". The column has been removed from the cockpit.
+> The status itself stays declared in the enums and contracts, deliberately: dropping a value from
+> a published enum is a breaking contract narrowing, and it is not worth a MAJOR for a value no
+> client can ever receive (#8618). The service docs and the lifecycle diagram now say it is
+> unreachable rather than describing transitions that do not exist. The decision recorded below is preserved as written;
+> collecting documents from a customer needs an operator endpoint, an upload path and storage, and
+> would be a new ADR.
+
 There is no operational view over this. An operator cannot answer "how many applicants
 are stuck waiting on documents", "who failed sanctions screening", or "which approved
 customers never finished passkey enrollment". Concretely:

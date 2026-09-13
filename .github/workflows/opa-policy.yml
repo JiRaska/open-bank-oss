@@ -60,8 +60,10 @@ jobs:
           PATTERN="${PATTERN}|^openbank-libs/governance/rules-opa-data\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
           PATTERN="${PATTERN}|^openbank-libs/governance/agents-opa-data\.yaml$"
+          PATTERN="${PATTERN}|^openbank-libs/governance/case-collaboration-opa-data\.yaml$"
           PATTERN="${PATTERN}|^\.github/scripts/gen-rules-opa-data\.py$"
           PATTERN="${PATTERN}|^\.github/scripts/gen-agents-opa-data\.py$"
+          PATTERN="${PATTERN}|^\.github/scripts/gen-case-collaboration-opa-data\.py$"
           PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
 
           # Every component directory that owns a bundle generator — discovered, never
@@ -70,7 +72,7 @@ jobs:
           # bundle or pod-roll annotation did not even mark the PR policy-relevant, and
           # `verify` never ran to catch it.
           while IFS= read -r dir; do
-            PATTERN="${PATTERN}|^$(printf '%s' "$dir" | sed 's/\./\\./g')/"
+            PATTERN="${PATTERN}|^${dir//./\\.}/"
           done < <(find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' -exec dirname {} \; | sort -u)
 
           if [ "${{ github.event_name }}" = "push" ]; then
@@ -88,7 +90,7 @@ jobs:
               >/dev/null 2>&1 || true
             MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
             FILES=$(git diff --name-only "$MB" HEAD)
-            echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
+            printf 'Changed files:\n  %s\n' "${FILES//$'\n'/$'\n  '}"
             # Here-string, not `echo "$FILES" | grep -q`: under `set -o pipefail` a
             # short-circuiting `grep -q` SIGPIPEs the upstream `echo`, and the
             # pipeline's exit code becomes racy (documented in services-ci.yml).
@@ -189,7 +191,7 @@ jobs:
           # proof to REJECT it. A gate that has only ever passed is unfalsified, and this
           # one's failure mode (a silently narrower charter document) is invisible from
           # every other angle — `data.agents.<missing>` is undefined in Rego, not an error.
-          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          bash .github/scripts/install-pyyaml-hash-pinned.sh
           python3 .github/scripts/gen-agents-opa-data.py --self-test
           python3 .github/scripts/gen-agents-opa-data.py --check
 
@@ -201,8 +203,16 @@ jobs:
           # below, or they would hash a stale input and the diff check would pass about
           # the wrong thing. The key set is derived from the .rego sources, so adding
           # data.rules.<new> to a policy fails here until the subset is regenerated.
-          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          bash .github/scripts/install-pyyaml-hash-pinned.sh
           python3 .github/scripts/gen-rules-opa-data.py --check
+
+      - name: Verify case-coordinator collaboration policy data is isolated and in sync
+        run: |
+          # This projection is intentionally separate from agents-opa-data/rules-opa-data:
+          # changing case collaboration must roll only case-coordinator, not every service
+          # that embeds the shared MCP/REST policy bundle (ADR-0271 D8).
+          python3 .github/scripts/gen-case-collaboration-opa-data.py --self-test
+          python3 .github/scripts/gen-case-collaboration-opa-data.py --check
 
       - name: Verify service OPA bundles + pod-roll annotations are in sync with the policy source
         run: |

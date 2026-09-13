@@ -19,6 +19,9 @@ interface TransactionEventPublisher {
 
     fun failedPayload(transaction: Transaction, reason: String): String
 
+    /** #8745: the COMPLETED → REVERSED terminal transition event. */
+    fun reversedPayload(transaction: Transaction, reason: String): String
+
     /** ADR-0108: settlement proof event with journalId for scheme reconciliation. */
     fun settledPayload(transaction: Transaction, journalId: java.util.UUID): String
 }

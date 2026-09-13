@@ -5,6 +5,7 @@
 package com.openbank.vop.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -22,6 +23,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * service may hold a second copy.
  */
 @RegisterRestClient(configKey = "party-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)

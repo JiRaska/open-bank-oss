@@ -52,6 +52,20 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
     }.awaitSuspending()
 
     /**
+     * Count of terminal DEAD rows, for the `openbank.outbox.dead_lettered` gauge (#4701).
+     *
+     * Deliberately NOT part of [countProcessable]: DEAD is excluded from the backlog by design
+     * (ADR-0050 N5 parks a poison row so it cannot starve the batch), which is exactly why a
+     * fully-parked outbox reads `openbank_outbox_backlog{service="billing"} == 0` — the same
+     * value a perfectly healthy service publishes. Measured 2026-08-15: two
+     * `billing.fee.post-intent.v1` rows have sat DEAD since 2026-07-13 with the backlog gauge at
+     * a healthy-looking zero the whole time.
+     */
+    suspend fun countDead(): Long = Panache.withSession {
+        count("status = ?1", OutboxStatus.DEAD.name)
+    }.awaitSuspending()
+
+    /**
      * Reference implementation for the [OutboxRepository.claimProcessable] atomic-claim
      * override (#1201). One statement: the inner `SELECT ... FOR UPDATE SKIP LOCKED` locks and
      * skips-past whatever a concurrently running claim has already locked, and the outer
@@ -96,18 +110,22 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         }.awaitSuspending()
     }
 
-    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
-        val deadRow: Uni<DeadRow?> = Panache.withTransaction {
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus {
+        val outcome: Uni<FailureOutcome> = Panache.withTransaction {
             find("eventId", eventId).firstResult().map { e ->
                 if (e == null) {
-                    null
+                    // Row not found -- unreachable in practice (the dispatcher only calls
+                    // markFailed on a row it just claimed), but degrade gracefully rather than
+                    // throw out of a batch that is otherwise mid-flight (#5128 finding 3).
+                    FailureOutcome(OutboxStatus.FAILED, null)
                 } else {
-                    applyFailure(e, error, failedAt)
-                    if (e.status == OutboxStatus.DEAD.name) {
+                    val status = applyFailure(e, error, failedAt)
+                    val dead = if (status == OutboxStatus.DEAD) {
                         DeadRow(e.eventType, extractIdempotencyKey(e.eventType, e.payload))
                     } else {
                         null
                     }
+                    FailureOutcome(status, dead)
                 }
             }
         }
@@ -115,13 +133,21 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         // separate aggregate from the outbox row; both updates are individually durable, and a
         // crash between them just means the fee catches up to FAILED on a later markFailed retry
         // or is visible as "PENDING forever" — never silently POSTED).
-        val dead = deadRow.awaitSuspending() ?: return
-        val idempotencyKey = dead.idempotencyKey ?: return
+        val result = outcome.awaitSuspending()
+        val dead = result.dead ?: return result.status
+        if (dead.eventType == ANNUAL_FEE_SUMMARY_EVENT_TYPE) {
+            // ADR-0248: not a fee-posting event — there is no AssessedFee row to flip. A DEAD
+            // annual-summary row is operator-visible via the `billing.outbox.dead` log line above
+            // and the outbox backlog gauge; nothing on the fee side needs (or can) be updated.
+            return result.status
+        }
+        val idempotencyKey = dead.idempotencyKey ?: return result.status
         if (dead.eventType == REVERSAL_INTENT_EVENT_TYPE) {
             assessments.markReversalFailed(idempotencyKey)
         } else {
             assessments.markFailed(idempotencyKey)
         }
+        return result.status
     }
 
     /**
@@ -135,20 +161,25 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
      * row flags the ORIGINAL fee's `posting_status`, not a phantom row keyed by the reversal's own
      * (never-persisted-as-a-fee-row) idempotency key.
      */
-    private fun extractIdempotencyKey(eventType: String, payload: String): String? = if (eventType ==
-        REVERSAL_INTENT_EVENT_TYPE
-    ) {
-        runCatching {
-            mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey
-        }.getOrNull()
-    } else {
-        runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
+    private fun extractIdempotencyKey(eventType: String, payload: String): String? = when (eventType) {
+        // ADR-0248: no idempotencyKey field on this payload at all (it is not a fee) — skip the
+        // parse attempt rather than let it fail-and-be-caught below.
+        ANNUAL_FEE_SUMMARY_EVENT_TYPE -> null
+        REVERSAL_INTENT_EVENT_TYPE ->
+            runCatching {
+                mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey
+            }.getOrNull()
+        else -> runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
     }
 
     private data class DeadRow(val eventType: String, val idempotencyKey: String?)
 
+    /** [markFailed]'s per-row result: the status the row was actually persisted with, plus the
+     * fee-side follow-up data only populated when that status is terminal DEAD. */
+    private data class FailureOutcome(val status: OutboxStatus, val dead: DeadRow?)
+
     /** Record a publish failure (ADR-0050 N5) — same policy every service's outbox repo applies. */
-    private fun applyFailure(e: BillingOutboxEntity, error: String, at: Instant) {
+    private fun applyFailure(e: BillingOutboxEntity, error: String, at: Instant): OutboxStatus {
         e.attemptCount += 1
         e.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
         e.updatedAt = at
@@ -164,6 +195,7 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
                 e.lastError,
             )
         }
+        return next
     }
 
     companion object {
@@ -171,6 +203,9 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
 
         /** Mirrors `LedgerOutboxEventPublisher.REVERSAL_INTENT_EVENT_TYPE` (ADR-0143 phase 2e). */
         const val REVERSAL_INTENT_EVENT_TYPE = "billing.fee.reversal-intent.v1"
+
+        /** Mirrors `BillingAssessmentRepositoryImpl.ANNUAL_FEE_SUMMARY_EVENT_TYPE` (ADR-0248). */
+        const val ANNUAL_FEE_SUMMARY_EVENT_TYPE = "billing.annual-fee-summary.ready"
 
         @Suppress("MaxLineLength")
         private const val CLAIM_SQL = """

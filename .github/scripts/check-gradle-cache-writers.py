@@ -94,6 +94,18 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Restores fleet-lint's home and re-downloads only the runtime-only artifacts "
         "`assemble` needs beyond it.",
     ),
+    "evals-copilot-proposal.yml::copilot-proposal-pack": (
+        "read-only",
+        "Scoped to one service's eval test classes (pure-JVM, no infra); resolves a small subset "
+        "of what fleet-lint already restores fleet-wide. Same reasoning as its sibling "
+        "evals-fraud-review.yml below.",
+    ),
+    "evals-fraud-review.yml::fraud-review-pack": (
+        "read-only",
+        "Scoped to one service's test classes; resolves a small subset of what fleet-lint "
+        "already restores fleet-wide, so it never needed a fresh entry of its own. Same "
+        "reasoning as dependency-submission.yml's own demotion above.",
+    ),
     "security.yml::codeql": (
         "writes-on-main",
         "Left as-is deliberately. Its java-kotlin leg documents a 25-30 min cold penalty and "
@@ -115,11 +127,24 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Same Linux-ARM64 scope and the same reasoning as auto-deploy's build-push.",
     ),
     "_service-ci.yml::build": (
-        "conditional",
-        "Provably never writes, by two complementary expressions: `cache-disabled` on "
-        "self-hosted (ARC NAT egress, ~$200/mo) and `cache-read-only` on GitHub-hosted. "
-        "Declared so that changing EITHER expression alone — which would silently re-arm "
-        "26 per-service writers — shows up here.",
+        "read-only",
+        "ADR-0250 Phase 2 split the old single self-hosted-or-GitHub-hosted job in two: "
+        "`build` is now ALWAYS GitHub-hosted (never self-hosted), so its Gradle-cache "
+        "inputs are literal (`cache-disabled: false`, `cache-read-only: true`) rather "
+        "than the `runner.environment`-conditioned expressions the pre-split job used — "
+        "there is no longer a self-hosted branch here to make this `conditional`. The "
+        "self-hosted, cache-disabled leg (ARC NAT egress, ~$200/mo) moved to the new "
+        "`contract` job below.",
+    ),
+    "_service-ci.yml::contract": (
+        "disabled",
+        "ADR-0250 Phase 2: the self-hosted half of the pre-split `build` job (ARC NAT "
+        "egress FinOps, ~$200/mo — ties GitHub Actions cache off entirely and relies on "
+        "the in-cluster remote Gradle build cache instead, GRADLE_REMOTE_CACHE_URL via "
+        "arc-runners.tf, ADR-0043). Runs only on main push/dispatch to publish provider-"
+        "pact verification, never on a PR, so it costs the writer budget nothing either "
+        "way — declared for the same reason `build` is: so a change to `cache-disabled` "
+        "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
     "api-fuzz-authenticated.yml::fuzz-authenticated": (
@@ -142,6 +167,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "keying argument holds better here than for verification-metadata — this is a "
         "weekly scheduled sweep — but it is still a pure consumer, so reading the entry "
         "fleet-lint already maintains costs the pool nothing and cannot churn it.",
+    ),
+    "pitest.yml::pitest-authz": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Targeted authz mutation lane (ADR-0279 #7) "
+        "riding the same weekly schedule and cache posture as the matrix job above — a "
+        "pure consumer with no reason to store a per-run entry.",
     ),
     "pact-drift-check.yml::drift-check": (
         "read-only",

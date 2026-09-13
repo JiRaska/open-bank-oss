@@ -18,6 +18,11 @@ const CONTENT_CATALOGUE = [
 ]
 
 async function mockComposerCatalogues(page: Page) {
+  await page.route(/\/api\/audiences$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ state: 'ok', items: [{ name: 'active-savers', version: 2, rules: ['party status is ACTIVE'], state: 'APPROVED' }] }),
+  }))
   await page.route(/\/api\/segments$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -47,6 +52,11 @@ async function mockComposerCatalogues(page: Page) {
     }),
   }))
   await page.route(/\/api\/segments\/active-savers\/2\/preview$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ state: 'ok', size: 12480 }),
+  }))
+  await page.route(/\/api\/audiences\/active-savers\/2\/preview$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ state: 'ok', size: 12480 }),
@@ -155,7 +165,7 @@ test('keeps campaign outcome and app attention as distinct, readable decision su
   await expect(outcome).toBeVisible()
   await expect(attention).toBeVisible()
   await expect(outcome).toContainText(/18/)
-  await expect(outcome).toContainText(/4/)
+  await expect(outcome.locator('[data-conversion="measured"] > strong')).toHaveText('4')
   await expect(attention).toContainText(/1,200/)
   await expect(attention).toContainText(/186/)
 

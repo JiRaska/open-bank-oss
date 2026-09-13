@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, ArrowLeft, ShieldCheck, FileText, RefreshCw, Bell, ChevronDown, Send, Clock } from 'lucide-react'
@@ -15,21 +15,12 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
+import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
+import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
 
 const PAGE_SIZE = 25
-
-interface Party {
-  id: string; partyType: string; status: string; legalName: string; tradingName?: string
-  email: string; phone?: string; kycStatus: string; taxId?: string; registrationNumber?: string
-  nationality?: string; dateOfBirth?: string; address?: { line1: string; city: string; postalCode: string; countryCode: string }
-  createdAt: string; updatedAt: string
-}
-
-interface KycCase {
-  id: string; status: string; checks: { checkType: string; status: string; result?: string }[]
-  reviewedBy?: string; createdAt: string; updatedAt: string
-}
 
 // The list endpoint's NotificationSummary (notification-service openapi.yaml 1.5.0).
 // Metadata only — `body` is deliberately absent here and is NOT fetched by this page.
@@ -38,52 +29,78 @@ interface NotificationSummary {
   subject?: string; status: string; sentAt?: string; readAt?: string; createdAt: string
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'var(--green)', INACTIVE: 'var(--text-muted)', BLOCKED: 'var(--red)',
-}
-const KYC_COLOR: Record<string, string> = {
-  APPROVED: 'var(--green)', PENDING: 'var(--yellow)', REJECTED: 'var(--red)', NOT_STARTED: 'var(--text-muted)',
-}
-const MSG_STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', BOUNCED: 'var(--red)',
-}
-
 function PartyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
-  const [party, setParty]     = useState<Party | null>(null)
-  const [kyc, setKyc]         = useState<KycCase | null>(null)
+  const [party, setParty]     = useState<PartyEvidence | null>(null)
+  const [kyc, setKyc]         = useState<KycCaseEvidence | null>(null)
+  const [kycUnavailable, setKycUnavailable] = useState<UnavailableKind>('no_data')
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [tab, setTab] = useState<'overview' | 'messages'>('overview')
+  const activeLoad = useRef<AbortController | null>(null)
 
   const canSeeMessages = hasPermission(roles, 'notifications:view')
 
   const load = useCallback(async () => {
+    activeLoad.current?.abort()
+    const controller = new AbortController()
+    activeLoad.current = controller
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])
     setLoading(true); setUnavailable(null)
+    setKyc(null); setKycUnavailable('no_data')
     try {
       const [partyRes, kycRes] = await Promise.allSettled([
-        fetch(svcUrl('party-service', `/api/v1/parties/${id}`), { signal: AbortSignal.timeout(5000) }),
-        fetch(svcUrl('kyc-service', `/api/v1/kyc/cases/party/${id}`), { signal: AbortSignal.timeout(5000) }),
+        fetch(svcUrl('party-service', `/api/v1/parties/${id}`), { signal }),
+        fetch(svcUrl('kyc-service', `/api/v1/kyc/cases/party/${id}`), { signal }),
       ])
+      if (controller.signal.aborted) return
       if (partyRes.status !== 'fulfilled') { setUnavailable({ kind: 'unreachable' }); return }
       if (!partyRes.value.ok) { setUnavailable({ kind: await classifyBffFailure(partyRes.value) }); return }
-      setParty(await partyRes.value.json())
+      const verifiedParty = parsePartyEvidence(await partyRes.value.json(), id)
+      if (!verifiedParty) { setUnavailable({ kind: 'error' }); return }
+      if (controller.signal.aborted) return
+      setParty(verifiedParty)
       // KYC is supplementary: a party with no case is normal, so a failure here degrades
       // that card rather than the page.
-      if (kycRes.status === 'fulfilled' && kycRes.value.ok) setKyc(await kycRes.value.json())
+      if (kycRes.status === 'fulfilled' && kycRes.value.ok) {
+        const verifiedKyc = parseKycCaseEvidence(await kycRes.value.json(), id)
+        if (verifiedKyc) setKyc(verifiedKyc)
+        else setKycUnavailable('error')
+      } else if (kycRes.status === 'fulfilled') {
+        const kind = await classifyBffFailure(kycRes.value)
+        setKycUnavailable(kind === 'not_found' ? 'no_data' : kind)
+      } else {
+        setKycUnavailable('unreachable')
+      }
     } catch {
-      setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
+      if (!controller.signal.aborted) setUnavailable({ kind: 'unreachable' })
+    } finally {
+      if (activeLoad.current === controller) {
+        activeLoad.current = null
+        setLoading(false)
+      }
+    }
   }, [id])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => {
+      const controller = activeLoad.current
+      activeLoad.current = null
+      controller?.abort()
+    }
+  }, [load])
 
   if (loading) return (
     <div>
-      <div className="page-header"><div><div className="skeleton" style={{ height: '24px', width: '200px' }} /></div></div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={<div className="skeleton" style={{ height: '24px', width: '200px' }} aria-label={t('Načítání detailu subjektu', 'Loading party detail')} />}
+      />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         {[1,2].map(i => <div key={i} className="card" style={{ padding: '20px', height: '200px' }}><div className="skeleton" style={{ height: '100%' }} /></div>)}
       </div>
@@ -92,9 +109,12 @@ function PartyDetailPage() {
 
   if (unavailable) return (
     <div>
-      <div className="page-header">
-        <button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} /> {t('Zpět', 'Back')}</button>
-      </div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Detail subjektu', 'Party detail')}
+        subtitle={t('Data subjektu nejsou v tomto prostředí dostupná.', 'Party data is unavailable in this environment.')}
+        actions={<button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</button>}
+      />
       <DataUnavailable kind={unavailable.kind} service="Party-service" feature={t('Detail subjektu', 'Party detail')} lang={language} />
     </div>
   )
@@ -109,34 +129,36 @@ function PartyDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{party.legalName}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={18} style={{ color: 'var(--accent)' }} />
-            {party.legalName}
-          </h1>
-          <p className="page-subtitle" style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load}><RefreshCw size={13} /> {t('Obnovit', 'Refresh')}</button>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={party.legalName}
+        subtitle={<span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</span>}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{party.legalName}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit detail subjektu', 'Refresh party detail')}
+          >
+            <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
+          </button>
           <Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <ArrowLeft size={13} /> {t('Zpět', 'Back')}
+            <ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}
           </Link>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Loop var is `item`, never `t` — a callback param named `t` shadows the translation
           function (see openbank-admin-ui/CLAUDE.md rule #4; sanctions/page.tsx does this). */}
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      <div role="group" aria-label={t('Sekce detailu subjektu', 'Party detail sections')} style={{ display: 'flex', gap: '2px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {tabs.map(item => (
           <button
             key={item.id}
+            type="button"
+            aria-pressed={tab === item.id}
             onClick={() => setTab(item.id)}
             style={{
               display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px',
@@ -145,7 +167,7 @@ function PartyDetailPage() {
               color: tab === item.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s',
             }}
           >
-            {item.icon}{item.label}
+            <span aria-hidden="true">{item.icon}</span>{item.label}
           </button>
         ))}
       </div>
@@ -157,9 +179,7 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <Users size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${STATUS_COLOR[party.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[party.status] ?? 'var(--text-muted)' }}>
-                {party.status}
-              </span>
+              <span style={{ marginLeft: 'auto' }}><StatusBadge status={party.status} /></span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {[
@@ -172,8 +192,8 @@ function PartyDetailPage() {
                 [t('Reg. číslo', 'Reg. Number'),          party.registrationNumber ?? '—'],
                 [t('Státní příslušnost', 'Nationality'),  party.nationality ?? '—'],
                 [t('Datum narození', 'Date of Birth'),    party.dateOfBirth ?? '—'],
-                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString()],
-                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString()],
+                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString(dateLocale)],
+                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString(dateLocale)],
               ].map(([label, value]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                   <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -188,8 +208,8 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <ShieldCheck size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Stav KYC', 'KYC Status')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)' }}>
-                {party.kycStatus?.replace('_', ' ')}
+              <span style={{ marginLeft: 'auto' }}>
+                <StatusBadge status={party.kycStatus} label={party.kycStatus?.replace('_', ' ')} />
               </span>
             </div>
             {kyc ? (
@@ -197,12 +217,10 @@ function PartyDetailPage() {
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
                   {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
                 </div>
-                {kyc.checks?.map(check => (
-                  <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
+                {kyc.checks.map(check => (
+                  <div key={check.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
                     <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
-                    <span className="pill" style={{ background: `${KYC_COLOR[check.status] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[check.status] ?? 'var(--text-muted)' }}>
-                      {check.status}
-                    </span>
+                    <StatusBadge status={check.status} />
                   </div>
                 ))}
                 {kyc.reviewedBy && (
@@ -212,7 +230,7 @@ function PartyDetailPage() {
                 )}
               </div>
             ) : (
-              <DataUnavailable kind="no_data" feature={t('Případ KYC', 'KYC case')} lang={language} dense />
+              <DataUnavailable kind={kycUnavailable} service="KYC-service" feature={t('Případ KYC', 'KYC case')} lang={language} dense />
             )}
 
             {/* Address */}
@@ -232,7 +250,7 @@ function PartyDetailPage() {
           </div>
 
           {/* Related entities (ADR-0231 D3) — the party → accounts walk is chips, not UUID copying. */}
-          <RelatedAccounts partyId={party.id} />
+          <RelatedAccounts key={party.id} partyId={party.id} />
         </div>
       )}
 
@@ -246,17 +264,31 @@ type AccountRef = { id: string; accountNumber: string; currencyCode?: string; st
 function RelatedAccounts({ partyId }: { partyId: string }) {
   const { t } = useLanguage()
   const [accounts, setAccounts] = useState<AccountRef[] | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     const ctrl = new AbortController()
     fetch(svcUrl('account-service', '/api/v1/accounts', { partyId, limit: '20' }), {
       signal: ctrl.signal, cache: 'no-store',
     })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => setAccounts(d ? (d.data ?? []) : []))
-      .catch(() => setAccounts([]))
+      .then(r => {
+        if (!r.ok) throw new Error(`Related accounts HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => setAccounts(d?.data ?? []))
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setUnavailable(true)
+      })
     return () => ctrl.abort()
-  }, [partyId])
+  }, [partyId, reloadKey])
+
+  const retry = () => {
+    setAccounts(null)
+    setUnavailable(false)
+    setReloadKey(key => key + 1)
+  }
 
   return (
     <div className="card" style={{ padding: '20px' }}>
@@ -264,7 +296,15 @@ function RelatedAccounts({ partyId }: { partyId: string }) {
         <Users size={15} style={{ color: 'var(--accent)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Související účty', 'Related accounts')}</span>
       </div>
-      {accounts === null ? (
+      {unavailable ? (
+        <div role="status" aria-live="polite" style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
+          <div>{t('Související účty se nepodařilo načíst — tento stav neznamená, že subjekt nemá žádné účty.', 'Related accounts could not be loaded — this does not mean the party has no accounts.')}</div>
+          <button type="button" onClick={retry} aria-label={t('Zkusit znovu načíst související účty', 'Retry loading related accounts')}
+            style={{ marginTop: '10px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+            {t('Zkusit znovu', 'Try again')}
+          </button>
+        </div>
+      ) : accounts === null ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítám…', 'Loading…')}</div>
       ) : accounts.length === 0 ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádné účty', 'No accounts')}</div>
@@ -300,6 +340,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
   // A helper component outside the page needs its own language context (all admin-ui pages
   // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<NotificationSummary[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -436,8 +477,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <span style={{ fontSize: '13px' }}>
                   {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
                 </span>
-                <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
-                  <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
+                <button type="button" className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying} aria-busy={retrying} aria-label={t('Zkusit znovu odeslat zprávu', 'Retry sending message')}>
+                  <RefreshCw size={13} aria-hidden="true" /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
                 </button>
               </div>
               {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
@@ -493,8 +534,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 </label>
               ))}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
-                  <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
+                <button type="button" className="btn btn-secondary" onClick={sendMessage} disabled={sending} aria-busy={sending} aria-label={t('Poslat zprávu', 'Send message')}>
+                  <Send size={13} aria-hidden="true" /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
                 </button>
                 {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
               </div>
@@ -552,12 +593,10 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.recipient}</td>
                 <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.subject ?? '—'}</td>
                 <td>
-                  <span className="pill" style={{ background: `${MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)'}22`, color: MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)' }}>
-                    {row.status}
-                  </span>
+                  <StatusBadge status={row.status} />
                 </td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString() : '—'}</td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString() : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString(dateLocale) : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString(dateLocale) : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -566,8 +605,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
 
       {hasNextPage && !loadingMore && (
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-secondary" onClick={() => load(page + 1)}>
-            <ChevronDown size={13} /> {t('Načíst další', 'Load more')}
+          <button type="button" className="btn btn-secondary" onClick={() => load(page + 1)} aria-label={t('Načíst další zprávy', 'Load more messages')}>
+            <ChevronDown size={13} aria-hidden="true" /> {t('Načíst další', 'Load more')}
           </button>
         </div>
       )}

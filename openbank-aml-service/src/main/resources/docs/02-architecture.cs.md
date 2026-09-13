@@ -41,7 +41,7 @@ graph TB
     uc[Application<br/>AmlCaseService]
     dom[Domain<br/>AmlCase + stavový automat<br/>+ doménové události]
     persist[Persistence<br/>AmlCaseRepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>AmlOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>AmlOutboxDispatcher<br/>@Scheduled každých 5s"]
     pub[Kafka out<br/>KafkaAmlOutboxEventPublisher]
     idem[Idempotence<br/>RedisIdempotencyStore]
   end

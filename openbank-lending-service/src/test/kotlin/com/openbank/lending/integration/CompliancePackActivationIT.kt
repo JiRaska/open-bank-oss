@@ -94,6 +94,9 @@ class CompliancePackActivationIT {
         }
         proposalId = response.jsonPath().getString("id")
         assertThat(proposalId).isNotBlank()
+        assertThat(response.jsonPath().getString("proposedAt")).isNotBlank()
+        assertThat(response.jsonPath().getInt("pack.version")).isEqualTo(PACK_VERSION)
+        assertThat(response.jsonPath().getString("pack.jurisdiction")).isEqualTo("CZ")
 
         dataSource.connection.use { conn ->
             conn.prepareStatement(
@@ -154,6 +157,9 @@ class CompliancePackActivationIT {
             // 500 here is the persist-vs-merge defect: this is the second write to the same primary
             // key, so `persistAndFlush` fails with `duplicate key value violates ... _pkey`.
             statusCode(200)
+            body("decisionReason", org.hamcrest.Matchers.equalTo("reviewed against ADR-0212"))
+            body("decidedBy", org.hamcrest.Matchers.equalTo("pack-it-checker"))
+            body("pack.version", org.hamcrest.Matchers.equalTo(PACK_VERSION))
         }
 
         dataSource.connection.use { conn ->
@@ -201,5 +207,7 @@ class CompliancePackActivationIT {
         // An empty list here is indistinguishable from "nothing activated yet" in the console, which
         // is precisely how the OPA denial stayed invisible for the life of the feature (#3402).
         assertThat(body).contains("\"packVersion\":$PACK_VERSION")
+        assertThat(body).contains("\"pack\":{")
+        assertThat(body).contains("\"jurisdiction\":\"CZ\"")
     }
 }

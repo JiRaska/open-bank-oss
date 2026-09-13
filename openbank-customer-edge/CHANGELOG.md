@@ -1,5 +1,168 @@
 # Changelog
 
+## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.75.0...customer-edge-v0.76.0) (2026-09-13)
+
+
+### Features
+
+* **customer-edge:** expose Lístky and member-get-member to the app ([#9965](https://github.com/JiRaska/open-bank-oss/issues/9965)) ([02054bb](https://github.com/JiRaska/open-bank-oss/commit/02054bb71b7fbc23c8af92cf2dce725fa40c0212))
+
+## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.74.1...customer-edge-v0.75.0) (2026-09-13)
+
+
+### Features
+
+* **account:** record the terms version a term deposit opens under ([#9263](https://github.com/JiRaska/open-bank-oss/issues/9263)) ([848d79e](https://github.com/JiRaska/open-bank-oss/commit/848d79e8e54ab1137cc8b8d603390cbc03388147))
+* **customer-edge:** compose net worth from the services that own each figure (ADR-0301 D2) ([#9893](https://github.com/JiRaska/open-bank-oss/issues/9893)) ([105c0ce](https://github.com/JiRaska/open-bank-oss/commit/105c0ceedcb4b566dcd24db01c99ab49f10de9a5))
+* **customer-edge:** expose business search by name and town to the app ([#9716](https://github.com/JiRaska/open-bank-oss/issues/9716)) ([841b657](https://github.com/JiRaska/open-bank-oss/commit/841b657b3b0c7980e84210403aa2573608e662d8))
+* **customer-edge:** serve merchant logos through the edge ([#9119](https://github.com/JiRaska/open-bank-oss/issues/9119)) ([fb2bab0](https://github.com/JiRaska/open-bank-oss/commit/fb2bab0f04413faf92cbfca0927248ce7ddbef44))
+* **delegation:** add managed account portfolios ([#9286](https://github.com/JiRaska/open-bank-oss/issues/9286)) ([7e92be5](https://github.com/JiRaska/open-bank-oss/commit/7e92be54bf327573ad0b5229faa20f646c17dc51))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+
+
+### Security
+
+* **customer-edge:** lock upstream hosts ([#9396](https://github.com/JiRaska/open-bank-oss/issues/9396)) ([e596948](https://github.com/JiRaska/open-bank-oss/commit/e5969489ecc2cea31637ecddda76f008e746bea2))
+* **customer-edge:** separate upstream authority from paths ([#9666](https://github.com/JiRaska/open-bank-oss/issues/9666)) ([0326f74](https://github.com/JiRaska/open-bank-oss/commit/0326f74b07d10e671b233c96005a09f31d07fdd6))
+* **delegation:** fail closed unsupported exposure ([#9171](https://github.com/JiRaska/open-bank-oss/issues/9171)) ([312cb9f](https://github.com/JiRaska/open-bank-oss/commit/312cb9fdf80e99d0b56bb25e4d342f167debcb46))
+
+## [0.74.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.74.0...customer-edge-v0.74.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **edge:** catalogue rates cross to the customer as percent, not as the stored fraction ([#9144](https://github.com/JiRaska/open-bank-oss/issues/9144)) ([9ce6286](https://github.com/JiRaska/open-bank-oss/commit/9ce62868fdf9d58eecf67293e3cdf1334bc02861))
+
+## [0.74.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.73.0...customer-edge-v0.74.0) (2026-09-08)
+
+
+### Features
+
+* **account:** show the owner everyone who can act on their account ([#8011](https://github.com/JiRaska/open-bank-oss/issues/8011)) ([b201a04](https://github.com/JiRaska/open-bank-oss/commit/b201a0415ccbfb6ba3f76532122f463259dab08e))
+* **delegation:** reserve delegated spend, so a payment-capable grant can exist ([#8321](https://github.com/JiRaska/open-bank-oss/issues/8321)) ([a5225f9](https://github.com/JiRaska/open-bank-oss/commit/a5225f9184d74cb7f16f1e0c6a4c12b2701125b3))
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **consent:** wire the OPA path for the edge's ADR-0269 credit-consent switch ([#8489](https://github.com/JiRaska/open-bank-oss/issues/8489)) ([5d38133](https://github.com/JiRaska/open-bank-oss/commit/5d38133566414fd0923209e41423d08f530d1956))
+* **party:** make GDPR Art. 15 and Art. 20 exports reachable by the data subject ([#8487](https://github.com/JiRaska/open-bank-oss/issues/8487)) ([2ba4787](https://github.com/JiRaska/open-bank-oss/commit/2ba4787544aeaf723cd1e867f04777c32978f68b))
+
+
+### Security
+
+* **payments:** bind delegated payment ingress ([#8274](https://github.com/JiRaska/open-bank-oss/issues/8274)) ([3f84120](https://github.com/JiRaska/open-bank-oss/commit/3f84120aafdf04b818d9e898fc148d77bbc62ac5))
+
+## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.72.0...customer-edge-v0.73.0) (2026-09-03)
+
+
+### Features
+
+* **customer-edge:** the product catalogue a customer may open from ([#8536](https://github.com/JiRaska/open-bank-oss/issues/8536)) ([ea114a2](https://github.com/JiRaska/open-bank-oss/commit/ea114a245740e58715daff4e0f3632f3531094ef))
+
+## [0.72.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.71.0...customer-edge-v0.72.0) (2026-09-02)
+
+
+### Features
+
+* **delegation:** preview client grants before SCA ([#8173](https://github.com/JiRaska/open-bank-oss/issues/8173)) ([cb8065c](https://github.com/JiRaska/open-bank-oss/commit/cb8065c425dde53ba02073b938ca908f2f3e7dfc))
+
+## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.70.0...customer-edge-v0.71.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.69.0...customer-edge-v0.70.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.68.0...customer-edge-v0.69.0) (2026-08-27)
+
+
+### Features
+
+* **customer-edge:** add campaign incentive claims ([#7281](https://github.com/JiRaska/open-bank-oss/issues/7281)) ([e8a1d6c](https://github.com/JiRaska/open-bank-oss/commit/e8a1d6c0cbb8b203666822650c0d0a9f95d26203))
+
+## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.67.0...customer-edge-v0.68.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
+## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.1...customer-edge-v0.67.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+
+## [0.66.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.0...customer-edge-v0.66.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.66.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.1...customer-edge-v0.66.0) (2026-08-21)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 0 — credit-offer consent and the distress suppression floor ([#6226](https://github.com/JiRaska/open-bank-oss/issues/6226)) ([bf87d31](https://github.com/JiRaska/open-bank-oss/commit/bf87d314745d72eae965a256e6f68f34e8bf01b2))
+
+## [0.65.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.0...customer-edge-v0.65.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.65.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.64.0...customer-edge-v0.65.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.2...customer-edge-v0.64.0) (2026-08-17)
+
+
+### Features
+
+* **payees:** server-synced saved payees (TOP-10 [#5](https://github.com/JiRaska/open-bank-oss/issues/5)) ([#5154](https://github.com/JiRaska/open-bank-oss/issues/5154)) ([9c93621](https://github.com/JiRaska/open-bank-oss/commit/9c936211df184df867a6a274ce4cb09b64114f21))
+
+## [0.63.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.1...customer-edge-v0.63.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **accounts:** refuse to close an account that still holds money ([#5072](https://github.com/JiRaska/open-bank-oss/issues/5072)) ([d7be3a3](https://github.com/JiRaska/open-bank-oss/commit/d7be3a3f82f29b190160e8cd6ebaa3dddcfc96ca))
+
+## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.0...customer-edge-v0.63.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **customer-edge:** announce the single-replica assumption behind PaymentSessionStore ([#5101](https://github.com/JiRaska/open-bank-oss/issues/5101)) ([0e48bd7](https://github.com/JiRaska/open-bank-oss/commit/0e48bd794b7db6aefe9047d60b83da183a776607)), closes [#4728](https://github.com/JiRaska/open-bank-oss/issues/4728)
+
+## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.62.0...customer-edge-v0.63.0) (2026-08-16)
+
+
+### Features
+
+* **accounts:** let a customer rename an account (TOP-10 [#10](https://github.com/JiRaska/open-bank-oss/issues/10), part 1) ([#5002](https://github.com/JiRaska/open-bank-oss/issues/5002)) ([b9b3fc6](https://github.com/JiRaska/open-bank-oss/commit/b9b3fc675da7c5920d1d8fd4562fb001eb04635d))
+
 ## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.61.0...customer-edge-v0.62.0) (2026-08-13)
 
 

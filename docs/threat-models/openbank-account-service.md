@@ -23,14 +23,15 @@ that is balance-service).
                                                                 |
                                                                 +--> [sanctions-service] (OIDC M2M, sync, ADR-0032)
                                                                 |
-                                                                +--> [product-catalog] (unauthenticated read, sync, fail-open, ADR-0158)
+                                                                +--> [product-catalog] (OIDC M2M read, sync, fail-open, ADR-0158)
+[analytics-sink INITIAL_LOAD] --OIDC M2M read--> (GET /api/v1/accounts/active) --> [account-service]
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
 ```
 
 - **External entities:** operators/admins (human, OIDC via Keycloak), downstream consumers of account events, party-service (event source).
-- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (new, unauthenticated read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
+- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **analytics-sink↔account-service (INBOUND M2M read, new — the ADR-0143 fleet sweep `GET /api/v1/accounts/active`)**; **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (OIDC M2M read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
 - **Assets:** account identity, IBAN, freeze/closure state, ownership linkage, **the oidc-client M2M secret** (grants ROLE_OPERATOR on the money path).
 
 ## 3. Authn/Authz
@@ -46,10 +47,12 @@ that is balance-service).
 |---|---|---|
 | **S**poofing | Caller impersonates operator | OIDC bearer + mTLS; no anonymous mutation |
 | **T**ampering | Forced freeze/close, IBAN reassignment | RBAC on all mutations; state-machine guards; DB constraints; audit trail |
+| **T**ampering | Open an account in a currency incompatible with its selected product | Confirmed catalog product responses are checked server-side for product identity and currency. A missing product rejects the request; an unavailable catalog stays explicitly fail-open as reference-data unavailability, with skipped validation logged. |
 | **R**epudiation | Operator denies freezing an account | AuditEvent per lifecycle transition (immutable, ADR audit) |
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.accounts.created` tagged only by `product_type` (closed `AccountType` enum) + `currency`; `openbank.accounts.closed` adds a `reason` **normalized to a closed set** (`customer_request`/`regulatory`/`fraud`/`inactivity`/`unspecified`/`other`) — the operator-supplied free-text reason never becomes a label; outbox-backlog gauge tagged only by `service`. Never an account id, IBAN, party id, or balance. Counters increment only after the commit + publish. `/q/metrics` is cluster-internal |
+| **I**nfo disclosure | Authorization-id enumeration via the revoke route: `DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}` distinguishing "this id exists on another account" from "this id does not exist" | `AuthorizationNotFoundExceptionMapper` and `AuthorizationNotOnAccountExceptionMapper` both answer 404 with a byte-identical `AUTHORIZATION_NOT_FOUND` body, so an operator scoped to one account gets no existence oracle over ids on accounts they do not hold. The distinction is kept in a WARN log, not on the wire. Same posture as the `X-Customer-Party-Id` row above. |
 | **D**oS | Mass open/close churn | Gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to freeze/close | Distinct roles; OPA enforce; deny-by-default |
 | **S**poofing / **E**oP (M2M) | Compromise of the `oidc-client` secret → mint a ROLE_OPERATOR token → inject arbitrary transactions via transaction-service `POST /api/v1/transactions` | Secret held only in a K8s Secret (ExternalSecret from Vault), never in image/git; rotatable; least-privilege client (`openbank-services`); welcome-bonus call is **flag-gated default-OFF** and **sandbox-only**. Residual: transaction-service does not currently distinguish caller identity beyond the role — accepted residual risk in sandbox (see §5) |
@@ -83,8 +86,210 @@ not change any existing request's outcome until explicitly flipped.
 - Relies on Keycloak realm integrity and OPA policy correctness.
 - Freeze now has the four-eyes *mechanism* wired (§4a) but not enforced (`authz.four-eyes.enforce=false`);
   close remains single-actor — a candidate for a follow-up rollout under issue #413.
+- **`closeAccount`'s balance guard (2026-08-16 entry below) is best-effort, not a guarantee:**
+  (a) the balance check and the close persist are not atomic, so money settling in that window
+  still lands on a closed account; (b) it only sees currently-booked/reserved balance, not money
+  already in flight (a future-dated transfer reads as zero and still executes later). Closing (a)
+  needs a lock spanning balance-service and this service, or a saga; closing (b) needs a check
+  against every service that can schedule a future credit (standing-order-service, sepa-instant,
+  domestic-payment). Neither exists yet — tracked as a follow-up, not blocking this change since
+  it is a strict improvement over the prior state of no guard at all.
 
 ## 6. Change log
+
+- **2026-09-06** — **New INBOUND reader on the fleet sweep**, no new route and no new privilege.
+  `openbank-analytics-sink` now calls the existing `GET /api/v1/accounts/active` (ADR-0143's
+  staff/service sweep, already used by billing-service's cycle scheduler) with an OIDC
+  client_credentials token, to seed the account-to-party key for accounts that pre-date the event
+  stream (#8792/#2891 — 88 accounts hold a `party_id`, the warehouse had it for 19).
+  `accounts/network-policies.yaml` gains the `analytics` namespace as an ingress source, which is
+  the change this entry exists for.
+
+  **What widens.** The set of namespaces that may reach this service's REST port grows by one, and
+  that namespace now holds a credential (`analytics-sink-oidc`) minted from the SHARED
+  `openbank-services` realm client — the same client several services already carry, so this adds a
+  holder rather than a new grant. Compromise of the analytics namespace therefore reaches the same
+  endpoints that client could already reach from elsewhere; it does not reach anything new. The
+  secret ref is `optional: false` on purpose: a credential allowed to be missing sends
+  UNAUTHENTICATED requests instead of failing, and the resulting 401 is indistinguishable from
+  having no client configured at all (#2929).
+
+  **What does not widen.** The sweep is READ-only and returns the same `AccountResponse` the
+  endpoint already served — no new field, and no route added. The projection analytics builds from
+  it is written straight to the warehouse sink and is **never republished to Kafka**, so
+  `AccountCreated` — a discriminator balance-service, document-service, statement-service and
+  campaign-service read verbatim — does not reach them; a backfill that republished would re-create
+  balances and re-issue documents for 66 accounts.
+
+  **Residual.** The transport is plaintext in-cluster (`http://account-service.accounts.svc:8100`),
+  baselined under ASVS V9.1 exactly as the identical edge from payments, customer-edge and party
+  already is; retiring the class is the mesh-mTLS work, not this change. The bearer does not depend
+  on the transport.
+- **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0295, burn-down #8351).
+  `grantAuthorization` and `propose` gained check-first replay on their natural keys (grant: the
+  full caller tuple restricted to ACTIVE rows; proposal: account/delegate/amount/currency/note
+  while PENDING and unexpired). Pockets were already enforced (`uq_account_pockets_acc_ccy`, V7).
+  The grant fix touches the delegated-access surface: a retried grant can no longer stack a
+  second authority row, and a retried proposal can no longer stack a second executable
+  withdrawal instruction awaiting owner approval. No new endpoint, caller, privilege or control
+  bypass; the authorization guard still runs BEFORE any replay answer on the proposal path.
+- **2026-09-05** — **Inbound REST error surface on the authentication boundary**, no new route,
+  caller, edge or privilege. A security abort (anonymous or under-roled caller hitting a
+  `@RolesAllowed` route) was rendered by Quarkus REST's built-in handling as the raw exception
+  message in a plain-text body under the resource's negotiated `application/json` content-type —
+  a 401 whose body was the literal text `Not Authenticated` while declaring itself JSON, which any
+  JSON-parsing client (and the VoP consumer pact's anonymous-IBAN-lookup replay, #8803) breaks on.
+  Three service-local mappers (`io.quarkus.security` Unauthorized / AuthenticationFailed → 401
+  `UNAUTHORIZED`, Forbidden → 403 `FORBIDDEN`) now answer with the standard `ApiError` envelope and
+  fixed messages. **Security-relevant half:** the fixed message names neither the failure detail
+  nor the underlying mechanism, so the abort leaks strictly less than the raw exception text did;
+  status codes are unchanged, so no client-visible signaling about account or authorization
+  existence moves. The mappers live in the service rather than libs-runtime because a
+  shared-library `@Provider` naming an `io.quarkus.security` type is the #6240 ArC boot-failure
+  class (enforced by the `provider-type-classpath` gate). The anonymous 401 itself is now covered
+  by contract: the VoP pact interaction is replayed with the `@TestSecurity` identity cleared
+  (TestIdentityAssociation), so "no caller identity → 401" is verified, not assumed. RBAC, OPA and
+  authentication itself are untouched. **Risk class:** availability/observability plus disclosure
+  hardening; no money mutation and no new principal. Rollback: delete the three mappers and the
+  aborts fall back to Quarkus' built-in text rendering. (#8803)
+
+- **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
+  or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
+  mapper: an unreachable screening service (the gate fails closed, ADR-0032 §C) and a policy
+  refusal (HIT/REVIEW). They now answer 503 with `Retry-After: 30` and 422 respectively, via two
+  dedicated mappers in `ExceptionMappers.kt`; the routine policy refusal also stops logging at
+  ERROR with a full stack (WARN, no stack), so it no longer consumes this money-path service's
+  5xx error budget. **Security-relevant half — the disclosure the naive fix would have shipped:**
+  re-parenting `AccountOpeningBlockedByScreeningException` to `IllegalStateException` would have
+  fixed the status and put the matched sanctions name plus partyId into the response body
+  (libs-runtime's 422 mapper echoes `exception.message`), handing the caller a sanctions-list
+  oracle. The mapper bodies are fixed strings naming neither; a unit test asserts the matched
+  name and partyId appear nowhere in the body, and that a refusal with a match is
+  indistinguishable from one without. RBAC, OPA and the screening call itself are untouched.
+  **Risk class:** availability/observability plus disclosure hardening; no money mutation and no
+  new principal. Rollback: delete the two mappers and both types fall back to the generic 500
+  mapper. (#8512)
+
+- **2026-09-03** — **Inbound REST error surface on the authorization routes**, no new route, caller,
+  edge or privilege. Revoking an authorization that does not exist answered 500 INTERNAL_ERROR; it now
+  answers 404, via two service-local mappers (`AuthorizationNotFoundExceptionMapper`,
+  `AuthorizationNotOnAccountExceptionMapper`) added to the existing
+  `com.openbank.account.infrastructure.rest.ExceptionMappers` file. RBAC, OPA action
+  (`account.authorize`) and the revoke logic are untouched — only the status and body of an
+  already-refused request change. **Security-relevant half:** the cross-account case
+  (`AuthorizationNotOnAccountException`) previously leaked through the generic 500 and now returns a
+  body byte-identical to the unknown-id case, closing an authorization-id existence oracle for an
+  operator scoped to a different account; a unit test asserts the two bodies match field for field.
+  **Risk class:** availability/observability (a client fault stops consuming this money-path service's
+  5xx error budget) plus the enumeration hardening above; no money mutation and no new principal.
+  Rollback: delete the two mappers and both types fall back to the generic 500 mapper. (#5913)
+
+- **2026-08-27** — **New tightly scoped inbound diagnostic edge:** the sandbox's
+  `journey-product-catalog-read` k6 CronJob may make one read-only request to
+  product-catalog `:8104`. The additive NetworkPolicy selects both its `observability`
+  namespace and its immutable journey pod labels; it does not admit Grafana, Prometheus,
+  or any other observability workload. The Job has no ServiceAccount token or credentials
+  and the endpoint returns only the public product list. This is a production-like
+  availability assertion, not an access-control bypass: Product Catalog still owns
+  request handling, and removing the policy restores fail-closed connection denial.
+
+- **2026-08-26** — The operator approval inbox gains a bounded, read-only
+  `GET /api/v1/accounts/approvals` edge. It exposes only the pending approval id, action,
+  resource id, maker id and creation time to callers already holding `ROLE_OPERATOR` or
+  `ROLE_ADMIN`, with the same OPA policy boundary as the checker decision endpoint. The result is
+  capped at 200 and ordered oldest first; it cannot approve, reject or execute an action. The
+  existing random ids, 24-hour Redis TTL, maker/checker separation and one-time execution checks
+  remain unchanged. **Risk class:** confidentiality (operator workflow metadata) and bounded Redis
+  read load; no new principal, service-to-service edge or money mutation. Rollback: remove the GET
+  route and let the admin UI report the account source unavailable; the decision path is unaffected.
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: sanctions, SCA and all other downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a separate fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-20** — Product-catalog product/currency enforcement (#668). This existing reference-data
+  edge now authenticates with the `openbank-services` OIDC client and validates a confirmed product's
+  currency before account creation. It deliberately preserves ADR-0158's fail-open posture only for
+  network/5xx unavailability: a definite 404 or incompatible currency cannot create an account.
+  Product-catalog cannot mutate accounts, and account-service never accepts a catalog currency from the
+  caller. Tests cover compatible, missing and mismatched currency responses. Rollback: revert the
+  validation while retaining the OIDC client filter required by catalog reads.
+
+- **2026-08-17** — **New inbound trust edge: the `lending` namespace.** #3931 added `lending` as
+  an allowed ingress peer in this component's `network-policies.yaml`, so `lending-service` can
+  now reach this service's `GET /api/v1/accounts/iban/{iban}` from inside the cluster —
+  resolving the borrower's own CURRENT account for a loan disbursement (`account.read`, the same
+  M2M `openbank-services` client already trusted by ~10 other callers, §2). Read-only; no
+  mutation reachable from this edge. Risk class = **information disclosure** at most (an
+  IBAN→account/party lookup), bounded the same way as every other `openbank-services` caller —
+  the NetworkPolicy decides reach, `@RolesAllowed`/OPA still decide permission. Rollback: drop
+  the `namespaceSelector` entry for `lending`. See `docs/threat-models/openbank-lending-service.md`
+  §2 items 7-8 for the calling side.
+- **2026-08-16** — Account close (TOP-10 #10, part 2): `POST /{accountId}/close` gains a balance
+  guard (`AccountNotEmptyException`, mapped to 422) and threads `customerPartyId` +
+  `denyIfNotOwner` through the endpoint the same way the goal/nickname endpoints already do, so
+  `requestedBy` on `AccountClosedEvent` reflects the real caller instead of always being stamped
+  as the operator. **No new trust boundary and no new edge route** — this endpoint stays
+  operator/admin-only (`@RolesAllowed(OPERATOR, ADMIN)`); customer-edge deliberately does NOT
+  gain a close proxy in this change (see the 2026-08-05 entry below — `account.close` is
+  explicitly `prohibited` for the edge's M2M principal after #3734, and reopening that needs its
+  own explicit decision, not a side effect of this PR).
+  - **S (Spoofing):** unchanged — same OIDC bearer + role gate as before; the new
+    `customerPartyId` header path only narrows who a call can act as (via `denyIfNotOwner`), it
+    does not widen who can call the endpoint.
+  - **T (Tampering):** the new guard is itself the tampering-relevant change — it prevents a
+    close from silently discarding a nonzero balance. **Known limitation, not a full fix:**
+    the balance read and the close persist are not atomic (no lock spans balance-service and this
+    service's own row), so a credit settling in that window still lands on the now-CLOSED
+    account; and the guard only sees *currently booked/reserved* balance, not money already in
+    flight (a future-dated standing order or a transfer on its documented value-date delay reads
+    as zero today and still executes later against a closed account). Closing either gap needs
+    cross-service coordination (balance-service locking, or a standing-order-service/sepa-instant
+    check) that does not exist yet — flagged as a residual risk in §5, not silently absorbed into
+    this entry's risk class.
+  - **R (Repudiation):** `AccountClosedEvent.reason` and (now) the real `requestedBy` give a
+    better audit trail than before, not a worse one — this is a strict improvement on the
+    pre-existing gap where every close was attributed to a generic operator id.
+  - **I (Information disclosure):** the 422 error message echoes the account's currency + booked
+    amount back to the caller (`"still holds money in CZK 1250.00"`). Only reachable by an
+    OPERATOR/ADMIN-role caller today (endpoint is not edge-exposed), so no new exposure to an
+    unauthenticated or customer-scoped principal.
+  - **D (Denial of service):** one additional synchronous `balancePort.getByAccount` call per
+    close attempt — bounded, same trust boundary as the existing balance reads this service
+    already makes.
+  - **E (Elevation of privilege):** none — `@RolesAllowed`/`@Authorize(action = "account.close")`
+    unchanged; `account.close` remains in the `prohibited` set for the edge M2M principal.
+  **Risk class = low-to-medium** (prevents a real money-stranding gap, but the fix is best-effort
+  — see §5 residual risk). Money-path service (`rules.yaml: money_path_services`) — this entry
+  satisfies the threat-model requirement for the 2-approval gate (CLAUDE.md rule 7 / rule #8
+  above); PR review confirmed the two limitations above before this entry was written, they are
+  not something a later audit had to discover.
+
+- **2026-08-16** — Account rename (TOP-10 #10, part 1): `PATCH /api/v1/accounts/{accountId}/nickname`
+  (`nickname` — nullable, VARCHAR(60)). No new trust boundary, no new service, no money movement —
+  same shape as the 2026-07-03 savings-goal entry below, which this mirrors field for field.
+  - **S (Spoofing):** identical path — the edge authenticates the customer JWT and forwards
+    `X-Customer-Party-Id`; account-service's `denyIfNotOwner` re-checks ownership as
+    defense-in-depth before accepting operator/service-role requests.
+  - **T (Tampering):** nickname is customer-authored free text — bounded to 60 chars (VARCHAR(60)
+    + app-side `require`), forwarded through the edge via Jackson re-serialization (not string
+    interpolation) so it cannot break out of the JSON body.
+  - **R (Repudiation):** no new event/audit trail — cosmetic customer preference, not a money-path
+    state transition; the `accounts.updated_at` / optimistic `version` bump is the only trace, same
+    as the goal fields.
+  - **I (Information disclosure):** returned only on the owning customer's own `GET /accounts/{id}`
+    (or operator/admin reads) — no new read endpoint. PII-adjacent (customer-authored text) —
+    nulled on GDPR Art. 17 erasure alongside `legalName`/goal fields (`anonymizeByPartyId`
+    extended, not a new erasure path).
+  - **D (Denial of service):** plain synchronous DB write through the existing `update()` path — no
+    new external call, no new failure mode beyond "account not found" (404).
+  - **E (Elevation of privilege):** none — reuses `account.update` (service-side) and
+    `customer.accounts.nickname.write` (edge-side, under the existing `customer.*` self-service OPA
+    rule — no new policy rule needed).
+  **Risk class = low** (customer-preference metadata, no money movement, no new trust boundary).
+  Flyway `V20__account_nickname.sql`: `nickname VARCHAR(60)`, nullable. Rollback: `ALTER TABLE
+  accounts DROP COLUMN nickname` + revert commit.
+  Money-path service (account-service is in `rules.yaml: money_path_services`) — this entry
+  satisfies the threat-model requirement for the 2-approval gate (rule #8); the change itself moves
+  no money and needs no additional compensating control beyond what's documented above.
 
 - **2026-08-09** — **`BalanceServiceClient` now reads and forwards a spendable figure the raw projection did not carry (#1745).** `effectiveAvailableAmount` on the wire is nullable and defaults to `availableAmount` when absent, so this service tolerates talking to an older balance-service during a rollout. **Risk class = none new**: this is a client-side interpretation change on an existing inbound field from an already-trusted M2M dependency (balance-service is inside this service's own trust boundary, not a new edge), no new endpoint, no new listener, no authorization change. The only new datum this service now trusts is a number it already trusted the shape of. Rollback: revert the mapping; the field is additive on balance-service's side and nothing here persists it.
 
@@ -127,9 +332,10 @@ not change any existing request's outcome until explicitly flipped.
   - **Replay (fixed).** The challenge was READ and never consumed, so one approved ceremony
     authorised unlimited proposals. RTS Art. 5 single-use was not met. `consume` is atomic on
     `consumedAt`, so two concurrent approvals cannot both win.
-  - **Availability (fixed).** `verifyOwnerSca` pre-checked `status == "COMPLETED"` before consuming
-    — the same defect as #3537 in delegation-service, in a second service. Nothing a customer can
-    reach promotes a decoupled challenge (customer-edge exposes create/read/decision only;
+  - **Availability (fixed).** `verifyDecisionSca` no longer pre-checks `status == "COMPLETED"`
+    before consuming — the same defect as #3537 in delegation-service, in a second service.
+    Nothing a customer can reach promotes a decoupled challenge (customer-edge exposes
+    create/read/decision only;
     `decision` records the signed device decision without promoting), so every owner approval
     failed. Party and purpose are checked here; promotion and approval enforcement belong to
     `consume`, which owns them.
@@ -405,3 +611,67 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+## Delegation lifecycle ordering
+
+The local enforcement projection accepts authority-opening events only with a positive,
+monotonically increasing `lifecycleRevision`. A revisionless close remains accepted and installs a
+permanent legacy tombstone; a revisionless activate/reinstate is ignored. This deliberately favors
+temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
+Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.
+
+## Approval-policy projection
+
+Activation and reinstatement events now carry the grant's exact `approvalPolicy` and
+`requiredApprovals` into `account_delegation_projection`. Legacy events with neither field become
+`SOLO`; they never acquire a multi-party promise retrospectively. Unknown future policy strings
+are retained for forward compatibility but must remain unsupported by the operation-snapshot
+resolver. This slice does not count approvals and therefore does not remove delegation-service's
+fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. Rollout is
+consumer-first (account-service migration and consumer before delegation-service producer);
+rollback removes the producer fields first and may retain the additive projection columns.
+
+## SCA-derived representative identity
+
+An entity-owned savings proposal is still addressed under the entity subject, but the human
+decision actor is derived only from sca-service's challenge `partyId`; no client or edge-provided
+actor header is trusted. Account-service independently authorizes that actor against its local
+projection of party-service mandates. The existing one-decision approval path admits only an
+exact, active `SOLE` mandate with `requiredSignatures=1`. `JOINT`, unknown, inactive and legacy
+incomplete facts fail closed before the one-shot challenge is consumed. This preserves the human
+evidence in `WithdrawalProposal.decidedBy` and `ApprovalStore` without falsely claiming that one
+signature satisfies a statutory quorum.
+
+Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
+`party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
+partial projections. Projection failures retain the channel's bounded retry/DLQ behavior.
+Rollout is account consumer/schema first, then the party producer from ADR-0284 D3, followed by a
+source-of-truth replay or reissue for existing active mandates; until that reconciliation,
+corporate decisions remain unavailable rather than over-authorized. Rollback disables the
+decision use first; the additive projection table may remain until its consumer is removed.
+
+- **2026-09-06** — **Owner-only transparency view over both authorization stores** (ADR-0232,
+  `GET /api/v1/accounts/{accountId}/authorizations/effective`). Read-only projection of the same
+  two stores (`account_authorizations`, delegation grants) and the same active/validity filters the
+  payment guard consults, so the view cannot drift from enforcement. When the customer-edge stamps
+  `X-Customer-Party-Id`, ownership is re-checked here (defence in depth); a mismatch answers 404 and
+  an unknown account answers an empty list, so no response distinguishes "not yours" from "does not
+  exist" — no account-id existence oracle. Payload carries party ids only: no names, contact details
+  or grant labels, so the endpoint cannot be used to turn an account id into a person. The
+  customer-edge route is owner-only; a delegate may read the account but not this list.
+  **Risk class:** confidentiality (bounded to party ids of parties the owner already transacts
+  with); no money mutation, no new principal, no new service-to-service edge. Rollback: remove the
+  route; enforcement is unchanged because the guard never reads this projection.
+- **2026-09-08** — **Term-deposit openings record the governing terms version** (#9044), no new
+  route, caller, edge or privilege. `POST /api/v1/accounts` for `TERM_DEPOSIT` now carries a
+  required `termsVersion`/`termsUrl`/`termsEffectiveFrom` triple, persisted on the account row
+  (V24; CHECK NOT VALID, existing deposits stay NULL — no backfill, a historical deposit must not
+  gain terms it never showed the customer). The values are resolved server-side by the
+  customer-edge from the product catalogue's currently-effective terms, and a client-supplied
+  `termsVersionShown` mismatch answers 409 there, so a terms rollout can never bind a customer to
+  a document they were not shown. The record is audit data: it is written once at opening, never
+  mutated, and read back in the account response. **Security-relevant half:** the triple is
+  evidence, not input to any authorization or money decision, so forging it requires the caller to
+  already hold the open-account privilege; the 409 comparison happens at the edge against the
+  catalogue of record, not against client-supplied truth. **Risk class:** accountability /
+  non-repudiation hardening; no money mutation, no new principal, no new service-to-service edge.
+  Rollback: drop the three columns; openings of other account types are unaffected.

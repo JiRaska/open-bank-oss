@@ -42,9 +42,13 @@ class SepaPaymentTransactionServicePactConsumerTest {
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "valueDate": "2026-01-20",
-          "rail": "SEPA"
+          "rail": "SEPA_CT"
         }
     """.trimIndent()
+
+    // #8699: the pact used to send rail "SEPA", which is NOT a PaymentRail value — it only passed
+    // because transaction-service silently nulled unparseable enums. The production client
+    // (SettlementAdapter) sends SEPA_CT; the contract must mirror the real wire.
 
     @Pact(consumer = "openbank-sepa-payment", provider = "openbank-transaction-service")
     fun initiateSepaTransactionPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -85,5 +89,45 @@ class SepaPaymentTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+    }
+
+    /**
+     * The negative half of the contract (ADR-0279 #3). A success-only contract stays green the day
+     * the provider stops enforcing authz, which is the one regression a contract is uniquely placed
+     * to catch: nothing else replays this exact request against the real provider.
+     *
+     * The state name is not free text — it is the literal
+     * `TransactionNegativeAuthPactVerificationTest.NEGATIVE_AUTH_STATE`. transaction-service splits
+     * its replay in two because a class-level `@TestSecurity` authenticates every request it makes,
+     * so a 401 interaction routed to the positive class would be served a 201 and the pact would
+     * fail for a reason that has nothing to do with authz (#8993). This state is what routes the
+     * interaction to the class that has no `@TestSecurity`.
+     *
+     * No body is asserted on purpose: an unauthenticated `@RolesAllowed` rejection is answered by
+     * the container before any mapper runs, so the 401 carries no envelope today. Pinning the
+     * status alone is the part that is true now and would still be true after #9025 gives it one.
+     */
+    @Pact(consumer = "openbank-sepa-payment", provider = "openbank-transaction-service")
+    fun initiateSepaTransactionUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST initiate SEPA transaction with no credentials")
+        .path("/api/v1/transactions")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "initiateSepaTransactionUnauthenticatedPact")
+    fun `initiateTransaction without credentials is refused with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/transactions")
+            .then()
+            .statusCode(401)
     }
 }

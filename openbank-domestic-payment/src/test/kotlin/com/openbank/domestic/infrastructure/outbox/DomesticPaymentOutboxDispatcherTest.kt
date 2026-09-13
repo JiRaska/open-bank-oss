@@ -30,8 +30,12 @@ class DomesticPaymentOutboxDispatcherTest {
     private val outboxRepository: DomesticPaymentOutboxRepository = mockk()
     private val eventPublisher: KafkaDomesticPaymentEventPublisher = mockk()
 
-    private fun dispatcher(): DomesticPaymentOutboxDispatcher =
-        DomesticPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+    private fun dispatcher(): DomesticPaymentOutboxDispatcher = DomesticPaymentOutboxDispatcher(
+        outboxRepository,
+        eventPublisher,
+        dispatchEnabled = true,
+        metrics = mockk(relaxed = true),
+    )
 
     private fun entry(eventId: UUID = UUID.randomUUID(), payload: String = "{\"event\":\"$eventId\"}") = OutboxEntry(
         eventId = eventId,
@@ -70,7 +74,7 @@ class DomesticPaymentOutboxDispatcherTest {
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
         coJustRun { eventPublisher.publish(healthy) }
         coJustRun { outboxRepository.markSent(any(), any()) }
-        coJustRun { outboxRepository.markFailed(any(), any(), any()) }
+        coEvery { outboxRepository.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         dispatcher().dispatch()
 
@@ -91,7 +95,12 @@ class DomesticPaymentOutboxDispatcherTest {
 
     @Test
     fun `dispatch is skipped when dispatchEnabled is false`(): Unit = runBlocking {
-        val disabled = DomesticPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+        val disabled = DomesticPaymentOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
         coEvery { outboxRepository.claimProcessable(any(), any()) } returns emptyList()
 
         disabled.dispatch()

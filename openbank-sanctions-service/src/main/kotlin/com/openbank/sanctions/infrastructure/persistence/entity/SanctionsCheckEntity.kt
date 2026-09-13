@@ -63,7 +63,7 @@ class SanctionsCheckEntity {
     var reviewNote: String? = null
 
     @field:Column(name = "checked_at")
-    var checkedAt: Instant = Instant.EPOCH
+    var checkedAt: Instant = Instant.now()
 
     @field:Column(name = "reviewed_at")
     var reviewedAt: Instant? = null

@@ -73,12 +73,12 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 | T3 | `sanctions_entries` rows | **Tampering** — direct DB mutation bypassing the import pipeline | App-only write path via `SanctionsEntryRepository.upsertAll`/`deactivateByListType`; reactive Panache; forward-only Flyway | DB-admin insider — infra scope |
 | R1 | Import outcome | **Repudiation** — dispute over which source URL and entry count backed a screening decision at a given time | `sanctions_lists.last_updated_at`/`last_entry_count` updated on every successful refresh (manual and scheduled); `SanctionsImportService` logs source URL + entry count per run | Not yet a signed/immutable audit record (ADR-0029 evidence bundle) — *planned*, same gap as fraud-service R1 |
 | I1 | Match results | **Information disclosure** — sanctions/PEP match reasons could leak screening logic or PII beyond what the caller needs | Match responses are same-list domain data already public on the source feed (sanctioned entity names); endpoint role-gated, no customer-facing exposure | Low — screening data is inherently about named public entities |
-| D1 | Scheduled refresh | **DoS (self-inflicted)** — a slow or hung upstream feed (e.g. a stalled multi-hundred-MB CSV stream) blocks the refresh loop or exhausts memory | Streaming parsers (SAX for OFAC XML, `BufferedReader` line-by-line for OpenSanctions CSV) — **O(1) peak memory per entry**, never buffers the full body; `IMPORT_BATCH_SIZE = 500` batched upserts; per-list `try/catch` in `scheduledRefresh()` — one hung/failing list logs a warning and does not block the others; `HttpClient` has a 30s connect timeout and 300s request timeout | No circuit breaker/backoff on a persistently-failing host yet — a feed that fails every tick retries every tick until its cron slot passes; acceptable given the 60s poll is cheap (cron-gated, not per-list every tick) |
+| D1 | Scheduled refresh | **DoS** — a slow source or large feed exhausts time or resources | CSV records are processed in batches of 500; XML imports retain parsed entries and reconciliation retains source IDs. Publisher pages are bounded independently of feed size. Per-list exception handling isolates failed attempts. | A hung stream can still delay the sequential refresh loop; connection/request timeouts do not establish an independent streaming-body deadline. Importer memory and PostgreSQL temporary storage require capacity planning. |
 | D2 | Scheduled refresh | **DoS** — the fix in this PR made the scheduled path call the real importer for the first time; a bug here could make every due list re-import on every 60s tick instead of once per cron slot | `isDueForScheduledRefresh()` compares `lastUpdatedAt` against the current minute — a list is only due once per matching cron slot; covered by unit tests (`SanctionsListServiceTest`) | Verify in a live sandbox before relying on it — no integration/Testcontainers run against a real external network signal was possible in this sandboxed session (see PR notes) |
 | E1 | Roles | **Elevation** — a viewer/service role obtains operator-only mutation (registry update, manual refresh) | Distinct `@RolesAllowed` tiers per endpoint; `listAll`/`getById` allow `ROLE_SERVICE` (read-only, for KYC/payment callers), `update`/`refresh`/`refreshAll` require `ROLE_OPERATOR`/`ROLE_ADMIN` | OPA enforce still advisory fleet-wide — *open*, same as fraud-service E1 |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — reuses the shared `openbank-services` Keycloak confidential client, same pattern as the rest of the fleet | Secret Vault-projected; confidential client; role-gated endpoints | Shared-credential blast radius accepted for sandbox only; dedicated per-service Vault path is prod hardening — *open* |
-| T4 | `SANCTIONS_LIST_CHANGED` event | **Tampering / silent loss** — a refresh that changed content but whose outbox write fails would leave the fleet's existing-customer base un-re-screened, recreating the exact "list changed after onboarding" gap the event exists to close, with no error surfaced | `publishChangeEvent` fails the refresh **loudly** (exception propagates out of `refresh()`), so a persist failure reads as a failed refresh, not a clean one; outbox dispatcher retries with the fleet-standard failure policy (ADR-0050); a content-identical refresh emits nothing by design (empty diff → no row), so the trigger cannot fire on a no-op re-import | A refresh whose diff-detection itself is wrong (e.g. a canonicalization bug making a real edit hash-identical) still emits nothing — mitigated by the per-column `IS DISTINCT` comparison being the source of truth, not a hand-rolled hash |
-| T5 | `SANCTIONS_LIST_CHANGE_STORM` guard (ADR-0256 D1) | **DoS (self-inflicted) / availability of the screening function** — an upstream schema reformat rewrites every row and is indistinguishable, entry by entry, from "the whole list changed", so an unguarded diff would raise `SANCTIONS_LIST_CHANGED` and re-screen the entire customer book off a formatting change | Above a configured share of the list (`openbank.sanctions.list-change.storm-threshold-share`, default 0.5) the re-screening trigger is **withheld** and a distinct `SANCTIONS_LIST_CHANGE_STORM` event is raised instead, carrying counts only; a consumer cannot mistake it for the trigger because the event type differs. Logged at ERROR. A list's first import (no baseline) is exempt, or a newly configured list could never raise its first trigger | **The guard trades one failure for another, deliberately:** a genuinely large legitimate change — a regime action touching more than half a list — is withheld and goes un-re-screened until an operator acts on the storm event. That is the accepted trade (a false mass re-screening is unrecoverable; a withheld one is visible and re-drivable), but it makes the storm event **operationally load-bearing**: if nobody watches it, a real bulk sanctions action is silently deferred |
+| T4 | Committed list changes | **Silent loss** — entry batches commit but the process fails before publishing their changes | V14 appends journal evidence in the same PostgreSQL transaction as each entry mutation, including old-version writers during rollout. The publisher locks an exact selection and writes outbox rows plus journal deletion in one repeatable-read Panache transaction. Failure rolls back the publication; the scheduled loop retries retained evidence outside the feed cron too. | Broker delivery remains at-least-once; consumers must deduplicate ce-id. The KYC re-screen consumer is a separate integration; an outbox row does not prove a completed re-screen. |
+| T5 | Withheld list changes | **DoS / missed re-screening** — a bulk source reformat or unaddressable identifier causes excessive or incomplete targeted work | Actual population and changed targets are summarized in SQL before paging. A share above the configured threshold, missing source ID, or oversized ID withholds targeted events and retains the journal. A distinct count-only signal is deduplicated across identical retries. Normal events contain at most 64 bounded identifiers; transaction-local SQL tables and flush/clear between pages bound publisher heap. | Retained evidence and SQL temporary storage grow with pending changes. Operator handling and KYC re-screening remain separate integrations; the count event alone is not an operational resolution. A legitimate bulk update can require deliberate intervention. |
 
 ## 4. Key invariants (must never regress)
 
@@ -160,32 +160,16 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
-- **2026-08-11** — **New outbound event: `SANCTIONS_LIST_CHANGED` published through the existing
-  `openbank.sanctions.screening.event` outbox topic** (ADR-0256 D1 follow-up, draft). Every list
-  refresh now computes a content-level diff — which `external_id`s were inserted/updated (from the
-  `upsertAll` `IS DISTINCT` WHERE-guard's `RETURNING`) and which were deactivated
-  (`deactivateMissing`'s `RETURNING`) — and publishes it as an outbox row **only when the diff is
-  non-empty**. The consumer (kyc-service, not yet wired) re-screens only the affected customers,
-  closing the "screened at onboarding, list changed after" gap. Risk class = **information
-  disclosure** (the event carries list-entry identifiers — public source-feed data, no customer
-  PII) and **repudiation-positive** (the diff is now a recorded, replayable fact, strengthening
-  R1's audit trail). A new failure mode is introduced and must be watched: a refresh that *did*
-  change content but whose outbox persist fails raises no event — `publishChangeEvent` therefore
-  fails the refresh loudly rather than swallowing (see §3 T4). No DB schema change: the diff is
-  derived from the existing content-aware upsert, not a new stored hash column. Rollback: revert;
-  the event is additive and no consumer subscribes yet.
-
-- **2026-08-15 (ADR-0256 D1 storm guard)** — The producer above gains the second half of D1's
-  firing condition, which the first cut omitted: a diff exceeding a configured share of the list
-  (default 0.5) **withholds** `SANCTIONS_LIST_CHANGED` and raises `SANCTIONS_LIST_CHANGE_STORM`
-  instead. D1 requires this because an upstream reformat is entry-for-entry indistinguishable from
-  a total content change, and the trigger's whole purpose is that it means something. New risk row
-  T5 records both the mitigation and the residual it creates — a withheld trigger is a real change
-  going un-re-screened until an operator acts, so the storm event is load-bearing rather than
-  informational. A list's first import is exempt (no baseline ⇒ undefined share) or a newly
-  configured list could never raise its first trigger. No schema change, no API change; the new
-  event is additive and no consumer subscribes yet. Rollback: revert — which restores the
-  unguarded trigger, i.e. the gap.
+- **2026-09-13** — Add durable list-change publication (ADR-0256 D1). Flyway V14 installs an
+  append-only journal trigger; publication atomically transfers an exact committed selection to
+  the existing outbox. Retry survives failed imports, process interruption and outbox rollback.
+  Equivalent alias/program/nationality ordering does not trigger a new change; malformed legacy
+  text remains repairable. SQL working sets and bounded pages prevent fleet-sized journals from
+  becoming fleet-sized JVM allocations. Change messages are additive chunks on the existing
+  topic; withheld messages retain evidence and do not claim a downstream re-screen completed.
+  Migration rollback requires stopping publication and preserving pending journal evidence before
+  dropping the trigger/tables. Existing outbox rows remain dispatchable. The KYC consumer and
+  operator resolution workflow are separate delivery requirements.
 
 - **2026-07-07** — Verified the sanctions/PEP feed registry (`sanctions_lists`, Flyway V3/V7/V8) was
   already populated with real, live source URLs (OFAC Treasury `sdn.xml`; EU/UN/HM Treasury via
@@ -225,3 +209,36 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   interceptor case in #3349 (an approval for resource A must not unlock resource B).
   Risk class = **elevation of privilege** (narrowed). Rollback: revert to `resource = ""`, which
   restores the over-broad grant — the two tests would go red first.
+- **2026-09-08** — **New inbound REST surface: `POST /api/v2/sanctions/lists/refresh-all`** (issue
+  #9048), and the v1 operation's semantics change under its unchanged shape. The old v1 behaviour
+  was itself a D1-class hazard: it ran the entire external-feed fan-out synchronously inside the
+  HTTP request, so any slow feed turned a compliance-data refresh into an opaque proxy 502/504 and
+  the fuzz lane had to exclude the operation outright. Both URL majors now set a
+  `refresh_requested_at` flag (V12, additive column) on every enabled list and return immediately —
+  v2 with 202 + `{requested: N}` and a **required `Idempotency-Key` header** (#8351), v1 with its
+  legacy 200 + array of pre-refresh lists for the deprecation window. The 60s scheduler treats a
+  flagged list as due, runs the real imports one list at a time, and `markUpdated` clears the flag
+  at commit, so a flag cannot cause re-import on every tick. Risk class = **denial of service**
+  (a refreshed-all trigger is an expensive-batch amplifier): mitigated by `ROLE_OPERATOR`/
+  `ROLE_ADMIN` + `@Authorize(sanctions.trigger)` on BOTH URL majors (regression guard extended to
+  the v2 resource class), by the flag being idempotent by construction (repeated triggers converge,
+  no dedup store needed), and by `ConcurrentExecution.SKIP` on the scheduler. No new egress — the
+  same feeds the cron already fetches. Rollback: revert; V12 is a nullable additive column and the
+  v1 path is untouched in shape.
+
+- **2026-09-04** — Issue #8362: first-party EU consolidated-list adapter + import outcomes.
+  The EU list import switches its default source from the OpenSanctions-normalised CSV mirror
+  (migration V7's workaround for a then-redirecting endpoint) to the official EU FSF XML feed,
+  SAX-streamed (`EuFsfSaxParser`, ~25 MB, O(1) memory per entity); `opensanctions` stays
+  selectable for rollback and `seed` keeps the Flyway sample entries as an explicitly
+  NON-PRODUCTION local-dev fallback (`%dev` profile). The threat this closes is silent
+  staleness masquerading as health: the import previously returned a bare count where `0`
+  meant failed, skipped AND legitimately-empty at once, so a feed that had been failing for
+  weeks read identically to a working one (#4348 shape). Every import attempt now resolves to
+  a named `ListImportOutcome` (`imported` | `empty_feed` | `failed_kept_existing` |
+  `skipped_not_entity_based` | `seed_fallback_non_production`) and increments
+  `openbank.sanctions.list.imports{list_type,outcome}` — alert on the absence of
+  `outcome=imported`, never on an error rate. The durability contract is unchanged:
+  deactivateMissing runs only after a fully-consumed stream, so a mid-stream failure keeps the
+  previously stored entries (#1432). No endpoint, authz or DB schema change; rollback = revert
+  the commit or set `SANCTIONS_EU_SOURCE=opensanctions`.

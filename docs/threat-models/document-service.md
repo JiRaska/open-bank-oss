@@ -28,7 +28,7 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
   ADR-0007/0162) — introduces an HSM/key-custody trust boundary in phase-2.
 - Outbox → Kafka (`openbank.documents.document.event`) → downstream consumers (lending, account).
 - **Kafka → document-service (new, ADR-0248):** `billing-service`'s billing-outbox
-  (`openbank.billing.billing.event`, `AnnualFeeSummaryReadyConsumer`) — the annual statement of
+  (`openbank.billing.fee.event`, `AnnualFeeSummaryReadyConsumer`) — the annual statement of
   fees is a PAD Art. 5 push duty, so this is the one template family document-service renders on an
   async trigger rather than a synchronous caller request. Same poison-pill posture as the existing
   `AccountCreatedConsumer` ingress (malformed/incomplete events are logged and skipped, never
@@ -68,3 +68,17 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - **QUALIFIED signature level** is declared but phase-2 — the QES/QSCD path is not implemented.
 - **10-year retention enforcement** (`retainUntil`) is captured as metadata but not yet enforced by a
   retention/erasure job — a tracked follow-up.
+
+## Change log
+
+- **2026-09-03** — Doc correction, no behavior change: §2 named the billing ingress topic
+  `openbank.billing.billing.event`. No such topic exists — the string occurs nowhere in the
+  repository except this document (`git grep -l -F openbank.billing.billing.event` returns only
+  this file), so no consumer, producer, contract or `KafkaTopic` CR has ever carried it. **The
+  ingress itself is real and correctly wired**: the topic is `openbank.billing.fee.event`, declared
+  by the consumer at `openbank-document-service/src/main/resources/application.yaml:251`, by the
+  producer at `openbank-billing-service/src/main/resources/application.yaml:131`, and in the
+  contract at `openbank-contracts/openbank-billing-service/asyncapi.yaml:66`. The consumer class
+  named in the same sentence, `AnnualFeeSummaryReadyConsumer`, does exist and is unchanged. Only
+  the topic name in this document was wrong; nothing about the PAD Art. 5 push duty, the
+  poison-pill posture or the trust boundary changes.

@@ -50,6 +50,20 @@ interface PushMetricsPort {
     fun recordFanOut(template: NotificationTemplate, outcome: NotificationOutcome, devices: Int)
 
     /**
+     * Record a policy-authorised handoff from a no-device PUSH to a separately persisted channel.
+     * `REROUTED` means a fallback request exists; it never claims that the target delivered it.
+     */
+    fun recordFallbackRouted(
+        template: NotificationTemplate,
+        from: NotificationChannel,
+        to: NotificationChannel,
+        outcome: NotificationOutcome,
+    )
+
+    /** Exposes the default-off fallback guard so alerts only evaluate after a reviewed activation. */
+    fun recordFallbackEnabled(enabled: Boolean)
+
+    /**
      * Record that a terminal transition found **no row** to write it onto (issue #4512).
      *
      * The status writers locate the row by `notificationId` and update it through a null-safe

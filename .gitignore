@@ -214,6 +214,15 @@ openbank-admin-ui/test-results.json
 # admin-ui image at build time (scripts/collect-quality-report.mjs, ADR-0063).
 # Derived data — never committed; regenerated per build.
 openbank-admin-ui/quality-report.json
+
+# Card capability registry baked into the admin-ui image at build time
+# (scripts/generate-card-capabilities.mjs, ADR-0283 phase 3). Derived from
+# openbank-libs/governance/card-capabilities.yaml — edit the registry, never this.
+openbank-admin-ui/card-capabilities.json
+openbank-admin-ui/test-intelligence.json
+openbank-admin-ui/perf-artifacts/
+openbank-admin-ui/test-intelligence-history/
+openbank-admin-ui/test-run-history/
 # Generated AWS Cost Explorer snapshot baked into the admin-ui image at build
 # time (scripts/collect-aws-costs.mjs). Derived billing data — never committed.
 openbank-admin-ui/cost-report.json
@@ -232,6 +241,11 @@ openbank-admin-ui/governance.json
 # never committed, and never hand-written: a second copy of the state list would drift
 # from the machine while still rendering a perfectly convincing diagram.
 openbank-admin-ui/origination-graph.json
+# Generated Kafka topic table for the developer-docs page, derived from
+# docs/asyncapi/openbank-events.yaml cross-referenced with each service's own
+# application.yaml (scripts/generate-events.mjs). Derived — never committed;
+# replaces a hand-maintained array that drifted from the AsyncAPI doc (#4761).
+openbank-admin-ui/events.json
 # Generated git-derived DORA snapshot baked at build time
 # (scripts/collect-dora.mjs, ADR-0061). Derived — never committed.
 openbank-admin-ui/dora.json

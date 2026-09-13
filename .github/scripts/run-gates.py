@@ -60,6 +60,7 @@ import concurrent.futures
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -77,14 +78,89 @@ MANIFEST = ".github/gates/gates.yaml"
 # the manifest even where a checker's dependencies are missing, and the string is the contract.
 PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
 SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
+SUBJECTS_UNRESOLVED = "UNRESOLVED"  # must match gatelib.SUBJECTS_UNRESOLVED
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
+
+# Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
+# under `bash -euo pipefail` with `unbound variable`, which is the same failure the PR_DIFF_BASE
+# guard below already exists to dress properly — see its comment: "refusing to run vacuously" says
+# what went wrong, `unbound variable` does not. Measured 2026-09-12: 3 of 220 gates read one bare,
+# and locally they produced a red that reads exactly like a finding. `security-checklist-money-path`
+# walked GITHUB_REPOSITORY -> PR_NUMBER one crash at a time, and the 5 gates that looked like
+# "pre-existing red on main" in a local `--all` were all this.
+#
+# A hand-kept list of EXTERNAL FACTS (what the runner provides), not of coverage: a name missing
+# here leaves the old `unbound variable` crash, i.e. failing towards today's behaviour, never
+# towards a gate that silently passes. PR_DIFF_BASE is deliberately absent — it has its own
+# richer required/optional derivation below.
+CI_ONLY_ENV = (
+    "BASE_REF",
+    "GH_TOKEN",
+    "GITHUB_ACTOR",
+    "GITHUB_BASE_REF",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_EVENT_PATH",
+    "GITHUB_HEAD_REF",
+    "GITHUB_OUTPUT",
+    "GITHUB_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_RUN_ID",
+    "GITHUB_SERVER_URL",
+    "GITHUB_SHA",
+    "GITHUB_TOKEN",
+    "GITHUB_WORKSPACE",
+    "PR_BODY",
+    "PR_NUMBER",
+)
 
 
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
+def unbuffer():
+    """Line-buffer stdout/stderr, unconditionally.
+
+    THE ISSUE THIS EXISTS FOR (#6068). Python block-buffers stdout when it is not a TTY,
+    and this runner printed nothing until the very end. Measured 2026-08-21 on `--all`:
+    the redirect file held **0 bytes for the whole 81-second run** and every byte appeared
+    at exit. A `--group` shard finishes in seconds, so its window is invisible — which is
+    exactly why all four reported observations were `--all` and none were per-shard.
+
+    That silence is the failure. Anything that samples the output early, or kills the run
+    (a harness timeout, a cancelled job, a closed session) and reports the WRAPPER's exit
+    code, reads "exit 0, no output" — indistinguishable from "all gates passed". With line
+    buffering a killed run leaves its partial verdicts behind, which is the difference
+    between an unexplained silence and a truncated log naming the gate it died on.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, OSError):
+            pass  # not a reconfigurable stream (a StringIO under the self-test); harmless
+
+
+TEXT_GATE_ID = re.compile(r"^  - id:\s*\S", re.M)
+
+
+def gate_count_by_text(root: pathlib.Path, path: str = MANIFEST) -> int:
+    """Count gate entries by TEXT SCAN — deliberately not the YAML parser.
+
+    The cross-count (#6068 suggestion 2, the convention `check_ruler_wiring()` and
+    `check-audit-money-path-subscription.py` adopted): a reach figure derived twice by the
+    same method is one figure. If PyYAML ever silently drops entries — a duplicate mapping
+    key keeps only the LAST, the trap CLAUDE.md documents for application.yaml — the parse
+    shrinks and nothing disagrees with it. A regex over the raw bytes cannot make that
+    mistake, and a mismatch between the two is a hard failure rather than a smaller run.
+    """
+    f = root / path
+    try:
+        return len(TEXT_GATE_ID.findall(f.read_text()))
+    except OSError:
+        return -1
+
+
 def strip_comments(body: str) -> str:
     """Drop whole-line shell comments. See the ${{ }} check in load() for why."""
     return "\n".join(l for l in body.split("\n") if not l.lstrip().startswith("#"))
@@ -142,6 +218,44 @@ def load(root: pathlib.Path, path: str = MANIFEST):
                     f"number\n"
                 )
                 sys.exit(2)
+        # selftest_inputs. The one way this optimisation can HARM: a declared path that
+        # matches nothing — a typo, or a file since renamed — makes the gate's self-test skip
+        # on every pull request forever, and the skip is silent because "no declared input
+        # changed" is the normal, expected message. So every declared path must exist in the
+        # tree right now, and the check is here rather than at execution time because a
+        # manifest that cannot be trusted must stop the run, not degrade it.
+        inputs = g.get("selftest_inputs")
+        if inputs is not None:
+            if not g.get("selftest"):
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: declares `selftest_inputs` but has no "
+                    f"`selftest` to scope. Remove it, or add the falsification.\n"
+                )
+                sys.exit(2)
+            if not isinstance(inputs, list) or not inputs or not all(
+                isinstance(x, str) and x.strip() for x in inputs
+            ):
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: `selftest_inputs` must be a non-empty list of "
+                    f"repo-relative paths.\n"
+                )
+                sys.exit(2)
+            for decl in inputs:
+                if decl in UNIVERSAL_SELFTEST_INPUTS:
+                    sys.stderr.write(
+                        f"::error::gate {g['id']}: `selftest_inputs` names `{decl}`, which is "
+                        f"already universal — every gate's self-test re-runs when it changes. "
+                        f"Listing it hides that fact from the next reader.\n"
+                    )
+                    sys.exit(2)
+                if not (root / decl).exists():
+                    sys.stderr.write(
+                        f"::error::gate {g['id']}: `selftest_inputs` names `{decl}`, which does "
+                        f"not exist. A path that matches nothing skips this gate's self-test on "
+                        f"every pull request, silently and forever.\n"
+                    )
+                    sys.exit(2)
+
         floor = g.get("min_subjects")
         if floor is not None:
             if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
@@ -223,6 +337,14 @@ def load(root: pathlib.Path, path: str = MANIFEST):
             )
             sys.exit(2)
         g["needs_base"] = derived
+        # Same treatment for the other runner-only variables, DERIVED the same way so there is
+        # nothing to declare and nothing to drift: a bare `$NAME` is required, `${NAME:-}` supplies
+        # its own default and is not. No `when` restriction — unlike PR_DIFF_BASE these are set on
+        # push as well as on pull_request, so a required one is satisfiable under either event.
+        g["needs_env"] = sorted(
+            v for v in CI_ONLY_ENV
+            if re.search(r"\$\{?" + v + r"\b", run) and not re.search(r"\$\{" + v + r":[-=]", run)
+        )
         if derived == "required" and g["when"] != "pull_request":
             sys.stderr.write(
                 f"::error::gate {g['id']}: needs_base `required` with when `{g['when']}` can "
@@ -249,6 +371,10 @@ class Result:
         # text log — measured live at 894s of gate CPU in one CI run with no way to say how
         # much of that was falsification overhead vs the check doing its actual job.
         self.selftest_seconds = 0.0
+        # True when the self-test was deliberately not run for this pull request because
+        # none of the gate's declared inputs changed. Distinct from `selftest_declared`
+        # being false: the falsification EXISTS and simply did not need re-proving here.
+        self.selftest_skipped = False
 
     @property
     def id(self):
@@ -337,13 +463,83 @@ def last_subject_count(out: str):
     for line in out.splitlines():
         line = line.strip()
         if line.startswith(SUBJECTS_PREFIX):
-            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
-            if digits.isdigit():
-                found = int(digits)
+            value = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if value.isdigit():
+                found = int(value)
+            elif value == SUBJECTS_UNRESOLVED:
+                found = SUBJECTS_UNRESOLVED
     return found
 
 
-def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> Result:
+# Files whose content can change a self-test's verdict for EVERY gate, so a change to any of
+# them re-falsifies the whole estate regardless of what a gate declares. gates.yaml carries the
+# selftest command and its expected verdict; run-gates.py decides what a verdict MEANS; gatelib
+# is imported by most checkers. Anything else is per-gate and must be declared.
+UNIVERSAL_SELFTEST_INPUTS = (
+    ".github/gates/gates.yaml",
+    ".github/scripts/run-gates.py",
+    ".github/scripts/gatelib.py",
+)
+
+
+def changed_paths(root: pathlib.Path, base: str):
+    """Repo-relative paths this PR changed against the already-resolved merge-base.
+
+    Returns None when the set cannot be established — no base, not a repo, git failed. None is
+    NOT an empty set: an empty set means "this PR changed nothing here" and would let every
+    self-test be skipped, so the caller must treat None as "run everything". That distinction is
+    the whole safety property of this function (CLAUDE.md: a probe's silence is not evidence).
+    """
+    if not base:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", base],
+            cwd=root, capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+
+def selftest_is_needed(gate, changed):
+    """(needed, reason). Whether this gate's self-test must run on THIS pull request.
+
+    A self-test proves the gate's red path is reachable. That is a property of the gate's own
+    code -- its checker, its fixture, its manifest entry -- and re-running it on a pull request
+    that touched none of them re-proves an identical static fact. Measured 2026-09-02 over the
+    ci_gate_runs warehouse: 266.1 of 889.1 gate-hours in 23 days were self-test, 193.4 h of it
+    on the pull_request lane alone.
+
+    What is NOT weakened, and why this is not a cache:
+      * nothing is stored, trusted or replayed -- there is no recorded verdict anywhere, so
+        there is nothing to poison or to go stale;
+      * every push to main runs every self-test unconditionally (`changed` is None off a pull
+        request), so a self-test broken by anything at all is caught on the merge commit that
+        introduced it, not a day later;
+      * any pull request touching a gate's declared inputs, the manifest, or the runner itself
+        falsifies that gate before it is allowed to gate the change;
+      * a gate that declares no `selftest_inputs` keeps today's behaviour exactly.
+    """
+    if not gate.get("selftest"):
+        return False, ""
+    inputs = gate.get("selftest_inputs")
+    if not inputs:
+        return True, ""
+    if changed is None:
+        return True, "the changed-file set could not be established"
+    for path in changed:
+        if path in UNIVERSAL_SELFTEST_INPUTS:
+            return True, f"`{path}` changed (universal self-test input)"
+        for decl in inputs:
+            if path == decl or path.startswith(decl.rstrip("/") + "/"):
+                return True, f"`{path}` changed (declared input `{decl}`)"
+    return False, "no declared input changed on this pull request"
+
+
+def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
         r.status = "skipped"
@@ -356,11 +552,37 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
         r.status = "failed"
         r.output = "PR_DIFF_BASE is empty but this gate requires it — refusing to run vacuously\n"
         return r
+    missing_env = [v for v in gate.get("needs_env", ()) if not os.environ.get(v)]
+    if missing_env:
+        # Say which variable and that the runner provides it. Without this the gate dies on
+        # `unbound variable` — same red, but it names a shell symptom instead of the cause, and
+        # reads like a finding to anyone running the manifest locally.
+        r.status = "failed"
+        r.output = (
+            f"{', '.join(missing_env)} {'is' if len(missing_env) == 1 else 'are'} empty but this "
+            f"gate requires {'it' if len(missing_env) == 1 else 'them'} — refusing to run "
+            f"vacuously. The Actions runner sets {'this' if len(missing_env) == 1 else 'these'}; "
+            f"locally, export {'it' if len(missing_env) == 1 else 'them'} to run this gate.\n"
+        )
+        return r
 
     t0 = time.monotonic()
     buf = []
 
     selftest = gate.get("selftest")
+    needed, why = selftest_is_needed(gate, changed)
+    if selftest and not needed:
+        # Skipped, and SAID SO in the gate's own output — a falsification that silently did not
+        # happen would be indistinguishable from one that passed, which is the failure mode this
+        # whole runner exists to prevent.
+        r.selftest_skipped = True
+        buf.append(
+            f"--- self-test SKIPPED on this pull request: {why} ---\n"
+            "[run-gates] the gate below still runs. Its self-test runs unconditionally on every\n"
+            "push to main, and on any pull request touching its declared `selftest_inputs`,\n"
+            "gates.yaml, run-gates.py or gatelib.py.\n"
+        )
+        selftest = None
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
@@ -397,7 +619,16 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     floor = gate.get("min_subjects")
     if floor is not None and rc == 0:
         found = last_subject_count(out)
-        if found is None:
+        if found == SUBJECTS_UNRESOLVED:
+            # THIRD STATE. The gate says it could not read its corpus at all (a rate-limited
+            # or unreachable API), so the floor has nothing to hold: 0 subjects here means
+            # "not measured", not "corpus collapsed". Enforcing it would turn every transient
+            # outage into a red PR — exactly what gatelib.subjects_unresolved exists to stop.
+            buf.append(
+                "\n[run-gates] this gate reported its corpus UNRESOLVED; min_subjects "
+                f"({floor}) not applied to this run. Not a pass and not a failure.\n"
+            )
+        elif found is None:
             rc = 1
             buf.append(
                 f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
@@ -457,6 +688,20 @@ ICON = {
 
 
 def report(results, jobs):
+    # ZERO GATES IS NOT A PASS (#6068). Without this, report([]) printed "0 gates" and
+    # returned 0 — the one line in this file that could answer "everything is fine" about
+    # a run that evaluated nothing. Every other vacuity guard here (empty manifest, empty
+    # run:, unknown group, missing subject floor) exists to prevent exactly that shape;
+    # the function that computes the exit code did not have one.
+    if not results:
+        sys.stderr.write(
+            "::error::run-gates: ZERO gates ran, so there is nothing to report success "
+            "about. A run that evaluated nothing is not a pass — exiting 2. If a shard is "
+            "genuinely meant to be empty, delete it from the matrix rather than letting it "
+            "report green.\n"
+        )
+        return 2
+
     # Print each gate's output inside its own collapsible group, in manifest order — the
     # concurrent completion order is not reproducible and makes logs hard to diff.
     failed, warned = [], []
@@ -480,6 +725,16 @@ def report(results, jobs):
         + "  ".join(f"{ICON[k]}={counts[k]}" for k in ICON if counts[k])
         + f"   cpu={total:.1f}s  slowest={wall:.1f}s  jobs={jobs}"
     )
+    # The per-gate roster, printed UNCONDITIONALLY — on the pass path as much as the fail
+    # path (#6068). The ::group:: blocks above are collapsed by default in the CI UI and
+    # absent entirely from a truncated log, so on a green run the only surviving evidence
+    # used to be a single count line. A caller has to be able to see WHICH gates ran, not
+    # just how many, without expanding anything.
+    print(f"--- verdicts ({len(results)} gates) ---")
+    for r in results:
+        print(f"  {ICON[r.status]:12s} {r.gate['id']:{max(len(x.gate['id']) for x in results)}s}"
+              f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]")
+
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
     for r in failed:
@@ -520,8 +775,13 @@ def json_records(results) -> list[dict]:
             # own run: at all (see execute()) — status alone already encodes this, repeated
             # here as an explicit boolean so a consumer never has to know that convention.
             "selftest_passed": (
-                None if not g.get("selftest") else r.status != "unfalsified"
+                None if not g.get("selftest") or r.selftest_skipped
+                else r.status != "unfalsified"
             ),
+            # None means "not re-proved on this pull request because no declared input
+            # changed", NOT "passed" and NOT "absent". A consumer counting falsifications must
+            # keep the three apart or the estate's coverage reads higher than it is.
+            "selftest_skipped": r.selftest_skipped,
             "budget_seconds": g.get("budget_seconds"),
             "min_subjects": g.get("min_subjects"),
         })
@@ -565,12 +825,26 @@ def main(argv=None):
                      "code or the text output")
     ap.add_argument("--self-test", action="store_true", help="falsify the runner itself")
     args = ap.parse_args(argv)
+    unbuffer()
 
     if args.self_test:
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
     gates = load(root, args.manifest)
+
+    # Cross-count the manifest's reach by a SECOND method before running anything (#6068).
+    # A YAML parse that silently lost entries yields a smaller, entirely green run, and no
+    # figure derived from that same parse can disagree with it.
+    by_text = gate_count_by_text(root, args.manifest)
+    if by_text != len(gates):
+        sys.stderr.write(
+            f"::error::run-gates: gate count disagrees by method — YAML parse says "
+            f"{len(gates)}, a text scan of {args.manifest} says {by_text}. One of them is "
+            f"losing gates (a duplicate mapping key keeps only the last), so the run would "
+            f"cover less than the manifest declares. Refusing to run.\n"
+        )
+        return 2
 
     if args.list:
         w = max(len(g["id"]) for g in gates)
@@ -594,6 +868,14 @@ def main(argv=None):
     print(f"[run-gates] {len(sel)} gates, {jobs} concurrent, event="
           f"{os.environ.get('GITHUB_EVENT_NAME', '(local)')}")
 
+    # Resolved ONCE for the whole invocation: 40-odd gates in a shard would otherwise each
+    # shell out to git for the identical answer. `None` off a pull request (and whenever the
+    # set cannot be established) means every self-test runs — see selftest_is_needed().
+    changed = changed_paths(root, os.environ.get("PR_DIFF_BASE", "")) if is_pr else None
+    if changed is not None:
+        print(f"[run-gates] pull request changed {len(changed)} paths; self-tests whose declared "
+              f"inputs are untouched will be skipped")
+
     index = git_index_path(root)
     # One YAML parse cache for the whole invocation. The gates are separate processes over one
     # corpus — the 20 single-script python gates in the `gitops` shard cost 231s apart and 8.7s
@@ -605,11 +887,30 @@ def main(argv=None):
     os.environ[PARSE_CACHE_ENV] = cache
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
-            done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed): g["id"] for g in sel}
+            done = {}
+            # Emit a line PER GATE as it finishes, rather than nothing until the end
+            # (#6068). Combined with unbuffer() this is what makes a run that is killed
+            # part-way leave evidence of how far it got, instead of an empty file.
+            for f in concurrent.futures.as_completed(futs):
+                r = f.result()
+                done[futs[f]] = r
+                print(f"[run-gates] {len(done):3d}/{len(sel)} {ICON[r.status]:12s} "
+                      f"{r.gate['id']} ({r.seconds:.1f}s)")
     finally:
         os.environ.pop(PARSE_CACHE_ENV, None)
         shutil.rmtree(cache, ignore_errors=True)
+
+    # Everything that was submitted must come back. A missing id here would silently
+    # shrink `results` (and with it every count printed below) rather than fail.
+    missing = [g["id"] for g in sel if g["id"] not in done]
+    if missing or len(done) != len(sel):
+        sys.stderr.write(
+            f"::error::run-gates: {len(sel)} gates were submitted but {len(done)} came "
+            f"back{' (missing: ' + ', '.join(missing) + ')' if missing else ''}. The run "
+            f"is incomplete, so its verdict is not evidence. Refusing to report it.\n"
+        )
+        return 2
     results = [done[g["id"]] for g in sel]
     if args.json:
         # Written BEFORE report()'s exit code is returned, so a shard that goes on to fail
@@ -680,6 +981,11 @@ gates:
     group: t
     min_subjects: 3
     run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unresolved
+    name: "a gate whose corpus could not be READ is not held to its floor"
+    group: t
+    min_subjects: 3
+    run: "echo 'SUBJECTS=UNRESOLVED  # rate limited'"
   - id: floor-unreported
     name: "a gate that declares a floor and never prints a count"
     group: t
@@ -713,6 +1019,7 @@ EXPECTED = {
     "passing": "ok",
     "floor-met": "ok",
     "floor-missed": "failed",
+    "floor-unresolved": "ok",
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
@@ -751,6 +1058,11 @@ def self_test():
                 bad.append("over-budget: failed, but not for the budget reason")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
+            # The third state, both halves: an UNRESOLVED corpus must pass DESPITE the floor,
+            # and must say out loud that the floor was not applied — a silent pass here is
+            # indistinguishable from a gate that really checked 3 subjects.
+            if r.id == "floor-unresolved" and "min_subjects (3) not applied" not in r.output:
+                bad.append("floor-unresolved: passed without saying the floor was skipped")
             # ADR-0255's json_records() must round-trip through json.dumps (a Result carrying
             # something non-serialisable would crash the whole run at the very end, after
             # every gate had already finished) and preserve the SUBJECTS= count this record
@@ -988,6 +1300,36 @@ def self_test():
                     f"the guard's message, got: {r.output.strip()[:120]}"
                 )
 
+        # The same guard for the other runner-only variables. Asserting the MESSAGE is the whole
+        # point here too: `bash -euo pipefail` already fails on a bare unset variable, so a status
+        # check alone passes against no guard at all. Known-positive (bare read, variable unset),
+        # known-negative in BOTH directions — the variable present, and the `${NAME:-}` form that
+        # supplies its own default and must run even when unset.
+        for body, env, want, want_text in (
+            ('run: "echo $GITHUB_REPOSITORY"', None, "failed", "GITHUB_REPOSITORY is empty"),
+            ('run: "echo $GITHUB_REPOSITORY"', "o/r", "ok", None),
+            ('run: "echo ${GITHUB_REPOSITORY:-}"', None, "ok", None),
+            ('run: "echo $PR_NUMBER $GITHUB_REPOSITORY"', None, "failed",
+             "GITHUB_REPOSITORY, PR_NUMBER are empty"),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+            )
+            os.environ.pop("GITHUB_REPOSITORY", None)
+            os.environ.pop("PR_NUMBER", None)
+            if env:
+                os.environ["GITHUB_REPOSITORY"] = env
+            g = load(tmp)[0]
+            r = execute(g, tmp, is_pr=True, timeout=5)
+            os.environ.pop("GITHUB_REPOSITORY", None)
+            if r.status != want:
+                bad.append(f"CI-only env {body} (env={env}): want {want}, got {r.status}")
+            if want_text and want_text not in r.output:
+                bad.append(
+                    f"CI-only env {body}: failed for the wrong reason — expected the guard's "
+                    f"message naming the variable, got: {r.output.strip()[:120]}"
+                )
+
         # --json end to end: a real file gets written and round-trips through json.load, and
         # an unwritable path warns instead of taking the whole run down (main()'s own
         # try/except, exercised here rather than only unit-testing json_records() in
@@ -1026,6 +1368,198 @@ def self_test():
             bad.append("--json to an unwritable path did not warn")
         if rc2 == 0:
             bad.append("--json to an unwritable path unexpectedly reported success overall")
+
+        # ------------------------------------------------------------------
+        # #6068: the runner must not be able to report success having run nothing,
+        # and must not be able to report ANYTHING silently.
+        # ------------------------------------------------------------------
+
+        # 1. Zero gates ran -> non-zero, and it must SAY that nothing ran. Status-only
+        #    assertions would pass against a report() that returned 2 for a different
+        #    reason, which is how a guard ends up green for the wrong cause.
+        sink0 = io.StringIO()
+        with contextlib.redirect_stderr(sink0):
+            rc_empty = report([], 1)
+        if rc_empty == 0:
+            bad.append("report([]) returned 0 — a run that evaluated nothing read as a pass")
+        if "ZERO gates ran" not in sink0.getvalue():
+            bad.append("report([]) failed without naming the fact that nothing ran")
+
+        # 2. The cross-count. Both directions: a manifest whose two counting methods
+        #    disagree must abort, and the REAL manifest must agree — a check that always
+        #    reported a mismatch would satisfy the negative case on its own.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        if gate_count_by_text(tmp) != len(load(tmp)):
+            bad.append("gate_count_by_text disagrees with the YAML parse on a VALID manifest")
+        repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
+        if (repo_root / MANIFEST).is_file():
+            n_text, n_yaml = gate_count_by_text(repo_root), len(load(repo_root))
+            if n_text != n_yaml:
+                bad.append(f"the repo's own {MANIFEST}: text scan {n_text} != YAML {n_yaml}")
+        # duplicate `id:` keys inside one entry: PyYAML keeps the last, the text scan sees
+        # the entries — the shape the cross-count exists to catch.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            'gates:\n  - id: a\n    name: a\n    group: t\n    run: "true"\n'
+        )
+        if gate_count_by_text(tmp) != 1:
+            bad.append(f"text scan miscounted a 1-gate manifest: {gate_count_by_text(tmp)}")
+
+        # 3. NO TTY -> still non-empty output, same verdict as an ordinary run. Driven as a
+        #    real SUBPROCESS with pipes for stdout/stderr: an in-process call cannot observe
+        #    buffering at all, which is the whole defect (#6068). stdin is closed too, so
+        #    nothing about the invocation looks interactive.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        for label, argv_tty in (
+            ("failing shard", ["--group", "t", "--timeout", "3"]),
+            ("passing shard", ["--only", "passing"]),
+        ):
+            proc = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve()),
+                 "--root", str(tmp)] + argv_tty,
+                capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                env={**os.environ, "GITHUB_EVENT_NAME": "push"},
+            )
+            if not proc.stdout.strip():
+                bad.append(f"no-TTY {label}: EMPTY stdout — the #6068 shape, exit "
+                           f"{proc.returncode}")
+            if "--- verdicts" not in proc.stdout:
+                bad.append(f"no-TTY {label}: no per-gate verdict roster in the output")
+            want_rc = (label == "passing shard")
+            if (proc.returncode == 0) != want_rc:
+                bad.append(f"no-TTY {label}: exit {proc.returncode}, want "
+                           f"{'0' if want_rc else 'non-zero'}")
+
+        # 4. STREAMING, not just eventual. The three checks above all wait for the process
+        #    to exit, and exit flushes — so every one of them passes against the block-
+        #    buffered build that produced #6068. This is the assertion that can actually
+        #    fail: with stdout redirected to a FILE (never a TTY), output must be readable
+        #    while the run is still in flight. Measured on origin/main before the fix:
+        #    0 bytes for the whole 81s of `--all`, everything appearing at exit.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            'gates:\n  - id: slow-a\n    name: slow-a\n    group: t\n    run: "true"\n'
+            '  - id: slow-b\n    name: slow-b\n    group: t\n    run: "sleep 6"\n'
+        )
+        stream_out = tmp / "streamed.log"
+        with open(stream_out, "wb") as fh:
+            proc = subprocess.Popen(
+                [sys.executable, str(pathlib.Path(__file__).resolve()),
+                 "--root", str(tmp), "--group", "t", "--timeout", "30"],
+                stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                env={**os.environ, "GITHUB_EVENT_NAME": "push"},
+            )
+            seen = 0
+            deadline = time.monotonic() + 4.0
+            while time.monotonic() < deadline and proc.poll() is None:
+                seen = stream_out.stat().st_size
+                if seen:
+                    break
+                time.sleep(0.1)
+            alive_when_seen = proc.poll() is None
+            proc.wait(timeout=60)
+        if not seen:
+            bad.append(
+                "stdout to a non-TTY file stayed EMPTY while the run was in flight — this "
+                "is #6068 exactly: a killed or sampled run is indistinguishable from a "
+                "silent pass. unbuffer() is not taking effect."
+            )
+        elif not alive_when_seen:
+            bad.append("output only appeared after the process had already exited")
+
+        # 9. SELFTEST INPUT SCOPING. Skipping a falsification is the one optimisation in
+        #    this runner that can hollow it out, so every branch is driven here — including
+        #    the two that must NOT skip, because a feature that skips everything would satisfy
+        #    a test that only checked the skip.
+        SKIP_CASES = [
+            # (gate dict fragment, changed set, want_needed, label)
+            ({"selftest": "true"}, {"any/file"}, True,
+             "no selftest_inputs declared -> unchanged behaviour, always runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, {"a/b.py"}, True,
+             "a declared input changed -> runs"),
+            ({"selftest": "true", "selftest_inputs": ["a"]}, {"a/deep/c.py"}, True,
+             "a declared DIRECTORY prefix contains the change -> runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, {"z/other.py"}, False,
+             "nothing declared changed -> skipped"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/gates/gates.yaml"}, True,
+             "the manifest changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/scripts/run-gates.py"}, True,
+             "the runner changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/scripts/gatelib.py"}, True,
+             "gatelib changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, None, True,
+             "changed set UNKNOWN -> runs (None is not an empty set)"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, set(), False,
+             "a pull request that changed nothing -> skipped"),
+            ({"selftest": "true", "selftest_inputs": ["ab"]}, {"abc/d.py"}, False,
+             "prefix must be a PATH boundary: `ab` must not match `abc/`"),
+            ({"run": "true"}, {"a/b.py"}, False,
+             "no selftest at all -> nothing to run"),
+        ]
+        for frag, changed_set, want, label in SKIP_CASES:
+            got, _why = selftest_is_needed(dict(frag), changed_set)
+            if got != want:
+                bad.append(f"selftest scoping [{label}]: want needed={want}, got {got}")
+
+        # And end to end through execute(), because the predicate agreeing is not the same as
+        # the runner acting on it: a skipped self-test must still RUN THE GATE, must say in its
+        # own output that the falsification did not happen, and must not report `selftest_passed`.
+        scoped = {
+            "id": "scoped", "name": "scoped", "group": "t", "when": "always",
+            "mode": "enforced", "selftest": "exit 1", "selftest_expect": "pass",
+            "selftest_inputs": ["a/b.py"], "run": "echo ran-anyway",
+        }
+        r = execute(dict(scoped), tmp, True, 60, None, {"z/unrelated.py"})
+        if r.status != "ok":
+            bad.append(f"scoped skip: a broken self-test with untouched inputs should not "
+                       f"block the gate on a PR, got {r.status}")
+        if "ran-anyway" not in r.output:
+            bad.append("scoped skip: the GATE itself did not run")
+        if "self-test SKIPPED" not in r.output:
+            bad.append("scoped skip: output does not say the falsification was skipped")
+        if not r.selftest_skipped:
+            bad.append("scoped skip: selftest_skipped flag not set")
+        if json_records([r])[0]["selftest_passed"] is not None:
+            bad.append("scoped skip: selftest_passed must be null, never true, when skipped")
+        if r.selftest_seconds != 0.0:
+            bad.append("scoped skip: charged self-test time for a self-test that did not run")
+
+        # The SAME gate, same broken self-test, with the changed set unknown — i.e. every push
+        # to main. It must go UNFALSIFIED. This is the case that makes the whole design safe,
+        # so it is asserted rather than assumed.
+        r = execute(dict(scoped), tmp, False, 60, None, None)
+        if r.status != "unfalsified":
+            bad.append(f"off a pull request a broken self-test must be UNFALSIFIED, got {r.status}")
+
+        # A declared input that does not exist would skip forever, silently. load() must refuse.
+        (tmp / "real-input.py").write_text("# a path that really exists\n")
+        man = tmp / ".github" / "gates" / "gates.yaml"
+        for body, want_refused in (
+            ('selftest_inputs: ["does/not/exist.py"]', True),
+            ('selftest_inputs: [".github/gates/gates.yaml"]', True),   # already universal
+            ('selftest_inputs: []', True),
+            ('selftest_inputs: "a-string"', True),
+            ('selftest_inputs: ["real-input.py"]', False),             # the valid shape
+            # ...and the valid shape must still be refused without a selftest to scope.
+            ('selftest_inputs: ["real-input.py"]\n    NO_SELFTEST: 1', True),
+        ):
+            decl = body.replace("\n    NO_SELFTEST: 1", "")
+            has_selftest = "NO_SELFTEST" not in body
+            man.write_text(
+                "gates:\n  - id: x\n    name: x\n    group: t\n"
+                + ('    selftest: "true"\n    selftest_expect: pass\n' if has_selftest else "")
+                + f"    {decl}\n" + '    run: "true"\n'
+            )
+            rc = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve()), "--list"],
+                capture_output=True, text=True, cwd=str(tmp),
+            ).returncode
+            if want_refused and rc == 0:
+                bad.append(f"load() accepted an unusable selftest_inputs ({body!r})")
+            if not want_refused and rc != 0:
+                bad.append(f"load() rejected a valid selftest_inputs ({body!r})")
+        man.write_text(SELF_TEST_MANIFEST)   # restore for anything after this block
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

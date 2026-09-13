@@ -35,9 +35,23 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
                 entity.lastUpdatedAt = updatedAt
                 entity.lastEntryCount = entryCount
                 entity.updatedAt = updatedAt
+                // #9048: the refresh the flag asked for has now run — clear it, or the scheduler
+                // would re-import the list on every tick forever.
+                entity.refreshRequestedAt = null
             }
         }
     }.map { it?.toDomain() }
+
+    /**
+     * #9048: flag every enabled list for refresh, returning how many were flagged. The actual
+     * imports run on the scheduler ticks, one list per unit of work — never inside the HTTP
+     * request that asked.
+     */
+    suspend fun requestRefreshAll(): Int = Panache.withTransaction {
+        // `now` must be computed in the body, never as a default parameter — a default arg is
+        // evaluated at the call site even on a mockk mock (whose clock is null → NPE in tests).
+        update("refreshRequestedAt = ?1, updatedAt = ?1 WHERE enabled = true", Instant.now(clock))
+    }.awaitSuspending()
 
     suspend fun listSanctionsLists(): List<SanctionsList> = listSanctionsListsUni().awaitSuspending()
 

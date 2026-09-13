@@ -111,6 +111,9 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "status", nullable = false)
     lateinit var status: DelegationStatus
 
+    @Column(name = "lifecycle_revision", nullable = false)
+    var lifecycleRevision: Long = 0
+
     @Column(name = "grant_sca_session_id")
     var grantScaSessionId: UUID? = null
 
@@ -153,6 +156,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
         validFrom = validFrom,
         validTo = validTo,
         status = status,
+        lifecycleRevision = lifecycleRevision,
         grantScaSessionId = grantScaSessionId,
         acceptScaSessionId = acceptScaSessionId,
         note = note,
@@ -222,6 +226,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
             validFrom = g.validFrom
             validTo = g.validTo
             status = g.status
+            lifecycleRevision = g.lifecycleRevision
             grantScaSessionId = g.grantScaSessionId
             acceptScaSessionId = g.acceptScaSessionId
             note = g.note

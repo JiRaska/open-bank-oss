@@ -4,8 +4,10 @@
 
 package com.openbank.domestic.application.workflow
 
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
+import com.openbank.domestic.application.port.out.CustomerNotificationPort
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreOutcome
@@ -20,6 +22,7 @@ import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.port.out.SettlementOutcome
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
+import com.openbank.domestic.application.port.out.customerSafeReason
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -30,6 +33,7 @@ import com.openbank.domestic.domain.screening.ScreeningMatchStatus
 import com.openbank.domestic.domain.screening.ScreeningResult
 import com.openbank.domestic.domain.screening.ScreeningRole.CREDITOR
 import com.openbank.domestic.domain.screening.ScreeningRole.DEBTOR
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coJustRun
@@ -38,6 +42,7 @@ import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -61,6 +66,11 @@ class DomesticPaymentActivitiesImplTest {
     private lateinit var fraudScoringPort: FraudScoringPort
     private lateinit var schemeGatewayPort: SchemeGatewayPort
     private lateinit var settlementPort: SettlementPort
+    private lateinit var accountLookupPort: AccountLookupPort
+    private lateinit var customerNotificationPort: CustomerNotificationPort
+    private lateinit var metrics: DomainMetrics
+
+    private val ownerPartyId: UUID = UUID.randomUUID()
 
     private lateinit var activities: DomesticPaymentActivitiesImpl
     private lateinit var activitiesWithScheme: DomesticPaymentActivitiesImpl
@@ -72,6 +82,9 @@ class DomesticPaymentActivitiesImplTest {
         screeningPort = mockk()
         amlCasePort = mockk()
         fraudScoringPort = mockk()
+        accountLookupPort = mockk()
+        customerNotificationPort = mockk()
+        metrics = mockk(relaxed = true)
         activities = object : DomesticPaymentActivitiesImpl(
             paymentRepository,
             eventPublisher,
@@ -80,7 +93,10 @@ class DomesticPaymentActivitiesImplTest {
             fraudScoringPort,
             schemeGatewayPort = mockk(),
             settlementPort = mockk(),
+            accountLookupPort = accountLookupPort,
+            customerNotificationPort = customerNotificationPort,
             clock = Clock.systemUTC(),
+            metrics = metrics,
             schemeSubmissionEnabled = false,
         ) {
             override fun <T> vtx(block: suspend () -> T): T = runBlocking { block() }
@@ -90,6 +106,8 @@ class DomesticPaymentActivitiesImplTest {
         coJustRun { amlCasePort.openCase(any()) }
         coEvery { paymentRepository.claimSchemeDispatch(any(), any()) } returns true
         coJustRun { paymentRepository.clearSchemeDispatch(any()) }
+        coEvery { accountLookupPort.findPartyByAccountId(any()) } returns ownerPartyId
+        coJustRun { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) }
 
         schemeGatewayPort = mockk()
         settlementPort = mockk()
@@ -101,7 +119,10 @@ class DomesticPaymentActivitiesImplTest {
             fraudScoringPort,
             schemeGatewayPort = schemeGatewayPort,
             settlementPort = settlementPort,
+            accountLookupPort = accountLookupPort,
+            customerNotificationPort = customerNotificationPort,
             clock = Clock.systemUTC(),
+            metrics = metrics,
             schemeSubmissionEnabled = true,
         ) {
             override fun <T> vtx(block: suspend () -> T): T = runBlocking { block() }
@@ -120,6 +141,51 @@ class DomesticPaymentActivitiesImplTest {
 
         assertThat(decision).isEqualTo(ScreeningDecision.CLEAR)
         coVerify(exactly = 0) { amlCasePort.openCase(any()) }
+    }
+
+    // Issue #5049: openbank_sanctions_screenings_total / openbank_sanctions_hits_total had NO
+    // call site anywhere in this class -- see the sepa-payment equivalent for why
+    // sanctions-service itself cannot record these (no "role" concept of its own).
+    @Test
+    fun `screenPayment records sanctionsScreening for both roles and no hit when both are clear`() {
+        val payment = payment()
+        coEvery { paymentRepository.findById(payment.id) } returns payment
+        coEvery { screeningPort.screen(any(), any(), any()) } answers {
+            ScreeningResult(firstArg(), secondArg(), ScreeningMatchStatus.CLEAR, 0.0, null)
+        }
+
+        activities.screenPayment(payment.id)
+
+        verify(exactly = 1) { metrics.sanctionsScreening("debtor") }
+        verify(exactly = 1) { metrics.sanctionsScreening("creditor") }
+        verify(exactly = 0) { metrics.sanctionsHit(any(), any()) }
+    }
+
+    @Test
+    fun `screenPayment records a block-severity hit only for the debtor that HIT`() {
+        val payment = payment()
+        coEvery { paymentRepository.findById(payment.id) } returns payment
+        coEvery { screeningPort.screen(payment.debtorName, DEBTOR, any()) } returns
+            ScreeningResult(payment.debtorName, DEBTOR, ScreeningMatchStatus.HIT, 0.99, "OFAC:123")
+        coEvery { screeningPort.screen(payment.creditorName, CREDITOR, any()) } returns
+            ScreeningResult(payment.creditorName, CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+        coJustRun { amlCasePort.openCase(any()) }
+
+        activities.screenPayment(payment.id)
+
+        verify(exactly = 1) { metrics.sanctionsHit("debtor", "block") }
+        verify(exactly = 0) { metrics.sanctionsHit("creditor", any()) }
+    }
+
+    @Test
+    fun `screenPayment records nothing when screening is skipped for an own-accounts transfer`() {
+        val payment = payment().copy(transferScope = DomesticTransferScope.OWN_ACCOUNTS)
+        coEvery { paymentRepository.findById(payment.id) } returns payment
+
+        activities.screenPayment(payment.id)
+
+        verify(exactly = 0) { metrics.sanctionsScreening(any()) }
+        verify(exactly = 0) { metrics.sanctionsHit(any(), any()) }
     }
 
     @Test
@@ -306,6 +372,89 @@ class DomesticPaymentActivitiesImplTest {
                 any(),
             )
         }
+    }
+
+    // ─── TRANSACTION_FAILED notifications (#8432) ───────────────────────────────
+
+    @Test
+    fun `a scheme-rejected payment tells the account OWNER, with a safe reason`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AM05")
+
+        activitiesWithScheme.submitScheme(validated.id)
+
+        coVerify {
+            accountLookupPort.findPartyByAccountId(validated.debtorAccountId)
+            customerNotificationPort.notifyPaymentFailed(
+                ownerPartyId,
+                validated.amount,
+                validated.currency,
+                customerSafeReason(DomesticRejectReason.INSUFFICIENT_FUNDS),
+            )
+        }
+    }
+
+    @Test
+    fun `an accepted payment raises no failure notification`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+
+        activitiesWithScheme.submitScheme(validated.id)
+
+        coVerify(exactly = 0) { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) }
+    }
+
+    /**
+     * The load-bearing guard. `rejectPayment` is the sanctions-screening BLOCK path and always
+     * records SANCTIONS_HIT; telling the customer their payment was stopped by a financial-crime
+     * control is tipping-off. Whether they should get a neutral message instead is a compliance
+     * decision (#8432), so this path stays silent until someone makes it.
+     */
+    @Test
+    fun `the sanctions-screening reject path notifies nobody`() {
+        val payment = payment()
+        coEvery { paymentRepository.findById(payment.id) } returns payment
+
+        activities.rejectPayment(payment.id)
+
+        coVerify(exactly = 0) { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an unresolvable account owner drops the notification instead of failing the activity`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC04")
+        coEvery { accountLookupPort.findPartyByAccountId(any()) } returns null
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
+        coVerify(exactly = 0) { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) }
+    }
+
+    /**
+     * A notification that cannot be published must never fail the activity: Temporal would retry
+     * it, and the retry would re-run bookkeeping for a verdict already recorded.
+     */
+    @Test
+    fun `a notification failure does not disturb the rejection verdict`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC04")
+        coEvery { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) } throws
+            IllegalStateException("kafka down")
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
+        coVerify { paymentRepository.update(match { it.status == DomesticPaymentStatus.REJECTED }, any()) }
     }
 
     @Test

@@ -78,7 +78,7 @@ sequenceDiagram
   Con->>SCA: GET /sca/challenges/S
   SCA-->>Con: {partyId, purpose, status}
   alt status=COMPLETED & partyId matches & purpose=CONSENT_GRANT
-    Con->>Con: status=ACTIVE; outbox ConsentGranted
+    Con->>Con: status=ACTIVE#59; outbox ConsentGranted
     Con-->>TPP: 200 ACTIVE
   else not completed / mismatch
     Con-->>TPP: 422 VALIDATION_ERROR

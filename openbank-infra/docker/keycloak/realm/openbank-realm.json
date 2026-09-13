@@ -2,6 +2,9 @@
   "id": "openbank",
   "realm": "openbank",
   "displayName": "OpenBank",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self' https://admin.open-bank.tech; frame-ancestors 'self' https://admin.open-bank.tech; object-src 'none';"
+  },
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -30,6 +33,10 @@
         "description": "Read-only access"
       },
       {
+        "name": "ROLE_DPO",
+        "description": "Data Protection Officer — GDPR Art. 15/20 export endpoints (ADR-0204); no write actions"
+      },
+      {
         "name": "ROLE_API",
         "description": "Machine-to-machine API access"
       },
@@ -40,6 +47,39 @@
     ]
   },
   "clients": [
+    {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ],
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "realm roles (lightweight)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "true"
+          }
+        }
+      ]
+    },
     {
       "clientId": "openbank-services",
       "name": "OpenBank Services",

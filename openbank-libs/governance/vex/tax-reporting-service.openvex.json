@@ -1,0 +1,80 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/tax-reporting-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-33818"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-39821"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46600"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56853"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56858"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56859"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56860"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56862"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Every openbank-*-service image shares the fleet-standard base pinned in .github/workflows/Dockerfile.deploy (FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e), itself built on ubuntu:26.04 via Canonical rockcraft. That base ships usr/bin/pebble, Canonical's Pebble service manager - not a dpkg-tracked package (dpkg -S finds no owning package on the running image), so it is baked into the upstream rockcraft build and not something this fleet installs or can remove. Verified against the CURRENT eclipse-temurin:25-jre manifest (sha256:20723ef8e8a0a332c6cc569f32484f7c5beefc207354465eb95c89227d52ae93, published 2026-08-04, newer than our pin) with a fresh trivy image scan: pebble's embedded Go stdlib is still v1.26.5 there too, so no upstream rebuild against a patched Go toolchain exists yet and bumping the pinned digest would not clear this finding. Exploitability: the base image's own ENTRYPOINT (/__cacert_entrypoint.sh, confirmed via `crane config`) is overridden by Dockerfile.deploy's `ENTRYPOINT [\"java\",\"-XX:+UseZGC\",...,\"-jar\",\"/app/quarkus-run.jar\"]`; nothing in this repo's Dockerfiles, gitops manifests or k8s probes invokes usr/bin/pebble, execs into it, or opens its control socket (PEBBLE_SOCKET, default /var/lib/pebble/default/.pebble.socket) - grep across openbank-infra confirms no reference. The binary is present on disk but never started as a process in any deployed pod, so none of this CVE's Go stdlib code paths are ever reached. Tracked fleet-wide in issue #5206 pending an upstream eclipse-temurin rebuild against a patched Go toolchain.",
+      "timestamp": "2026-08-17T09:38:36Z"
+    }
+  ]
+}

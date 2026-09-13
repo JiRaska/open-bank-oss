@@ -7,11 +7,12 @@ import styles from './AgentMeshExplainer.module.css'
 
 type Language = 'cs' | 'en'
 
-function MeshStep({ icon: Icon, number, title, detail }: {
+function MeshStep({ icon: Icon, number, title, detail, action }: {
   icon: typeof Network
   number: string
   title: string
   detail: string
+  action?: { href: string; label: string }
 }) {
   return (
     <li className={styles.step}>
@@ -19,6 +20,11 @@ function MeshStep({ icon: Icon, number, title, detail }: {
       <span className={styles.icon}><Icon size={18} /></span>
       <strong>{title}</strong>
       <span>{detail}</span>
+      {action && (
+        <Link href={action.href} className={styles.stepLink}>
+          {action.label} <ArrowRight size={12} />
+        </Link>
+      )}
     </li>
   )
 }
@@ -48,13 +54,16 @@ export function AgentMeshExplainer({ language }: { language: Language }) {
             detail={t('Například alert, nález nebo požadavek na prověření.', 'For example, an alert, finding, or request for review.')} />
           <MeshStep number="2" icon={Network}
             title={t('Koordinátor drží případ', 'A coordinator holds the case')}
-            detail={t('Hlídá společný kontext, rozpočet, termín a okamžik zastavení.', 'It holds shared context, budget, deadline, and the stop condition.')} />
+            detail={t('Hlídá společný kontext, rozpočet, termín a okamžik zastavení.', 'It holds shared context, budget, deadline, and the stop condition.')}
+            action={{ href: '/iaops/agents/case-coordinator', label: t('Poznat Korda', 'Meet Chord') }} />
           <MeshStep number="3" icon={UsersRound}
             title={t('Specialisté přispějí', 'Specialists contribute')}
-            detail={t('Každý přidá jen svůj pohled a důkazy v mezích svého charteru.', 'Each adds only its own view and evidence within its charter.')} />
+            detail={t('Každý přidá jen svůj pohled a důkazy v mezích svého charteru.', 'Each adds only its own view and evidence within its charter.')}
+            action={{ href: '/iaops#agent-roster', label: t('Prohlédnout charterové role', 'Explore chartered roles') }} />
           <MeshStep number="4" icon={Hand}
             title={t('Člověk rozhodne', 'A human decides')}
-            detail={t('Dostane jeden návrh, zdroje i případné nesouhlasy. Agenti do business služby přímo nezapisují.', 'They receive one proposal, sources, and any dissent. Agents never write directly to a business service.')} />
+            detail={t('Dostane jeden návrh, zdroje i případné nesouhlasy. Agenti do business služby přímo nezapisují.', 'They receive one proposal, sources, and any dissent. Agents never write directly to a business service.')}
+            action={{ href: '/iaops/cases', label: t('Otevřít case vlákna', 'Open case threads') }} />
         </ol>
 
         <div className={styles.footer}>

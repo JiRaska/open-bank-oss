@@ -37,14 +37,23 @@ interface LlmDiagnosisPort {
     suspend fun proposeFixDiff(finding: ReleaseStewardFinding, diagnosis: String): String?
 }
 
+/**
+ * Both methods return the URL of a proposal that was actually created, or `null` when none was —
+ * an unwired write path, a missing token, or a refused finding. `null` is the ONLY way to say
+ * "nothing was created": there is deliberately no placeholder-URL return, because a well-formed
+ * string is indistinguishable from a delivered proposal to every consumer (#5897, and the
+ * `UnwiredProposalPort` precedent in `openbank-mcp-service`, #3900).
+ */
 interface GitHubProposalPort {
     /** The one mechanically fixable case — deleting an explicit `quarkus.application.version` key
      * (ADR-0165 check 3). Not the primary proposal path: a manifest-drift, admin-ui-sync, or
-     * openapi-collision finding needs a human decision, not a diff (ADR-0165 Decision). */
-    suspend fun openProposalPr(finding: ReleaseStewardFinding, fixDiff: String): String
+     * openapi-collision finding needs a human decision, not a diff (ADR-0165 Decision). Returns
+     * `null` when no PR was opened. */
+    suspend fun openProposalPr(finding: ReleaseStewardFinding, fixDiff: String): String?
 
-    /** The primary proposal path: a release/version-axis drift needing human triage. */
-    suspend fun openTicket(finding: ReleaseStewardFinding, diagnosis: String): String
+    /** The primary proposal path: a release/version-axis drift needing human triage. Returns
+     * `null` when no ticket was opened. */
+    suspend fun openTicket(finding: ReleaseStewardFinding, diagnosis: String): String?
 }
 
 interface FindingRepository {

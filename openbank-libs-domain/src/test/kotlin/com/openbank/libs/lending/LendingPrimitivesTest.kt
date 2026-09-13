@@ -136,6 +136,7 @@ class LendingPrimitivesTest {
             pdLifetime = BigDecimal("0.20"),
             lgd = BigDecimal("0.45"),
             exposureAtDefault = eur("10000.00"),
+            modelVersion = "test-model-v1",
         )
         // Stage 1: 0.02 * 0.45 * 10000 = 90.00
         assertThat(Ifrs9.ecl(Ifrs9Stage.STAGE_1, inputs).expectedCreditLoss).isEqualTo(eur("90.00"))
@@ -153,7 +154,7 @@ class LendingPrimitivesTest {
     @Test
     fun `ifrs9 rejects out-of-range probabilities`() {
         assertThatThrownBy {
-            EclInputs(BigDecimal("1.5"), BigDecimal("0.2"), BigDecimal("0.4"), eur("100.00"))
+            EclInputs(BigDecimal("1.5"), BigDecimal("0.2"), BigDecimal("0.4"), eur("100.00"), "test-model-v1")
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 

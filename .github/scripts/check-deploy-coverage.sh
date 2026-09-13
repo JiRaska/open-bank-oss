@@ -5,7 +5,8 @@
 #
 # ---------------------------------------------------------------------------------------
 # Guard: every released component with a gitops workload must be in auto-deploy's
-# ALL_SERVICES (rules.yaml: deploy_coverage).
+# ALL_SERVICES, release markers must reach DIRECT_SERVICES, and recovery PRs must target
+# main (rules.yaml: deploy_coverage).
 #
 # THE FAILURE THIS CATCHES
 # A service can be merged, released by release-please, and given an ArgoCD manifest, yet
@@ -56,7 +57,7 @@ if [ "${1:-}" = "--self-test" ]; then
     mkdir -p "$d/.github/workflows" "$d/.github/scripts" "$d/openbank-infra/gitops"
     printf '%s\n' "{\"packages\": {$(echo "$rel" | tr ',' '\n' | sed 's/.*/"&": {}/' | paste -sd, -)}}" \
       > "$d/release-please-config.json"
-    printf "jobs:\n  x:\n    steps:\n      - run: ALL_SERVICES='%s'\n" "$(echo "$all" | tr ',' ' ')" \
+    printf "jobs:\n  x:\n    steps:\n      - run: |\n          ALL_SERVICES='%s'\n          if grep -qE \"^\${svc}/(src/main|build\\.gradle\\.kts|version\\.txt)\"; then true; fi\n      - uses: peter-evans/create-pull-request@pinned\n        with:\n          base: main\n" "$(echo "$all" | tr ',' ' ')" \
       > "$d/.github/workflows/auto-deploy.yml"
     : > "$d/openbank-infra/gitops/apps.yaml"
     for s in $(echo "$gito" | tr ',' ' '); do printf '  image: %s:1.0.0\n' "$s" >> "$d/openbank-infra/gitops/apps.yaml"; done
@@ -109,8 +110,20 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'jobs:\n  x:\n    steps:\n      - run: echo nothing\n' > "$h/.github/workflows/auto-deploy.yml"
   expect "an unreadable ALL_SERVICES aborts" "$h" 2
 
+  # A version-only release commit triggers the workflow but must also enter the service set.
+  # Otherwise the run is green while build-push/gitops-pr are skipped (observed on #7077).
+  i="$td/noversionmarker"; mkrepo "$i" openbank-a openbank-a openbank-a
+  sed -i.bak 's/|version\\\.txt//' "$i/.github/workflows/auto-deploy.yml"; rm -f "$i/.github/workflows/auto-deploy.yml.bak"
+  expect "version-only releases are detected as direct service changes" "$i" 1 "version.txt"
+
+  # A recovery dispatch checks out a non-main ref. Without an explicit PR base, the generated
+  # deploy PR contains every main commit since that ref (observed on #7121/#7127).
+  j="$td/nomainbase"; mkrepo "$j" openbank-a openbank-a openbank-a
+  sed -i.bak '/base: main/d' "$j/.github/workflows/auto-deploy.yml"; rm -f "$j/.github/workflows/auto-deploy.yml.bak"
+  expect "recovery deploy PRs explicitly target main" "$j" 1 "base: main"
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: deploy-coverage guard is falsifiable (8 cases)"
+  echo "self-test ok: deploy-coverage guard is falsifiable (10 cases)"
   exit 0
 fi
 
@@ -152,6 +165,26 @@ done < <(jq -r '.packages | keys[]' "$RP_CONFIG" | grep '^openbank-' | sort)
 # the `|| true`.
 ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//" || true)"
 [ -n "$ALL_SERVICES" ] || { echo "ERROR: could not read ALL_SERVICES from ${WORKFLOW}." >&2; exit 2; }
+
+# The workflow trigger already includes openbank-*/version.txt. The detector must agree or a
+# release-only commit starts a successful no-op run: no image, no PR, stale pod.
+DIRECT_SERVICE_DETECTOR="$(grep -F 'if grep -qE "^${svc}/' "$WORKFLOW" | head -1 || true)"
+if [[ "$DIRECT_SERVICE_DETECTOR" != *'version\.txt'* ]]; then
+  echo "ERROR: auto-deploy DIRECT_SERVICES does not detect version.txt release markers." >&2
+  exit 1
+fi
+
+# create-pull-request otherwise defaults to the checked-out workflow_dispatch ref. Recovery
+# runs originate at historical refs, so an implicit base creates a PR containing main history.
+CREATE_PR_BLOCK="$(awk '
+  /uses: peter-evans\/create-pull-request@/ { in_block=1 }
+  in_block && /^[[:space:]]+- name:/ { exit }
+  in_block { print }
+' "$WORKFLOW")"
+if ! grep -qE '^[[:space:]]+base:[[:space:]]+main([[:space:]]|$)' <<< "$CREATE_PR_BLOCK"; then
+  echo "ERROR: auto-deploy create-pull-request must set base: main for recovery refs." >&2
+  exit 1
+fi
 
 # Components that ArgoCD actually deploys, i.e. something references their image.
 # Position-blind on purpose: an initContainer or sidecar is still a workload image.

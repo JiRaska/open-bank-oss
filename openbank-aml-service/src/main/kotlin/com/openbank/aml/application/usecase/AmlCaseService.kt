@@ -98,6 +98,7 @@ class AmlCaseService(
                 decisionReason = command.decisionReason,
                 assignedAnalyst = command.assignedAnalyst,
                 decidedBy = command.decidedBy,
+                now = Instant.now(clock),
             )
         } catch (ex: IllegalArgumentException) {
             throw InvalidAmlCaseStateTransitionException(ex.message ?: "Invalid AML case state transition")

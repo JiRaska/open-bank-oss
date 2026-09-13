@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.2...interest-service-v0.20.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **interest:** guard interest_outbox created_at plausibility at INSERT ([#9311](https://github.com/JiRaska/open-bank-oss/issues/9311)) ([a26ab85](https://github.com/JiRaska/open-bank-oss/commit/a26ab851e708102c61f7568b6c6c2d14e2511fa6))
+* **interest:** replay-safe accrue + rate-config creation + ADR-0291 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9055](https://github.com/JiRaska/open-bank-oss/issues/9055)) ([98db7a5](https://github.com/JiRaska/open-bank-oss/commit/98db7a5702a186ccb8a13ab0168ce48eaca913c6))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.1...interest-service-v0.20.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.0...interest-service-v0.20.1) (2026-09-03)
+
+
+### Security
+
+* **interest:** enforce authorization by default, not by manifest ([#8424](https://github.com/JiRaska/open-bank-oss/issues/8424)) ([faaacfa](https://github.com/JiRaska/open-bank-oss/commit/faaacfaf24945110c0e6e40e01ac48cabbd0c5ca))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.19.0...interest-service-v0.20.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.18.0...interest-service-v0.19.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.2...interest-service-v0.18.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.1...interest-service-v0.17.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.0...interest-service-v0.17.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.16.0...interest-service-v0.17.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.15.1...interest-service-v0.16.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.15.0...interest-service-v0.15.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.7...interest-service-v0.15.0) (2026-08-07)
 
 

@@ -63,6 +63,10 @@ class SepaPaymentEventsTest {
         assertThat(event.currency).isEqualTo("EUR")
         assertThat(event.endToEndId).isEqualTo("E2E-event")
         assertThat(event.occurredAt).isEqualTo(now)
+        // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
+        // (EVENT-sourced) attribution, upgrading over EventAttribution.TopicAttribution's
+        // TOPIC-sourced `openbank.sepa.payment.events` -> `sepa-payment` fallback.
+        assertThat(event.sourceService).isEqualTo("sepa-payment")
     }
 
     @Test
@@ -82,6 +86,7 @@ class SepaPaymentEventsTest {
         assertThat(event.rejectReason).isEqualTo("SANCTIONS_HIT")
         assertThat(event.rejectDetail).isEqualTo("OFAC hit")
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.sourceService).isEqualTo("sepa-payment")
     }
 
     @Test

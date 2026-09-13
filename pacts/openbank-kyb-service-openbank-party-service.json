@@ -1,0 +1,138 @@
+{
+  "consumer": {
+    "name": "openbank-kyb-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a registry mandate preserving a three-signature statutory quorum",
+      "providerStates": [
+        {
+          "name": "an active company and natural person exist for a joint KYB mandate"
+        }
+      ],
+      "request": {
+        "body": {
+          "agentPartyId": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+          "authority": "JOINT",
+          "evidenceRef": "kyb-case:pact-joint-3",
+          "requiredSignatures": 3,
+          "role": "LEGAL_REPRESENTATIVE",
+          "source": "REGISTRY"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.requiredSignatures": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/parties/c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1/mandates"
+      },
+      "response": {
+        "body": {
+          "agentPartyId": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+          "authority": "JOINT",
+          "evidenceRef": "kyb-case:pact-joint-3",
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "principalPartyId": "c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1",
+          "requiredSignatures": 3,
+          "role": "LEGAL_REPRESENTATIVE",
+          "source": "REGISTRY",
+          "status": "ACTIVE"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.requiredSignatures": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a mandate for a legal entity the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no party exists for the KYB mandate principal"
+        }
+      ],
+      "request": {
+        "body": {
+          "agentPartyId": "d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1",
+          "authority": "JOINT",
+          "evidenceRef": "kyb-case:pact-missing",
+          "requiredSignatures": 3,
+          "role": "LEGAL_REPRESENTATIVE",
+          "source": "REGISTRY"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.requiredSignatures": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/parties/00000000-0000-4000-8000-000000000284/mandates"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

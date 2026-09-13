@@ -42,6 +42,8 @@ name: main red watch
 
 on:
   workflow_run:
+    # Reject PR-branch completions before allocating a workflow run (Refs #9031).
+    branches: [main]
     # R1: every workflow that pushes to main with no paths filter. These run on
     # every commit, so their conclusion IS main's health. The list is not
     # hand-maintained scope -- check-main-red-watch.py --check-declaration fails
@@ -55,6 +57,9 @@ on:
       - "Dependency submission"
       - "Gradle wrapper validation"
       - "Release Please"
+      # ADR-0279 #16/#20: the Semgrep IaC lane is a security gate; its red on main is a
+      # container/manifest regression and must not stay silent.
+      - "Semgrep IaC security"
       # Pushes to main unconditionally (issue #4240). Its red is meaningful in a way worth
       # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
       # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
@@ -62,15 +67,25 @@ on:
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.
+      # Heals a derived artefact stale on main (#9755). Its red is the one state that must
+      # not stay silent: either the regeneration itself broke, or a generator stopped being a
+      # pure projection of its sources — and in both cases the fleet-wide merge freeze this
+      # workflow exists to end is back, with nothing else reporting it.
+      - "Derived artefact autoheal"
       - "ADR registry"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"
       - "EU AI Act registry"
+      - "Evals - copilot proposal quality"
+      - "Evals - fraud review"
       - "Fleet lint"
       - "Label sync"
       - "Pact drift check"
       - "Product Catalog Native Build (T1 enabler smoke test)"
+      - "Schema registry apply (document-service pilot)"
+      - "Synthetic journeys"
+      - "Admin UI browser synthetic"
     types: [completed]
   pull_request:
     paths:
@@ -104,7 +119,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: pip install --quiet pyyaml
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
       - name: Self-test the watcher
         run: python3 .github/scripts/check-main-red-watch.py --self-test
       - name: Every push-on-main workflow is watched or declared
@@ -128,7 +143,7 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: pip install --quiet pyyaml
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
 
       # A verdict that has only ever said "green" is indistinguishable from a
       # classifier that finds nothing. This step failing voids the run.
@@ -158,13 +173,24 @@ jobs:
                echo "::error::'main is green' verdict — see check-main-red-watch.py."
                exit 1 ;;
             2) echo "::warning::main is red — escalating onto a main-red issue." ;;
+            3) echo "::warning::main-red-watch could not REACH the API for run $RUN_ID"
+               echo "::warning::attempt $ATTEMPT — a quota or transport failure, not a verdict"
+               echo "::warning::about main. Not failing this run: 18 red watches in 6 hours, ten"
+               echo "::warning::of ten saying 'could not answer', is how a genuinely red main"
+               echo "::warning::stops being visible (#9697). The next push re-reads main." ;;
             *) echo "::error::Unexpected exit $code."; exit "$code" ;;
           esac
 
       - name: Escalate or stand down
         # A manual dispatch inspects without touching an issue: falsifying the
         # watch must not manufacture the thing it reports.
-        if: ${{ github.event_name == 'workflow_run' }}
+        #
+        # Exit 3 (the API refused to answer) is excluded for TWO independent reasons, either of
+        # which alone would be a defect: `--json` is never written on that path, so this step
+        # would die reading /tmp/main-red.json; and the branch below treats "not red" as a reason
+        # to CLOSE this workflow's open main-red issue — so a rate limit would silently declare a
+        # genuinely red main fixed. Not answering must change nothing (#9697).
+        if: ${{ github.event_name == 'workflow_run' && steps.verdict.outputs.code != '3' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           CODE: ${{ steps.verdict.outputs.code }}

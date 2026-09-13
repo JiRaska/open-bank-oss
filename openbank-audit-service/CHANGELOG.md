@@ -1,5 +1,100 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.4...audit-service-v0.18.5) (2026-09-08)
+
+
+### Bug Fixes
+
+* **audit:** subscribe to billing, standing-order and psd2 — [#6035](https://github.com/JiRaska/open-bank-oss/issues/6035)'s last three gaps ([#8534](https://github.com/JiRaska/open-bank-oss/issues/8534)) ([a2512e1](https://github.com/JiRaska/open-bank-oss/commit/a2512e1be448c62419eb7f0615fd6877c98e3e06))
+* **libs:** give the topic-to-producer table one definition, and stop deriving it ([#8920](https://github.com/JiRaska/open-bank-oss/issues/8920)) ([d327301](https://github.com/JiRaska/open-bank-oss/commit/d3273010199030500eb1db042c7fb2cb241d4813))
+
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.3...audit-service-v0.18.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.2...audit-service-v0.18.3) (2026-09-02)
+
+
+### Security
+
+* **delegation:** publish durable spend reservation state ([#8247](https://github.com/JiRaska/open-bank-oss/issues/8247)) ([a017aab](https://github.com/JiRaska/open-bank-oss/commit/a017aab1111abaf702cc708f9e2a39cec56c9b1c))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.1...audit-service-v0.18.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **audit:** read aggregateId from the producer envelope ([#6478](https://github.com/JiRaska/open-bank-oss/issues/6478)) ([564cbd3](https://github.com/JiRaska/open-bank-oss/commit/564cbd3aa00094479253fc20b1551fe079de8f23)), closes [#6318](https://github.com/JiRaska/open-bank-oss/issues/6318)
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.0...audit-service-v0.18.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.1...audit-service-v0.18.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** durable AI audit provenance ([#6209](https://github.com/JiRaska/open-bank-oss/issues/6209)) ([8a862f3](https://github.com/JiRaska/open-bank-oss/commit/8a862f387594f934f91bf5befcbc966ccf40abad))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.0...audit-service-v0.17.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **audit:** make anchor kms-key-id optional so the service boots ([#5944](https://github.com/JiRaska/open-bank-oss/issues/5944)) ([87b9c00](https://github.com/JiRaska/open-bank-oss/commit/87b9c00caec1ad7bff983ce953e5156f2509222a)), closes [#5844](https://github.com/JiRaska/open-bank-oss/issues/5844)
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.16.0...audit-service-v0.17.0) (2026-08-20)
+
+
+### Features
+
+* **audit:** add KMS-backed audit anchors ([#5844](https://github.com/JiRaska/open-bank-oss/issues/5844)) ([785df7a](https://github.com/JiRaska/open-bank-oss/commit/785df7a0807e05dc6eab828319abe82f3faa891f))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.4...audit-service-v0.16.0) (2026-08-17)
+
+
+### Features
+
+* **audit:** subscribe to openbank.sca.events for SCA enrollment audit trail ([#5369](https://github.com/JiRaska/open-bank-oss/issues/5369)) ([9446fda](https://github.com/JiRaska/open-bank-oss/commit/9446fda2d4e2768bce5f3d1d54d1d63066cc20ef)), closes [#5337](https://github.com/JiRaska/open-bank-oss/issues/5337) [#5338](https://github.com/JiRaska/open-bank-oss/issues/5338)
+
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.3...audit-service-v0.15.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.2...audit-service-v0.15.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **audit:** follow merged_into at read time for a party's history ([#5110](https://github.com/JiRaska/open-bank-oss/issues/5110)) ([48df1cc](https://github.com/JiRaska/open-bank-oss/commit/48df1cc917ca6e66ce23fa43c71ee2d8623ca892)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.1...audit-service-v0.15.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **audit:** publish a percentile histogram for the chain-verify timer ([#5062](https://github.com/JiRaska/open-bank-oss/issues/5062)) ([d35c4e3](https://github.com/JiRaska/open-bank-oss/commit/d35c4e394f46766d1bb3780eb986d344b0c03387)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.0...audit-service-v0.15.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **audit:** record anchor capture liveness ([#5042](https://github.com/JiRaska/open-bank-oss/issues/5042)) ([27eece9](https://github.com/JiRaska/open-bank-oss/commit/27eece9998d7e4a1fc30556fa8776ac9d8d969bf))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.6...audit-service-v0.15.0) (2026-08-14)
 
 

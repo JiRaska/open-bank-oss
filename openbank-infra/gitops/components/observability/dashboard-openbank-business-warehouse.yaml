@@ -27,7 +27,7 @@ data:
       "id": null,
       "uid": "openbank-business-warehouse",
       "title": "OpenBank — Business Reporting (warehouse)",
-      "description": "Business volume, product mix and the onboarding funnel from the ClickHouse warehouse (ADR-0022). Daily grain, 90-day windows — the analytical plane, not the 7-day operational one.",
+      "description": "Business volume, product mix and the onboarding funnel from the ClickHouse warehouse (ADR-0022). Daily grain, selected dashboard period — the analytical plane, not the 7-day operational one.",
       "schemaVersion": 39,
       "version": 1,
       "refresh": "5m",
@@ -50,7 +50,7 @@ data:
               "text": "ClickHouse",
               "value": "clickhouse"
             },
-            "hide": 0,
+            "hide": 2,
             "includeAll": false,
             "multi": false,
             "name": "ds_clickhouse",
@@ -75,21 +75,22 @@ data:
             "x": 0,
             "y": 0,
             "w": 24,
-            "h": 7
+            "h": 3
           },
           "options": {
             "mode": "markdown",
-            "content": "**This is the analytical plane, not the operational one.** Every panel reads the ClickHouse warehouse (`openbank_analytics`, ADR-0022), fed from the domain event stream by openbank-analytics-sink. The other OpenBank boards read Prometheus, which holds 7 days and whose counters reset on every pod restart — it cannot answer \"how many accounts did we open last quarter\". This board can, because bronze is the append-only log of record kept for 10 years.\n\n**Freshness first.** The top-left tile is the age of the newest event in the warehouse. If it is hours old, every number below it is stale, and a flat line here means the sink stopped rather than that the business did. Nothing alerts on a table that stops growing — check this tile before reading anything else.\n\n**Grain is a day.** All rollups group by `toDate(occurred_at)`, so today's bar is partial until midnight UTC and always reads low. Compare like-for-like days.\n\nCounts are of *events*, not of reconciled balances. For money that has to foot, use the ledger and the statutory close — this board is for volume, mix and trend."
+            "content": "**Read freshness first.** Missing events can indicate delayed ingestion, not zero activity. Charts follow the selected period; daily buckets use UTC and today is incomplete. Counts describe observed events, not reconciled balances. Use governed reports for internal decisions and sealed ledger returns for regulatory reporting."
           }
         },
         {
           "id": 2,
           "type": "stat",
+          "transparent": true,
           "title": "Warehouse freshness",
           "description": "Age of the newest event in bronze. Read this before anything else: a stale warehouse makes every panel below wrong in a way that looks like calm.",
           "gridPos": {
             "x": 0,
-            "y": 7,
+            "y": 3,
             "w": 5,
             "h": 4
           },
@@ -106,7 +107,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT dateDiff('second', max(occurred_at), now()) AS value FROM openbank_analytics.bronze_events"
+              "rawSql": "SELECT dateDiff('second', maxOrNull(occurred_at), now()) AS value FROM openbank_analytics.bronze_events"
             }
           ],
           "fieldConfig": {
@@ -144,11 +145,12 @@ data:
         {
           "id": 3,
           "type": "stat",
-          "title": "Events (30d)",
+          "transparent": true,
+          "title": "Events — selected period",
           "description": null,
           "gridPos": {
             "x": 5,
-            "y": 7,
+            "y": 3,
             "w": 5,
             "h": 4
           },
@@ -165,7 +167,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT count() AS value FROM openbank_analytics.bronze_events WHERE occurred_at >= now() - INTERVAL 30 DAY"
+              "rawSql": "SELECT count() AS value FROM openbank_analytics.bronze_events WHERE $__timeFilter(occurred_at)"
             }
           ],
           "fieldConfig": {
@@ -203,11 +205,12 @@ data:
         {
           "id": 4,
           "type": "stat",
-          "title": "Accounts opened (30d)",
+          "transparent": true,
+          "title": "Accounts opened — selected period",
           "description": "Distinct account aggregates with an opening-type event (AccountCreated today; matched case-insensitively so a producer switching to ACCOUNT_OPENED does not silently zero this tile). aggregate_type is folded with upper() because bronze holds both ACCOUNT and Account for the same account (#4553). uniqExact, not count(): bronze is at-least-once, so duplicates are expected and a raw count overstates.",
           "gridPos": {
             "x": 10,
-            "y": 7,
+            "y": 3,
             "w": 5,
             "h": 4
           },
@@ -224,7 +227,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'ACCOUNT' AND (positionCaseInsensitive(event_type, 'opened') > 0 OR positionCaseInsensitive(event_type, 'created') > 0) AND occurred_at >= now() - INTERVAL 30 DAY"
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'ACCOUNT' AND (positionCaseInsensitive(event_type, 'opened') > 0 OR positionCaseInsensitive(event_type, 'created') > 0) AND $__timeFilter(occurred_at)"
             }
           ],
           "fieldConfig": {
@@ -262,11 +265,12 @@ data:
         {
           "id": 5,
           "type": "stat",
-          "title": "Parties onboarded (30d)",
+          "transparent": true,
+          "title": "Parties onboarded — selected period",
           "description": "Distinct party aggregates with a creation event (PARTY_CREATED). Previously counted ANY party event, so a party whose KYC status merely changed read as onboarded. aggregate_type is folded with upper() — bronze holds PARTY, never Party, so the old literal matched nothing (#4553).",
           "gridPos": {
             "x": 15,
-            "y": 7,
+            "y": 3,
             "w": 4,
             "h": 4
           },
@@ -283,7 +287,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'PARTY' AND positionCaseInsensitive(event_type, 'created') > 0 AND occurred_at >= now() - INTERVAL 30 DAY"
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'PARTY' AND positionCaseInsensitive(event_type, 'created') > 0 AND $__timeFilter(occurred_at)"
             }
           ],
           "fieldConfig": {
@@ -321,11 +325,12 @@ data:
         {
           "id": 6,
           "type": "stat",
-          "title": "Onboarding sessions (30d)",
+          "transparent": true,
+          "title": "Onboarding sessions — selected period",
           "description": null,
           "gridPos": {
             "x": 19,
-            "y": 7,
+            "y": 3,
             "w": 5,
             "h": 4
           },
@@ -342,7 +347,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT uniqExact(session_id) AS value FROM openbank_analytics.gold_onboarding_funnel_events WHERE day >= today() - 30"
+              "rawSql": "SELECT uniqExact(session_id) AS value FROM openbank_analytics.gold_onboarding_funnel_events WHERE $__dateFilter(day)"
             }
           ],
           "fieldConfig": {
@@ -380,10 +385,11 @@ data:
         {
           "id": 7,
           "type": "timeseries",
+          "transparent": true,
           "title": "Daily event volume by service",
           "gridPos": {
             "x": 0,
-            "y": 11,
+            "y": 7,
             "w": 12,
             "h": 8
           },
@@ -400,7 +406,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT day AS time, source_service, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE day >= today() - 90 GROUP BY day, source_service ORDER BY day"
+              "rawSql": "SELECT day AS time, source_service, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE $__dateFilter(day) GROUP BY day, source_service ORDER BY day"
             }
           ],
           "fieldConfig": {
@@ -431,10 +437,11 @@ data:
         {
           "id": 8,
           "type": "timeseries",
+          "transparent": true,
           "title": "Business volume by aggregate type",
           "gridPos": {
             "x": 12,
-            "y": 11,
+            "y": 7,
             "w": 12,
             "h": 8
           },
@@ -451,7 +458,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT day AS time, aggregate_type, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE day >= today() - 90 GROUP BY day, aggregate_type ORDER BY day"
+              "rawSql": "SELECT day AS time, aggregate_type, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE $__dateFilter(day) GROUP BY day, aggregate_type ORDER BY day"
             }
           ],
           "fieldConfig": {
@@ -482,10 +489,10 @@ data:
         {
           "id": 9,
           "type": "barchart",
-          "title": "Onboarding funnel — sessions by step (30d)",
+          "title": "Onboarding funnel — sessions by step — selected period",
           "gridPos": {
             "x": 0,
-            "y": 19,
+            "y": 15,
             "w": 12,
             "h": 8
           },
@@ -502,7 +509,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT step, sum(sessions_viewed) AS viewed, sum(sessions_completed) AS completed FROM openbank_analytics.gold_onboarding_funnel_daily WHERE day >= today() - 30 GROUP BY step, step_ordinal ORDER BY step_ordinal"
+              "rawSql": "SELECT step, sum(sessions_viewed) AS viewed, sum(sessions_completed) AS completed FROM openbank_analytics.gold_onboarding_funnel_daily WHERE $__dateFilter(day) GROUP BY step, step_ordinal ORDER BY step_ordinal"
             }
           ],
           "fieldConfig": {
@@ -533,10 +540,11 @@ data:
         {
           "id": 10,
           "type": "timeseries",
+          "transparent": true,
           "title": "Framework-agreement signing outcomes",
           "gridPos": {
             "x": 12,
-            "y": 19,
+            "y": 15,
             "w": 12,
             "h": 8
           },
@@ -553,7 +561,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT day AS time, sum(attempts) AS attempts, sum(successes) AS successes, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_outcomes WHERE day >= today() - 90 GROUP BY day ORDER BY day"
+              "rawSql": "SELECT day AS time, sum(attempts) AS attempts, sum(successes) AS successes, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_outcomes WHERE $__dateFilter(day) GROUP BY day ORDER BY day"
             }
           ],
           "fieldConfig": {
@@ -584,10 +592,10 @@ data:
         {
           "id": 11,
           "type": "table",
-          "title": "Top signing failure reasons (30d)",
+          "title": "Top signing failure reasons — selected period",
           "gridPos": {
             "x": 0,
-            "y": 27,
+            "y": 23,
             "w": 12,
             "h": 7
           },
@@ -604,7 +612,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT reason, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_fail_reasons WHERE day >= today() - 30 GROUP BY reason ORDER BY failures DESC LIMIT 20"
+              "rawSql": "SELECT reason, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_fail_reasons WHERE $__dateFilter(day) GROUP BY reason ORDER BY failures DESC LIMIT 20"
             }
           ],
           "fieldConfig": {
@@ -629,10 +637,10 @@ data:
         {
           "id": 12,
           "type": "piechart",
-          "title": "KYC method mix (30d)",
+          "title": "KYC method mix — selected period",
           "gridPos": {
             "x": 12,
-            "y": 27,
+            "y": 23,
             "w": 12,
             "h": 7
           },
@@ -649,7 +657,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT kyc_method, sum(sessions) AS sessions FROM openbank_analytics.gold_onboarding_kyc_method_daily WHERE day >= today() - 30 GROUP BY kyc_method ORDER BY sessions DESC"
+              "rawSql": "SELECT kyc_method, sum(sessions) AS sessions FROM openbank_analytics.gold_onboarding_kyc_method_daily WHERE $__dateFilter(day) GROUP BY kyc_method ORDER BY sessions DESC"
             }
           ],
           "fieldConfig": {
@@ -680,10 +688,10 @@ data:
         {
           "id": 13,
           "type": "barchart",
-          "title": "Median seconds on step (30d)",
+          "title": "Median seconds on step — selected period",
           "gridPos": {
             "x": 0,
-            "y": 34,
+            "y": 30,
             "w": 12,
             "h": 7
           },
@@ -700,7 +708,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT step, quantile(0.5)(seconds_on_step) AS median_seconds FROM openbank_analytics.gold_onboarding_step_durations WHERE day >= today() - 30 GROUP BY step ORDER BY median_seconds DESC"
+              "rawSql": "SELECT step, quantile(0.5)(seconds_on_step) AS median_seconds FROM openbank_analytics.gold_onboarding_step_durations WHERE $__dateFilter(day) GROUP BY step ORDER BY median_seconds DESC"
             }
           ],
           "fieldConfig": {
@@ -731,10 +739,11 @@ data:
         {
           "id": 14,
           "type": "timeseries",
-          "title": "Ingest health — dead-lettered events (30d)",
+          "transparent": true,
+          "title": "Ingest health — dead-lettered events — selected period",
           "gridPos": {
             "x": 12,
-            "y": 34,
+            "y": 30,
             "w": 12,
             "h": 7
           },
@@ -751,7 +760,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT toDate(failed_at) AS time, count() AS dead_lettered FROM openbank_analytics.dead_letter_events WHERE failed_at >= now() - INTERVAL 30 DAY GROUP BY time ORDER BY time"
+              "rawSql": "SELECT toDate(failed_at) AS time, count() AS dead_lettered FROM openbank_analytics.dead_letter_events WHERE $__timeFilter(failed_at) GROUP BY time ORDER BY time"
             }
           ],
           "fieldConfig": {

@@ -18,6 +18,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import org.junit.jupiter.api.BeforeEach
@@ -48,6 +49,8 @@ import java.util.UUID
  * the [PactVerifyProvider] methods below do: they serialize the genuine [DelegationActivated] and
  * [DelegationRevoked] data classes, so renaming `granteePartyId` in `DelegationEvents.kt` turns
  * this red on the PR that does it.
+ * The revoked interaction is also the negative authorization case: consuming it must remove the
+ * grant, the asynchronous equivalent of a subsequent request crossing a 403 boundary.
  *
  * ## No Quarkus, no Testcontainer
  *
@@ -112,11 +115,14 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
             resourceId = RESOURCE,
             capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            approvalPolicy = ApprovalPolicy.N_OF_M,
+            requiredApprovals = 3,
             validFrom = VALID_FROM,
             validTo = null,
             perTransactionLimit = EventMoney(BigDecimal("1500.00"), "CZK"),
@@ -131,6 +137,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceAccountRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
@@ -148,6 +155,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceCardActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,
@@ -167,6 +175,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceCardRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,

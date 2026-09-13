@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Product Catalog API
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
-  version: 2.0.0
+  version: 2.2.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -541,6 +541,28 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/revisions/{id}:
+    get:
+      tags: [Catalog V2]
+      summary: Get one immutable revision by its durable identifier
+      description: >-
+        Consumer-facing lookup for a revision referenced by the durable catalog change stream.
+        The response preserves the offering identity, schema reference, effective interval and
+        approved content required to materialize an independent effective-dated snapshot.
+      operationId: getRevisionV2
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Revision
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish:
     post:
       tags: [Catalog V2]
@@ -771,6 +793,9 @@ components:
     MarketContext:
       type: object
       additionalProperties: false
+      description: >-
+        Commercial availability context, never a customer identity. Restricted offers use controlled
+        segment keys; customer-specific eligibility and personalisation remain outside the catalog.
       properties:
         brands: { type: array, uniqueItems: true, items: { type: string } }
         countries: { type: array, uniqueItems: true, items: { type: string, pattern: '^[A-Z]{2}$' } }
@@ -831,6 +856,9 @@ components:
     OfferingRelationship:
       type: object
       additionalProperties: false
+      description: >-
+        A stable offering-to-offering relationship. BUNDLE components must exist and be published
+        and effective when the bundle is published; self-references and cycles are rejected.
       properties:
         kind: { type: string, enum: [BUNDLE, ADD_ON, REPLACEMENT, DEPENDENCY, COMPATIBLE_WITH] }
         targetOfferingId: { type: string, format: uuid }

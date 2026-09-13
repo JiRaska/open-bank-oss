@@ -5,6 +5,7 @@ package com.openbank.cardissuance.infrastructure.outbox
 
 import com.openbank.cardissuance.application.port.out.CardOutboxRepository
 import com.openbank.cardissuance.infrastructure.kafka.KafkaCardOutboxEventPublisher
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -42,10 +43,15 @@ class CardOutboxDispatcher(
     private val publisher: KafkaCardOutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
+
+    // Matches CardOutboxBacklogGauge's `service = "card-issuance"` — the class-name-derived
+    // default ("card") would disagree with the sibling gauge's label (#5049).
+    override val service: String = "card-issuance"
 
     @Scheduled(
         every = "\${openbank.outbox.poll-interval:5s}",

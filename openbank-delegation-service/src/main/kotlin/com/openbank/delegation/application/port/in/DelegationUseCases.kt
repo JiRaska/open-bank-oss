@@ -8,9 +8,12 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationLifecycleApproval
+import com.openbank.delegation.domain.model.DelegationLifecycleOperation
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.governance.ProposalState
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -27,23 +30,58 @@ import java.util.UUID
  */
 typealias CallerPartyId = UUID?
 
+interface DelegationCandidate {
+    val callerPartyId: CallerPartyId
+    val actorPartyId: UUID?
+    val grantorPartyId: UUID
+    val granteePartyId: UUID
+    val resourceType: DelegationResourceType
+    val resourceId: UUID
+    val capabilities: Set<DelegationCapability>
+    val approvalPolicy: ApprovalPolicy
+    val requiredApprovals: Int?
+    val perTransactionLimit: Money?
+    val dailyLimit: Money?
+    val monthlyLimit: Money?
+    val exposure: Exposure?
+    val validTo: OffsetDateTime?
+}
+
+data class PreviewDelegationCommand(
+    override val callerPartyId: CallerPartyId,
+    override val actorPartyId: UUID? = null,
+    override val grantorPartyId: UUID,
+    override val granteePartyId: UUID,
+    override val resourceType: DelegationResourceType,
+    override val resourceId: UUID,
+    override val capabilities: Set<DelegationCapability>,
+    override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    override val requiredApprovals: Int? = null,
+    override val perTransactionLimit: Money? = null,
+    override val dailyLimit: Money? = null,
+    override val monthlyLimit: Money? = null,
+    override val exposure: Exposure? = null,
+    override val validTo: OffsetDateTime?,
+) : DelegationCandidate
+
 data class OfferDelegationCommand(
-    val callerPartyId: CallerPartyId,
-    val grantorPartyId: UUID,
-    val granteePartyId: UUID,
-    val resourceType: DelegationResourceType,
-    val resourceId: UUID,
-    val capabilities: Set<DelegationCapability>,
-    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
-    val requiredApprovals: Int? = null,
-    val perTransactionLimit: Money? = null,
-    val dailyLimit: Money? = null,
-    val monthlyLimit: Money? = null,
-    val exposure: Exposure? = null,
-    val validTo: OffsetDateTime?,
+    override val callerPartyId: CallerPartyId,
+    override val actorPartyId: UUID? = null,
+    override val grantorPartyId: UUID,
+    override val granteePartyId: UUID,
+    override val resourceType: DelegationResourceType,
+    override val resourceId: UUID,
+    override val capabilities: Set<DelegationCapability>,
+    override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    override val requiredApprovals: Int? = null,
+    override val perTransactionLimit: Money? = null,
+    override val dailyLimit: Money? = null,
+    override val monthlyLimit: Money? = null,
+    override val exposure: Exposure? = null,
+    override val validTo: OffsetDateTime?,
     val grantScaSessionId: UUID,
     val note: String? = null,
-)
+) : DelegationCandidate
 
 /**
  * ADR-0232 D4. [revokedBy] is now derived from the authenticated caller, never from the request:
@@ -72,6 +110,11 @@ data class CheckDelegationCommand(
 
 interface OfferDelegationUseCase {
     suspend fun offer(command: OfferDelegationCommand): DelegationGrant
+}
+
+interface PreviewDelegationUseCase {
+    /** Validates the complete draft without consuming SCA or creating authority. */
+    suspend fun preview(command: PreviewDelegationCommand)
 }
 
 interface RespondDelegationUseCase {
@@ -113,4 +156,29 @@ interface GetDelegationUseCase {
  */
 interface CheckDelegationUseCase {
     suspend fun check(command: CheckDelegationCommand): DelegationCheckResult
+}
+
+data class ProposeDelegationLifecycleCommand(
+    val delegationId: UUID,
+    val operation: DelegationLifecycleOperation,
+    val reason: String,
+    val proposedBy: String,
+    val requestKey: String,
+)
+
+data class DecideDelegationLifecycleCommand(
+    val approvalId: UUID,
+    val approve: Boolean,
+    val decidedBy: String,
+    val reason: String,
+)
+
+interface DelegationLifecycleApprovalUseCase {
+    suspend fun propose(command: ProposeDelegationLifecycleCommand): DelegationLifecycleApproval
+    suspend fun decide(command: DecideDelegationLifecycleCommand): DelegationLifecycleApproval
+}
+
+interface DelegationLifecycleApprovalQuery {
+    suspend fun get(id: UUID): DelegationLifecycleApproval
+    suspend fun list(state: ProposalState?, limit: Int): List<DelegationLifecycleApproval>
 }

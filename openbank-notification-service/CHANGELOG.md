@@ -1,5 +1,137 @@
 # Changelog
 
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.31.0...notification-service-v0.31.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **notification:** dead-letter delegation-events-in, which would wedge on any dispatch failure ([#8457](https://github.com/JiRaska/open-bank-oss/issues/8457)) ([e8e8ed9](https://github.com/JiRaska/open-bank-oss/commit/e8e8ed93a789d1056e310b18d8c672dd566a9273))
+* **notification:** guard notification_outbox created_at plausibility at INSERT ([#9315](https://github.com/JiRaska/open-bank-oss/issues/9315)) ([dc09c39](https://github.com/JiRaska/open-bank-oss/commit/dc09c397d62215ef78a63e41c728f6af5c78a79e))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.1...notification-service-v0.31.0) (2026-09-08)
+
+
+### Features
+
+* **notification:** alert grantor on first delegated spend ([#8334](https://github.com/JiRaska/open-bank-oss/issues/8334)) ([24e15de](https://github.com/JiRaska/open-bank-oss/commit/24e15de97237ff29bb888b66c437143f8d69d277))
+* **notifications:** tell customers when a third party gains or loses account access ([#8491](https://github.com/JiRaska/open-bank-oss/issues/8491)) ([add3357](https://github.com/JiRaska/open-bank-oss/commit/add33579f036aae4ca9b09534d845d2a8dfa3229))
+
+
+### Bug Fixes
+
+* **notification:** remove the unproducible PASSWORD_RESET template ([#8857](https://github.com/JiRaska/open-bank-oss/issues/8857)) ([c5b43f8](https://github.com/JiRaska/open-bank-oss/commit/c5b43f81db762b74820b5aea5d78e43f6c793d5c))
+* **notification:** renumber the deduplication-key migration V14 to V15 — V14 is taken on main ([#8953](https://github.com/JiRaska/open-bank-oss/issues/8953)) ([0464d4a](https://github.com/JiRaska/open-bank-oss/commit/0464d4a06be781c37f22e7d4fffedb3b60dabf5b))
+
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.0...notification-service-v0.30.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **notification:** KYC outcome notifications get a producer — consume openbank.kyc.events ([#8432](https://github.com/JiRaska/open-bank-oss/issues/8432)) ([#8547](https://github.com/JiRaska/open-bank-oss/issues/8547)) ([e6d3e35](https://github.com/JiRaska/open-bank-oss/commit/e6d3e35be818978324c9508e9d524e6462b1fb05))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.2...notification-service-v0.30.0) (2026-09-02)
+
+
+### Features
+
+* **notification:** complete delegation lifecycle alerts ([#8184](https://github.com/JiRaska/open-bank-oss/issues/8184)) ([0656e71](https://github.com/JiRaska/open-bank-oss/commit/0656e7187fd1cdcffa36c0c9d8009b4bd534f14e)), closes [#8183](https://github.com/JiRaska/open-bank-oss/issues/8183) [#8172](https://github.com/JiRaska/open-bank-oss/issues/8172)
+
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.1...notification-service-v0.29.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **notification:** reject a null map value with 400 instead of 500 ([#8005](https://github.com/JiRaska/open-bank-oss/issues/8005)) ([56bfc37](https://github.com/JiRaska/open-bank-oss/commit/56bfc37ee6c8e8f43964305feeef26c0a3c2a7e2)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.0...notification-service-v0.29.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **notification:** stop acking a failed dispatch and wire its DLQ ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#7588](https://github.com/JiRaska/open-bank-oss/issues/7588)) ([69a64ad](https://github.com/JiRaska/open-bank-oss/commit/69a64ad29cdd06b72b15a7f3b12e760079d66a5f))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.28.0...notification-service-v0.29.0) (2026-08-27)
+
+
+### Features
+
+* **notification:** add safe no-device push fallback ([#7463](https://github.com/JiRaska/open-bank-oss/issues/7463)) ([7c9cc2c](https://github.com/JiRaska/open-bank-oss/commit/7c9cc2c2b87b8d2a6d1a9fc4a5ef2b94a5935012))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.27.0...notification-service-v0.28.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.26.0...notification-service-v0.27.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.2...notification-service-v0.26.0) (2026-08-24)
+
+
+### Features
+
+* **notification:** expose pending four-eyes approvals via approval inbox ([#6547](https://github.com/JiRaska/open-bank-oss/issues/6547)) ([312a73b](https://github.com/JiRaska/open-bank-oss/commit/312a73b0ddffa4eb834b871d75e93fbd022411f1))
+
+## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.1...notification-service-v0.25.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.25.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.0...notification-service-v0.25.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **notification:** wire the DLQ the [#5698](https://github.com/JiRaska/open-bank-oss/issues/5698) sweep assumes, and enumerate every consumer ([#5737](https://github.com/JiRaska/open-bank-oss/issues/5737)) ([0121c10](https://github.com/JiRaska/open-bank-oss/commit/0121c10a71577ddd550c8421b7d19666a61e92a9))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.24.0...notification-service-v0.25.0) (2026-08-19)
+
+
+### Features
+
+* **notification:** wire ADR-0232 delegation lifecycle into notifications ([#5661](https://github.com/JiRaska/open-bank-oss/issues/5661)) ([b89e1fb](https://github.com/JiRaska/open-bank-oss/commit/b89e1fb52f64d0d417726c1b14ef6b4c172194a6))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.3...notification-service-v0.24.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.23.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.2...notification-service-v0.23.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.23.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.1...notification-service-v0.23.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **notification:** follow the ADR-0179 merged_into pointer at dispatch ([#5112](https://github.com/JiRaska/open-bank-oss/issues/5112)) ([ff55163](https://github.com/JiRaska/open-bank-oss/commit/ff551638aea391365621e5f3d1722dba5ca309df)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.0...notification-service-v0.23.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **notification:** a mocked mailer committed status=SENT with sent_at for mail that never left ([#4938](https://github.com/JiRaska/open-bank-oss/issues/4938)) ([7a01350](https://github.com/JiRaska/open-bank-oss/commit/7a01350af1531eb7ac78cb2fdb844c84a2840d9e)), closes [#4737](https://github.com/JiRaska/open-bank-oss/issues/4737) [#4363](https://github.com/JiRaska/open-bank-oss/issues/4363)
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.2...notification-service-v0.23.0) (2026-08-14)
 
 

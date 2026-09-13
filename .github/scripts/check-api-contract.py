@@ -46,12 +46,14 @@ Modes (ADR-0144 gate graduation):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 OPENAPI_GLOB = re.compile(r"^(openbank-[^/]+)/src/main/resources/openapi\.yaml$")
@@ -101,6 +103,40 @@ def info_version(openapi_text: str) -> str | None:
         if m:
             return m.group(1)
     return None
+
+
+def with_info_version(openapi_text: str, value: str) -> str:
+    """Return the document with info.version rewritten to `value`.
+
+    Used to take `info.version` OUT of the material diff. The version is the gate's OUTPUT —
+    the thing it asks the author to change — so leaving it in the diff it classifies from makes
+    the classification self-fulfilling: adding the PATCH bump an `editorial` change requires is
+    itself a non-excluded diff, which reclassifies the change as `additive` and demands MINOR.
+    Measured on #6369: a document whose ONLY change was 1.2.0 -> 1.2.1 classified `additive`,
+    so no version could satisfy an editorial change (#6380).
+
+    Scans the top-level `info:` block only, exactly as [info_version] does, so a `version:` key
+    inside a schema or an example is never rewritten.
+    """
+    out: list[str] = []
+    in_info = False
+    replaced = False
+    for line in openapi_text.splitlines(keepends=True):
+        stripped = line.strip()
+        if not replaced and stripped and not stripped.startswith("#"):
+            indent = len(line) - len(line.lstrip())
+            if not in_info:
+                if indent == 0 and stripped == "info:":
+                    in_info = True
+            elif indent == 0:
+                in_info = False  # left the info block without finding a version
+            elif re.match(r"version:\s*['\"]?[0-9]", stripped):
+                pad = line[:indent]
+                out.append(f'{pad}version: "{value}"\n' if line.endswith("\n") else f'{pad}version: "{value}"')
+                replaced = True
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 def config_api_major(service_dir: Path) -> int | None:
@@ -287,6 +323,18 @@ def _majors(service_dir: Path, pattern: re.Pattern[str]) -> set[int]:
     return majors
 
 
+@contextlib.contextmanager
+def pinned_copy(spec: Path) -> Iterator[Path]:
+    """Yield a sibling copy of `spec` whose info.version is pinned to a fixed value."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", prefix=f".pinned-{spec.stem}-", dir=spec.parent,
+        encoding="utf-8", delete=True,
+    ) as fh:
+        fh.write(with_info_version(spec.read_text(encoding="utf-8", errors="replace"), "0.0.0"))
+        fh.flush()
+        yield Path(fh.name)
+
+
 def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]]:
     """Return (classification, breaking_titles).
 
@@ -311,11 +359,18 @@ def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]
     if breaking:
         return "breaking", breaking
 
-    material = sh(
-        oasdiff, "diff", str(old), str(new),
-        "--exclude-elements", "description,examples,title,summary",
-        "--format", "json", check=False,
-    ).strip()
+    # Compare copies whose info.version is pinned to the SAME value. oasdiff's
+    # --exclude-elements vocabulary does not cover info.version, and leaving it in makes the
+    # bump its own justification — see [with_info_version] and #6380.
+    # Each pinned copy is written NEXT TO its source, never in a scratch directory: a spec may
+    # resolve a relative $ref, and moving the document would break loading (which surfaces as
+    # SpecLoadError, i.e. a red gate, rather than a wrong answer — but only after it happens).
+    with pinned_copy(old) as old_pinned, pinned_copy(new) as new_pinned:
+        material = sh(
+            oasdiff, "diff", str(old_pinned), str(new_pinned),
+            "--exclude-elements", "description,examples,title,summary",
+            "--format", "json", check=False,
+        ).strip()
     if material and material not in ("{}", "null"):
         return "additive", []
 
@@ -488,11 +543,123 @@ def _self_test() -> int:
         else:
             print(f"ok: {name} own={sorted(got_own)} url={sorted(got_url)}")
 
+    failures += classification_self_test()
+
     if failures:
         print(f"{failures} self-test case(s) failed")
         return 1
     print(f"all {len(cases) + len(live)} self-test checks passed")
     return 0
+
+
+BASE_SPEC = """openapi: "3.0.3"
+info:
+  title: Self Test API
+  version: "1.2.0"
+paths:
+  /api/v1/things:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+components:
+  schemas:
+    Thing:
+      type: object
+      properties:
+        id:
+          type: string
+          description: the id
+"""
+
+
+def classification_self_test() -> int:
+    """Falsify [oasdiff_classify] itself — the half this gate's self-test never covered.
+
+    Every case above exercises `url_majors`; none has ever run the classifier, which is the
+    part that decides whether a PR is red. That gap is exactly how #6380 survived: `editorial`
+    demands a PATCH bump, the bump was itself a non-excluded diff, so the change reclassified as
+    `additive` and no version could satisfy it. The estate shows the shape — 231 MINOR bumps and
+    17 PATCH bumps across 50 specs, every PATCH dated 2026-07-06/07 when the gate was being
+    wired, none in the six weeks since.
+
+    Case 1 is the negative control: it FAILS against the code as it stood before #6380.
+    """
+    oasdiff = shutil.which("oasdiff")
+    if not oasdiff:
+        # Never silently pass: an absent binary means these cases did not run, and a self-test
+        # that cannot fail is decoration.
+        print("SELF-TEST FAIL: oasdiff not on PATH — classification cases did not run")
+        return 1
+
+    bumped = BASE_SPEC.replace('version: "1.2.0"', 'version: "1.2.1"')
+    cases: list[tuple[str, str, str, str]] = [
+        (
+            "a PATCH bump and NOTHING else is editorial, not additive (#6380)",
+            BASE_SPEC,
+            bumped,
+            "editorial",
+        ),
+        (
+            "a reworded description plus its PATCH bump stays editorial",
+            BASE_SPEC,
+            bumped.replace("description: the id", "description: the identifier of the thing"),
+            "editorial",
+        ),
+        (
+            "a new property is additive even with only a PATCH bump",
+            BASE_SPEC,
+            bumped.replace(
+                "        id:\n          type: string\n",
+                "        id:\n          type: string\n        label:\n          type: string\n",
+            ),
+            "additive",
+        ),
+        (
+            "an identical document is none",
+            BASE_SPEC,
+            BASE_SPEC,
+            "none",
+        ),
+    ]
+
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, old_text, new_text, expected in cases:
+            old_p = Path(tmp) / "old.yaml"
+            new_p = Path(tmp) / "new.yaml"
+            old_p.write_text(old_text, encoding="utf-8")
+            new_p.write_text(new_text, encoding="utf-8")
+            try:
+                got, _ = oasdiff_classify(oasdiff, old_p, new_p)
+            except (SpecLoadError, RuntimeError) as exc:
+                print(f"SELF-TEST FAIL: {name}: classifier raised {exc}")
+                failures += 1
+                continue
+            if got != expected:
+                print(f"SELF-TEST FAIL: {name}: expected {expected}, got {got}")
+                failures += 1
+            else:
+                print(f"ok: {name}")
+
+    # The bump the classification then demands must be reachable — the property #6380 broke.
+    for kind, old_v, new_v, want in [
+        ("editorial", (1, 2, 0), (1, 2, 1), True),
+        ("editorial", (1, 2, 0), (1, 2, 0), False),
+        ("additive", (1, 2, 0), (1, 2, 1), False),
+        ("additive", (1, 2, 0), (1, 3, 0), True),
+        ("breaking", (1, 2, 0), (2, 0, 0), True),
+    ]:
+        if bump_satisfied(kind, old_v, new_v) is not want:
+            print(f"SELF-TEST FAIL: bump_satisfied({kind}, {old_v}, {new_v}) is not {want}")
+            failures += 1
+    if not failures:
+        print("ok: every classification has a reachable version that satisfies it")
+    return failures
 
 
 def main() -> int:

@@ -36,14 +36,11 @@ class AuthzPolicyResource(
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<AuthzPolicyFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<AuthzPolicyFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): AuthzPolicyFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): AuthzPolicyFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }

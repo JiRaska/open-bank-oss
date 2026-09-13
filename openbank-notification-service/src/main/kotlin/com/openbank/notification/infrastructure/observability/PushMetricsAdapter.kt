@@ -11,6 +11,7 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushSendOutcome
 import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
@@ -79,6 +80,32 @@ class PushMetricsAdapter(private val registry: MeterRegistry?) : PushMetricsPort
         }
     }
 
+    override fun recordFallbackRouted(
+        template: NotificationTemplate,
+        from: NotificationChannel,
+        to: NotificationChannel,
+        outcome: NotificationOutcome,
+    ) {
+        registry?.let { r ->
+            Counter.builder("openbank.notification.fallback.routed")
+                .tag("service", SERVICE)
+                .tag("template", template.name)
+                .tag("from_channel", from.name)
+                .tag("to_channel", to.name)
+                .tag("outcome", outcome.name)
+                .register(r)
+                .increment()
+        }
+    }
+
+    override fun recordFallbackEnabled(enabled: Boolean) {
+        registry?.let { r ->
+            Gauge.builder("openbank.notification.push.fallback.enabled") { if (enabled) ENABLED else DISABLED }
+                .tag("service", SERVICE)
+                .register(r)
+        }
+    }
+
     override fun recordMissingRow(channel: NotificationChannel, template: NotificationTemplate) {
         registry?.let { r ->
             Counter.builder("openbank.notification.status.row.missing")
@@ -98,6 +125,8 @@ class PushMetricsAdapter(private val registry: MeterRegistry?) : PushMetricsPort
 
         private const val FEW_DEVICES = 1
         private const val SEVERAL_DEVICES = 3
+        private const val ENABLED = 1.0
+        private const val DISABLED = 0.0
 
         /** `none` for the success case, so the label is always present and never empty. */
         fun normalizeErrorCode(errorCode: String?): String {

@@ -28,14 +28,22 @@ interface LlmDiagnosisPort {
     suspend fun proposeFixDiff(finding: GovernanceFinding, diagnosis: String): String?
 }
 
+/**
+ * Both methods return the URL of a proposal that was actually created, or `null` when none was —
+ * an unwired write path, a missing token, or a refused finding. `null` is the ONLY way to say
+ * "nothing was created": there is deliberately no placeholder-URL return, because a well-formed
+ * string is indistinguishable from a delivered proposal to every consumer (#5897, and the
+ * `UnwiredProposalPort` precedent in `openbank-mcp-service`, #3900).
+ */
 interface GitHubProposalPort {
     /** The rare mechanical case — e.g. scaffolding a missing docs/threat-models/<service>.md stub.
      * Not the primary proposal path: a violation on an already-merged PR usually needs a human
-     * decision, not a diff (ADR-0164). */
-    suspend fun openProposalPr(finding: GovernanceFinding, fixDiff: String): String
+     * decision, not a diff (ADR-0164). Returns `null` when no PR was opened. */
+    suspend fun openProposalPr(finding: GovernanceFinding, fixDiff: String): String?
 
-    /** The primary proposal path: a compliance incident needing human triage. */
-    suspend fun openTicket(finding: GovernanceFinding, diagnosis: String): String
+    /** The primary proposal path: a compliance incident needing human triage. Returns `null` when
+     * no ticket was opened. */
+    suspend fun openTicket(finding: GovernanceFinding, diagnosis: String): String?
 }
 
 interface FindingRepository {

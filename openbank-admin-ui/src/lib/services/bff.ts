@@ -79,7 +79,7 @@ export function componentFolder(k8sName: string): string {
  * `{ error }` body per case, so we can tell them apart reliably:
  *   - 404 `{error:"Unknown service: <svc>"}` → not deployed / not discovered
  *   - 503 `{error:"scaled_to_zero"}`         → deployed but idle at 0 replicas (KEDA, ADR-0057)
- *   - 401 `{error:"unauthorized"}`           → no operator session / bearer
+ *   - 401/403                                 → no session or insufficient permission
  *   - 502 `{error:"upstream_unreachable"}`   → deployed but the pod didn't answer
  * A 404 WITHOUT that body is a genuine backend 404 (unknown endpoint or id).
  */
@@ -105,7 +105,7 @@ export async function classifyBffFailure(res: Response): Promise<BffFailure> {
   }
   if (res.status === 404 && error.startsWith('Unknown service')) return 'not_deployed'
   if (res.status === 503 && error === 'scaled_to_zero') return 'scaled_to_zero'
-  if (res.status === 401) return 'unauthorized'
+  if (res.status === 401 || res.status === 403) return 'unauthorized'
   if (res.status === 502 && error === 'upstream_unreachable') return 'unreachable'
   if (res.status === 404) return 'not_found'
   return 'error'

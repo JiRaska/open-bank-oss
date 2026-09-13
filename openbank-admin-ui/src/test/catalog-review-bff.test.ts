@@ -63,7 +63,9 @@ describe('catalog review BFF', () => {
   })
 
   it('preserves an upstream model-unavailable result for an honest UI state', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'model unavailable' }), { status: 503 })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: 'catalog review model is unavailable',
+    }), { status: 503 })))
     const { POST } = await import('@/app/api/agent/catalog-reviews/route')
 
     const response = await POST(request({ offeringId: OFFERING_ID, revisionId: REVISION_ID }))

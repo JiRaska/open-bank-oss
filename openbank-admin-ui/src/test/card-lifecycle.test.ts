@@ -28,11 +28,13 @@ describe('card lifecycle transition table', () => {
     expect(actionsFrom('BLOCKED')).toEqual(['cancel'])
   })
 
-  it('mirrors Card.TERMINAL_STATUSES: EXPIRED and CANCELLED offer nothing', () => {
+  it('mirrors Card.TERMINAL_STATUSES: EXPIRED, CANCELLED and CONSUMED offer nothing', () => {
     expect(legalTransitions('EXPIRED')).toEqual([])
     expect(legalTransitions('CANCELLED')).toEqual([])
+    expect(legalTransitions('CONSUMED')).toEqual([])
     expect(isTerminal('EXPIRED')).toBe(true)
     expect(isTerminal('CANCELLED')).toBe(true)
+    expect(isTerminal('CONSUMED')).toBe(true)
     expect(isTerminal('BLOCKED')).toBe(false)
   })
 

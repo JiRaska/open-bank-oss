@@ -40,6 +40,7 @@ import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -127,7 +128,14 @@ class SctInstPaymentService(
         ),
     )
         .invoke { outcome ->
-            if (outcome.verdict != FraudVerdict.ALLOW) {
+            if (outcome.synthetic) {
+                // #4221: a payment that was never scored is not a payment that scored clean.
+                log.warnf(
+                    "Fraud scoring UNAVAILABLE for payment %s — synthetic ALLOW, this payment carries no " +
+                        "fraud verdict (see openbank_fraud_scoring_degraded{service=\"sepa-instant\"})",
+                    payment.paymentId,
+                )
+            } else if (outcome.verdict != FraudVerdict.ALLOW) {
                 log.infof(
                     "Fraud SHADOW verdict %s (score=%d, rules=%s) for payment %s — observed, not enforced",
                     outcome.verdict,
@@ -268,7 +276,14 @@ class SctInstPaymentService(
                     occurredAt = OffsetDateTime.now(clock),
                 ),
             )
-                .invoke { _ -> metrics.paymentCompleted("sepa_instant", saved.currency, "rejected") }
+                .invoke { _ ->
+                    metrics.paymentCompleted("sepa_instant", saved.currency, "rejected")
+                    metrics.paymentProcessingDuration(
+                        "sepa_instant",
+                        "rejected",
+                        Duration.between(saved.createdAt, OffsetDateTime.now(clock)),
+                    )
+                }
                 .replaceWith(saved)
         }
     }
@@ -300,7 +315,14 @@ class SctInstPaymentService(
         val settled = processing.copy(status = SctInstStatus.SETTLED, settledAt = now)
         return repo.save(settled).flatMap { saved ->
             publisher.publish(SctInstPaymentSettled(paymentId = saved.paymentId, settledAt = now, occurredAt = now))
-                .invoke { _ -> metrics.paymentCompleted("sepa_instant", saved.currency, "settled") }
+                .invoke { _ ->
+                    metrics.paymentCompleted("sepa_instant", saved.currency, "settled")
+                    metrics.paymentProcessingDuration(
+                        "sepa_instant",
+                        "settled",
+                        Duration.between(saved.createdAt, now),
+                    )
+                }
                 .replaceWith(saved)
         }
     }
@@ -325,6 +347,11 @@ class SctInstPaymentService(
                 }
                 .invoke { _ ->
                     metrics.paymentCompleted("sepa_instant", saved.currency, "rejected")
+                    metrics.paymentProcessingDuration(
+                        "sepa_instant",
+                        "rejected",
+                        Duration.between(saved.createdAt, OffsetDateTime.now(clock)),
+                    )
                     metrics.sanctionsHit("debtor", "block")
                 }
                 .replaceWith(saved)

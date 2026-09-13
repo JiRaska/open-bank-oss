@@ -44,6 +44,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
+    // Emits secret-free start/stop evidence for the real PostgreSQL Testcontainer. The CI
+    // envelope consumes it; test topology and datasource configuration stay unchanged.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
 }
 

@@ -8,6 +8,7 @@ import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 
@@ -34,4 +35,44 @@ class MerchantCatalogRepository : PanacheRepositoryBase<MerchantCatalogEntity, S
             find("descriptorKey in ?1", keys).list()
         }.awaitSuspending().associateBy { it.descriptorKey }
     }
+
+    /** One page of the catalogue, oldest-updated last, for the operator view. */
+    suspend fun listPaged(page: Int, size: Int): List<MerchantCatalogEntity> = Panache.withSession {
+        find("order by updatedAt desc").page(page, size).list()
+    }.awaitSuspending()
+
+    suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
+
+    suspend fun findByKey(descriptorKey: String): MerchantCatalogEntity? = Panache.withSession {
+        find("descriptorKey", descriptorKey).firstResult()
+    }.awaitSuspending()
+
+    /**
+     * Insert or replace one catalogue row, returning true when it was newly created.
+     *
+     * Upsert rather than separate create/update: the key is the normalised descriptor, so an
+     * operator correcting a name is editing the same row they would otherwise fail to insert, and
+     * making them discover which verb applies is a worse API than making the write idempotent.
+     */
+    suspend fun upsert(entity: MerchantCatalogEntity): Boolean = Panache.withTransaction {
+        find("descriptorKey", entity.descriptorKey).firstResult().flatMap { existing ->
+            if (existing == null) {
+                persist(entity).map { true }
+            } else {
+                existing.cleanName = entity.cleanName
+                existing.logoUrl = entity.logoUrl
+                existing.category = entity.category
+                existing.lat = entity.lat
+                existing.lon = entity.lon
+                existing.city = entity.city
+                existing.country = entity.country
+                existing.updatedAt = entity.updatedAt
+                Uni.createFrom().item(false)
+            }
+        }
+    }.awaitSuspending()
+
+    suspend fun deleteByKey(descriptorKey: String): Boolean = Panache.withTransaction {
+        delete("descriptorKey", descriptorKey).map { it > 0 }
+    }.awaitSuspending()
 }

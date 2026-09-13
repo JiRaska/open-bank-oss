@@ -162,6 +162,13 @@ class StatementRestatementService(
      * Consumers of `period.closed` keep their contract unchanged; a consumer that must react to a
      * correction opts in explicitly (a silently-widened `period.closed` would have downstream
      * systems treat a restatement as a first close).
+     *
+     * Issue #3994/#5256: `sourceService` lets `AuditConsumer` attribute the row from the producer's
+     * own claim ([AttributionSource.EVENT]) instead of its topic-derived fallback, and `occurredAt`
+     * (the fleet's canonical event-time key, mirrored from `closedAt` exactly as the two sibling
+     * `period.closed`/`close_failed` payloads do) stops the audit row being stamped with ingest
+     * time. Both siblings were patched by the fleet sweep; this third event type was missed because
+     * it lives in its own service class rather than in `StatementService`/`CloseOrchestrator`.
      */
     private fun periodRestatedEvent(
         account: PocketAccountInfo,
@@ -183,7 +190,9 @@ class StatementRestatementService(
             "supersededClosingBalance":${superseded.closingBalance.toPlainString()},
             "entryCount":${period.entryCount},
             "supersededEntryCount":${superseded.entryCount},
-            "closedAt":"${period.closedAt}"}
+            "closedAt":"${period.closedAt}",
+            "occurredAt":"${period.closedAt}",
+            "sourceService":"statement-service"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
             eventId = Ids.newId(),

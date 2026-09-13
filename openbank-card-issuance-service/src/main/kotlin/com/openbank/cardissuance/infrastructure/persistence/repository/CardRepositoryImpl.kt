@@ -101,6 +101,30 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         )
     }.awaitSuspending() == 1
 
+    override suspend fun findWithPanCredential(): List<Card> = Panache.withSession {
+        find("panEncrypted IS NOT NULL").list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * Compare-and-swap on the OLD ciphertext, not a plain "update by id": the `expectedPanEncrypted`
+     * predicate is part of the *write*, so a row that changed between the caller's decrypt and this
+     * write (a re-issue, a concurrent re-encrypt pass) is left untouched instead of being clobbered.
+     */
+    override suspend fun updatePanCredentialIfMatches(
+        cardId: UUID,
+        expectedPanEncrypted: String,
+        newPanEncrypted: String,
+        newCvvEncrypted: String,
+    ): Boolean = Panache.withTransaction {
+        update(
+            "panEncrypted = ?1, cvvEncrypted = ?2 WHERE id = ?3 AND panEncrypted = ?4",
+            newPanEncrypted,
+            newCvvEncrypted,
+            cardId,
+            expectedPanEncrypted,
+        )
+    }.awaitSuspending() == 1
+
     private companion object {
         /** `status` is persisted as its enum NAME (see CardMapper), so the query compares strings. */
         val TERMINAL_STATUS_NAMES = Card.TERMINAL_STATUSES.map { it.name }

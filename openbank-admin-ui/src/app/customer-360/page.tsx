@@ -9,9 +9,16 @@ import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
-import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
+import { parseCustomer360Evidence, type Customer360Evidence } from '@/lib/customer360/evidence'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
+import { LipaPanel } from '@/components/party/LipaPanel'
+import { DevicesPanel } from '@/components/party/DevicesPanel'
+import { DocumentsPanel } from '@/components/party/DocumentsPanel'
+import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+
+const CUSTOMER_360_TIMEOUT_MS = 10_000
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -28,7 +35,7 @@ import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 export default function Customer360Page() {
   const { t, language } = useLanguage()
   const [selected, setSelected] = useState<PartyHit | null>(null)
-  const [data, setData] = useState<Customer360 | null>(null)
+  const [data, setData] = useState<Customer360Evidence | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -45,10 +52,27 @@ export default function Customer360Page() {
     setFailure(null)
     setData(null)
     try {
-      const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, { cache: 'no-store' })
-      const body = (await res.json()) as Customer360
+      const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CUSTOMER_360_TIMEOUT_MS),
+      })
       if (gen !== generation.current) return // a newer selection won; this answer is about someone else
+      if (res.status === 401 || res.status === 403) {
+        setSelected(null)
+        setFailure('unauthorized')
+        return
+      }
       if (res.status === 400) {
+        setFailure('error')
+        return
+      }
+      if (!res.ok) {
+        setFailure('unreachable')
+        return
+      }
+      const raw = await res.json()
+      const body = parseCustomer360Evidence(raw, party.id)
+      if (!body) {
         setFailure('error')
         return
       }
@@ -83,13 +107,26 @@ export default function Customer360Page() {
         )}
       />
 
+      {!selected && (
+        <ExplorerGuide compact mascot="lioness" title={t('Začněte člověkem, ne UUID', 'Start with a person, not a UUID')}>
+          {t(
+            'Hledejte přirozeně podle jména nebo e-mailu a vyberte správnou party. Explorer pak poskládá odvozený pohled napříč doménami — autoritativní detail vždy zůstává ve zdrojové službě.',
+            'Search naturally by name or email, then select the right party. Explorer will assemble the derived cross-domain view — authoritative detail always remains in the source service.',
+          )}
+        </ExplorerGuide>
+      )}
+
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 
       {/* Issue #4265. Deliberately OUTSIDE every `data`/`loading`/`failure` branch below: this panel
           reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no
           projected events must not hide an active fraud hold. Those are independent sources and the
           page now degrades independently for each. */}
-      {selected && <AdverseStatePanel key={selected.id} partyId={selected.id} />}
+      {selected && <AdverseStatePanel key={`adverse:${selected.id}`} partyId={selected.id} />}
+      {selected && <LipaPanel key={`lipa:${selected.id}`} partyId={selected.id} />}
+      {selected && <CustomerPortfolioPanel key={`portfolio:${selected.id}`} partyId={selected.id} />}
+      {selected && <DevicesPanel key={`devices:${selected.id}`} partyId={selected.id} />}
+      {selected && <DocumentsPanel key={`documents:${selected.id}`} partyId={selected.id} />}
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>
@@ -104,6 +141,15 @@ export default function Customer360Page() {
           feature={t('Customer 360', 'Customer 360')}
           lang={language === 'cs' ? 'cs' : 'en'}
         />
+      )}
+
+      {!loading && data && data.excludedCount > 0 && (
+        <div role="status" className="card" style={{ marginBottom: '20px', padding: '12px 16px', color: 'var(--warning-text)' }}>
+          {t(
+            `Vyloučeno neplatných projekčních záznamů: ${data.excludedCount}. Souhrny používají pouze ověřené události.`,
+            `Invalid projection records excluded: ${data.excludedCount}. Summaries use validated events only.`,
+          )}
+        </div>
       )}
 
       {/* A party that exists but has no projected events. Stated as exactly that — the source is up,

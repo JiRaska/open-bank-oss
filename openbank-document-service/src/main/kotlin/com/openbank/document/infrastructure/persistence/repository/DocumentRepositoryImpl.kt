@@ -61,6 +61,18 @@ class DocumentRepositoryImpl :
         Panache.withSession { find("partyRef", partyRef).list() }
             .awaitSuspending().map { it.toDomain(objectMapper) }
 
+    // Ordered explicitly: an unordered page is not a page. Without a deterministic sort Postgres
+    // may return rows in any order per query, so the same offset can repeat or skip a document
+    // between two requests — paging over it silently loses rows. createdAt DESC also matches the
+    // browse intent (newest first) and id breaks ties so the order is total, not merely mostly-total.
+    override suspend fun findByPartyPaged(partyRef: String, page: Int, size: Int): List<Document> =
+        Panache.withSession {
+            find("partyRef = ?1 order by createdAt desc, id", partyRef).page(page, size).list()
+        }.awaitSuspending().map { it.toDomain(objectMapper) }
+
+    override suspend fun countByParty(partyRef: String): Long =
+        Panache.withSession { count("partyRef", partyRef) }.awaitSuspending()
+
     override suspend fun findByIdempotencyKey(idempotencyKey: String): Document? =
         Panache.withSession { find("idempotencyKey", idempotencyKey).firstResult() }
             .awaitSuspending()?.toDomain(objectMapper)

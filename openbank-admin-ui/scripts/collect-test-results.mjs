@@ -21,6 +21,7 @@
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { releasedJvmServices } from './lib/service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -32,19 +33,7 @@ const getArg = (flag, dflt) => {
 const REPO = path.resolve(getArg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'test-results.json')))
 
-// The 26 service folders the Test Coverage page knows about (matches
-// KNOWN_SERVICES in the route). Folder name == component folder.
-const KNOWN = [
-  'openbank-account-service', 'openbank-aml-service', 'openbank-audit-service',
-  'openbank-balance-service', 'openbank-card-issuance-service', 'openbank-clearing-service',
-  'openbank-consent-service', 'openbank-dispute-service', 'openbank-domestic-payment',
-  'openbank-fx-service', 'openbank-interest-service', 'openbank-kyc-service',
-  'openbank-ledger-service', 'openbank-notification-service', 'openbank-party-service',
-  'openbank-pid-service', 'openbank-psd2-service', 'openbank-sanctions-service',
-  'openbank-sca-service', 'openbank-security-scanner', 'openbank-sepa-instant',
-  'openbank-sepa-payment', 'openbank-standing-order-service', 'openbank-swift-service',
-  'openbank-tpp-registry-service', 'openbank-transaction-service',
-]
+const KNOWN = releasedJvmServices(REPO)
 
 function findXml(dir) {
   const out = []

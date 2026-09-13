@@ -91,15 +91,18 @@ class FxService(
 
     override suspend fun getAllRates() = rateRepo.findAll()
 
-    override suspend fun getRateHistory(query: GetRateHistoryQuery): List<FxRate> = rateRepo.findHistory(
-        base = query.baseCurrency.uppercase(),
-        quote = query.quoteCurrency.uppercase(),
-        source = query.source,
-        from = query.from,
-        to = query.to,
-        limit = query.limit,
-        offset = query.offset,
-    )
+    override suspend fun getRateHistory(query: GetRateHistoryQuery): List<FxRate> {
+        val base = query.baseCurrency.uppercase()
+        val quote = query.quoteCurrency.uppercase()
+        val direct = rateRepo.findHistory(base, quote, query.source, query.from, query.to, query.limit, query.offset)
+        if (direct.isNotEmpty()) return direct
+
+        // History must resolve the same pair directions as today's quote. ČNB stores only X/CZK,
+        // while a customer commonly asks for CZK/X. Returning an empty chart for a pair that the
+        // quote endpoint can price is both surprising and financially misleading.
+        return rateRepo.findHistory(quote, base, query.source, query.from, query.to, query.limit, query.offset)
+            .map(FxRate::inverted)
+    }
 
     override suspend fun convert(cmd: ConvertCommand): FxConversion {
         convRepo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
@@ -341,7 +344,14 @@ class FxService(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
+        if (outcome.synthetic) {
+            // #4221: a conversion that was never scored is not a conversion that scored clean.
+            log.warnf(
+                "Fraud scoring UNAVAILABLE for conversion by party %s — synthetic ALLOW, no fraud " +
+                    "verdict was obtained (see openbank_fraud_scoring_degraded{service=\"fx\"})",
+                cmd.partyId,
+            )
+        } else if (outcome.verdict != FraudVerdict.ALLOW) {
             log.infof(
                 "Fraud SHADOW verdict %s (score=%d, rules=%s) for conversion by party %s — observed, not enforced",
                 outcome.verdict,

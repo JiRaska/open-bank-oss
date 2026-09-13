@@ -14,19 +14,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-
-type ScoredRecord = {
-  scoreId: string
-  amount: number
-  currency: string
-  rail: string
-  accountId: string | null
-  counterpartyId: string | null
-  verdict: string
-  score: number
-  ruleVersion: string
-  createdAt: string
-}
+import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
 
 function scoreTone(score: number): Tone {
   if (score >= 80) return 'danger'
@@ -36,9 +24,12 @@ function scoreTone(score: number): Tone {
 
 export default function FraudPage() {
   const { t, language } = useLanguage()
-  const [rows, setRows] = useState<ScoredRecord[]>([])
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const [rows, setRows] = useState<FraudReviewEvidence[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [hasSnapshot, setHasSnapshot] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -48,8 +39,17 @@ export default function FraudPage() {
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json() as unknown
-      setRows(Array.isArray(data) ? data as ScoredRecord[] : [])
+      const raw = await res.json() as unknown
+      let nextRows: FraudReviewEvidence[]
+      try {
+        nextRows = parseFraudReviewQueue(raw)
+      } catch {
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      setRows(nextRows)
+      setHasSnapshot(true)
+      setLastUpdatedAt(new Date())
       setUnavailable(null)
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -62,6 +62,7 @@ export default function FraudPage() {
 
   const critical = rows.filter(row => row.score >= 80).length
   const elevated = rows.filter(row => row.score >= 50 && row.score < 80).length
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   return (
     <div>
@@ -71,20 +72,30 @@ export default function FraudPage() {
           'Platby označené enginem jako REVIEW. Rozhodnutí zůstává ve čtyřočkovém compliance toku.',
           'Payments flagged REVIEW by the engine. Resolution remains in the four-eyes compliance flow.',
         )}
-        icon={<ShieldAlert size={20} style={{ color: 'var(--accent)' }} />}
-        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        icon={<ShieldAlert size={20} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
+        actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit frontu podvodů', 'Refresh fraud queue')} className="btn btn-secondary btn-sm">
+          <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
 
-      {!unavailable && <section style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, marginBottom: 16 }} aria-label={t('Souhrn fronty', 'Queue summary')}>
+      {(!unavailable || hasSnapshot) && <section style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, marginBottom: 16 }} aria-label={t('Souhrn fronty', 'Queue summary')}>
         <StatCard label={t('Čeká na posouzení', 'Awaiting review')} value={rows.length} hint={t('maximálně 50 nejnovějších záznamů', 'up to 50 most recent records')} icon={<Clock3 size={15} />} tone={rows.length ? 'warning' : 'neutral'} />
         <StatCard label={t('Kritické skóre', 'Critical score')} value={critical} hint={t('skóre 80 a více', 'score 80 and above')} icon={<CircleAlert size={15} />} tone={critical ? 'danger' : 'neutral'} />
         <StatCard label={t('Zvýšené skóre', 'Elevated score')} value={elevated} hint={t('skóre 50–79', 'score 50–79')} icon={<ShieldAlert size={15} />} tone={elevated ? 'warning' : 'neutral'} />
       </section>}
 
+      {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 16 }}>
+        <DataUnavailable kind={unavailable.kind} service="fraud-service" feature={t('Aktualizace fraud review fronty', 'Fraud review queue refresh')} lang={language} dense />
+        <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t(
+            `Zobrazen je poslední úspěšný snapshot z ${lastUpdatedAt?.toLocaleString(numberLocale) ?? '—'}; stav se mohl změnit.`,
+            `Showing the last successful snapshot from ${lastUpdatedAt?.toLocaleString(numberLocale) ?? '—'}; the queue may have changed.`,
+          )}
+        </p>
+      </div>}
+
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {unavailable ? <DataUnavailable kind={unavailable.kind} service="fraud-service" feature={t('Fraud review fronta', 'Fraud review queue')} lang={language} dense /> : (
+        {unavailable && !hasSnapshot ? <DataUnavailable kind={unavailable.kind} service="fraud-service" feature={t('Fraud review fronta', 'Fraud review queue')} lang={language} dense /> : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -102,7 +113,7 @@ export default function FraudPage() {
               return (
                 <tr key={r.scoreId} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', fontWeight: 700 }}>
-                    {r.amount.toLocaleString('cs-CZ')} {r.currency}
+                    {r.amount.toLocaleString(numberLocale)} {r.currency}
                   </td>
                   <td style={{ padding: '10px 14px' }}><span className="pill">{r.rail}</span></td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -115,12 +126,12 @@ export default function FraudPage() {
                     {r.ruleVersion}
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-                    {new Date(r.createdAt).toLocaleString()}
+                    {new Date(r.createdAt).toLocaleString(numberLocale)}
                   </td>
                 </tr>
               )
             })}
-            {!loading && rows.length === 0 && (
+            {!loading && rows.length === 0 && !showingRetainedSnapshot && (
               <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
                 {t('Fronta je prázdná — žádné REVIEW verdikty.', 'Queue is empty — no REVIEW verdicts.')}
               </td></tr>

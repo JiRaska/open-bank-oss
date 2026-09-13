@@ -16,5 +16,9 @@ interface CardDelegationProjectionRepository {
     /** Close the row (revoke/suspend/renounce/expire). Returns false when unknown — still a no-op. */
     suspend fun closeById(grantId: UUID): Boolean
 
+    suspend fun applyActive(grant: DelegatedCardGrant, lifecycleRevision: Long) = upsertActive(grant)
+
+    suspend fun applyClosed(grantId: UUID, lifecycleRevision: Long?): Boolean = closeById(grantId)
+
     suspend fun findActiveByCardAndParty(cardId: UUID, partyId: UUID): List<DelegatedCardGrant>
 }

@@ -33,7 +33,7 @@ class SignatureCeremonyResource(private val useCase: SignatureCeremonyUseCase) {
         val ceremony = useCase.openCeremony(
             OpenCeremonyCommand(
                 documentId = req.documentId,
-                signerPartyRefs = req.signerPartyRefs,
+                signerPartyRefs = req.requireSignerPartyRefs(),
                 signatureLevel = req.signatureLevel,
             ),
         )

@@ -4,7 +4,10 @@
 
 package com.openbank.pid.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import org.opentest4j.TestAbortedException
+import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -21,12 +24,18 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
 
     override fun start(): Map<String, String> {
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        if (!DockerClientFactory.instance().isDockerAvailable) {
+            throw TestAbortedException("Docker not available — skipping Testcontainers IT")
+        }
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_pid_it")
-        pg.start()
+        // Keep the handle before start() so a partial container startup remains observable and
+        // stop() can perform the same cleanup guarantee as a successful boot.
         postgres = pg
+        pg.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -39,6 +48,13 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

@@ -73,7 +73,9 @@ export function CampaignExperiencePreview({
             <div className={`campaign-phone-hero${isBanner ? ` campaign-phone-banner campaign-phone-${inAppSurface.toLowerCase()}` : ''}`} data-preview-surface={isBanner ? inAppSurface : undefined}>
               <span>{isBanner ? (language === 'cs' ? surface.cs : surface.en) : t('Doporučeno pro vás', 'Recommended for you')}</span>
               <strong>{headline}</strong>
-              <button type="button" tabIndex={-1}>{t('Zjistit víc', 'Explore')}</button>
+              {/* This previews a customer CTA; it is not an action in Admin UI. A real button here
+                  would be announced to assistive technology while doing nothing. */}
+              <span className="campaign-phone-cta">{t('Zjistit víc', 'Explore')}</span>
             </div>
             <div className="campaign-phone-row"><span /><span /><span /></div>
           </div>

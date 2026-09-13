@@ -7,6 +7,7 @@ package com.openbank.campaign.application
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -15,6 +16,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.application.usecase.EnrolmentOutcome
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -24,11 +26,14 @@ import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Regression coverage for #2953 — a failed journey start used to strand its party forever.
@@ -48,10 +53,22 @@ class CampaignEnrolmentFailureTest {
     private val campaignId = UUID.randomUUID()
     private val parties = List(3) { UUID.randomUUID() }
 
+    // A REAL adapter over a real registry (#5705): the per-party `failed` count is the one the
+    // sweep swallows into a return value nobody watches, so the assertion has to be that the
+    // counter moved, not that a mock was called.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+    private fun enrolments(outcome: String): Double = registry.find(CampaignMetricsAdapter.ENROLMENTS_METRIC)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
+
     private val campaign = Campaign(
         id = campaignId,
         name = "winback",
         goal = "reactivate dormant parties",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("dormant-parties", 1),
         steps = listOf(
             CampaignStep(
@@ -104,6 +121,7 @@ class CampaignEnrolmentFailureTest {
         journeys: JourneySignaller,
         selectedCampaign: Campaign = campaign,
         audience: List<UUID> = parties,
+        creditConsent: (UUID) -> Boolean = { true },
     ) = CampaignService(
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID): Campaign? = selectedCampaign.takeIf { it.id == id }
@@ -125,6 +143,11 @@ class CampaignEnrolmentFailureTest {
         // Enrolment never touches the scheduler — a stub that throws proves it, and would fail
         // loudly if a future change started scheduling from inside the enrol path.
         scheduler = ThrowingScheduler,
+        metrics = metrics,
+        consentCheck = object : ConsentCheckPort {
+            override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) =
+                if (scope == CampaignProductKind.CREDIT_OFFERS_SCOPE) creditConsent(partyId) else true
+        },
         explicitGraphActivationEnabled = false,
     )
 
@@ -172,6 +195,13 @@ class CampaignEnrolmentFailureTest {
             .describedAs("the loop used to abort on the first failure, so parties 2 and 3 were never reached")
             .containsExactly(parties[1], parties[2])
         assertThat(outcome).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
+        assertThat(enrolments("started")).isEqualTo(2.0)
+        assertThat(enrolments("failed")).isEqualTo(1.0)
+        assertThat(enrolments("holdout")).isEqualTo(0.0)
+        // The sweep is the only caller of this timer, so a batch that ran must leave a sample.
+        val timer = registry.find(CampaignMetricsAdapter.ENROL_DURATION_METRIC).timer()
+        assertThat(timer!!.count()).isEqualTo(1L)
+        assertThat(timer.totalTime(TimeUnit.NANOSECONDS)).isGreaterThan(0.0)
     }
 
     @Test
@@ -199,9 +229,68 @@ class CampaignEnrolmentFailureTest {
         assertThat(holdout.completedAt).isNotNull()
         assertThat(enrolments.saved.single { it.partyId == treatmentParty }.experimentCohort)
             .isEqualTo(ExperimentCohort.TREATMENT)
+        // A control-cohort assignment is not a started journey and must not be counted as one —
+        // otherwise a 100% holdout reads exactly like a fully working campaign.
+        assertThat(enrolments("holdout")).isEqualTo(1.0)
+        assertThat(enrolments("started")).isEqualTo(1.0)
+        assertThat(enrolments("failed")).isEqualTo(0.0)
     }
 
     private fun partyIn(cohort: ExperimentCohort): UUID = generateSequence(1L) { it + 1 }
         .map { UUID(0, it) }
         .first { ExperimentCohort.assign(campaignId, it, 50) == cohort }
+
+    // ── ADR-0269 rule 1 on the scheduled sweep ──────────────────────────────────────────────
+
+    @Test
+    fun `a credit sweep enrols only the parties who switched credit offers on`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val consenting = parties.first()
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { it == consenting })
+            .enrol(campaignId)
+
+        // Per party, not per campaign: consent belongs to the person. The others qualified for the
+        // segment and are simply not people the bank may offer credit to.
+        assertThat(enrolments.saved.map { it.partyId }).containsExactly(consenting)
+        assertThat(journeys.started).containsExactly(consenting)
+    }
+
+    @Test
+    fun `a credit sweep with no consenting party starts nothing at all`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { false }).enrol(campaignId)
+
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
+    }
+
+    @Test
+    fun `a non-credit sweep ignores credit consent entirely`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+
+        // campaign is NONE. If this refused, the credit consent would have become a general
+        // marketing switch — the thing ADR-0269 says it is not.
+        service(enrolments, journeys, creditConsent = { false }).enrol(campaignId)
+
+        assertThat(enrolments.saved.map { it.partyId }).containsExactlyElementsOf(parties)
+    }
+
+    @Test
+    fun `an unreadable consent skips the party rather than enrolling them`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { error("consent down") })
+            .enrol(campaignId)
+
+        assertThat(enrolments.saved).isEmpty()
+    }
 }

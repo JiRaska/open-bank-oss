@@ -40,7 +40,7 @@ graph TB
     rest[REST<br/>OnboardingResource<br/>3 GET endpointy]
     uc[Application<br/>OnboardingProjectionService<br/>implementuje OnboardingUseCase]
     dom[Domain<br/>OnboardingRecord / OnboardingEvent<br/>FunnelStage.derive]
-    consumer[Messaging<br/>OnboardingEventConsumer<br/>3 suspend @Incoming]
+    consumer["Messaging<br/>OnboardingEventConsumer<br/>3 suspend @Incoming"]
     persist[Persistence<br/>OnboardingRepositoryImpl<br/>Hibernate Reactive / Panache]
   end
 
@@ -118,7 +118,7 @@ sequenceDiagram
 | party `ACTIVE` a `scaEnrolled` | `ACTIVE` |
 | party `ACTIVE` a neenrollnuto | `SCA_PENDING` |
 | kyc `UNDER_REVIEW` | `KYC_UNDER_REVIEW` |
-| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` |
+| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` | <!-- nedosažitelné: kyc tento stav nikdy nenastaví (#8535) -->
 | kyc `OPEN` nebo null | `KYC_OPEN` |
 | kyc `REJECTED` nebo `EXPIRED` | `BLOCKED` |
 | jinak | `REGISTERED` |

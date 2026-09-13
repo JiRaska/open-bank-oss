@@ -2,6 +2,13 @@
 # metrics-generator output (traces_spanmetrics_* / traces_service_graph_*) — so
 # the whole fleet gets rate/error/duration and a dependency graph with ZERO
 # service instrumentation. Provisioned via the grafana_dashboard sidecar label.
+# `or vector(0)` (added 2026-08-16): sum(rate(x{status_code=~"ERROR|5.."}[5m])) over an
+# EMPTY match set is NOT a zero-valued sample in PromQL — it is no series at all, and Grafana
+# renders that as "No data", indistinguishable from the metric never existing. During any window
+# with genuinely zero errors this panel went blank, reading as broken when the real state was
+# healthy. Verified live against Prometheus before and after: all patched panels went from an
+# empty result set to a real 0-valued series over the same 14d window with confirmed non-zero
+# service traffic (i.e. the fix restores correctness, it does not paper over a real data gap).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -98,7 +105,7 @@ data:
           "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" }, "custom": { "fillOpacity": 20 } }, "overrides": [] },
           "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
           "targets": [
-            { "expr": "sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))", "legendFormat": "{{client}} → {{server}}", "refId": "A" }
+            { "expr": "sum by (client, server) (rate(traces_service_graph_request_failed_total[5m])) or vector(0)", "legendFormat": "{{client}} → {{server}}", "refId": "A" }
           ]
         }
       ]

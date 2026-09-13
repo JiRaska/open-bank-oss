@@ -4,9 +4,13 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
+import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
@@ -14,6 +18,8 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
+import com.openbank.campaign.domain.model.CampaignProductKind.Companion.CREDIT_OFFERS_SCOPE
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -22,6 +28,7 @@ import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
@@ -29,8 +36,10 @@ import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -55,7 +64,11 @@ class CampaignReferenceNotFoundException(message: String) : NoSuchElementExcepti
  * [Campaign.activate] — a domain rule, not a UI convention.
  */
 @ApplicationScoped
-@Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
+// LongParameterList: nine collaborators, each a distinct outbound port this service genuinely
+// drives (repositories, segments, journeys, scheduler, metrics, consent). Bundling them into a
+// holder would hide which ones a given use case touches and make the CDI graph less honest, for
+// no reduction in real coupling.
+@Suppress("TooManyFunctions", "LongParameterList") // Lifecycle actions are separate use cases, not helpers.
 class CampaignService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -63,6 +76,13 @@ class CampaignService @Inject constructor(
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    private val metrics: CampaignMetricsPort,
+    /**
+     * ADR-0269 rule 1. A live per-call check, never cached (ADR-0195): a cached credit consent
+     * outlives its own revocation, and the whole point of this consent is that switching it off
+     * takes effect at once rather than at the next sweep.
+     */
+    private val consentCheck: ConsentCheckPort,
     /**
      * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
      * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
@@ -72,6 +92,9 @@ class CampaignService @Inject constructor(
     private val explicitGraphActivationEnabled: Boolean,
 ) {
 
+    @Inject
+    lateinit var incentiveOffers: IncentiveOfferRegistry
+
     private val log = Logger.getLogger(CampaignService::class.java)
 
     suspend fun createDraft(
@@ -80,18 +103,22 @@ class CampaignService @Inject constructor(
         segmentRef: SegmentRef,
         steps: List<CampaignStep>,
         createdBy: String,
+        productKind: CampaignProductKind,
         stopCondition: StopCondition? = null,
         conversionRule: String? = null,
         holdoutPercent: Int = 0,
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
         decisions: List<CampaignDecision> = emptyList(),
+        incentiveOfferRef: IncentiveOfferRef? = null,
     ): Campaign {
         val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val resolvedIncentive = validateIncentiveOffer(incentiveOfferRef)
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
             goal = goal,
+            productKind = productKind,
             segmentRef = resolvedSegment,
             steps = steps.sortedBy { it.order },
             stopCondition = stopCondition,
@@ -103,6 +130,7 @@ class CampaignService @Inject constructor(
             schedule = schedule,
             trigger = trigger,
             decisions = decisions,
+            incentiveOfferRef = resolvedIncentive,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,
@@ -121,8 +149,9 @@ class CampaignService @Inject constructor(
             definition.conversionRule,
             definition.trigger,
         )
+        val resolvedIncentive = validateIncentiveOffer(definition.incentiveOfferRef)
         return campaigns.save(
-            existing.revise(definition.copy(segmentRef = resolvedSegment)),
+            existing.revise(definition.copy(segmentRef = resolvedSegment, incentiveOfferRef = resolvedIncentive)),
         )
     }
 
@@ -142,13 +171,60 @@ class CampaignService @Inject constructor(
             segmentRef = source.segmentRef,
             steps = source.steps,
             createdBy = createdBy,
+            // Carried, never defaulted: a duplicated credit campaign that silently became NONE
+            // would be a credit journey the step gate no longer recognises as one.
+            productKind = source.productKind,
             stopCondition = source.stopCondition,
             conversionRule = source.conversionRule,
             holdoutPercent = source.holdoutPercent,
             schedule = source.schedule,
             trigger = source.trigger,
             decisions = source.decisions,
+            incentiveOfferRef = source.incentiveOfferRef,
         )
+    }
+
+    /**
+     * Whether this sweep passes [partyId] over: already enrolled, or a credit campaign they never
+     * opted into.
+     *
+     * One guard rather than two `continue`s in the loop, and the reasoning lives here rather than
+     * inline. ADR-0269 rule 1 is checked PER PARTY, not once for the campaign, because consent is
+     * a property of the person and not of the journey — a campaign-level check would enrol
+     * everyone or no one.
+     *
+     * Fails CLOSED: an unreadable consent answers "no". The alternative offers credit to someone
+     * whose consent the bank could not read, which is the one outcome this rule exists to prevent,
+     * and a marketing act cannot be taken back once sent.
+     */
+    private suspend fun skipParty(campaign: Campaign, partyId: UUID): Boolean {
+        if (enrolments.findByCampaignAndParty(campaign.id, partyId) != null) return true
+        if (campaign.productKind.isCredit && !hasCreditOffersConsent(partyId)) {
+            metrics.enrolmentRecorded(EnrolmentAttempt.SUPPRESSED_CREDIT_CONSENT)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Whether [partyId] has switched credit offers on, answering `false` on any failure.
+     *
+     * `runCatching` with cancellation rethrown: swallowing a `CancellationException` here would
+     * turn a cancelled sweep into a business decision that the party has no consent, which is the
+     * safe direction but a lie in the metrics.
+     */
+    // TooGenericExceptionCaught: the point IS every failure — a timeout, a 500, a parse error all
+    // mean the same thing here, that the bank does not know whether it may offer credit, and the
+    // answer to that is always "no". Narrowing this would let some unknown class of fault through
+    // as a grant.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun hasCreditOffersConsent(partyId: UUID): Boolean = try {
+        consentCheck.hasActiveConsent(partyId, CREDIT_OFFERS_SCOPE)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warnf(e, "credit consent unreadable for party %s; treating as absent", partyId)
+        false
     }
 
     /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
@@ -171,6 +247,15 @@ class CampaignService @Inject constructor(
             "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
         return SegmentRef(segment.name, segment.version)
+    }
+
+    /** Pins only an exact published offer revision; Studio never owns redemption or value mutation. */
+    private suspend fun validateIncentiveOffer(ref: IncentiveOfferRef?): IncentiveOfferRef? {
+        if (ref == null) return null
+        return incentiveOffers.resolvePublished(ref)
+            ?: throw CampaignReferenceNotFoundException(
+                "published incentive offer ${ref.name}@${ref.version} (${ref.id}) not found",
+            )
     }
 
     suspend fun get(id: UUID): Campaign? = campaigns.findById(id)
@@ -262,11 +347,14 @@ class CampaignService @Inject constructor(
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol (state: ${campaign.state})" }
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
             ?: throw NoSuchElementException("segment ${campaign.segmentRef} not found")
+        // Measured around the whole sweep, segment evaluation included: the silver-layer query is
+        // the slow half and the part that degrades first.
+        val sweepStartedAt = Instant.now()
         val partyIds = segmentEvaluation.evaluate(segment)
         var started = 0
         var failed = 0
         for (partyId in partyIds) {
-            if (enrolments.findByCampaignAndParty(id, partyId) != null) continue
+            if (skipParty(campaign, partyId)) continue
             try {
                 val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
                 if (cohort == ExperimentCohort.HOLDOUT) {
@@ -287,6 +375,7 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
                 } else {
                     // Start FIRST, persist on success. The workflow id is the idempotency key
                     // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
@@ -311,15 +400,18 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
                 }
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
                 // nothing to do with them. The count returned is what actually started.
                 failed++
+                metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
                 log.errorf(e, "campaign.enrol failed campaign=%s party=%s", id, partyId)
             }
         }
+        metrics.enrolmentBatchCompleted(Duration.between(sweepStartedAt, Instant.now()))
         return EnrolmentOutcome(enrolled = started, failed = failed)
     }
 

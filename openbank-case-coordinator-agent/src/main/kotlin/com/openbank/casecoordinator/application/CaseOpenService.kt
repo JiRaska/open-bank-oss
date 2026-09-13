@@ -84,6 +84,9 @@ class CaseOpenService(
         if (!gate.canOpenCase(openedBy) || caseClass !in config.case().enabledClasses()) {
             return CaseOpenResult.Denied
         }
+        if (config.case().deliveryMode().name == "SHADOW" && caseClass != CaseClass.INCIDENT_RESPONSE) {
+            return CaseOpenResult.Denied
+        }
         val now = clock.millis()
         if (!consumeOpenQuota(callerPrincipal, now)) return CaseOpenResult.RateLimited
         if (countRunningCases() >= config.case().maxConcurrent()) {
@@ -101,6 +104,7 @@ class CaseOpenService(
             deadlineEpochMs = now + config.case().ttl().toMillis(),
             contestedRateThreshold = config.case().contestedRateThreshold(),
             maxContributions = config.case().maxContributions(),
+            deliveryMode = config.case().deliveryMode(),
         )
         val options = WorkflowOptions.newBuilder()
             .setWorkflowId(workflowId)

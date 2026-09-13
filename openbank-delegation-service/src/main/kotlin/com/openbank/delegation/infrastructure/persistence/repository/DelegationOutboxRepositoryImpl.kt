@@ -4,6 +4,7 @@
 package com.openbank.delegation.infrastructure.persistence.repository
 
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
+import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationOutboxEntity
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
@@ -78,21 +79,27 @@ class DelegationOutboxRepositoryImpl(private val clock: Clock) :
         }.awaitSuspending()
     }
 
-    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
         Panache.withTransaction {
-            find("eventId", eventId).firstResult().invoke { e ->
+            find("eventId", eventId).firstResult().map { e ->
                 if (e != null) {
                     e.attemptCount += 1
                     e.status = OutboxFailurePolicy.statusAfterFailure(e.attemptCount).name
                     e.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
                     e.updatedAt = failedAt
+                    OutboxStatus.valueOf(e.status)
+                } else {
+                    // Row not found -- unreachable in practice (the dispatcher only calls
+                    // markFailed on a row it just claimed), but degrade gracefully rather than
+                    // throw out of a batch that is otherwise mid-flight (#5128 finding 3).
+                    OutboxStatus.FAILED
                 }
-            }.replaceWith(Unit)
+            }
         }.awaitSuspending()
-    }
 
     private fun OutboxMessage.toEntity() = DelegationOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload
@@ -103,15 +110,31 @@ class DelegationOutboxRepositoryImpl(private val clock: Clock) :
     }
 
     companion object {
+        private const val SPEND_STATE_EVENT_TYPE = DelegationSpendReservationStateChanged.EVENT_TYPE
+        private const val SENT_STATUS = "SENT"
+
         @Suppress("MaxLineLength")
-        private const val CLAIM_SQL = """
-            UPDATE delegation_outbox
+        private val CLAIM_SQL = """
+            UPDATE delegation_outbox AS claimed
             SET status = :dispatching, claimed_at = :now, updated_at = :now
-            WHERE id IN (
-                SELECT id FROM delegation_outbox
-                WHERE (status IN (:pending, :failed))
-                   OR (status = :dispatching AND claimed_at < :staleThreshold)
-                ORDER BY created_at ASC
+            WHERE claimed.id IN (
+                SELECT candidate.id FROM delegation_outbox AS candidate
+                WHERE (
+                    candidate.status IN (:pending, :failed)
+                    OR (candidate.status = :dispatching AND candidate.claimed_at < :staleThreshold)
+                )
+                AND (
+                    candidate.event_type <> '$SPEND_STATE_EVENT_TYPE'
+                    OR NOT EXISTS (
+                        SELECT 1 FROM delegation_outbox AS older
+                        WHERE older.aggregate_id = candidate.aggregate_id
+                          AND older.event_type = '$SPEND_STATE_EVENT_TYPE'
+                          AND (older.payload::jsonb ->> 'reservationVersion')::bigint
+                              < (candidate.payload::jsonb ->> 'reservationVersion')::bigint
+                          AND older.status <> '$SENT_STATUS'
+                    )
+                )
+                ORDER BY candidate.created_at ASC, candidate.id ASC
                 LIMIT :claimLimit
                 FOR UPDATE SKIP LOCKED
             )

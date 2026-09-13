@@ -221,8 +221,8 @@ def self_test(since: str | None = None) -> int:
     could invalidate it, and stays silent on the ones that cannot.
     """
     if not shutil.which("docker"):
-        print("::warning title=Loki rules::docker not available — cannot run the self-test.")
-        return 0
+        print("::warning title=Loki rules::docker not available — cannot run the LOAD-TEST half "
+              "of the self-test. The wiring half below needs no docker and still runs.")
     if since:
         changed, detail = rule_inputs_changed(since)
         if not changed:
@@ -231,6 +231,35 @@ def self_test(since: str | None = None) -> int:
             return 0
         print(f"check-loki-rules --self-test: {detail}")
     failures = []
+
+    # The wiring half, falsified first: it needs no docker, so it runs even where the load test
+    # cannot. Feed it the exact defect #5734 was — the block keyed `ruler` instead of
+    # `rulerConfig` — and require it to flag. A gate that has only ever seen a passing input has
+    # not been shown to be able to fail.
+    print("self-test: the wiring case the gate MUST flag")
+    with tempfile.TemporaryDirectory() as td:
+        app = yaml.safe_load(LOKI_APP.read_text(encoding="utf-8"))
+        loki = app["spec"]["source"]["helm"]["valuesObject"]["loki"]
+        loki["ruler"] = loki.pop("rulerConfig")          # the pre-#5734 shape, verbatim
+        broken = Path(td) / "loki-broken.yaml"
+        broken.write_text(yaml.safe_dump(app, sort_keys=False))
+        flagged = check_ruler_wiring(broken)
+    print(f"  {'ok  ' if flagged else 'FAIL'} `loki.ruler:` instead of `loki.rulerConfig:` is "
+          f"rejected" + (f" ({len(flagged)} problem(s))" if flagged else ""))
+    if not flagged:
+        failures.append("silently-dropped ruler key accepted")
+
+    print("self-test: the wiring case the gate MUST pass")
+    live = check_ruler_wiring()
+    print(f"  {'ok  ' if not live else 'FAIL'} the committed loki.yaml is accepted"
+          + ("" if not live else f" — {live[0]}"))
+    if live:
+        failures.append("committed loki.yaml rejected")
+
+    if not shutil.which("docker"):
+        # Reached only when docker appeared between the guard above and here; keep it honest.
+        return 1 if failures else 0
+
     good = {"good": yaml.safe_dump({"groups": [{
         "name": "selftest.good", "interval": "5m", "rules": [{
             "alert": "SelfTestGood",
@@ -271,6 +300,109 @@ def self_test(since: str | None = None) -> int:
 # workflow can never be a required check (a required context that never reports blocks every PR
 # that misses its paths), and a step that silently no-ops reads exactly like a step that passed.
 # This one says which it did.
+LOKI_APP = REPO / "openbank-infra" / "gitops" / "apps" / "loki.yaml"
+
+
+def check_ruler_wiring(app_file: Path = LOKI_APP) -> list[str]:
+    """Assert the DEPLOYED chart values actually produce the ruler this gate simulates.
+
+    WHY THIS EXISTS, AND WHY THE LOAD TEST ABOVE COULD NOT SEE IT (issue #5734). The load test
+    boots Loki with LOKI_CONFIG — a ruler section written to mirror apps/loki.yaml. It therefore
+    validates the rules against the config the repo MEANT to deploy, and is structurally blind to
+    whether that config is the one that actually runs. It was not. From #3060 until 2026-08-20 the
+    block in apps/loki.yaml was keyed `loki.ruler:`; the grafana/loki chart's key is
+    `loki.rulerConfig:`, and Helm discards an unknown value key silently. So the live ruler ran on
+    defaults — rule storage `s3` instead of `local:/rules`, and an EMPTY alertmanager_url — while
+    the sidecar dutifully wrote three rule files to /rules/fake that nothing ever read. Measured
+    live: `/prometheus/api/v1/rules` returned zero groups with all three files present on disk.
+    Every log-based alert in the estate had never evaluated, and the load test was green
+    throughout, about a config nobody deployed.
+
+    Deliberately offline and unconditional: no docker, no chart download, no network, single-digit
+    milliseconds. This is the half of the check that must never be skipped, because the failure it
+    catches produces no error anywhere else — not in Helm, not in ArgoCD, not in the pod's health.
+
+    Nothing here is hardcoded that can be derived: the expected rule directory comes from the
+    sidecar's own `folder`, so moving the sidecar moves the assertion with it.
+    """
+    problems: list[str] = []
+    try:
+        app = yaml.safe_load(app_file.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as ex:
+        return [f"could not read {app_file}: {ex}"]
+
+    values = (((app or {}).get("spec") or {}).get("source") or {}).get("helm", {}).get(
+        "valuesObject") or {}
+    loki = values.get("loki") or {}
+
+    # (1) The key itself. `ruler` is the Loki CONFIG name and the intuitive guess; `rulerConfig`
+    #     is the CHART name and the only one that survives templating.
+    if "ruler" in loki:
+        problems.append(
+            "loki.yaml sets `loki.ruler:` — not a chart key. The grafana/loki chart calls it "
+            "`loki.rulerConfig:`, and Helm drops unknown value keys SILENTLY, so every setting "
+            "under it is inert and the ruler runs on defaults (s3 rule storage, no "
+            "alertmanager_url). Rename the key to `rulerConfig`.")
+    ruler = loki.get("rulerConfig")
+    if not isinstance(ruler, dict):
+        problems.append(
+            "loki.yaml declares no `loki.rulerConfig:` block, so the Loki ruler has no rule "
+            "storage and no Alertmanager — every loki_rule ConfigMap in this repo would be "
+            "written to disk and never read.")
+        return problems
+
+    # (2) Rule storage must be LOCAL and point at the directory the sidecar writes into.
+    #     Derived from the sidecar's folder rather than restated, so the two cannot drift.
+    sidecar_folder = ((values.get("sidecar") or {}).get("rules") or {}).get("folder")
+    storage = ruler.get("storage") or {}
+    if storage.get("type") != "local":
+        problems.append(
+            f"loki.rulerConfig.storage.type is {storage.get('type')!r}, not 'local'. Rules reach "
+            f"this ruler as files written by the k8s-sidecar; any other storage type makes the "
+            f"ruler read somewhere nothing writes and load zero groups.")
+    directory = (storage.get("local") or {}).get("directory")
+    if sidecar_folder and directory:
+        # The sidecar writes into <directory>/<tenant>; single-tenant Loki calls the tenant `fake`.
+        if not str(sidecar_folder).rstrip("/").startswith(str(directory).rstrip("/") + "/"):
+            problems.append(
+                f"the sidecar writes rules to {sidecar_folder!r} but the ruler reads "
+                f"{directory!r} — the ruler will never see them.")
+    elif not directory:
+        problems.append("loki.rulerConfig.storage.local.directory is unset — the ruler has no "
+                        "rule directory to read.")
+
+    # (3) A rule that fires and is delivered nowhere is the same write-only control this whole
+    #     issue is about, one layer up.
+    if not (ruler.get("alertmanager_url") or "").strip():
+        problems.append(
+            "loki.rulerConfig.alertmanager_url is empty — a rule can evaluate and fire, and the "
+            "alert is dropped on the floor with no error anywhere.")
+
+    # (4) Keep the simulation honest: the ruler this gate boots must match the deployed one on the
+    #     two settings that decide whether rules load at all. Otherwise the load test drifts back
+    #     into being green about a config nobody runs, which is exactly how #5734 happened.
+    sim = (yaml.safe_load(LOKI_CONFIG) or {}).get("ruler") or {}
+    sim_dir = ((sim.get("storage") or {}).get("local") or {}).get("directory")
+    if (sim.get("storage") or {}).get("type") != storage.get("type") or sim_dir != directory:
+        problems.append(
+            f"this gate boots a ruler with storage "
+            f"{(sim.get('storage') or {}).get('type')!r}:{sim_dir!r} but loki.yaml deploys "
+            f"{storage.get('type')!r}:{directory!r}. The load test would be validating rules "
+            f"against a ruler the estate does not run — update LOKI_CONFIG in this file.")
+    return problems
+
+
+def run_wiring_gate() -> int:
+    problems = check_ruler_wiring()
+    if not problems:
+        print("check-loki-rules: the deployed Loki ruler is wired to read these rules and to "
+              "deliver what they fire.")
+        return 0
+    for p in problems:
+        print(f"::error title=Loki ruler wiring::{p}")
+    return 1
+
+
 RULE_INPUTS = [
     "openbank-infra/gitops/components",       # where loki_rule ConfigMaps live
     "openbank-infra/gitops/apps/loki.yaml",   # the ruler config the rules load under
@@ -319,8 +451,15 @@ def main() -> int:
                          "BOTH the gate and --self-test — each boots Loki, and the self-test boots "
                          "it twice. Omit to always run.")
     args = ap.parse_args()
+    # ALWAYS, and before anything else: offline, no docker, no --since skip. The load test can be
+    # skipped when no rule changed; this cannot, because it does not check the rules — it checks
+    # that a ruler capable of loading them exists at all, and that regresses from an edit to
+    # loki.yaml that touches no rule file.
+    wiring = run_wiring_gate()
     if args.self_test:
-        return self_test(args.since)
+        return self_test(args.since) or wiring
+    if wiring:
+        return wiring
     if args.since:
         changed, detail = rule_inputs_changed(args.since)
         if not changed:

@@ -1,0 +1,38 @@
+# pgvector for the copilot database (ADR-0183, executed by ADR-0265 slice 4).
+#
+# WHY THIS RESOURCE EXISTS AT ALL — the migration cannot do it. `vector` is not a TRUSTED extension,
+# so the role Flyway connects as (the database owner, `openbank`) is refused. Measured against the
+# exact image this cluster runs, ghcr.io/cloudnative-pg/postgresql:18.1:
+#
+#   as owner:      ERROR:  permission denied to create extension "vector"
+#                  HINT:   Must be superuser to create this extension.
+#   as superuser:  CREATE EXTENSION
+#
+# pgvector 0.8.1 IS bundled in that image, so nothing needs to be installed — only created, by
+# someone with the rights. This is the operator: it reconciles the Database object over its own
+# superuser connection.
+#
+# The failure this prevents is the invisible kind. Without this resource the copilot's V3 migration
+# fails at its first statement, Flyway aborts, and the pod crashloops on a schema error that reads
+# like a migration bug rather than a missing privilege — while working perfectly on every
+# developer's laptop and in every test container, where the app connects as superuser.
+#
+# ADOPTION, NOT CREATION. `openbank_copilots` already exists — it was created by the Cluster's
+# initdb bootstrap. CloudNativePG uses CREATE DATABASE only when the database is absent and ALTER
+# DATABASE otherwise, so this resource adopts the existing one. `databaseReclaimPolicy: retain` (the
+# default, set explicitly here) means deleting this object never drops the database.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: copilot-db-openbank-copilots
+  namespace: platform
+spec:
+  cluster:
+    name: copilot-db
+  name: openbank_copilots
+  owner: openbank
+  ensure: present
+  databaseReclaimPolicy: retain
+  extensions:
+    - name: vector
+      ensure: present

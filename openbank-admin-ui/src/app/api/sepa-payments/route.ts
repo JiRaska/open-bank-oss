@@ -10,19 +10,20 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { paymentListQuery } from '@/lib/payments/paymentListQuery'
 
 // In-cluster ClusterIP (payments namespace). Overridable via env for local/dev.
 const SEPA_SERVICE_URL = process.env.SEPA_SERVICE_URL || 'http://sepa-payment.payments.svc:8115'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const session = await auth()
     if (!session?.user?.accessToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    const res = await fetch(`${SEPA_SERVICE_URL}/api/v1/sepa-payments`, {
+    const res = await fetch(`${SEPA_SERVICE_URL}/api/v1/sepa-payments${paymentListQuery(req.nextUrl.searchParams)}`, {
       headers: { 'Authorization': `Bearer ${session.user.accessToken}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),

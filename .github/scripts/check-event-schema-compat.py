@@ -25,6 +25,24 @@ Also covers *.avsc files if/when they appear (ADR-0006 target state):
 added fields must carry a "default", removed fields must have had one,
 in-place type changes are flagged.
 
+Also covers */schema/*.schema.json files (ADR-0260: JSON Schema is the fleet's
+chosen event-schema format, not Avro). Each file may be a single object schema
+or a `oneOf` list of branches distinguished by an `x-openbank-event-type`
+keyword (or `title`, for a topic whose branches carry no explicit event-type
+tag) -- the shape a topic needs when its events are discriminated only by the
+Kafka `ce-type` header (ADR-0260 D4), which this comparator does not itself
+verify against real header literals (see check-event-contract-code-agreement.py
+and check-asyncapi-doc-discriminator.py for that half). Within each branch,
+`properties`/`required` are compared the same way as a DomainEvent's
+constructor: a removed property, a type change, or a property that becomes
+required is breaking; a new optional property is compatible. THIS PATH IS THE
+ONLY compatibility check for a producer whose event class does not extend
+DomainEvent -- e.g. openbank-document-service's DocumentGenerated and
+SignatureCeremonyCompleted, which the DomainEvent-scoped comparator above has
+never once evaluated (the same structural gap SepaPaymentCreatedEvent has on
+the money-path side). A JSON-Schema-covered topic closes that gap; an
+uncovered one does not, which is exactly why ADR-0260's pilot registers one.
+
 stdlib-only. Advisory by default (::warning, exit 0); --enforce exits 1.
 
 Usage:
@@ -54,6 +72,52 @@ def changed_files(base: str) -> list[str]:
         ["git", "diff", "--name-only", base, "HEAD"], capture_output=True, text=True, check=True
     ).stdout
     return [line for line in out.splitlines() if line.strip()]
+
+
+def strip_comments(src: str) -> str:
+    """Remove Kotlin block and line comments, preserving string literals.
+
+    Why this exists: a KDoc INSIDE a constructor parameter list contains commas, and
+    split_params splits on top-level commas. Measured 2026-09-04 on
+    AccountEvents.kt::AccountCreatedEvent — 9 declared properties, the parser captured 8, and
+    split_params produced 15 fragments instead of 9 because the KDoc above the last parameter
+    was diced into pieces. The final fragment read
+    `* the same spelling ... */ val sourceService: String`, which PARAM_RE cannot match, so
+    `sourceService` was invisible to the gate — and REMOVING it therefore produced NO finding,
+    which is the one thing this gate exists to catch.
+
+    Fleet-wide that was 15 properties across 4 files, every one of them the `sourceService`
+    field on money-path account/transaction events.
+
+    Kotlin block comments NEST, so the scanner counts depth rather than searching for the
+    first `*/` (this repo has been burnt by that before).
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if src.startswith('\"\"\"', i):
+                end = src.find('\"\"\"', i + 3)
+                end = n if end == -1 else end + 3
+            else:
+                end = i + 1
+                while end < n and src[end] != '"':
+                    end += 2 if src[end] == "\\" else 1
+                end = min(end + 1, n)
+            out.append(src[i:end]); i = end; continue
+        if src.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j): depth += 1; j += 2; continue
+                if src.startswith("*/", j): depth -= 1; j += 2; continue
+                j += 1
+            out.append(" "); i = j; continue
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            out.append(" "); i = n if j == -1 else j; continue
+        out.append(ch); i += 1
+    return "".join(out)
 
 
 def split_params(paramlist: str) -> list[str]:
@@ -112,7 +176,7 @@ def parse_events(text: str) -> dict[str, dict]:
             elif text[i] == ")":
                 depth -= 1
             i += 1
-        paramlist = text[m.end(): i - 1]
+        paramlist = strip_comments(text[m.end(): i - 1])
         # an event class is `data class X(...) : Iface?, DomainEvent(...) { ... }` — the marker
         # must appear in the supertype list, i.e. between the ctor's closing paren and the class
         # body's opening brace. Search that whole span (not a fixed 80-char window) so a class
@@ -209,6 +273,75 @@ def compare_avsc(path: str, old_text: str, new_text: str) -> list[str]:
     return findings
 
 
+def json_schema_branches(schema: dict) -> dict[str, dict]:
+    """Map an event-type key -> its JSON Schema branch.
+
+    A single-shape topic is one implicit branch (the whole document). A topic whose events are
+    discriminated by the `ce-type` Kafka header (ADR-0260 D4) -- so the body carries no field
+    that tells them apart -- expresses that as a top-level `oneOf`, keyed here by each branch's
+    `x-openbank-event-type` (falling back to `title`, then a positional key so a malformed branch
+    still participates instead of vanishing silently).
+    """
+    raw = schema.get("oneOf")
+    branches = raw if isinstance(raw, list) else [schema]
+    out: dict[str, dict] = {}
+    for i, b in enumerate(branches):
+        if not isinstance(b, dict):
+            continue
+        key = b.get("x-openbank-event-type") or b.get("title") or f"branch[{i}]"
+        out[key] = b
+    return out
+
+
+def compare_json_schema(path: str, old_text: str, new_text: str) -> list[str]:
+    try:
+        old, new = json.loads(old_text), json.loads(new_text)
+    except json.JSONDecodeError as e:
+        return [f"{path}: unparseable JSON Schema ({e})"]
+    findings: list[str] = []
+    old_branches, new_branches = json_schema_branches(old), json_schema_branches(new)
+    for key, ob in old_branches.items():
+        nb = new_branches.get(key)
+        if nb is None:
+            findings.append(
+                f"{path}: event type {key!r} removed from the schema — breaking for consumers; "
+                f"ship a new versioned event, don't delete a oneOf branch in place (ADR-0006/ADR-0260)"
+            )
+            continue
+        oprops = ob.get("properties") if isinstance(ob.get("properties"), dict) else {}
+        nprops = nb.get("properties") if isinstance(nb.get("properties"), dict) else {}
+        oreq = set(ob.get("required")) if isinstance(ob.get("required"), list) else set()
+        nreq = set(nb.get("required")) if isinstance(nb.get("required"), list) else set()
+        for prop, ospec in oprops.items():
+            if prop not in nprops:
+                findings.append(
+                    f"{path}: {key}.{prop} removed — breaking (consumers reading it get nothing); "
+                    f"a breaking change must be a NEW versioned event, not an in-place edit"
+                )
+                continue
+            otype = ospec.get("type") if isinstance(ospec, dict) else None
+            nspec = nprops[prop]
+            ntype = nspec.get("type") if isinstance(nspec, dict) else None
+            if json.dumps(otype, sort_keys=True) != json.dumps(ntype, sort_keys=True):
+                findings.append(
+                    f"{path}: {key}.{prop} type changed {otype!r} -> {ntype!r} — breaking for "
+                    f"deserialization of historical payloads"
+                )
+        for prop in nprops:
+            if prop in nreq and prop not in oprops:
+                findings.append(
+                    f"{path}: {key}.{prop} added as a REQUIRED property — breaking on REPLAY "
+                    f"(historical events lack the field); make it optional or version the event"
+                )
+        for prop in nreq - oreq:
+            if prop in oprops:
+                findings.append(
+                    f"{path}: {key}.{prop} changed from optional to required — breaking on "
+                    f"REPLAY (historical events may lack the field)"
+                )
+    return findings
+
+
 def self_test() -> int:
     """Falsify the Kotlin event parser and both compatibility comparators.
 
@@ -285,13 +418,147 @@ def self_test() -> int:
     if parse_events('data class NotAnEvent(val x: String)\n'):
         fails.append("a plain data class was parsed as a DomainEvent")
 
+    # --- JSON Schema, the ADR-0260 format, and the gap it closes ---------------------------
+    # DocumentGenerated (openbank-document-service) is a plain data class with NO DomainEvent
+    # supertype — parse_events must not see it at all, exactly like SepaPaymentCreatedEvent on
+    # the money-path side. That is the case for compare_json_schema to prove it closes.
+    doc_generated_kt = (
+        'data class DocumentGenerated(\n'
+        '    val documentId: UUID,\n'
+        '    val templateCode: String,\n'
+        '    val templateVersion: String,\n'
+        '    val sha256: String,\n'
+        '    val occurredAt: Instant,\n'
+        ')\n'
+    )
+    if parse_events(doc_generated_kt):
+        fails.append(
+            "DocumentGenerated (no DomainEvent supertype) was parsed as an event — the "
+            "DomainEvent-scoped comparator should be structurally blind to it"
+        )
+    dg_findings = compare_events(
+        "DocumentEvents.kt", parse_events(doc_generated_kt),
+        parse_events(doc_generated_kt.replace("val sha256: String,\n", "")),
+    )
+    if dg_findings:
+        fails.append(
+            f"the DomainEvent comparator found something in a class it should never parse: {dg_findings}"
+        )
+
+    doc_schema_old = _json.dumps({
+        "oneOf": [{
+            "x-openbank-event-type": "document.generated.v1",
+            "properties": {
+                "documentId": {"type": "string", "format": "uuid"},
+                "templateCode": {"type": "string"},
+                "templateVersion": {"type": "string"},
+                "sha256": {"type": "string"},
+                "occurredAt": {"type": "string", "format": "date-time"},
+            },
+            "required": ["documentId", "templateCode", "templateVersion", "sha256", "occurredAt"],
+        }],
+    })
+    case("an unchanged JSON Schema oneOf branch is compatible",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_old), False)
+
+    # THE case this self-test exists for: removing `sha256` from document-event.schema.json is
+    # exactly the same defect class as removing it from DocumentGenerated's constructor — and
+    # the DomainEvent comparator (proven above) can never see it, because the class carries no
+    # DomainEvent supertype. Only compare_json_schema can catch this breaking change.
+    doc_schema_sha_removed = _json.dumps({
+        "oneOf": [{
+            "x-openbank-event-type": "document.generated.v1",
+            "properties": {
+                "documentId": {"type": "string", "format": "uuid"},
+                "templateCode": {"type": "string"},
+                "templateVersion": {"type": "string"},
+                "occurredAt": {"type": "string", "format": "date-time"},
+            },
+            "required": ["documentId", "templateCode", "templateVersion", "occurredAt"],
+        }],
+    })
+    case("removing sha256 from document-event.schema.json is breaking — the gap the "
+         "DomainEvent comparator has for this exact class (no DomainEvent supertype)",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_sha_removed),
+         True, "sha256 removed")
+
+    doc_schema_type_changed = json.loads(doc_schema_old)
+    doc_schema_type_changed["oneOf"][0]["properties"]["sha256"] = {"type": "integer"}
+    case("a JSON Schema property type change is breaking",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_type_changed)),
+         True, "type changed")
+
+    doc_schema_new_required = json.loads(doc_schema_old)
+    doc_schema_new_required["oneOf"][0]["properties"]["signerCount"] = {"type": "integer"}
+    doc_schema_new_required["oneOf"][0]["required"].append("signerCount")
+    case("a new REQUIRED JSON Schema property is breaking on replay",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_new_required)),
+         True, "REQUIRED")
+
+    doc_schema_new_optional = json.loads(doc_schema_old)
+    doc_schema_new_optional["oneOf"][0]["properties"]["signerCount"] = {"type": "integer"}
+    case("a new OPTIONAL JSON Schema property is compatible",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_new_optional)),
+         False)
+
+    doc_schema_branch_removed = _json.dumps({"oneOf": []})
+    case("a removed oneOf branch (event type deleted) is breaking",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_branch_removed),
+         True, "removed from the schema")
+
+    # SCOPE (#6253): which files are event contracts at all. Each case is a real repo path.
+    def selected(name: str, path: str, want: bool) -> None:
+        got = is_event_json_schema(path)
+        if got != want:
+            fails.append(f"{name}: is_event_json_schema({path!r}) = {got}, want {want}")
+
+    selected("the contracts-repo convention is in scope",
+             "openbank-contracts/openbank-document-service/schema/document-event.schema.json", True)
+    selected("an in-service event-schemas/ contract is in scope (the #6253 gap)",
+             "openbank-product-catalog/src/main/resources/event-schemas/catalog-change-event-v1.schema.json", True)
+    selected("a catalog-pack product definition is NOT an event contract",
+             "openbank-product-catalog/src/main/resources/catalog-packs/banking/loan-v2.schema.json", False)
+    selected("the governance manifest schema is NOT an event contract",
+             "openbank-libs/governance/governance.schema.json", False)
+    selected("a helm values schema is NOT an event contract",
+             "openbank-product-catalog/helm/product-catalog/values.schema.json", False)
+
+    # ...and the comparator can actually read the newly covered shape (a flat object envelope, not
+    # document-event's oneOf): removing a required field of the real CatalogChangeEvent is breaking.
+    catalog_old = _json.dumps({
+        "title": "Catalog change event v1", "type": "object",
+        "required": ["eventId", "eventType"],
+        "properties": {"eventId": {"type": "string"}, "eventType": {"type": "string"}},
+    })
+    catalog_new = _json.dumps({
+        "title": "Catalog change event v1", "type": "object",
+        "required": ["eventType"],
+        "properties": {"eventType": {"type": "string"}},
+    })
+    case("removing eventId from a flat catalog-change envelope is breaking",
+         compare_json_schema("e.schema.json", catalog_old, catalog_new), True, "eventId removed")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: event schema compatibility is falsifiable (14 cases)")
+    print("self-test ok: event schema compatibility is falsifiable (23 cases)")
     return 0
+
+
+# Where a JSON Schema EVENT CONTRACT lives. `/schema/` is the openbank-contracts convention
+# (document-event). `/event-schemas/` is the in-service one: product-catalog's live
+# CatalogChangeEvent v1 envelope, written through the outbox, sits at
+# src/main/resources/event-schemas/ and matched neither — so a removed or newly required property
+# in it was compared by nothing (#6253). Deliberately NOT every `*.schema.json`: catalog-pack
+# product definitions, governance.schema.json and helm values.schema.json are not event contracts,
+# and "a removed property breaks consumers" is the wrong rule for them.
+EVENT_JSON_SCHEMA_DIRS = ("/schema/", "/event-schemas/")
+
+
+def is_event_json_schema(path: str) -> bool:
+    return path.endswith(".schema.json") and any(d in path for d in EVENT_JSON_SCHEMA_DIRS)
 
 
 def main() -> int:
@@ -313,6 +580,15 @@ def main() -> int:
                 continue  # deleted schema — reviewed as a service/event removal
             if old_text is not None:
                 findings.extend(compare_avsc(path, old_text, new_text))
+            continue
+        if is_event_json_schema(path):
+            old_text = git_show(args.base, path)
+            try:
+                new_text = open(path, encoding="utf-8").read()
+            except OSError:
+                continue  # deleted schema — reviewed as a service/event removal
+            if old_text is not None:
+                findings.extend(compare_json_schema(path, old_text, new_text))
             continue
         if not (path.endswith(".kt") and "/src/main/" in path):
             continue

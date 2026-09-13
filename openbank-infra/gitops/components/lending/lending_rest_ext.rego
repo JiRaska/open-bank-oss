@@ -134,11 +134,26 @@ allowed_reasons contains "edge-customer-intake" if {
 	input.action == "lending.intake"
 }
 
-# NO BLANKET SERVICE (M2M) rule on purpose: the only in-repo M2M caller is the one named
-# above (the admin-ui BFF reaches only the unauthenticated /api/v1/info discovery, the
-# observability/security scanners use the management port, and ledger posting is an
-# OUTBOUND call from lending). A blanket SERVICE allow would open every endpoint to any
-# M2M client. If a future caller lands (e.g. anacredit moving from Kafka to REST), add
+# ADR-0269 rule 2: campaign-service asks whether it may market credit to a party before it
+# delivers a credit campaign step. The named, action-scoped rule this file's note below asks
+# for — a future caller landing — rather than a blanket M2M allow.
+#
+# Scoped to ONE read action. campaign-service has no business in any other lending endpoint, and
+# it authenticates on the SHARED `openbank-services` client, so this identity is every backend
+# service at once: whatever is opened here is opened to all of them. A read of "may we offer" is
+# proportionate to that; nothing else in lending would be.
+#
+# Read-only by construction — the action has no write counterpart to be confused with, which is
+# why it needs no entry in the `prohibited` veto below.
+allowed_reasons contains "service-credit-offer-eligibility" if {
+	input.principal.id == "service-account-openbank-services"
+	input.action == "lending.creditOffer.eligibility"
+}
+
+# NO BLANKET SERVICE (M2M) rule on purpose: in-repo M2M callers are the ones named above (the
+# admin-ui BFF reaches only the unauthenticated /api/v1/info discovery, the observability/security
+# scanners use the management port, and ledger posting is an OUTBOUND call from lending). A blanket
+# SERVICE allow would open every endpoint to any M2M client. If a future caller lands, add
 # another named, action-scoped rule here.
 
 # 2026-08-05 (#3734): operator-lending-write was role-only, and rules.yaml's role_action_matrix

@@ -31,6 +31,9 @@ on:
     branches: [main]
     paths:
       - "openbank-*/src/main/**"
+      # The canonical runtime image reads the service Dockerfile's EXPOSE declaration.
+      # A port-only change therefore requires a rebuild just as source does.
+      - "openbank-*/Dockerfile"
       # openbank-libs/src/main no longer holds compiled code (ADR-0122 moved it to
       # openbank-libs-domain / openbank-libs-runtime, both already covered by the
       # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
@@ -82,6 +85,15 @@ on:
         type: boolean
         required: false
         default: false
+      codeploy_pact_versions:
+        description: >-
+          Optional JSON object mapping every co-deployed service to the exact 40-character Pact
+          version to evaluate, for example {"openbank-product-catalog":"<sha>"}. Each supplied
+          version must be proven byte-identical to the deploy ref in that service's build inputs;
+          otherwise the co-deploy gate refuses the run. Use this only to replay a previously
+          verified product set after main has moved on.
+        required: false
+        default: ""
       reconcile:
         description: >-
           Run the scheduled reconcile logic immediately (issue #2020). Instead of building the
@@ -89,6 +101,15 @@ on:
           per-service commit, using the same logic as the every-3h schedule tick. This is the
           safe way to recover stale gitops tags when the current HEAD did not change those
           services. When reconcile is true, `services` is ignored and `codeploy` is not used.
+        type: boolean
+        required: false
+        default: false
+      bootstrap_image_only:
+        description: >-
+          Build, sign and attest exactly one service image that has no GitOps manifest yet.
+          This is an artifact-only bootstrap: it never runs the contract deploy gate, rewrites
+          GitOps, opens a PR or deploys a workload. Use the resulting immutable image only in a
+          separately reviewed first-manifest PR.
         type: boolean
         required: false
         default: false
@@ -132,6 +153,10 @@ jobs:
           fetch-depth: 0
 
       - id: detect
+        env:
+          INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -197,7 +222,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service openbank-case-coordinator-agent openbank-analytics-sink'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -230,7 +255,9 @@ jobs:
           # Services changed directly in this push.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+            # Keep this aligned with the push trigger: release-please changes only
+            # version.txt, and that release marker must rebuild/deploy the component.
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -241,6 +268,31 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
+              if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+                echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
+                exit 1
+              fi
+              REQUESTED="$INPUT_SERVICES"
+              if [ "$(wc -w <<< "$REQUESTED" | tr -d ' ')" -ne 1 ]; then
+                echo "::error::bootstrap_image_only requires exactly one service"
+                exit 1
+              fi
+              svc="$REQUESTED"
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
+                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+                exit 1
+              fi
+              if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                echo "::error::bootstrap_image_only is only for a service with no GitOps manifest"
+                exit 1
+              fi
+              SERVICES_JSON="$(printf '%s\n' "$svc" | jq -R . | jq -sc .)"
+              echo "artifact-only bootstrap → building: $SERVICES_JSON"
+              echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+              echo "any=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
@@ -258,7 +310,7 @@ jobs:
               exit 0
             fi
 
-            REQUESTED="${{ github.event.inputs.services }}"
+            REQUESTED="$INPUT_SERVICES"
             if [ -z "$REQUESTED" ]; then
               echo "::error::workflow_dispatch with empty services is only allowed when reconcile=true. A blank manual dispatch of the full fleet at an unrelated commit creates the NOT_ASKED / missing-pact failures seen in runs 31149468822 and 31150052893. Use reconcile=true to re-drive stranded services, or list explicit services that changed in the current HEAD."
               exit 1
@@ -280,14 +332,40 @@ jobs:
               exit 0
             fi
 
+            # A normal manual dispatch is intentionally limited to service code changed by
+            # this ref: otherwise the broker cannot be asked about the image being built.
+            # The one safe exception is a co-deploy replay with a complete explicit Pact map.
+            # `can-i-deploy` subsequently proves every supplied version byte-identical to this
+            # ref's build inputs before it can open a GitOps PR. Validate the map shape here as
+            # well so a malformed input cannot turn the exception into a broad build bypass.
+            DEPLOYABLE_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            EXACT_CODEPLOY_REPLAY=false
+            if [ "${INPUT_CODEPLOY:-}" = "true" ] \
+              && [ -n "${INPUT_CODEPLOY_PACT_VERSIONS:-}" ] \
+              && [ "${INPUT_CODEPLOY_PACT_VERSIONS}" != "{}" ]; then
+              if ! jq -e --argjson services "$DEPLOYABLE_JSON" \
+                'type == "object" and (keys | sort) == ($services | sort) and
+                 all(.[]; type == "string" and test("^[0-9a-f]{40}$"))' \
+                >/dev/null <<< "$INPUT_CODEPLOY_PACT_VERSIONS"; then
+                echo "::error::codeploy_pact_versions must map exactly the requested services to 40-hex versions"
+                exit 1
+              fi
+              EXACT_CODEPLOY_REPLAY=true
+            fi
+
             # Guard: every manually requested service must have changed in the current HEAD,
             # or be a consumer of a changed shared library. Dispatching a service that did not
             # change in this commit means the broker has no pact version for this SHA, which the
-            # contract gate rightfully refuses (#3318), and the build is wasted work.
-            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u )"
+            # contract gate rightfully refuses (#3318), and the build is wasted work. The exact
+            # co-deploy replay above is different: it cannot deploy unless the later gate proves
+            # its supplied Pact versions are byte-identical to these build inputs.
+            # `grep -v` returns 1 when no line remains. That is a valid state for an
+            # explicit replay (the wrapper changes only deployment metadata), not a failed
+            # command; `awk` preserves the filtering semantics while returning success.
+            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | awk 'NF' | sort -u )"
             GUARD_FAILED=0
             for svc in "${DEPLOYABLE[@]}"; do
-              if ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
+              if [ "$EXACT_CODEPLOY_REPLAY" != "true" ] && ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
                 echo "::error::workflow_dispatch requested service ${svc} which did not change in HEAD ($(git rev-parse --short HEAD)) and is not a dependent of a changed shared library. The broker has no pact version for this SHA, so the contract gate will REFUSE. Dispatch from the commit that changed ${svc}, or use reconcile=true to recover the correct per-service commit."
                 GUARD_FAILED=1
               fi
@@ -296,7 +374,7 @@ jobs:
               exit 1
             fi
 
-            SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            SERVICES_JSON="$DEPLOYABLE_JSON"
             echo "workflow_dispatch → building: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
@@ -406,7 +484,18 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -421,10 +510,18 @@ jobs:
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
+      # Only the services whose image actually reached the registry. Everything after
+      # the push keys off this, never off the changed set (#9714).
+      pushed_services: ${{ steps.push.outputs.pushed }}
+      failed_services: ${{ steps.push.outputs.failed }}
+      # What survived BOTH the push and the CVE gate. `deployable` is the set the gitops PR
+      # and can-i-deploy must use; `pushed` is only "the image exists in the registry".
+      deployable_services: ${{ steps.scan.outputs.deployable }}
+      cve_blocked_services: ${{ steps.scan.outputs.cve_blocked }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: temurin
           java-version: |
@@ -446,7 +543,7 @@ jobs:
       # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
@@ -467,7 +564,7 @@ jobs:
 
       - name: ECR login
         id: ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Build fast-jars (parallel)
         id: build
@@ -478,6 +575,11 @@ jobs:
         # looks perfectly healthy. Harmless for the other services: only this module reads it.
         env:
           ANALYTICS_SINK_TYPE: clickhouse
+          # agent-service selects its NonceStore binding with @IfBuildProperty (same trap as
+          # analytics-sink above — resolved at AUGMENTATION time, so a runtime env var cannot
+          # reach it). Without this the image ships the @Default InMemoryNonceStore, and the PoP
+          # replay guard silently weakens to per-pod once replicas > 1 (issue #4728).
+          AGENT_SVID_NONCE_STORE: redis
         run: |
           set -euo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
@@ -522,6 +624,7 @@ jobs:
           SERVICES='${{ needs.changes.outputs.services }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
+          PUSHED=(); FAILED_SVCS=()
 
           docker buildx create --use --name ob-deploy-builder \
             --driver docker-container >/dev/null 2>&1 || \
@@ -595,16 +698,40 @@ jobs:
             push_one "$svc" &
             PIDS+=($!); SVCS+=("$svc"); RUNNING=$(( RUNNING + 1 ))
             if [ "$RUNNING" -ge "$MAX_PARALLEL" ]; then
-              wait "${PIDS[0]}" || { echo "FAIL: ${SVCS[0]}"; FAILED=1; }
+              if wait "${PIDS[0]}"; then PUSHED+=("${SVCS[0]}"); else echo "FAIL: ${SVCS[0]}"; FAILED_SVCS+=("${SVCS[0]}"); FAILED=1; fi
               PIDS=("${PIDS[@]:1}"); SVCS=("${SVCS[@]:1}"); RUNNING=$(( RUNNING - 1 ))
             fi
           done
-          for pid in "${PIDS[@]}"; do wait "$pid" || FAILED=1; done
+          for idx in "${!PIDS[@]}"; do
+            if wait "${PIDS[$idx]}"; then PUSHED+=("${SVCS[$idx]}"); else echo "FAIL: ${SVCS[$idx]}"; FAILED_SVCS+=("${SVCS[$idx]}"); FAILED=1; fi
+          done
 
-          [ "$FAILED" -eq 0 ] || { echo "One or more docker pushes failed"; exit 1; }
+          # A push that fails for ONE service must not strand the deploy of every other
+          # service in the same run. It used to: this line exited 1, so `Gitops PR`,
+          # `can-i-deploy` and `Deploy signal` were skipped as job dependents. Measured
+          # 2026-09-11 — openbank-communication-service had no ECR repository (its gitops
+          # image pin exists, so ecr-service-repositories.tf derives one, but
+          # platform-tofu.yml applies on workflow_dispatch only and had not been run) and
+          # auto-deploy failed EVERY run for 2.5 days: last success 2026-09-09T05:48Z, 76 of
+          # the following 100 runs red, nothing deployed fleet-wide (#9714).
+          #
+          # The run still goes red, and still names what failed — the `push-failures` job
+          # does that. What changes is WHEN: after the services that pushed cleanly have
+          # been signed, scanned, attested and deployed. One service's failure stops being
+          # everyone else's.
+          printf '%s\n' ${PUSHED[@]+"${PUSHED[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/pushed.json"
+          printf '%s\n' ${FAILED_SVCS[@]+"${FAILED_SVCS[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/failed.json"
+          {
+            echo "pushed=$(cat "$RUNNER_TEMP/pushed.json")"
+            echo "failed=$(cat "$RUNNER_TEMP/failed.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> pushed: $(cat "$RUNNER_TEMP/pushed.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
-      # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
+      # verify-openbank-image-sbom-attestation (Enforce) also verifies the image signature
+      # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
       # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
@@ -612,7 +739,7 @@ jobs:
       - name: Sign images (cosign v2 + KMS)
         run: |
           set -uo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
           # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
@@ -663,12 +790,14 @@ jobs:
           df -h /
 
       - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
+        id: scan
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.push.outputs.pushed }}'
           TAG="${{ steps.build.outputs.tag }}"
           FAILED=0
+          DEPLOYABLE=(); BLOCKED=()
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # Mirror push_one's skip: no fast-jar → nothing was pushed.
@@ -689,11 +818,34 @@ jobs:
                  --ignore-unfixed --quiet --exit-code 1 "${image}" \
                  2>&1 | sed "s/^/[${svc}] /"; then
               echo "[${svc}] fixable CRITICAL CVEs (or scan error) — blocking deploy"
-              FAILED=1
+              BLOCKED+=("$svc"); FAILED=1
+            else
+              DEPLOYABLE+=("$svc")
             fi
           done
 
-          [ "$FAILED" -eq 0 ] || { echo "Image scan gate failed"; exit 1; }
+          # Same shape as the push step, one stage later (#9715, #9714). A CVE in ONE service
+          # must block THAT service's deploy — which is the gate working — and must not skip
+          # `Gitops PR` and `Deploy signal` for every other service in the run. Measured
+          # 2026-09-11: openbank-kyb-service had fixable CRITICALs, so this line exited 1 and
+          # a run in which every other image had been built, pushed and scanned cleanly
+          # deployed nothing at all.
+          #
+          # The blocked service simply does not reach `collect`, so no gitops manifest is
+          # repinned to its new tag and it keeps running the image it was already running.
+          # That is the correct outcome for a vulnerable image: not deployed, not silently
+          # deployed anyway, and not a reason to freeze the fleet.
+          printf '%s\n' ${DEPLOYABLE[@]+"${DEPLOYABLE[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/deployable.json"
+          printf '%s\n' ${BLOCKED[@]+"${BLOCKED[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/cve-blocked.json"
+          {
+            echo "deployable=$(cat "$RUNNER_TEMP/deployable.json")"
+            echo "cve_blocked=$(cat "$RUNNER_TEMP/cve-blocked.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> deployable after the CVE gate: $(cat "$RUNNER_TEMP/deployable.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::fixable CRITICAL CVEs blocked $(cat "$RUNNER_TEMP/cve-blocked.json") — the run fails in push-failures; the rest of the fleet deploys"
 
       # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to each pushed
       # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
@@ -712,11 +864,11 @@ jobs:
       #
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
-      - name: Attest image SBOMs (cosign + KMS)
+      - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
         timeout-minutes: 15
         run: |
           set -uo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES='${{ steps.scan.outputs.deployable }}'
           TAG="${{ steps.build.outputs.tag }}"
           # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
           # post-attest proof all live in the shared helper, which every build-push-*.sh
@@ -737,7 +889,18 @@ jobs:
               echo "::error::[${svc}] SBOM attestation failed — image UNATTESTED and undeployable"
               rc=1; continue
             fi
-            echo "    [${svc}] attested + verified"
+            # SLSA build provenance (ADR-0030 D4, #8590 #14): binds the image to the repo/commit/
+            # workflow/run that built it — the claim neither the signature nor the SBOM attestation
+            # carries. Fatal in CI even though no admission policy checks SLSA right now: the
+            # kyverno SLSA policy was removed from admission (#9805 item 4 — v1.12.5 lets any
+            # verify policy's verdict overwrite the others per image) and returns once Kyverno
+            # scopes verdicts per policy, so an image built without provenance today is the
+            # redeploy worklist on that day. 12 such images existed when it was removed.
+            if ! cosign_attest_slsa_provenance "$image"; then
+              echo "::error::[${svc}] SLSA provenance attestation failed"
+              rc=1; continue
+            fi
+            echo "    [${svc}] attested + verified (SBOM + SLSA provenance)"
           done
           [ "$rc" -eq 0 ] || {
             echo "::error::One or more images are UNATTESTED. kyverno (verify-openbank-image-sbom-attestation, Enforce) will DENY their pods on the next reschedule."
@@ -786,7 +949,10 @@ jobs:
         id: collect
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          # The CVE-gate survivors, NOT everything that pushed: this map is what repins the
+          # gitops manifests, so a service blocked by a fixable CRITICAL must not appear in it
+          # — otherwise the vulnerable tag deploys anyway and the gate was decorative (#9714).
+          SERVICES='${{ steps.scan.outputs.deployable }}'
           TAG="${{ steps.build.outputs.tag }}"
 
           # Emit { "openbank-account-service": "sandbox-abc1234", … }
@@ -818,7 +984,7 @@ jobs:
   can-i-deploy:
     name: can-i-deploy
     needs: [changes, build-push]
-    if: needs.changes.outputs.any == 'true'
+    if: needs.changes.outputs.any == 'true' && github.event.inputs.bootstrap_image_only != 'true'
     # Stays on the self-hosted pool: the Pact Broker has no public ingress
     # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
     # serves this label at ~$0 idle.
@@ -866,7 +1032,7 @@ jobs:
       # worse than today.
       - name: Cache pact standalone CLI
         id: pact-cli-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/pact
           key: pact-standalone-${{ env.PACT_STANDALONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -878,8 +1044,9 @@ jobs:
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
           # a group name silently stops the job being created (#3082/#3084); an env var has no
           # such ceiling.
-          SERVICES: ${{ needs.changes.outputs.services }}
+          SERVICES: ${{ needs.build-push.outputs.deployable_services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
@@ -923,11 +1090,16 @@ jobs:
     # record-deployment for every other service in it, deadlocking the broker's view of
     # reality against itself with no self-healing path. Never runs if build-push itself
     # failed (nothing built to deploy) or was cancelled/skipped.
+    # The last clause: every push failing leaves nothing to pin, and without it this job opens
+    # a gitops PR whose image-tag set is empty — a no-op PR for a run that deployed nothing
+    # (#9714).
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
+      github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
-      needs.can-i-deploy.result != 'cancelled'
+      needs.can-i-deploy.result != 'cancelled' &&
+      needs.build-push.outputs.deployable_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
       contents: write
@@ -1037,6 +1209,40 @@ jobs:
             done
           done
 
+          # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
+          # check-fleet-attestations.sh fails on an allowlist entry whose ref nothing under
+          # openbank-infra/gitops declares any more (#7740), and the first real deploy of a
+          # service that shipped with a placeholder tag is exactly what makes its entry
+          # undeclared. Left to a human, every deploy PR after that one inherits the red gate:
+          # on 2026-09-13 #9924 and #9931 both replaced wealth-service's `sandbox-000000000`
+          # and both failed `fleet-attestation-classifier` on the entry they had just orphaned.
+          #
+          # "Declared" is computed exactly as the gate computes it — the same position-blind
+          # IMAGE_RE over the same directory — so this can neither leave an entry the gate
+          # calls stale nor remove one the gate still counts as declared. A still-declared
+          # placeholder (a service not yet built) is kept, which is the case the file exists for.
+          PLACEHOLDER_FILE=.github/scripts/fleet-attestation-placeholders.txt
+          if [ "${#UPDATED[@]}" -gt 0 ] && [ -f "$PLACEHOLDER_FILE" ]; then
+            IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
+            declared="$(grep -rhoE "$IMAGE_RE" openbank-infra/gitops 2>/dev/null | sort -u || true)"
+            pruned=0
+            : > "${PLACEHOLDER_FILE}.new"
+            while IFS= read -r line || [ -n "$line" ]; do
+              if printf '%s' "$line" | grep -qE '^[[:space:]]*(#|$)' \
+                 || printf '%s\n' "$declared" | grep -qxF "$line"; then
+                printf '%s\n' "$line" >> "${PLACEHOLDER_FILE}.new"
+              else
+                echo "  [placeholder allowlist] pruned ${line#"${ECR_REGISTRY}"/} — no longer declared in gitops"
+                pruned=$((pruned + 1))
+              fi
+            done < "$PLACEHOLDER_FILE"
+            if [ "$pruned" -gt 0 ]; then
+              mv "${PLACEHOLDER_FILE}.new" "$PLACEHOLDER_FILE"
+            else
+              rm -f "${PLACEHOLDER_FILE}.new"
+            fi
+          fi
+
           if [ "${#UPDATED[@]}" -eq 0 ]; then
             echo "No manifests changed — all images already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -1073,7 +1279,15 @@ jobs:
           # a property rather than a hope: create-pull-request otherwise commits whatever is dirty,
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
-          add-paths: openbank-infra/gitops/**
+          # The placeholder allowlist rides along ONLY because the rewrite step prunes it in the
+          # same change that orphans an entry; nothing else in the job writes it.
+          add-paths: |
+            openbank-infra/gitops/**
+            .github/scripts/fleet-attestation-placeholders.txt
+          # workflow_dispatch may run from a recovery ref. Without an explicit base,
+          # create-pull-request targets that stale ref and includes every intervening main
+          # commit in the deploy PR instead of only the rewritten GitOps manifests.
+          base: main
           branch: chore/gitops-auto-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
@@ -1081,7 +1295,7 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Changed services:** ${{ needs.changes.outputs.services }}
+            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
 
             Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
             triggering commit). ArgoCD syncs automatically after merge.
@@ -1142,7 +1356,16 @@ jobs:
                 await new Promise(r => setTimeout(r, 12000));
               }
             }
-            core.notice('could not enable auto-merge after retries — check the App token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) / branch protection');
+            // setFailed, NOT notice (issue #6231): a deploy PR with auto-merge unarmed never
+            // merges, so the deploy silently does not happen — and a notice leaves the job, the
+            // workflow and `Deploy signal` all green, with the only evidence one line in a job
+            // nobody opens. That is the repo's "green run that deployed nothing" shape. The PR
+            // itself is left open and rescuable; what changes is that the run now says so.
+            core.setFailed(
+              `auto-merge could not be enabled on PR #${pull_number} after 8 attempts, so this deploy ` +
+              `will NOT land on its own — the PR stays open until someone merges it. Check the App ` +
+              `token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) and branch protection.`
+            );
 
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check
@@ -1229,4 +1452,52 @@ jobs:
           echo "::error::deploy for ${RUN_SHA::8} did not land — gitops-pr ended ${GITOPS_PR_RESULT} after build-push succeeded (services: ${CHANGED_SERVICES})"
           # Fail the job (only this new, non-blocking job — nothing downstream needs it) so the
           # run's overall status flags red and is findable without opening every job's log.
+          exit 1
+
+  # ── the run's red light for a failed push ────────────────────────────────────────────────
+  # `Docker push` no longer exits non-zero when one service fails, because a job failure skips
+  # every dependent job and so stranded the deploy of every HEALTHY service in the same run
+  # (#9714: 2.5 days, 76 of 100 runs, nothing deployed, one undeclared ECR repository). The
+  # failure has to stay just as visible, so it lands here instead — after gitops-pr and
+  # deploy-signal have done their work for the services that did push.
+  #
+  # `always()` is load-bearing: without it this job is skipped whenever an earlier job fails,
+  # which is exactly the case it exists to report.
+  push-failures:
+    name: Push failures
+    needs: [build-push, gitops-pr, deploy-signal]
+    if: >-
+      ${{ always() && (
+        (needs.build-push.outputs.failed_services != '' &&
+         needs.build-push.outputs.failed_services != '[]') ||
+        (needs.build-push.outputs.cve_blocked_services != '' &&
+         needs.build-push.outputs.cve_blocked_services != '[]')
+      ) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report the services whose image never reached the registry
+        env:
+          FAILED_SERVICES: ${{ needs.build-push.outputs.failed_services }}
+          PUSHED_SERVICES: ${{ needs.build-push.outputs.pushed_services }}
+          CVE_BLOCKED: ${{ needs.build-push.outputs.cve_blocked_services }}
+          DEPLOYABLE: ${{ needs.build-push.outputs.deployable_services }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## Some services did not deploy"
+            echo
+            echo "Push failed: \`${FAILED_SERVICES:-[]}\`"
+            echo "Blocked by fixable CRITICAL CVEs: \`${CVE_BLOCKED:-[]}\`"
+            echo "Pushed: \`${PUSHED_SERVICES:-[]}\`"
+            echo "Deployed: \`${DEPLOYABLE:-[]}\`"
+            echo
+            echo "These services are running whatever image they ran before this commit."
+            echo "A missing ECR repository is the recurring cause — the repository set is"
+            echo "derived in \`openbank-infra/aws/envs/sandbox-platform/ecr-service-repositories.tf\`"
+            echo "from the gitops image pins, and \`platform-tofu.yml\` applies on"
+            echo "workflow_dispatch only, so a new service's pin is not a repository until"
+            echo "someone runs that apply."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::error::these services did not deploy — push: ${FAILED_SERVICES:-[]}, CVE-blocked: ${CVE_BLOCKED:-[]}"
           exit 1

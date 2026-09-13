@@ -4,19 +4,15 @@
 
 'use client'
 
-import { useState, useCallback } from 'react'
+import { Fragment, useState, useCallback, useRef } from 'react'
 import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { AUDIT_EVIDENCE_WINDOW, formatAuditPayload, parseAuditEvidenceList, type AuditEvidence } from '@/lib/audit/auditEvidence'
 
 const AUDIT_SERVICE = '/api/svc/audit-service'
-
-interface AuditEntry {
-  id: string; aggregateId: string; aggregateType: string
-  eventType: string; actorId?: string; actorType?: string
-  payload?: Record<string, unknown>; occurredAt: string
-}
 
 const EVENT_COLOR: Record<string, string> = {
   CREATED: 'var(--green)', UPDATED: 'var(--accent)', DELETED: 'var(--red)',
@@ -26,50 +22,82 @@ const EVENT_COLOR: Record<string, string> = {
 
 export default function AuditPage() {
   const { t, language } = useLanguage()
-  const [entries, setEntries]   = useState<AuditEntry[]>([])
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const [entries, setEntries]   = useState<AuditEvidence[]>([])
   const [loading, setLoading]   = useState(false)
   // Instead of a raw "HTTP 404" string, hold a typed reason that renders as a
   // calm <DataUnavailable> panel. audit-service isn't deployed in every
   // environment, so a failed lookup is normally "not deployed", not "broken".
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [aggregateId, setAggregateId] = useState('')
+  const [loadedAggregateId, setLoadedAggregateId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const activeSearch = useRef<AbortController | null>(null)
 
   const search = useCallback(async () => {
-    if (!aggregateId.trim()) return
+    const query = aggregateId.trim()
+    if (!query) return
+    activeSearch.current?.abort()
+    const controller = new AbortController()
+    activeSearch.current = controller
+    const timeout = window.setTimeout(() => controller.abort(), 5000)
     setLoading(true); setUnavailable(null)
     try {
-      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${aggregateId.trim()}?limit=100`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${encodeURIComponent(query)}?limit=${AUDIT_EVIDENCE_WINDOW}`, { signal: controller.signal })
+      if (activeSearch.current !== controller) return
       if (!res.ok) {
-        setEntries([])
+        if (loadedAggregateId !== query) {
+          setEntries([])
+          setLoadedAggregateId(null)
+        }
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const data = await res.json()
-      setEntries(Array.isArray(data) ? data : data.entries ?? [])
+      let data: AuditEvidence[]
+      try {
+        data = parseAuditEvidenceList(await res.json(), query)
+      } catch {
+        if (loadedAggregateId !== query) {
+          setEntries([])
+          setLoadedAggregateId(null)
+        }
+        setUnavailable({ kind: 'error' })
+        return
+      }
+      if (activeSearch.current !== controller) return
+      setEntries(data)
+      setLoadedAggregateId(query)
     } catch {
+      if (activeSearch.current !== controller) return
       // fetch threw (timeout/abort/network) — the BFF or audit-service didn't
       // answer at all. Treat as unreachable rather than leaking the raw error.
-      setEntries([])
+      if (loadedAggregateId !== query) {
+        setEntries([])
+        setLoadedAggregateId(null)
+      }
       setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
-  }, [aggregateId])
+    } finally {
+      window.clearTimeout(timeout)
+      if (activeSearch.current === controller) {
+        activeSearch.current = null
+        setLoading(false)
+      }
+    }
+  }, [aggregateId, loadedAggregateId])
+
+  // A response holding exactly the window is evidence of TRUNCATION, not of a complete trail:
+  // audit-service clamps at AUDIT_EVIDENCE_WINDOW, so a full window cannot distinguish "this is
+  // everything" from "there is more". Below the window the service returned all it holds.
+  const windowFull = entries.length >= AUDIT_EVIDENCE_WINDOW
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Auditní log', 'Audit Log')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScrollText size={18} style={{ color: 'var(--accent)' }} />
-            {t('Auditní log', 'Audit Log')}
-          </h1>
-          <p className="page-subtitle">{t('Neměnný auditní záznam pro všechny entity platformy', 'Immutable audit trail for all platform entities')}</p>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Auditní log', 'Audit Log')}</span></div>}
+        icon={<ScrollText size={18} aria-hidden="true" />}
+        title={t('Auditní log', 'Audit Log')}
+        subtitle={t('Nejnovější ověřitelné události a jejich původ', 'Latest verifiable events and their provenance')}
+      />
 
       {/* Search */}
       <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
@@ -81,17 +109,29 @@ export default function AuditPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
               placeholder="Aggregate ID (account UUID, party UUID, transaction UUID…)"
+              aria-label={t('ID agregátu', 'Aggregate ID')}
               value={aggregateId}
-              onChange={e => setAggregateId(e.target.value)}
+              onChange={e => {
+                activeSearch.current?.abort()
+                activeSearch.current = null
+                setLoading(false)
+                setAggregateId(e.target.value)
+                setUnavailable(null)
+                if (loadedAggregateId !== e.target.value.trim()) {
+                  setEntries([])
+                  setLoadedAggregateId(null)
+                  setExpanded(null)
+                }
+              }}
               onKeyDown={e => e.key === 'Enter' && search()}
             />
           </div>
-          <button className="btn btn-primary" onClick={search} disabled={loading || !aggregateId.trim()}>
+          <button type="button" className="btn btn-primary" onClick={search} disabled={loading || !aggregateId.trim()} aria-busy={loading} aria-label={t('Vyhledat auditní záznam', 'Search audit trail')}>
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-          {t('Zadejte UUID libovolné entity pro zobrazení jejího auditního záznamu — účty, klienti, transakce, KYC případy atd.', 'Enter any entity UUID to see its full audit trail — accounts, parties, transactions, KYC cases, etc.')}
+          {t(`Zadejte UUID libovolné entity — účty, klienti, transakce, KYC případy atd. Jeden dotaz vrátí nejvýše ${AUDIT_EVIDENCE_WINDOW} nejnovějších událostí.`, `Enter any entity UUID — accounts, parties, transactions, KYC cases, etc. One query returns at most the ${AUDIT_EVIDENCE_WINDOW} newest events.`)}
         </div>
       </div>
 
@@ -102,6 +142,9 @@ export default function AuditPage() {
             service={t('Audit-service', 'Audit-service')}
             feature={t('Auditní záznamy', 'Audit trail')}
             lang={language}
+            detail={entries.length > 0 && loadedAggregateId === aggregateId.trim()
+              ? t('Zobrazen je poslední ověřený snapshot pro stejné Aggregate ID; novější události mohou chybět.', 'The last verified snapshot for this Aggregate ID is shown; newer events may be missing.')
+              : undefined}
           />
         </div>
       )}
@@ -109,7 +152,9 @@ export default function AuditPage() {
       {entries.length > 0 && (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            {entries.length} {t('událostí pro', 'events for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{aggregateId}</span>
+          {windowFull
+            ? t(`Nejnovějších ${entries.length} událostí — okno je plné (maximum ${AUDIT_EVIDENCE_WINDOW} na dotaz), starší události mohou existovat a nejsou zobrazeny, pro`, `Newest ${entries.length} events — the window is full (${AUDIT_EVIDENCE_WINDOW} maximum per query), so older events may exist and are not shown, for`)
+            : t(`Všech ${entries.length} událostí, které služba pro toto Aggregate ID vrátila (limit ${AUDIT_EVIDENCE_WINDOW} nedosažen), pro`, `All ${entries.length} events the service returned for this Aggregate ID (below the ${AUDIT_EVIDENCE_WINDOW} limit) for`)} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
           </div>
           <table className="data-table">
             <thead>
@@ -117,14 +162,16 @@ export default function AuditPage() {
                 <th>{t('Událost', 'Event')}</th>
                 <th>{t('Typ agregátu', 'Aggregate Type')}</th>
                 <th>{t('Aktér', 'Actor')}</th>
+                <th>{t('Zdroj', 'Source')}</th>
                 <th>{t('Nastalo', 'Occurred At')}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {entries.map(e => (
-                <>
-                  <tr key={e.id} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
+                <Fragment key={e.id}>
+                  <tr tabIndex={0} aria-expanded={expanded === e.id} aria-label={expanded === e.id ? t('Sbalit auditní událost', 'Collapse audit event') : t('Rozbalit auditní událost', 'Expand audit event')} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded(expanded === e.id ? null : e.id) } }}>
                     <td>
                       <span className="pill" style={{ background: `${EVENT_COLOR[e.eventType] ?? 'var(--text-muted)'}22`, color: EVENT_COLOR[e.eventType] ?? 'var(--text-muted)' }}>
                         {e.eventType}
@@ -134,21 +181,30 @@ export default function AuditPage() {
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                       {e.actorId ? `${e.actorType ?? 'USER'}:${e.actorId.slice(0, 8)}…` : 'system'}
                     </td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {e.sourceService}
+                      <span className="tag" style={{ marginLeft: '6px', fontSize: '10px' }}>{e.sourceServiceSource.toLowerCase()}</span>
+                    </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {new Date(e.occurredAt).toLocaleString()}
+                      {new Date(e.occurredAt).toLocaleString(dateLocale)}
+                      {e.occurredAtSource === 'INGEST' && (
+                        <span className="tag" title={t('Čas události chyběl; zobrazen je čas přijetí.', 'Producer event time was absent; ingest time is shown.')} style={{ marginLeft: '6px', fontSize: '10px' }}>
+                          {t('čas přijetí', 'ingest time')}
+                        </span>
+                      )}
                     </td>
                     <td style={{ color: 'var(--accent)', fontSize: '12px' }}>{expanded === e.id ? '▲' : '▼'}</td>
                   </tr>
                   {expanded === e.id && e.payload && (
                     <tr key={`${e.id}-payload`}>
-                      <td colSpan={5} style={{ background: 'var(--surface-2)', padding: '12px 16px' }}>
+                      <td colSpan={6} style={{ background: 'var(--surface-2)', padding: '12px 16px' }}>
                         <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          {JSON.stringify(e.payload, null, 2)}
+                          {formatAuditPayload(e.payload)}
                         </pre>
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

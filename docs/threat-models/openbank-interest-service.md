@@ -23,6 +23,7 @@ money-path service, not adjacent.
 [Scheduler / Admin-UI] --HTTPS/internal--> [openbank-interest-service]
                                                 |
                      account lookup        ---|---> [account-service] (AccountDirectoryAdapter)
+                     published rate snapshot ---|---> [product-catalog] (immutable revision lookup)
                      capitalization journal ---|---> [ledger-service] (RestLedgerPostingAdapter, CapitalizationJournalFactory)
                      debit remittance       ---|---> [transaction-service] (TransactionServiceClient)
                      settlement ack         <---|--- [Kafka: withholding-remittance-settlement]
@@ -30,7 +31,7 @@ money-path service, not adjacent.
 ```
 
 - **External entities:** scheduler (internal trigger, no external caller), admin-UI (ROLE_OPERATOR/ADMIN for read/ops endpoints).
-- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → Kafka (mTLS, consumer/producer ACLs).
+- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → Kafka (mTLS, consumer/producer ACLs).
 - **Assets:** accrued/capitalized interest amounts, withholding tax rate and remittance amounts, account balances (indirectly, via the ledger postings this service issues).
 
 ## 3. Authn/Authz
@@ -38,6 +39,10 @@ money-path service, not adjacent.
 - Operator-facing REST endpoints: `@RolesAllowed` (ROLE_OPERATOR/ADMIN).
 - Capitalization and remittance runs are triggered internally (scheduled job), not by an external caller — no unauthenticated inbound trigger surface.
 - Calls to `ledger-service` and `transaction-service` are service-to-service (OIDC client credentials, OPA policy, four-eyes verbs per `rules.yaml`).
+- OPA enforcement is a property of the **service**, not of a manifest: `authz.enforce` defaults to
+  `${AUTHZ_ENFORCE:true}` in `application.yaml` (#3679). The `%test` profile is the single
+  documented exception — no OPA sidecar runs in the test JVM, and the interceptor fails closed
+  (503) on an unreachable PDP.
 
 ## 4. STRIDE
 
@@ -49,14 +54,63 @@ money-path service, not adjacent.
 | **I**nfo disclosure | Expose per-account interest/withholding amounts via error bodies or metrics | Error bodies carry codes only; metrics are low-cardinality (no account-id/amount labels, ADR-0077/0079) |
 | **D**oS | Flood the manual capitalization/remittance trigger, or replay settlement events | `@RolesAllowed` gate on manual triggers; idempotency key on both the ledger posting and the transaction-service debit guards duplicate runs |
 | **E**oP | Use the withholding remittance path to move funds unrelated to actual accrued tax | Remittance amount computed solely from `WithholdingRemittancePolicy` against the service's own accrual ledger, not from caller-supplied input; downstream `transaction-service` is the authoritative amount boundary |
+| **T**ampering | A catalog change makes historical or future accruals use an unintended rate | Consume only a maker-checker-published immutable revision; persist its content hash, effective interval and source revision locally; never resolve the latest catalog document during accrual; reject unsupported tiered profiles until their calculation is explicitly implemented |
 
 ## 5. Residual risks / assumptions
 
 - **Withholding-tax remittance to the tax authority is not yet wired to an external filing system** (#999 tracks actual remittance-to-authority; today the debit lands in an internal remittance-holding account). The money-path risk this threat model covers is the *internal* debit/capitalization flow, which is live.
-- **Interest rate configuration** is operator-managed and out of scope for this document (covered by the product-catalog/pricing threat surface).
+- Catalog-projected rate snapshots are an additional inbound reference-data boundary. A missing, malformed, stale or unsupported snapshot must prevent accrual for its affected product/currency; it must never fall back to a different current rate.
 - **Settlement ack consumer** (`WithholdingRemittanceSettlementConsumer`) trusts the Kafka topic's mTLS/ACL boundary as its authentication; no additional payload-level signature.
 
 ## 6. Change log
+
+- **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0291, burn-down #8351).
+  `accrue` and `rates` gained check-first replay on their natural keys (accrual: V12's
+  `(account, date, product, currency)`; rate config: `(product, account, currency,
+  effectiveFrom)`), each with the unique constraint as race backstop and a constraint-name-scoped
+  recovery that re-reads the winner's row. No new endpoint, caller, privilege or control bypass:
+  the change only converts a retry's 500-on-constraint into a replay of the original row, and a
+  retry's duplicate-active-config into a no-op. The trust boundaries are unchanged.
+- **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
+  Per-verb caller audit: **`interest.create` and `interest.trigger` are now four-eyes-gated** via
+  `rules.yaml: four_eyes.actions`. `interest.create` bundles every operator write on the money path
+  (manual accrue, capitalize → real GL journals, rate-config create → shapes all future accrual
+  amounts, withholding remittance assemble → triggers the real cash leg to the finanční úřad);
+  `interest.trigger` (accrueAll) is the manual mass accrual. Both caller sets are human-only, twice
+  over: `operator-interest-write` excludes `service-account-*` and the `interest_rest_ext.rego`
+  prohibition vetoes the write set for any service account at the allow head; the fleet audit found
+  no M2M writer (agent-service's client is read-only). The accrual/capitalization schedulers and the
+  remittance settlement consumer call the use cases in-process, so the HTTP-layer gate can never
+  pause automation. **`interest.delete` (deactivateRateConfig) NOT gated:** it stops future accrual
+  — reduces money movement (standing-order pause/cancel precedent). `interest.read/list` are reads.
+  Four-eyes enforcement itself remains off fleet-wide (`authz.four-eyes.enforce`, ADR-0155) — the
+  wiring sets the decision flag, nothing pauses yet.
+
+- **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
+  now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest
+  rather than of the service: the deployed Rollout sets the variable to `"true"` (since #3695), so
+  the cluster was enforcing, but **any environment that does not set the variable ran this
+  money-path service in advisory mode** — a new cluster, a local run, an ad-hoc container, a
+  restored namespace. In advisory mode `AuthorizeInterceptor` evaluates every `@Authorize`
+  decision, logs the deny at WARN and lets the request through, so the failure is silent: the
+  `prohibition` on service-account writes recorded in the 2026-08-03 entry below is **inert** in
+  any such environment, and so is every other reason in the bundle. This closes that gap at the
+  source. **No new caller, endpoint, network edge or grant** — the change can only ever move a
+  request from allowed-while-denied to denied. Grantability was measured before flipping, since
+  enforcing an action that no reason grants turns it into a 403: all five gated actions
+  (`interest.create/.trigger/.delete/.read/.list`) were evaluated with `opa eval` against the
+  deployed bundle ConfigMap, each probe carrying a must-DENY and a must-ALLOW control, and every
+  one resolves `allow=true` for at least one real principal. `four_eyes_required` is false for all
+  five. Residual: an operator running this service with no OPA sidecar reachable now gets 503
+  rather than an unauthorized success — the intended fail-closed direction, but it makes a missing
+  sidecar a hard outage instead of a silent control bypass. Rollback: set `AUTHZ_ENFORCE=false` in
+  the environment, which needs no code change.
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-20** — Added catalog fixed-rate snapshot boundary. Only immutable maker-checker-published
+  revisions with a content hash and UTC-day-aligned effective interval can materialize a local rate.
+  Unsupported or malformed profiles are durably rejected; catalog outages do not advance the cursor.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `productId` on capitalize and effectiveRate — #3104's own reproduction case. Both handlers are non-suspend, so `POST /api/v1/interest/capitalize/{accountId}` without `?productId=` threw at the method boundary and rendered 500 before any authorization-independent work ran. No fund movement is reachable without the parameter in either the old or the new behaviour — the change is purely which status the rejected request carries, and 5xx here also burnt this service's SLO error budget. No new caller or boundary. Rollback: revert.
 - **2026-08-03** — Prohibit service-account principals from interest writes (#3679 follow-up). The

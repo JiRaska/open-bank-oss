@@ -6,16 +6,19 @@
     {
       "contents": {
         "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "approvalPolicy": "N_OF_M",
         "capabilities": [
           "ACCOUNT_READ_BALANCES"
         ],
         "eventType": "DelegationActivated",
         "granteePartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "grantorPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "lifecycleRevision": 1,
         "perTransactionLimit": {
           "amount": 1500.0,
           "currency": "CZK"
         },
+        "requiredApprovals": 3,
         "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "resourceType": "ACCOUNT",
         "validFrom": "2026-01-01T00:00:00Z"
@@ -74,6 +77,14 @@
               }
             ]
           },
+          "$.lifecycleRevision": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          },
           "$.perTransactionLimit.amount": {
             "combine": "AND",
             "matchers": [
@@ -87,6 +98,14 @@
             "matchers": [
               {
                 "match": "type"
+              }
+            ]
+          },
+          "$.requiredApprovals": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
               }
             ]
           },
@@ -128,6 +147,7 @@
         "eventType": "DelegationRevoked",
         "granteePartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "grantorPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "lifecycleRevision": 2,
         "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "resourceType": "ACCOUNT"
       },
@@ -182,6 +202,14 @@
               {
                 "match": "regex",
                 "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.lifecycleRevision": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
               }
             ]
           },

@@ -5,6 +5,7 @@ package com.openbank.aml.infrastructure.outbox
 
 import com.openbank.aml.infrastructure.kafka.KafkaAmlOutboxEventPublisher
 import com.openbank.aml.infrastructure.persistence.repository.AmlOutboxRepositoryImpl
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -39,7 +40,8 @@ class AmlOutboxDispatcher(
     private val publisher: KafkaAmlOutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher

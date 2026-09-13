@@ -20,3 +20,19 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Dedicated D5 provenance stream. Retention is recovery time for the durable producer outbox,
+# not a claim that Kafka alone is the system of record.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.agent.audit.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

@@ -80,7 +80,28 @@ interface DocumentRepositoryPort {
      */
     suspend fun saveWithOutbox(document: Document, outboxMessage: OutboxMessage): Document
     suspend fun findById(id: UUID): Document?
+
+    /**
+     * EVERY document of a party, unbounded. Reserved for the onboarding-agreement resolution in
+     * `OnboardingDocumentService.ensureOnboardingAgreement`, which filters the whole set for the
+     * party's one live framework agreement and archives what it supersedes: bounding that read
+     * would let an already-SIGNED agreement fall off the page, and step 1 would re-render a
+     * contract that is legally signed. The filter makes the working set small by construction.
+     *
+     * NOT for the REST browse path — a party's document count is caller-controlled and unbounded.
+     * Use [findByPartyPaged] there (#8082).
+     */
     suspend fun findByParty(partyRef: String): List<Document>
+
+    /** One page of a party's documents, newest first, for the bounded browse contract (#8082). */
+    suspend fun findByPartyPaged(partyRef: String, page: Int, size: Int): List<Document>
+
+    /**
+     * Rows [findByPartyPaged] is paging over. Without it a caller cannot tell "this is everything"
+     * from "this is the first page of many" — the two render identically and mean opposite things
+     * to whoever is judging whether they have seen a party's whole file.
+     */
+    suspend fun countByParty(partyRef: String): Long
 
     /** The document persisted under [idempotencyKey], or null — an O(1) index lookup, not a scan. */
     suspend fun findByIdempotencyKey(idempotencyKey: String): Document?

@@ -94,16 +94,23 @@ RUN set -e; \
 # added for these trees (!docs/adr/**, !docs/threat-models/**, !docs/agents/**);
 # the rest of docs/ + *.md stays excluded.
 # ──────────────────────────────────────────────────────────────────────
+# Also carries the ADR-0148 prompt registry (openbank-libs/governance/prompts) for the ADR-0285
+# Communication Studio: openbank-libs/ is .dockerignore'd out of the runtime fs, so without this
+# copy /communication renders "registry not available" in the image while looking correct in local
+# dev, where the repo tree is one level up.
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
-    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-src/openbank-libs/governance; \
+    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-bundle/prompts /governance-src/openbank-libs; \
     cp /repo/docs/adr/*.md /governance-bundle/adr/ 2>/dev/null || true; \
     cp /repo/docs/threat-models/*.md /governance-bundle/threat-models/ 2>/dev/null || true; \
     cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
-    cp /repo/openbank-libs/governance/rules.yaml /governance-src/openbank-libs/governance/rules.yaml; \
-    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s) ──"; \
+    cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
+    test -s /governance-src/openbank-libs/governance/rules.yaml; \
+    test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
+    cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
+    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
 
 # ──────────────────────────────────────────────────────────────────────
@@ -230,10 +237,10 @@ COPY --from=origination-collector /origination-src/openbank-libs-domain /openban
 # Product Studio types are generated from the provider's committed design-first contract. Stage
 # exactly that contract at the same repo-relative path used by local builds; never duplicate DTOs.
 COPY --from=openapi-collector /openapi-bundle/openbank-product-catalog/openapi.yaml /openbank-product-catalog/src/main/resources/openapi.yaml
-# The readiness collector derives money-path policy from this authoritative source. Keep the
-# single file it reads at its repo-relative path; otherwise prebuild cannot distinguish a missing
-# policy from an empty policy and correctly refuses to produce a misleading scorecard.
-COPY --from=governance-collector /governance-src/openbank-libs/governance/rules.yaml /openbank-libs/governance/rules.yaml
+# Prebuild generators derive operator-facing data from authoritative governance registries. Stage
+# the directory at its repo-relative path so adding another registry-backed generator cannot pass
+# local CI and then fail only inside the deploy image build.
+COPY --from=governance-collector /governance-src/openbank-libs/governance /openbank-libs/governance
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=true
 # Source-map upload to GlitchTip (#3235). The token arrives as a BuildKit SECRET, not a build arg:
@@ -281,6 +288,11 @@ RUN addgroup -S openbank && adduser -S openbank -G openbank
 COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
+# bundle because Next.js only emits application code there; a --require preload is invisible to
+# its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from
+# instrumentation.ts (instrumentation-http patches node:http too late to catch the server).
+COPY --from=build /app/otel-bootstrap.cjs /app/otel-scrub.cjs ./
 COPY --from=docs-collector /docs-bundle ./docs-bundle
 COPY --from=sbom-collector /sbom-bundle ./sbom-bundle
 COPY --from=openapi-collector /openapi-bundle ./openapi-bundle
@@ -320,6 +332,9 @@ COPY --chmod=0644 openbank-admin-ui/test-results.json ./test-results.json
 # (empty scaffold when there are no pacts/pitest reports to collect).
 # --chmod=0644 for the same UID-100 readability reason as test-results.json.
 COPY --chmod=0644 openbank-admin-ui/quality-report.json ./quality-report.json
+# Unified provenance-aware test evidence (ADR-0273). Legacy test/quality
+# projections remain bundled through the compatibility window.
+COPY --chmod=0644 openbank-admin-ui/test-intelligence.json ./test-intelligence.json
 # CI-produced AWS Cost Explorer snapshot (read-only consumer; see
 # src/app/api/finops/costs/route.ts). build-push-admin-ui.sh runs
 # scripts/collect-aws-costs.mjs before the build so this file always exists
@@ -385,6 +400,7 @@ ENV OPENBANK_OPENAPI_BUNDLE=/app/openapi-bundle
 ENV OPENBANK_FLAGS_BUNDLE=/app/flags-bundle
 ENV OPENBANK_CHANGELOG_BUNDLE=/app/changelog-bundle
 ENV OPENBANK_TEST_RESULTS=/app/test-results.json
+ENV OPENBANK_TEST_INTELLIGENCE=/app/test-intelligence.json
 ENV OPENBANK_READINESS=/app/prod-readiness.json
 ENV OPENBANK_COST_REPORT=/app/cost-report.json
 ENV OPENBANK_AGENTS_FILE=/app/agents.yaml
@@ -396,4 +412,10 @@ ENV OPENBANK_GOVERNANCE_DOCS=/app/governance-bundle
 ENV OPENBANK_SECURITY_GRAPH=/app/security-graph.json
 ENV OPENBANK_INFRA_LIFECYCLE=/app/infra-lifecycle.json
 ENV OPENBANK_INFRA_VULNS=/app/infra-vulns.json
+# Preload the OpenTelemetry SDK before the application so instrumentation-http can patch
+# node:http before the server loads it. Self-gating: without OTEL_EXPORTER_OTLP_ENDPOINT the
+# bootstrap starts no SDK and costs one require (ADR-0075 inv. 2). Baked here rather than left to
+# the manifest so an environment that sets the endpoint cannot get tracing that silently exports
+# nothing — the exact failure this replaced.
+ENV NODE_OPTIONS="--require /app/otel-bootstrap.cjs"
 CMD ["node", "server.js"]

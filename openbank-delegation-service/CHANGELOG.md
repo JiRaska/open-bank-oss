@@ -1,5 +1,122 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.14.0...delegation-service-v0.15.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add managed account portfolios ([#9286](https://github.com/JiRaska/open-bank-oss/issues/9286)) ([7e92be5](https://github.com/JiRaska/open-bank-oss/commit/7e92be54bf327573ad0b5229faa20f646c17dc51))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+* **delegation:** project approval policy to account ([#9401](https://github.com/JiRaska/open-bank-oss/issues/9401)) ([58e3bbd](https://github.com/JiRaska/open-bank-oss/commit/58e3bbd91b1691ad05a150b53e02a4f0f6fb4df4))
+
+
+### Bug Fixes
+
+* **delegation:** guard delegation_outbox created_at plausibility at INSERT ([#9399](https://github.com/JiRaska/open-bank-oss/issues/9399)) ([b32ca68](https://github.com/JiRaska/open-bank-oss/commit/b32ca6806cd558c28922b052b4350b4900170f03))
+* **delegation:** replay-safe role-preset creation + ADR-0289 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9049](https://github.com/JiRaska/open-bank-oss/issues/9049)) ([4ee3ed2](https://github.com/JiRaska/open-bank-oss/commit/4ee3ed286a74e4aad7c4b0a70a9e5267a90f6b59))
+
+
+### Security
+
+* **delegation:** fail closed unsupported exposure ([#9171](https://github.com/JiRaska/open-bank-oss/issues/9171)) ([312cb9f](https://github.com/JiRaska/open-bank-oss/commit/312cb9fdf80e99d0b56bb25e4d342f167debcb46))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.3...delegation-service-v0.14.0) (2026-09-08)
+
+
+### Features
+
+* **delegation:** add lifecycle approval evidence ([#8310](https://github.com/JiRaska/open-bank-oss/issues/8310)) ([ded789d](https://github.com/JiRaska/open-bank-oss/commit/ded789d3c8fb62b27fbcf4ea45f83c19f6c7876d))
+* **notification:** alert grantor on first delegated spend ([#8334](https://github.com/JiRaska/open-bank-oss/issues/8334)) ([24e15de](https://github.com/JiRaska/open-bank-oss/commit/24e15de97237ff29bb888b66c437143f8d69d277))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.2...delegation-service-v0.13.3) (2026-09-03)
+
+
+### Security
+
+* **delegation:** enforce authorization by default, not by manifest ([#8425](https://github.com/JiRaska/open-bank-oss/issues/8425)) ([aae8b58](https://github.com/JiRaska/open-bank-oss/commit/aae8b588418c01bd60d1fbcc6c1ebe6c0e55124e))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.1...delegation-service-v0.13.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** publish durable spend reservation state ([#8247](https://github.com/JiRaska/open-bank-oss/issues/8247)) ([a017aab](https://github.com/JiRaska/open-bank-oss/commit/a017aab1111abaf702cc708f9e2a39cec56c9b1c))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.0...delegation-service-v0.13.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** make lifecycle transitions monotonic ([#8232](https://github.com/JiRaska/open-bank-oss/issues/8232)) ([da16bee](https://github.com/JiRaska/open-bank-oss/commit/da16beed4acd537dddef4bd6fd070733665bd69d))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.12.0...delegation-service-v0.13.0) (2026-09-02)
+
+
+### Features
+
+* **delegation:** preview client grants before SCA ([#8173](https://github.com/JiRaska/open-bank-oss/issues/8173)) ([cb8065c](https://github.com/JiRaska/open-bank-oss/commit/cb8065c425dde53ba02073b938ca908f2f3e7dfc))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.11.0...delegation-service-v0.12.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.10.0...delegation-service-v0.11.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** expand role capability catalog ([#7732](https://github.com/JiRaska/open-bank-oss/issues/7732)) ([4fdd0d3](https://github.com/JiRaska/open-bank-oss/commit/4fdd0d3e3c3a3d4b85c37c759300af60600a6cfb))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.9.0...delegation-service-v0.10.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** manage reusable role presets ([#7697](https://github.com/JiRaska/open-bank-oss/issues/7697)) ([c3f21ee](https://github.com/JiRaska/open-bank-oss/commit/c3f21ee63cc482a7ab27e6002967b23654812abe))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.8.0...delegation-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.7.0...delegation-service-v0.8.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.6.2...delegation-service-v0.7.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.6.1...delegation-service-v0.6.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.6.0...delegation-service-v0.6.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **delegation:** record expiration sweep liveness ([#5034](https://github.com/JiRaska/open-bank-oss/issues/5034)) ([db6e903](https://github.com/JiRaska/open-bank-oss/commit/db6e9039e6ffdd0512dafd806b9ae53400570d3f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.2...delegation-service-v0.6.0) (2026-08-09)
 
 

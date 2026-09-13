@@ -1,0 +1,25 @@
+.page { min-height: 100svh; display: grid; place-items: center; padding: clamp(24px, 5vw, 64px); background: radial-gradient(circle at 5% 5%, rgba(33, 147, 163, .12), transparent 27%), radial-gradient(circle at 95% 90%, rgba(25, 68, 120, .09), transparent 25%), #f5f7fb; color: #12233f; }
+.card { width: min(100%, 620px); padding: clamp(28px, 5vw, 54px); border: 1px solid #dce4ee; border-radius: 22px; background: rgba(255,255,255,.92); box-shadow: 0 24px 75px rgba(24, 47, 78, .12); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 46px; }
+.brand { border-radius: 5px; color: #142c4d; font-size: .95rem; font-weight: 760; text-decoration: none; }
+.brand span { margin-left: 6px; color: #61728a; font-size: .67rem; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; }
+.languageButton { display: inline-flex; align-items: center; gap: 7px; padding: 9px 11px; border: 1px solid #d8e0eb; border-radius: 10px; background: #fff; color: #314761; font: inherit; font-size: .77rem; font-weight: 650; cursor: pointer; }
+.icon { display: grid; width: 54px; height: 54px; place-items: center; margin-bottom: 24px; border-radius: 16px; }
+.errorIcon { border: 1px solid #f0cfb4; background: #fff7ed; color: #b45309; }
+.lockIcon { border: 1px solid #c6d9ed; background: #eef6ff; color: #225f99; }
+.eyebrow { margin: 0 0 13px; color: #177564; font-size: .7rem; font-weight: 760; letter-spacing: .16em; text-transform: uppercase; }
+.card h1 { max-width: 510px; margin: 0; color: #102746; font-size: clamp(2rem, 5vw, 3rem); font-weight: 680; letter-spacing: -.04em; line-height: 1.08; text-wrap: balance; }
+.intro { margin: 18px 0 24px; color: #52657d; font-size: .95rem; line-height: 1.7; }
+.explanation { padding: 16px 18px; border-left: 3px solid #72b6ad; border-radius: 0 10px 10px 0; background: #f0f7f6; color: #344c61; font-size: .84rem; line-height: 1.65; }
+.destination { display: grid; gap: 6px; margin-top: 16px; padding: 13px 16px; border: 1px solid #dde5ee; border-radius: 10px; background: #f8fafc; }
+.destination span { color: #6a7a8e; font-size: .67rem; font-weight: 720; letter-spacing: .1em; text-transform: uppercase; }
+.destination code { overflow: hidden; color: #304b68; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+.primaryButton { display: grid; width: 100%; min-height: 52px; grid-template-columns: 22px 1fr 22px; align-items: center; gap: 10px; margin-top: 26px; padding: 12px 16px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #0d5f6c, #0f7180); color: #fff; font: inherit; font-size: .87rem; font-weight: 720; cursor: pointer; box-shadow: 0 12px 28px rgba(12, 91, 104, .2); transition: filter .16s, transform .16s; }
+.primaryButton:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+.primaryButton:disabled { cursor: wait; opacity: .76; }
+.languageButton:focus-visible, .brand:focus-visible, .primaryButton:focus-visible { outline: 3px solid rgba(24,116,204,.3); outline-offset: 3px; }
+.spinner { animation: spin .8s linear infinite; }
+.help { margin: 20px 8px 0; color: #6a788c; font-size: .73rem; line-height: 1.55; text-align: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 520px) { .page { align-items: start; padding: 0; background: #fff; } .card { min-height: 100svh; padding: 24px 22px 38px; border: 0; border-radius: 0; box-shadow: none; } .header { margin-bottom: 52px; } }
+@media (prefers-reduced-motion: reduce) { .primaryButton { transition: none; } .spinner { animation-duration: 1.6s; } }

@@ -33,6 +33,9 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
+// TooManyFunctions: the idempotency violation detector (ADR-0298) pushes the use-case facade
+// to the threshold; splitting it out would scatter the submit path's replay logic.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class ClearingService(
     private val batchRepo: ClearingBatchRepository,
@@ -67,8 +70,27 @@ class ClearingService(
             createdAt = now,
             updatedAt = now,
         )
-        return itemRepo.save(item)
+        // Idempotent replay (ADR-0298, #8351): a payment enters clearing exactly once, so the
+        // natural key is paymentId. A retried POST replays the existing item instead of stacking
+        // a second PENDING row the clearing cycle would sweep into a batch — the same payment
+        // settled twice. Check-first covers the retry window; uq_clearing_items_payment (V9) is
+        // the DB backstop, and a lost race re-reads the winner rather than erroring the caller.
+        return itemRepo.findByPaymentId(request.paymentId).flatMap { existing ->
+            existing.firstOrNull()?.let { Uni.createFrom().item(it) }
+                ?: itemRepo.save(item).onFailure(this::isPaymentUniqueViolation)
+                    .recoverWithUni { _: Throwable ->
+                        itemRepo.findByPaymentId(request.paymentId)
+                            .map { winners -> winners.first() }
+                    }
+        }
     }
+
+    private fun isPaymentUniqueViolation(t: Throwable): Boolean = generateSequence(t) { it.cause }
+        .filterIsInstance<java.sql.SQLException>()
+        .any {
+            it.message?.contains("uq_clearing_items_payment") == true &&
+                (it.sqlState == "23505" || it.message.orEmpty().contains("(23505)"))
+        }
 
     override fun getBatch(id: UUID): Uni<ClearingBatch?> = batchRepo.findById(id)
 
@@ -100,7 +122,16 @@ class ClearingService(
                     createdAt = now,
                     updatedAt = now,
                 )
-                batchRepo.save(emptyBatch)
+                // An empty cycle still RAN, and a consumer that receives nothing cannot tell
+                // "the cycle ran and had nothing to settle" from "the cycle did not run" -- the
+                // two states are the reason this event exists. So the batch is born SETTLED *and*
+                // announced, atomically, exactly as a populated one is.
+                //
+                // `batch.settled` only: NOT the net_settlement.post command the populated path
+                // also emits, because there is no journal to post. Emitting a zero-amount
+                // settlement command would give NetSettlementPostingConsumer work that must not
+                // happen.
+                batchRepo.saveWithEvent(emptyBatch, eventPublisher.batchSettledMessage(emptyBatch))
             } else {
                 val now = OffsetDateTime.now(clock)
                 // For GROSS settlement: every item is a debit from our participant's perspective.
@@ -148,14 +179,24 @@ class ClearingService(
                 settledAt = now,
                 updatedAt = now,
             )
-            batchRepo.update(settled).flatMap { savedBatch ->
-                // Mark all items in this batch as SETTLED so the reconciliation view is consistent.
-                itemRepo.findByBatchId(batchId).flatMap { items ->
-                    val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
-                    itemRepo.saveAll(updatedItems).flatMap {
-                        eventPublisher.publishBatchSettled(savedBatch).map { savedBatch }
-                    }
-                }
+            // #8509: ONE transaction for batch + items + outbox rows, owned by the repository
+            // (settleWithEvents) — composing update/saveAll/publish here gave each its own
+            // transaction (measured xmin 750 vs 752) and could lose the settled event on a crash
+            // between commits. The boundary lives in infrastructure so this use case stays
+            // unit-testable without a Vert.x context (the sanctions `saveWithEvent` shape).
+            // ADR-0281: the net_settlement.post command commits in the SAME transaction — a
+            // SETTLED batch always has its settlement-leg intent durable; the actual journal
+            // posting is the consumer's idempotent job.
+            itemRepo.findByBatchId(batchId).flatMap { items ->
+                val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
+                batchRepo.settleWithEvents(
+                    settled,
+                    updatedItems,
+                    listOf(
+                        eventPublisher.batchSettledMessage(settled),
+                        eventPublisher.netSettlementPostMessage(settled),
+                    ),
+                )
             }
         }
     }

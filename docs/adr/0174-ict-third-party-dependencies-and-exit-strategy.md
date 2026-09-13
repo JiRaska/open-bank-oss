@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [compliance, infrastructure, governance]
-summary: "This ADR becomes the ICT third-party register of record with a criticality and exit position per provider, and states plainly that ADR-0031's LiteLLM/vLLM/Anthropic gateway topology is not deployed at all."
+summary: "ICT third-party register of record with a criticality and exit position per provider; the in-cluster LiteLLM gateway is represented in GitOps, while provider exit evidence remains outstanding."
 ---
 
 # ADR-0174 — ICT third-party dependencies and exit strategy
@@ -50,29 +50,31 @@ governed.
 Self-hosted and therefore **not** third parties: Pact broker, Keycloak, GlitchTip, the PID and customer
 edges — all on `open-bank.tech`.
 
-**2. The LLM topology this platform documents does not exist, and that is the single most important
-line in this ADR.**
+**2. The LLM topology this platform documents is now partially represented in GitOps, and the
+as-built boundary must remain explicit.**
 
 [ADR-0031](0031-ai-agent-governance-and-operations.md) decides a hybrid gateway: **LiteLLM** as the
 gateway, **vLLM** self-hosted for sensitive/air-gapped/residency work, **Anthropic** hosted for general
 reasoning, **Langfuse** for LLM observability, and `sensitive_data → self_hosted` routing.
 
-**None of it is deployed.** There is no `litellm`, no `ai-platform` namespace, no vLLM, no Anthropic
-integration, and no Langfuse anywhere in gitops. What exists is **one US provider, DeepInfra**, chosen
-on cost grounds in a YAML comment, with no ADR and no fallback.
+The in-cluster LiteLLM gateway and its `ai-platform` namespace are represented by
+`openbank-infra/gitops/apps/litellm.yaml` and `openbank-infra/gitops/components/ai-platform/`.
+The gateway fronts the configured DeepInfra and Groq routes, while vLLM, Anthropic and Langfuse
+remain target topology components rather than as-built dependencies. Runtime deployment and
+provider failover still require operational evidence; GitOps manifests alone do not prove either.
 
 Two things make this worse than a normal delivery gap:
-- **Five agents carry `LLM_GATEWAY_URL=http://litellm.ai-platform.svc:4000`** — governance-auditor,
-  flaky-test-hunter, authz-policy-auditor, finops-agent, docs-truth-agent — pointing at a service that
-  has never existed.
+- **The agent workloads carry `LLM_GATEWAY_URL=http://litellm.ai-platform.svc:4000`** — governance-auditor,
+  flaky-test-hunter, authz-policy-auditor, finops-agent, docs-truth-agent — pointing at the gateway
+  service represented in GitOps.
 - **~16 committed OPA bundles embed the false topology as policy data**: `tool: litellm`,
   `models: hosted {provider: anthropic}` / `self_hosted {runtime: vllm, in_cluster: true}`,
   `routing: {sensitive_data: self_hosted}`. Per `rules.yaml: opa_bundle_sync` these are machine-
   embedded, so the untruth is replicated fleet-wide and would be read by any policy consumer as fact.
 
-**We record the real dependency (DeepInfra, single provider, no fallback) as the governed one.** D1
-corrects the policy data; ADR-0031's topology stays a decision, but it is a *target*, not a
-description.
+**We record the real dependencies (DeepInfra and Groq behind the in-cluster gateway) as governed
+ones.** D1 is delivered in the governance policy data; ADR-0031's vLLM/Anthropic/Langfuse topology
+remains a *target*, not a description of the deployed estate.
 
 **3. What is genuinely AWS-locked — stated plainly, because ADR-0027 claims portability.**
 
@@ -119,12 +121,12 @@ architectural property, not evidence.
 
 ## Decisions to deliver
 
-- **D1 — Correct the OPA policy data.** ~16 bundles assert a litellm/vLLM/Anthropic topology that does
+- **D1 — Correct the OPA policy data.** ~16 bundles asserted a litellm/vLLM/Anthropic topology that did
   not exist. This is not a doc bug: it is machine-embedded policy data claiming a residency-routing
   control is in force when it is not. **Highest priority here** — a false control claim is worse than
-  an absent one. *(Pending)*
-- **D2 — Remove or implement `LLM_GATEWAY_URL`.** Five agents point at `litellm.ai-platform.svc:4000`,
-  which has never existed. Dead config that looks like architecture. *(Pending)*
+  an absent one. *(Delivered in governance policy; live rollout remains an operational check.)*
+- **D2 — Remove or implement `LLM_GATEWAY_URL`.** The agent workloads now point at the in-cluster
+  `litellm.ai-platform.svc:4000` service represented in GitOps. *(Delivered in manifests; live reachability remains an operational check.)*
 - **D3 — Write the register as a maintained artifact.** `docs/strategy/07-compliance-matrix.md` points
   at a "Vendor register (docs/)" that does not exist, and `dora-ictrm.md` lists **Hetzner**, which is
   not used. §1 is the register today; it needs an owner and a review cadence. *(Pending)*

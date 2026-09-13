@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 /**
  * Real-Postgres cover for #3265: adding the `<%` trigram operator to the screening search must make
@@ -81,6 +82,8 @@ class SanctionsSearchIndexEquivalenceIT {
         primaryName = primaryName,
         aliases = emptyList(),
         searchText = primaryName.lowercase(),
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
 
     /** The pre-#3265 predicate: the exact filter, with no operator and therefore no index. */

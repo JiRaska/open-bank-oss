@@ -168,4 +168,19 @@ regexes = [
   # / openapi.yaml, since refactored into src/test), so a full-history scan
   # (--log-opts=--all) still trips the bare-number rod-cislo heuristic on those blobs.
   '''2000145399''',
+  # LLM model identifier (Groq's `llama-3.3-70b-versatile`), named in agents.yaml's
+  # gateway-provider comments and config values (ADR-0175). The version-number-plus-size
+  # shape reads as high-entropy to the default generic-api-key rule; it is a public model
+  # name, not a credential — the actual Groq API key never appears in this repo (it is
+  # OpenBao/ESO-projected, same as every other service secret). A full-history scan
+  # (--log-opts=--all) trips on the comment form in a since-superseded commit
+  # (df37ca6f, openbank-libs/governance/agents.yaml:121).
+  '''llama-3\.3-70b-versatile\.?''',
+  # EU Financial Sanctions Files (FSF) consolidated-list endpoint
+  # (webgate.ec.europa.eu/fsd/fsf/public/files/...) — the `token=` query param is the
+  # European Commission's own fixed public access token for this dataset (base64
+  # decodes to "token-2017"), unrelated to any OpenBank credential and not something
+  # that rotates. It is meant for public consumption; publishing it is how the feed
+  # is fetched at all. Trips the default generic-api-key rule on the `token=` shape.
+  '''dG9rZW4tMjAxNw''',
 ]

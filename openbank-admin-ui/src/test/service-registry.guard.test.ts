@@ -43,9 +43,11 @@ import { SERVICE_REGISTRY, k8sNameOf } from '@/lib/services/registry'
 const ADMIN_UI = path.resolve(__dirname, '../..')
 const REPO = path.resolve(ADMIN_UI, '..')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
+const GITOPS_APPS = path.join(GITOPS, 'apps')
 
 const BFF_ROUTE = path.join(ADMIN_UI, 'src/app/api/svc/[service]/[...path]/route.ts')
 const SERVICES_PAGE = path.join(ADMIN_UI, 'src/app/services/page.tsx')
+const DOCS_API_PAGE = path.join(ADMIN_UI, 'src/app/docs/api/page.tsx')
 
 // ── Exceptions (tight, documented, code-backed — NOT an escape hatch) ───────
 
@@ -142,6 +144,50 @@ function gitopsWorkloadNamespaces(): Set<string> {
   return namespaces
 }
 
+interface ApplicationDiscoveryState {
+  file: string
+  namespace: string
+  staged: boolean
+  automated: boolean
+}
+
+/**
+ * Deployment lifecycle comes from the Argo Application, not merely from manifests under its
+ * component path. A staged Application may describe a complete workload while deliberately
+ * withholding sync; binding discovery RBAC into that absent namespace blocks the Admin UI's own
+ * Argo reconciliation before its Deployment can roll out.
+ */
+function applicationDiscoveryStates(): ApplicationDiscoveryState[] {
+  const states: ApplicationDiscoveryState[] = []
+  for (const file of walkYaml(GITOPS_APPS)) {
+    const src = readFileSync(file, 'utf8')
+    for (const doc of src.split(/^---$/m)) {
+      if (!/^kind:\s*Application\s*$/m.test(doc)) continue
+      const lines = doc.split('\n')
+      const destinationLine = lines.findIndex(line => line === '  destination:')
+      let namespace: string | undefined
+      if (destinationLine !== -1) {
+        for (let i = destinationLine + 1; i < lines.length; i++) {
+          if (/^  \S/.test(lines[i])) break
+          const match = /^ {4}namespace:\s*(\S+)\s*$/.exec(lines[i])
+          if (match) {
+            namespace = match[1]
+            break
+          }
+        }
+      }
+      if (!namespace) continue
+      states.push({
+        file: path.relative(REPO, file),
+        namespace,
+        staged: lines.some(line => /^ {4}openbank\.io\/discovery-state:\s*staged\s*$/.test(line)),
+        automated: lines.some(line => /^ {4}automated:\s*$/.test(line)),
+      })
+    }
+  }
+  return states
+}
+
 /**
  * Namespaces deliberately outside the discovery boundary. Kept tight: each entry is a namespace
  * whose workloads the console never proxies to.
@@ -175,6 +221,35 @@ function catalogShorts(): Set<string> {
   const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
   const parsed = JSON.parse(raw) as { services: { short: string }[] }
   return new Set(parsed.services.map(s => s.short))
+}
+
+/** Catalog module `name`s (the full `openbank-*` directory name, generate-catalog.mjs's key). */
+function catalogNames(): Set<string> {
+  const raw = readFileSync(path.join(ADMIN_UI, 'catalog.json'), 'utf-8')
+  const parsed = JSON.parse(raw) as { services: { name: string }[] }
+  return new Set(parsed.services.map(s => s.name))
+}
+
+/**
+ * `SERVICES` entries from the /docs/api page, as `{ specId, k8sName }`. `specId` doubles as the
+ * key into the code-derived catalog (`catalog[svc.specId]`, keyed by module directory name) AND,
+ * absent a `k8sName` override, the source `k8sName()` derives the BFF workload name from — so a
+ * `specId` that only satisfies one of those two readers is exactly the drift this guards against.
+ */
+function docsApiSpecEntries(): { id: string; specId: string; k8sName: string | null }[] {
+  const src = readFileSync(DOCS_API_PAGE, 'utf-8')
+  const block = src.match(/const SERVICES: Service\[\] = \[([\s\S]*?)\n\]/)
+  expect(block, 'SERVICES literal not found in the /docs/api page').toBeTruthy()
+  const out: { id: string; specId: string; k8sName: string | null }[] = []
+  for (const line of block![1].split('\n')) {
+    const id = line.match(/id:\s*'([a-z0-9-]+)'/)?.[1]
+    const specId = line.match(/specId:\s*'([a-z0-9-]+)'/)?.[1]
+    if (!id || !specId) continue // the `catalog` entry has `specId: null` — nothing to check
+    const k8sName = line.match(/k8sName:\s*'([a-z0-9-]+)'/)?.[1] ?? null
+    out.push({ id, specId, k8sName })
+  }
+  expect(out.length, 'no specId entries parsed out of the /docs/api SERVICES literal').toBeGreaterThan(0)
+  return out
 }
 
 // ── The rules ──────────────────────────────────────────────────────────────
@@ -298,11 +373,15 @@ describe('service registry drift guard', () => {
 
     // Namespaces that actually run an openbank service, derived from the gitops tree rather than
     // from a second hand-kept list — the whole point is that the set cannot drift.
+    const stagedNamespaces = new Set(
+      applicationDiscoveryStates().filter(app => app.staged).map(app => app.namespace),
+    )
     const serviceNamespaces = new Set<string>()
     for (const ns of gitopsWorkloadNamespaces()) serviceNamespaces.add(ns)
 
     const missing = [...serviceNamespaces]
       .filter(ns => !DISCOVERY_EXEMPT_NAMESPACES.has(ns))
+      .filter(ns => !stagedNamespaces.has(ns))
       .filter(ns => !listed.has(ns) || !bound.has(ns))
       .map(ns => `${ns}${listed.has(ns) ? '' : ' (not in OPENBANK_NAMESPACES)'}${bound.has(ns) ? '' : ' (no RoleBinding)'}`)
 
@@ -310,6 +389,37 @@ describe('service registry drift guard', () => {
       missing,
       'namespaces running an openbank service that admin-ui discovery cannot see. The console '
       + 'will render "not responding" for every service in them, against healthy pods.',
+    ).toEqual([])
+  })
+
+  it('keeps staged Applications outside live discovery until activation', () => {
+    const manifest = readFileSync(
+      path.join(GITOPS, 'components/admin-ui/admin-ui.yaml'), 'utf8',
+    )
+    const listed = new Set(
+      (manifest.match(/name: OPENBANK_NAMESPACES\s*\n\s*value:\s*(.+)/)?.[1] ?? '')
+        .split(',').map(n => n.trim()).filter(Boolean),
+    )
+    const bound = new Set(
+      [...manifest.matchAll(/name: admin-ui-discovery\s*\n\s*namespace:\s*(\S+)/g)].map(m => m[1]),
+    )
+    const staged = applicationDiscoveryStates().filter(app => app.staged)
+    const staleMarkers = staged
+      .filter(app => app.automated)
+      .map(app => `${app.namespace} (${app.file} is automated)`)
+    const activatedTooEarly = staged
+      .filter(app => listed.has(app.namespace) || bound.has(app.namespace))
+      .map(app => `${app.namespace}${listed.has(app.namespace) ? ' (queried)' : ''}${bound.has(app.namespace) ? ' (RBAC bound)' : ''}`)
+
+    expect(
+      staleMarkers,
+      'an automated Application cannot remain marked discovery-state=staged; remove the marker '
+      + 'and complete its OPENBANK_NAMESPACES + RoleBinding activation together.',
+    ).toEqual([])
+    expect(
+      activatedTooEarly,
+      'staged Applications are desired state, not live namespaces. Querying or binding them makes '
+      + `the Admin UI Argo sync fail before its own rollout: ${activatedTooEarly.join(', ')}`,
     ).toEqual([])
   })
 
@@ -386,6 +496,40 @@ describe('service registry drift guard', () => {
       unknown,
       `NON_FLEET_MODULES names modules absent from catalog.json — the derived fleet count `
       + `on /services is now wrong: ${unknown.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('every /docs/api SERVICES specId resolves to a real code-derived catalog entry', () => {
+    // The page looks up `catalog[svc.specId]` (keyed by full module directory name, e.g.
+    // "openbank-security-scanner") to overlay release/API version, money-path and gap facts.
+    // specId `openbank-security-scanner-service` names no such directory, so that card silently
+    // rendered with no version/API metadata forever — nothing threw, the lookup just missed.
+    const names = catalogNames()
+    const orphaned = docsApiSpecEntries()
+      .filter(s => !names.has(s.specId))
+      .map(s => `${s.id} → specId '${s.specId}'`)
+    expect(
+      orphaned,
+      `/docs/api specId names no catalog module, so the card never overlays real version/API `
+      + `data: ${orphaned.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('every /docs/api SERVICES entry resolves to a real gitops workload', () => {
+    // The health check calls svcUrl(k8sName(svc), …); k8sName() derives from specId unless a
+    // `k8sName` override is set. Fixing the specId above to match the catalog directory must not
+    // silently break this — the two readers want different strings for security-scanner, which is
+    // exactly why the override field exists.
+    const workloads = gitopsWorkloadNames()
+    const undeployed = docsApiSpecEntries()
+      .map(s => ({ id: s.id, k8s: s.k8sName ?? s.specId.replace(/^openbank-/, '') }))
+      .filter(s => !workloads.has(s.k8s))
+      .map(s => `${s.id} → ${s.k8s}`)
+    expect(
+      undeployed,
+      `/docs/api entries whose derived k8s name matches no Deployment/Service/Rollout in `
+      + `openbank-infra/gitops — the health probe 404s and the card reads "not deployed" `
+      + `forever: ${undeployed.join(', ')}`,
     ).toEqual([])
   })
 

@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content against what the code actually sends, and no schema is registered
+# in Apicurio. Everything below is DERIVED from `DurableAgentAuditPublisher.publish` (the only
+# writer of the outbox row) and `AgentAuditOutboxDispatcher` (the only sender to Kafka), and each
+# claim names its source.
+#
+# NOT YET LIVE: the outgoing channel exists (`agent-audit-events-out` in application.yaml) but
+# is disabled by default (`AGENT_AUDIT_KAFKA_ENABLED:false`) and the gitops override that would
+# make openbank-audit-service's `AgentAuditConsumer` consume it correctly is deliberately NOT
+# added yet (see `openbank-infra/gitops/components/audit/audit-service-msg-override.yaml`) —
+# declaring the channel in gitops config before the image that names it is SRMSG00071, the
+# sequencing hazard #5661 hit for notification-service's delegation-events-in. This contract
+# documents the wire shape the producer sends once both land, per ADR-0006's own prescribed
+# order ("producers before consumers", #1916).
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Agent Service — audit events
+  version: 1.0.0
+  description: |
+    Durable AI-provenance handoff (ADR-0031 D5): every `AuditEvent` agent-service would
+    otherwise only log is enqueued to a local Postgres outbox (`agent_audit_outbox`,
+    `V4__agent_audit_outbox.sql`) inside the same transaction as the audited operation, then
+    drained by a `@Scheduled` dispatcher into Kafka — so an audit call returns only after the
+    source database has acknowledged the row, and a Kafka outage delays but never drops it.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS via the
+      `agent-service` KafkaUser (`kafka-agent-mtls.yaml`), topic declared in
+      `kafka-topic.yaml`. See the file header for what is not live yet.
+
+channels:
+  agentAuditEvents:
+    address: openbank.agent.audit.events
+    title: Agent-service audit provenance
+    description: |
+      Topic name from `AGENT_AUDIT_KAFKA_TOPIC:openbank.agent.audit.events` in
+      `openbank-agent-service/src/main/resources/application.yaml`. Consumed by
+      openbank-audit-service's `AgentAuditConsumer`, which writes into the same append-only
+      `audit_entries` store every other audit source feeds.
+
+      **Partitioning key: the outbox row's `event_id`** (`AgentAuditOutboxDispatcher.dispatch`
+      sends `Record.of(row.eventId.toString(), row.payload)`) — not an actor or resource id, so
+      events for the same actor are NOT guaranteed ordered relative to each other. Consumers
+      that need actor-level ordering must not assume partition locality.
+    messages:
+      agent-audit-event:
+        $ref: '#/components/messages/agent-audit-event'
+
+operations:
+  publishAgentAuditEvent:
+    action: send
+    channel:
+      $ref: '#/channels/agentAuditEvents'
+    summary: Emit one agent-service audit event once the local outbox row is durable.
+    description: |
+      `DurableAgentAuditPublisher.publish` (an `AuditEventPublisher` `@Alternative` that
+      replaces the log-only fallback) enqueues into `agent_audit_outbox` inside the caller's
+      own transaction. `AgentAuditOutboxDispatcher` (`@Scheduled(every =
+      "${agent.audit.outbox.poll-interval:5s}")`) claims unpublished rows with `FOR UPDATE SKIP
+      LOCKED`, sends each to this channel, and marks it published only on Kafka ack — a send
+      that throws leaves the row claimed for retry with `last_error` recorded, never dropped
+      silently.
+    messages:
+      - $ref: '#/channels/agentAuditEvents/messages/agent-audit-event'
+
+components:
+  messages:
+    agent-audit-event:
+      name: agent-audit-event
+      title: Agent-service audit envelope
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AgentAuditEventPayload'
+  schemas:
+    AgentAuditEventPayload:
+      type: object
+      description: |
+        `AgentAuditEventEnvelope`
+        (`openbank-agent-service/.../infrastructure/audit/JdbcAgentAuditOutbox.kt`, message name
+        from its own `EVENT_TYPE` constant), serialised via `objectMapper.convertValue` then
+        merged with the audited operation's own free-form `AuditEvent.payload` map before
+        `writeValueAsString` (`DurableAgentAuditPublisher.publish`) — the two share one flat JSON
+        object, not a nested envelope. A key collision lets the fixed envelope field win (`Map +`
+        semantics). Only the envelope's own fields are listed below; `event.payload`'s contents
+        are call-site-specific and undocumented here.
+      required: [eventId, eventType, aggregateType, actorId, actorType, sourceService, occurredAt, result]
+      properties:
+        eventId:
+          type: string
+          description: |
+            `AuditEvent.eventId` (a UUID, minted via `Ids.newId()` at the call site) — also the
+            outbox row's primary key and the Kafka record key, so redelivery of the same row is
+            idempotency-key-stable.
+        eventType:
+          type: string
+          description: |
+            `AuditEvent.operation` — the audited action's own name, service-defined, and NOT the
+            same thing as this message's own name (`EVENT_TYPE = "agent-audit-event"`, the
+            envelope's wire identity). A consumer that wants to branch on WHAT was audited reads
+            this field; the message name only says "this is an agent-service audit envelope".
+        aggregateType:
+          type: string
+          description: "`AuditEvent.resourceType`."
+        aggregateId:
+          type: string
+          nullable: true
+          description: |
+            `AuditEvent.resourceId`, verbatim — `null` when the operation has no distinct
+            resource. Never substituted with `actorId`: a consumer's own inference chain (or the
+            honest `ABSENT` provenance) is what runs for a resource-less action, not a value from
+            a different dimension under this key (#6479).
+        actorId:
+          type: string
+          description: "`AuditEvent.actorId` — who performed the operation."
+        actorType:
+          type: string
+          description: "`AuditEvent.actorType`."
+        sourceService:
+          type: string
+          enum: [agent-service]
+          description: Constant, set by this publisher — not read from `AuditEvent`.
+        correlationId:
+          type: string
+          nullable: true
+          description: "`AuditEvent.traceId`, ties the entry back to log lines for the same request."
+        occurredAt:
+          type: string
+          format: date-time
+          description: "`AuditEvent.timestamp` — business time of the audited operation, not dispatch time."
+        channel:
+          type: string
+          nullable: true
+          description: "`AuditEvent.channel` (ADR-0226 D1): ui / mcp / api, or absent meaning unknown."
+        actChain:
+          type: array
+          items:
+            type: string
+          description: "`AuditEvent.actChain` — RFC 8693 on-behalf-of delegation chain (ADR-0224), empty when the action was not mediated."
+        sessionId:
+          type: string
+          nullable: true
+          description: "`AuditEvent.sessionId` — groups one sitting's events."
+        result:
+          type: string
+          enum: [SUCCESS, FAILURE, DENIED]
+          description: "`AuditEvent.result.name` — outcome of the audited operation."

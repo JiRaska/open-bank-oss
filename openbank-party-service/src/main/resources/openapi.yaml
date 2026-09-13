@@ -3,10 +3,15 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
-  # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
-  # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.15.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
+  # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
+  # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
+  # 1.23.0 -> 1.24.0 (#9391): additive only — mandates expose the exact statutory
+  # requiredSignatures quorum; an omitted SOLE mandate stays compatible as 1. This branch's
+  # comment still described a 1.19 -> 1.20 bump it never got to take: main moved to 1.23.0 while
+  # it was open, so the reserved number was spent three releases ago. Read off live origin/main,
+  # confirmed free with `git log -S 'version: 1.24.0'` on this file (no hits).
+  version: 1.24.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -41,7 +46,7 @@ paths:
           description: Filter by party status. When omitted all parties are returned.
           schema:
             type: string
-            enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED]
+            enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED, MERGED]
       responses:
         '200':
           description: Party list with optional statusFilter echo
@@ -194,6 +199,36 @@ paths:
             A merge precondition failed — already merged, the target is itself merged (chains are
             refused), a party is erased, or the duplicate still owns an open account.
 
+  /api/v1/parties/approvals:
+    get:
+      tags: [Parties]
+      summary: List pending four-eyes approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals on party.merge, oldest first. This is the read side of the
+        unified approval inbox; deciding remains on PATCH /api/v1/parties/approvals/{id}. Requires
+        ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: Caller lacks ROLE_OPERATOR or ROLE_ADMIN
+
   /api/v1/parties/approvals/{id}:
     patch:
       tags: [Parties]
@@ -223,6 +258,10 @@ paths:
       responses:
         '200':
           description: The decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
         '403':
           description: >-
             The decider is the original maker — segregation of duties (SelfApprovalNotAllowedMapper
@@ -252,6 +291,149 @@ paths:
           description: Updated
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/{id}/mandates:
+    post:
+      tags: [Parties]
+      summary: Grant (or refresh) a representation mandate — agent may act for the entity party {id} (ADR-0284 D3)
+      operationId: grantMandate
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantMandateRequest'
+      responses:
+        '201':
+          description: Mandate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyMandate'
+        '404':
+          description: Principal or agent party not found
+        '422':
+          description: Mandate precondition failed (principal is an INDIVIDUAL, agent is not, a party is CLOSED/MERGED)
+    get:
+      tags: [Parties]
+      summary: Every mandate over the entity party {id}
+      operationId: listMandates
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Mandates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartyMandate'
+  /api/v1/parties/{id}/mandates/{mandateId}:
+    delete:
+      tags: [Parties]
+      summary: Revoke a mandate
+      operationId: revokeMandate
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: mandateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Revoked mandate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyMandate'
+        '404':
+          description: No such mandate on this party
+  /api/v1/parties/{id}/acting-for:
+    get:
+      tags: [Parties]
+      summary: Entities the natural person {id} holds an ACTIVE mandate for — the profile switcher's source (ADR-0284 D4)
+      operationId: listActingFor
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Entity parties with the granting mandate
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActingForProfile'
+  /api/v1/parties/{id}/payees:
+    get:
+      tags: [Parties]
+      summary: List a party's saved payees, newest first (TOP-10 #5)
+      operationId: listPayees
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Saved payees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payee'
+    put:
+      tags: [Parties]
+      summary: Save (or update) a payee — upsert by IBAN
+      operationId: savePayee
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePayeeRequest'
+      responses:
+        '200':
+          description: Saved payee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payee'
+        '400':
+          description: Missing name or iban
+        '422':
+          description: Party already has the maximum of 30 saved payees
+
+  /api/v1/parties/{id}/payees/{iban}:
+    delete:
+      tags: [Parties]
+      summary: Remove a saved payee by IBAN. Idempotent — a missing IBAN is not an error.
+      operationId: deletePayee
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: iban
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed (or already absent)
 
   /api/v1/parties/directory/lookup:
     post:
@@ -468,13 +650,31 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/partyId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: >-
+            Set by customer-edge from the data subject's own validated JWT (ADR-0065). When the
+            caller IS the customer-edge service account and this header names the SAME party as
+            the path, the request is a subject-initiated exercise of the right and is permitted;
+            the edge cannot read any party other than the one whose token it validated. Ignored
+            for a ROLE_ADMIN / ROLE_DPO / self-JWT caller.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: GDPR Art. 15 subject-access export (ROLE_ADMIN only)
+          description: >-
+            GDPR Art. 15 subject-access export (ROLE_ADMIN / ROLE_DPO / subject self, or
+            customer-edge acting for the subject named in X-Customer-Party-Id)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GdprExport'
+        '403':
+          description: >-
+            The caller is neither ROLE_ADMIN, ROLE_DPO, the subject itself, nor the customer-edge
+            principal presenting a matching X-Customer-Party-Id.
         '404':
           $ref: '#/components/responses/NotFound'
         '502':
@@ -503,13 +703,31 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/partyId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: >-
+            Set by customer-edge from the data subject's own validated JWT (ADR-0065). When the
+            caller IS the customer-edge service account and this header names the SAME party as
+            the path, the request is a subject-initiated exercise of the right and is permitted;
+            the edge cannot read any party other than the one whose token it validated. Ignored
+            for a ROLE_ADMIN / ROLE_DPO / self-JWT caller.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: GDPR Art. 20 portability export (ROLE_ADMIN / ROLE_DPO / subject self)
+          description: >-
+            GDPR Art. 20 portability export (ROLE_ADMIN / ROLE_DPO / subject self, or
+            customer-edge acting for the subject named in X-Customer-Party-Id)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GdprExport'
+        '403':
+          description: >-
+            The caller is neither ROLE_ADMIN, ROLE_DPO, the subject itself, nor the customer-edge
+            principal presenting a matching X-Customer-Party-Id.
         '404':
           $ref: '#/components/responses/NotFound'
         '502':
@@ -540,6 +758,35 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record. makerId identifies who requested the gated action; a different
+        principal must decide it, which is enforced by the shared ApprovalStore.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          example: party.merge
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          description: Shared ApprovalStatus value; deliberately not narrowed to the party KYC enum.
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     GdprExport:
       type: object
       description: GDPR Art. 15 subject-access export (party-service-direct PII).
@@ -557,6 +804,8 @@ components:
             nationality: { type: string, nullable: true }
             taxId: { type: string, nullable: true }
             registrationNumber: { type: string, nullable: true }
+            registrationCountry: { type: string, nullable: true, description: "ADR-0284: ISO 3166-1 alpha-2 of the register that issued registrationNumber" }
+            legalForm: { type: string, nullable: true, description: "ADR-0284: register legal-form code (ARES pravniForma, ISO 20275 ELF)" }
             email: { type: string }
             phone: { type: string, nullable: true }
             address:
@@ -584,6 +833,79 @@ components:
         scope:
           type: string
           description: What this export does and does not cover.
+    GrantMandateRequest:
+      type: object
+      required: [agentPartyId, role]
+      properties:
+        agentPartyId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [OWNER, LEGAL_REPRESENTATIVE, AUTHORISED_SIGNATORY]
+        authority:
+          type: string
+          enum: [SOLE, JOINT]
+          default: SOLE
+        requiredSignatures:
+          type: integer
+          minimum: 1
+          description: Exact legal-representation quorum. Defaults to 1 for SOLE; required and at least 2 for JOINT.
+        source:
+          type: string
+          enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
+          default: MANUAL
+        evidenceRef:
+          type: string
+          nullable: true
+        validTo:
+          type: string
+          format: date-time
+          nullable: true
+    PartyMandate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        principalPartyId: { type: string, format: uuid }
+        agentPartyId: { type: string, format: uuid }
+        role:
+          type: string
+          enum: [OWNER, LEGAL_REPRESENTATIVE, AUTHORISED_SIGNATORY]
+        authority:
+          type: string
+          enum: [SOLE, JOINT]
+        requiredSignatures:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Exact register quorum; null only for legacy mandates whose value was not preserved.
+        source:
+          type: string
+          enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, EXPIRED]
+        evidenceRef: { type: string, nullable: true }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        revokeReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ActingForProfile:
+      type: object
+      properties:
+        partyId: { type: string, format: uuid }
+        partyType: { type: string }
+        legalName: { type: string }
+        tradingName: { type: string, nullable: true }
+        status: { type: string }
+        kycStatus: { type: string }
+        registrationNumber: { type: string, nullable: true }
+        registrationCountry: { type: string, nullable: true }
+        legalForm: { type: string, nullable: true }
+        mandate:
+          $ref: '#/components/schemas/PartyMandate'
     CreatePartyRequest:
       type: object
       # email is mandatory: a party is uniquely keyed by email (DB unique + not-null),
@@ -609,6 +931,12 @@ components:
           type: string
         registrationNumber:
           type: string
+        registrationCountry:
+          type: string
+          description: ADR-0284. ISO 3166-1 alpha-2 of the register that issued registrationNumber (legal entities).
+        legalForm:
+          type: string
+          description: ADR-0284. Register legal-form code (ARES pravniForma, ISO 20275 ELF) for a legal entity.
         email:
           type: string
           format: email
@@ -617,6 +945,9 @@ components:
           type: string
         address:
           $ref: '#/components/schemas/AddressDto'
+        id:
+          type: string
+          nullable: true
         consentGdpr:
           type: boolean
           description: >-
@@ -625,6 +956,13 @@ components:
         consentMarketing:
           type: boolean
           description: Optional marketing-communications consent from the same onboarding step.
+        classification:
+          type: string
+          enum: [CUSTOMER, SYNTHETIC]
+          default: CUSTOMER
+          description: >-
+            Bank-owned synthetic canary only. Requires ROLE_ADMIN and is immutable once created;
+            ordinary self-service onboarding always creates CUSTOMER.
 
     UpdatePartyRequest:
       type: object
@@ -716,13 +1054,41 @@ components:
             Not the onboarding-time consentGdpr snapshot — that isn't Art 6(1)(a) consent and
             has no update path.
 
+    Payee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    SavePayeeRequest:
+      type: object
+      required: [name, iban]
+      properties:
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
+
     AddDocumentRequest:
       type: object
       required: [documentType, documentNumber, issuingCountry]
       properties:
         documentType:
           type: string
-          enum: [PASSPORT, ID_CARD, DRIVING_LICENSE, COMPANY_REGISTRATION]
+          enum: [NATIONAL_ID, PASSPORT, DRIVING_LICENCE, COMPANY_REGISTRATION, TAX_ID]
         documentNumber:
           type: string
         issuingCountry:
@@ -737,7 +1103,7 @@ components:
       properties:
         kycStatus:
           type: string
-          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+          enum: [NOT_STARTED, IN_PROGRESS, APPROVED, REJECTED, EXPIRED]
 
     AddressDto:
       type: object

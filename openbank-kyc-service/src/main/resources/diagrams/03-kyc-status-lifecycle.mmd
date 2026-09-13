@@ -2,20 +2,11 @@
 stateDiagram-v2
   [*] --> OPEN: case created (PARTY_CREATED event or POST /kyc/cases)
 
-  OPEN --> DOCUMENTS_REQUIRED: operator marks docs missing
   OPEN --> UNDER_REVIEW: all mandatory checks recorded
   OPEN --> EXPIRED: expires_at passed without decision
 
-  DOCUMENTS_REQUIRED --> OPEN: documents submitted
-  DOCUMENTS_REQUIRED --> EXPIRED: expires_at passed
-
   UNDER_REVIEW --> APPROVED: POST /approve (four-eyes, authorised reviewer)
   UNDER_REVIEW --> REJECTED: POST /reject (four-eyes, authorised reviewer)
-  UNDER_REVIEW --> ESCALATED: escalation required (EDD / PEP)
-
-  ESCALATED --> UNDER_REVIEW: escalation resolved
-  ESCALATED --> APPROVED: escalation cleared, four-eyes approve
-  ESCALATED --> REJECTED: escalation rejected
 
   APPROVED --> [*]: terminal — emits KYC_CASE_APPROVED → party activation
   REJECTED --> [*]: terminal — emits KYC_CASE_REJECTED → party SUSPENDED
@@ -30,4 +21,22 @@ stateDiagram-v2
   note right of UNDER_REVIEW
     due_diligence_level: SDD / CDD / EDD
     risk_level: LOW / MEDIUM / HIGH / VERY_HIGH
+
+    A KYC case has no ESCALATED status. Escalation
+    shows up here as a check in MANUAL_REVIEW and
+    due_diligence_level EDD, while the case stays
+    UNDER_REVIEW. MLRO escalation is a state of the
+    AML case in aml-service (AmlCaseStatus.ESCALATED,
+    aml_cases.escalated_to_mlro), a different
+    aggregate in a different service.
+  end note
+
+  note right of OPEN
+    DOCUMENTS_REQUIRED is declared by KycCaseStatus
+    and published by the OpenAPI contracts, and is
+    drawn nowhere here on purpose: no operation in
+    KycService sets it, so no case can reach it
+    (#8535). It stays declared rather than removed
+    because dropping a value from a published enum
+    is a breaking contract narrowing (#8618).
   end note

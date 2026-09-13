@@ -3,12 +3,14 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -31,6 +33,7 @@ import java.util.UUID
  * directly would 403 — those expect SERVICE/OPERATOR roles a customer token does not carry.
  */
 @RegisterRestClient(configKey = "customer-edge")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(CopilotAuthPropagationFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -63,6 +66,20 @@ interface CustomerEdgeRestClient {
     @Path("/customer/v1/statements/{accountId}")
     fun listStatements(@PathParam("accountId") accountId: UUID): Uni<List<StatementDto>>
 
+    /**
+     * ADR-0269 rule 4: the customer's indicative price for an amount and term. The edge and
+     * lending-service own every input that is not amount/term, so this cannot be used to price a
+     * loan on the model's terms.
+     */
+    @POST
+    @Path("/customer/v1/credit/quotes")
+    fun quoteCredit(request: CreditQuoteRequestDto): Uni<CreditQuoteDto>
+
+    /** ADR-0269 rule 3: the caller's own credit applications as customer-readable journeys. */
+    @GET
+    @Path("/customer/v1/credit-applications")
+    fun listCreditApplications(): Uni<List<CreditJourneyDto>>
+
     @GET
     @Path("/customer/v1/standing-orders")
     fun listStandingOrders(): Uni<List<StandingOrderDto>>
@@ -76,6 +93,30 @@ data class AccountSummary(
     val accountType: String = "",
     val currencyCode: String = "",
     val status: String = "",
+)
+
+/** Amounts are strings on the wire: money never crosses an API as a Double. */
+data class CreditQuoteRequestDto(val amount: String, val termMonths: Int)
+
+data class CreditQuoteDto(
+    val amount: String = "",
+    val currency: String = "",
+    val termMonths: Int = 0,
+    val monthlyPayment: String = "",
+    val totalPayable: String = "",
+    val totalCostOfCredit: String = "",
+    /** Null means "could not be computed" — render as absent, never as 0%. */
+    val aprcPercent: String? = null,
+    val validUntil: String = "",
+    val binding: Boolean = false,
+)
+
+data class CreditJourneyDto(
+    val id: String = "",
+    val productKind: String = "",
+    val state: String = "",
+    val awaitingCustomer: List<String> = emptyList(),
+    val outcomeReasonCode: String? = null,
 )
 
 data class BalanceDto(
