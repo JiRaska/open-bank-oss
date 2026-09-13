@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.dev/schemas/openbank-dispute-service/complaint-event.schema.json",
+  "title": "OpenBank complaint lifecycle event",
+  "description": "Backward-compatible complaint projection contract for openbank.dispute.events. sourceVersion is the aggregate transition instant in epoch nanoseconds and gives consumers deterministic last-write-wins ordering under replay.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sourceVersion": { "type": "integer", "minimum": 1 },
+    "eventType": {
+      "enum": ["complaint.received", "complaint.interim_reply", "complaint.resolved", "complaint.closed"]
+    },
+    "complaintId": { "type": "string", "format": "uuid" },
+    "reference": { "type": "string", "minLength": 1 },
+    "category": { "type": "string" },
+    "channel": { "type": "string" },
+    "status": { "type": "string" },
+    "receivedDate": { "type": "string", "format": "date" },
+    "dueDate": { "type": "string", "format": "date" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "sourceService": { "const": "dispute-service" },
+    "accountId": { "type": "string", "format": "uuid" },
+    "transactionId": { "type": "string", "format": "uuid" },
+    "disputeId": { "type": "string", "format": "uuid" }
+  },
+  "required": [
+    "schemaVersion", "sourceVersion", "eventType", "complaintId", "reference", "category",
+    "channel", "status", "receivedDate", "dueDate", "occurredAt", "sourceService"
+  ],
+  "additionalProperties": true
+}
