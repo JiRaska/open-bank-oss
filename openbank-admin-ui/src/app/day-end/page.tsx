@@ -214,11 +214,11 @@ function EodPanel() {
         // not the calm gray no-data panel.
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '16px 18px',
           background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 'var(--r-lg)' }}>
-          <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: 'var(--surface)', color: 'var(--danger)' }}>
+          <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: 'var(--surface)', color: 'var(--danger-text)' }}>
             <AlertTriangle size={20} />
           </div>
           <div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--danger)' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--danger-text)' }}>
               {t('Denní tie-out dosud neproběhl', 'The daily tie-out has never run')}
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
@@ -251,7 +251,7 @@ function EodPanel() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', marginBottom: '16px',
                 background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 'var(--r-lg)' }}>
                 <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-                <span style={{ fontSize: '13px', color: 'var(--warning)' }}>
+                <span style={{ fontSize: '13px', color: 'var(--warning-text)' }}>
                   {t(`Poslední tie-out je ${Math.round(ageHours)} h starý (${fmtDateTime(report.generatedAt)}) — dnešní denní závěrka zřejmě neproběhla.`,
                      `The last tie-out is ${Math.round(ageHours)}h old (${fmtDateTime(report.generatedAt)}) — today's daily close appears not to have run.`)}
                 </span>
@@ -868,7 +868,7 @@ function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, trigger
           )}</Dialog.Description>
         </div>
       </div>
-      <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning)', fontSize: 12.5, lineHeight: 1.5 }}>
+      <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: 12.5, lineHeight: 1.5 }}>
         {t('Nespouštějte ručně jen proto, že plánovaný běh ještě není vidět. Ověřte plánovač 1. den v měsíci v 02:30 a poslední běh níže.', 'Do not trigger manually only because the scheduled run is not visible yet. Check the 1st-of-month 02:30 schedule and the latest run below.')}
       </div>
       <dl style={{ margin: '14px 0 0', padding: 12, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', display: 'grid', gap: 8, fontSize: 12.5 }}>
@@ -1007,8 +1007,8 @@ function EvidenceWarning({ count, subject, compact = false }: { count: number; s
 function CycleCard({ tag, status, title, body }: { tag: string; status: 'live' | 'pending' | 'none'; title: string; body: string }) {
   const { t } = useLanguage()
   const cfg = {
-    live: { label: t('Běží', 'Live'), color: 'var(--success)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
-    pending: { label: t('Připraveno', 'Pending'), color: 'var(--warning)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+    live: { label: t('Běží', 'Live'), color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+    pending: { label: t('Připraveno', 'Pending'), color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
     none: { label: t('Není', 'None'), color: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)' },
   }[status]
   return (

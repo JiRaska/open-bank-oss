@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "333c1c44e3d51c69"
+    openbank.tech/policy-checksum: "2ec45ea0f849dc7a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -682,10 +682,6 @@ data:
     		"delegation.reserve",
     		"delegation.reserve.confirm",
     		"delegation.reserve.release",
-            # The public magic-link routes terminate at customer-edge. The edge presents its own M2M
-            # identity here; no anonymous identity reaches delegation-service.
-            "delegation.disclosure.verify",
-            "delegation.disclosure.release",
     	}
     }
 
@@ -1000,6 +996,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read

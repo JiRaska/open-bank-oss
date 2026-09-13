@@ -243,7 +243,7 @@ export default function LendingPage() {
       />
 
       {error && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
+        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger-text)', fontSize: 13 }}>
           {t('lending-service je nedostupný.', 'lending-service is unreachable.')}
         </div>
       )}

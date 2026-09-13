@@ -52,7 +52,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 6. delegation-service → compacted Kafka (`openbank.delegation.spend-reservation-state`) — complete
    domestic reservation snapshots. The stream is default-off for new domestic reservations until
    a compatible binding consumer is deployed; rail-neutral callers remain unchanged.
-7. External recipient → customer-edge → delegation-service disclosure endpoint. The public edge
+7. delegation-service → party-service (`https://party-service.party.svc:8443`) — authoritative
+   principal status/type and live representation mandates. Mutual TLS uses the platform private CA
+   with per-service client identity and hostname verification; OIDC authenticates the application
+   principal and the network policy admits only the declared namespace/port edge.
+8. External recipient → customer-edge → delegation-service disclosure endpoint. The public edge
    owns anonymous ingress and its per-IP ingress rate limit; it authenticates upstream using only
    its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
    `delegation.disclosure.release` for that identity, never the shared backend client. Every
@@ -83,6 +87,7 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T19 | A service account, maker, or replay decides a bank-side lifecycle proposal | Proposal/decision actions are human-only and exclude `service-account-*`; the domain rejects maker = checker. The proposal request key is unique in Postgres and terminal rejection is serialized by a row lock, preserving the original actor, reason and timestamps. The admin BFF exposes GET only. Residual: direct staff lifecycle endpoints are not routed through the inbox, so mutation activation remains prohibited until that authority is narrowed. |
 | T20 | Approval races a newer lifecycle transition and overwrites state or emits stale evidence | This first slice is fail-closed: `approve=true` returns 409 even if the dark mutation setting is enabled, so no grant row or outbox event is touched. Execution may land only on top of lifecycle V8-V10 through their expected-revision/CAS transition and revision-stamped event, proven by a real-Postgres race test. Emergency suspend remains only the existing fraud/AML safety path. |
 | T21 | Stale business mandate, a foreign account, or a guessed portfolio id widens an active profile's account scope | `customer-edge` resolves `X-Acting-For` against party-service on every request and forwards a business profile only after an ACTIVE mandate check; absent that header, the active profile is the token party. Portfolio create/list/get additionally require the authenticated active profile to equal `ownerPartyId`; the customer API does not accept an owner field at all, and a supplied one is refused before the upstream call. Before persistence, every account is checked against account-service's authoritative owner; a foreign account returns 422 and an unavailable lookup returns retryable 503 without storing the portfolio. A mismatched or absent principal is 403, including before an idempotency replay can reveal a cached response. A guessed detail id remains a 404 at the customer boundary. The aggregate requires a non-empty, bounded account set, so it cannot become a client-only "all accounts" selector. A portfolio is explicitly **not** a grant, N-of-M decision, or payment authorization; no payment rail reads it until a later enforcing producer/consumer slice exists. Residual: ownership changes after creation require revalidation when a later grant binds or uses the portfolio; co-signing is not yet built and cannot be represented as active authority. |
+| T24 | A caller forges an entity profile, reuses a revoked mandate, or intercepts the authority lookup | The edge derives the human actor from the authenticated token; it is not accepted from the app. delegation-service re-checks the selected principal and the actor's currently active mandate at issuance time against party-service, before consuming SCA. Unknown, inactive, malformed and unavailable results fail closed. The new east-west call uses party-service's parallel private-CA mTLS listener on 8443: hostname verification authenticates the server, a namespace-local cert identifies delegation-service, and TLS 1.3 is pinned; OIDC and namespace/port NetworkPolicy remain independent controls. An event-only projection was rejected for this admission decision because bootstrap/replay lag and a revocation race would trade authorization freshness for availability. Residual: this establishes statutory/owner representation, not a delegated employee capability such as `delegation.manage`. |
 | T22 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
 | T23 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
 | T28 | A leaked external-link token becomes an unbounded, permanent document download | Each disclosure has a per-record SHA-256 link-secret hash, hard expiry, revocable state and a positive maximum view count. The row and its immutable view timestamps are locked and transitioned in one database transaction, so replicas cannot both consume the last allowed view. Raw secrets never persist. customer-edge maps every 4xx to the same unavailable response and is behind its per-IP ingress limit. |
@@ -93,9 +98,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 
 ## Outbound authentication (added 2026-08-06)
 
-Every REST client this service owns — sca-service, pid-service, account-service, card-issuance —
+Every REST client this service owns — sca-service, pid-service, party-service, account-service,
+card-issuance —
 carries the shared `openbank-services` client-credentials token via
-`OidcClientRequestReactiveFilter`. Before this, all four called out with **no Authorization header**
+`OidcClientRequestReactiveFilter`. Before the outbound-authentication fix, the original four called
+out with **no Authorization header**
 and every one 401'd, so the service could not complete a single ceremony: offers refused with the
 ownership gate's `UNVERIFIABLE`, accepts never reached the SCA read.
 
@@ -159,8 +166,15 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - **No notification on any lifecycle transition** (ADR-0232 D4 requires both parties be told).
 - **No sanctions/PEP screening at grant time** (ADR-0232 D5); the eligibility gate checks party
   status and KYC level only.
-- **The ADR-0232 D5 SME bridge is unimplemented**: nothing requires a LEGAL_ENTITY grantor's
-  acting person to hold `delegation.manage` on that entity.
+- **LEGAL_ENTITY grantors are bound to a human actor** (ADR-0232 D5 / ADR-0284): customer-edge
+  derives `X-Customer-Actor-Party-Id` from the authenticated token while keeping the selected
+  entity in `X-Customer-Party-Id`; delegation-service resolves the principal type in party-service
+  and requires that human to appear in its active `acting-for` mandate set. The same human owns
+  the consumed grant SCA challenge. Missing identity, a revoked/expired mandate, a non-active
+  principal, malformed data or either lookup being unavailable refuses preview and offer before
+  SCA is spent. Retail remains the degenerate case actor == principal. Residual: this proves a
+  statutory/owner mandate, not an employee delegation carrying `delegation.manage`; employee-level
+  sub-administration remains a later, explicitly capability-scoped grant.
 
 ## Change log
 

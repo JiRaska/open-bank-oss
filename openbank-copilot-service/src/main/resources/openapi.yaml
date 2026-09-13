@@ -220,7 +220,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [PAYMENT, CARD_FREEZE, DISPUTE]
+          enum: [PAYMENT, CARD_FREEZE, DISPUTE, FX_CONVERSION, CREDIT_APPLICATION]
         summary:
           type: string
           description: Human-readable one-liner of the proposed action.

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Namespace-local projection of the private CA chain. delegation-service mounts only ca.crt;
-# it never receives the document-service private key.
+# Materialises a namespace-local copy of the platform CA chain. delegation-service mounts only
+# ca.crt; the generated private key is never mounted into the workload.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

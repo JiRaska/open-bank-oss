@@ -366,8 +366,8 @@ function TechStackChips({ stack }: { stack: ServiceStack }) {
             ? `Quarkus ${stack.quarkus.version} LTS, supported until ${stack.quarkus.supportUntil ?? 'unknown'}`
             : `Quarkus ${stack.quarkus.version} (non-LTS)`}
           style={stack.quarkus.lts
-            ? { background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }
-            : { background: 'var(--warning-bg)', color: 'var(--warning)', border: 'none' }}
+            ? { background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }
+            : { background: 'var(--warning-bg)', color: 'var(--warning-text)', border: 'none' }}
         >
           Quarkus {stack.quarkus.version}{stack.quarkus.lts ? ' LTS' : ''}
         </span>

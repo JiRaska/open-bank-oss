@@ -13,16 +13,11 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
-  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
-  # 1.57.0 -> 1.58.0 (#9286): additive — customer-managed delegated account portfolios.
-  #
-  # 1.58.0 -> 1.60.0 (#9237, this branch): additive — anonymous OTP-gated sealed disclosure download.
-  # NOT 1.59.0: that number is held by the still-open #9215. Seven PRs have now queued on this one
-  # spec, and this branch has been renumbered three times as main overtook it (1.55.0 -> 1.57.0 ->
-  # 1.60.0) — a taken version is textually identical to a free one, so no merge can catch the
-  # collision; only reading live origin/main together with the open PRs can.
-  version: 1.60.0
+  # 1.62.0 -> 1.64.0 (#9237, this branch): additive — the OTP-gated external disclosure routes.
+  # This branch held 1.60.0 and main OVERTOOK it twice while it sat open; 1.63.0 is taken by the
+  # open #9417, so 1.64.0 is the first free number. Re-read off live origin/main WITH the open PRs
+  # after any rebase — a taken version is textually identical to a free one (ADR-0048).
+  version: 1.64.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -75,6 +70,36 @@ tags:
   - name: Complaints
 
 paths:
+  /net-worth:
+    get:
+      tags: [Profiles]
+      operationId: getNetWorth
+      summary: The caller's net worth, composed from the services that own each figure
+      description: |
+        Fans out to balance-service, lending-service, wealth-service and the ADR-0284 owner graph
+        (ADR-0301 D2). The party comes from the JWT; there is no path or query parameter.
+
+        A branch whose owner did not answer is UNAVAILABLE, never zero. This endpoint answers 200
+        with an honest partial tree rather than 5xx when one upstream is down, so a customer can
+        still see their cash while lending is unavailable. `totals.complete` is false whenever any
+        branch failed or was truncated, and `totals.missingBranches` names them. A client that
+        renders the totals while ignoring those fields is presenting a partial figure as final.
+
+        No currency conversion. Totals are per currency and `totals.converted` is always false; a
+        consolidated cross-currency figure is indicative only (ADR-0024) and is the client's to
+        compute through fx-service, showing the rate and its timestamp.
+
+        Declared holdings are labelled. Every leaf from wealth-service carries `valuationSource`
+        and `valuationAgeDays`: `CUSTOMER_DECLARED` means the customer typed the number and nobody
+        checked it, and a years-old figure is otherwise indistinguishable from a fresh one.
+
+        Entity stakes carry no amount at all (`valued: false`) and move no total: party-service
+        returns who may represent whom, not what an entity is worth.
+      responses:
+        '200':
+          description: The net-worth tree, possibly partial
+        '401':
+          description: Missing or invalid bearer token
   /external-disclosures/{id}/verify-otp:
     post:
       tags: [External disclosures]

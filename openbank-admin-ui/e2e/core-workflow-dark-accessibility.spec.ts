@@ -3,6 +3,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { waitForSettledShell } from './helpers/shell'
 
 const CORE_WORKFLOWS = [
   { route: '/dashboard', heading: /Můj pracovní prostor|My workspace/ },
@@ -32,6 +33,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 for (const { route, heading } of CORE_WORKFLOWS) {
   test(`${route} has no automated WCAG A/AA violations in its controlled dark state`, async ({ page }) => {
     await page.goto(route)
+    await waitForSettledShell(page)
     await expect(page.locator('#main-content')).toBeVisible()
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
     await page.locator('html').evaluate(element => element.classList.add('dark'))
