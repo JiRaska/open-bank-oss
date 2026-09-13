@@ -56,11 +56,12 @@ REQUIRED_CHECKS=(
   "Admin UI"                                 # CI — path-aware build + Playwright gate
   "Gitleaks"                                 # Secret scan
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
+  "OPA policy gate"                          # OPA policy — policy bundle validation
 )
 
 # Contexts introduced by the phase-1 migration. Before the ruleset can require
 # them, the exact current default-branch commit must already have emitted every
-# one successfully. This proves both claims the migration relies on: the matrix
+# one with a successful conclusion. This proves both claims the migration relies on: the matrix
 # display names match GitHub's real check names, and the path-aware Admin UI
 # aggregator is healthy. A renamed shard, a missing job, a queued run or a real
 # build failure therefore stops this script before it can deadlock main.
@@ -104,13 +105,14 @@ for context in "${MIGRATION_CHECKS[@]}"; do
   conclusion=$(echo "$check_runs" | jq -r --arg context "$context" '
     map(select(.name == $context)) | sort_by(.id) | last | .conclusion // "missing"')
   case "$conclusion" in
-    success|neutral|skipped)
+    success)
       echo "Preflight: $context = $conclusion on $default_sha"
       ;;
     *)
       echo "ERROR: refusing to require '$context': latest result on default-branch" >&2
-      echo "       commit $default_sha is '$conclusion' (missing/null means it never ran)." >&2
-      echo "       Wait for that exact check to succeed or fix its workflow first." >&2
+      echo "       commit $default_sha is '$conclusion'." >&2
+      echo "       It may be absent, still running, skipped or failed; wait for SUCCESS" >&2
+      echo "       on that exact commit, or fix its workflow first." >&2
       exit 1
       ;;
   esac
@@ -134,14 +136,30 @@ if [ -n "$existing_id" ]; then
   # to `[]` would silently strip the actors, reintroducing the very bug this
   # guards against. A legitimately empty list serialises as "[]" (valid JSON),
   # which is distinct from the empty string produced on gh/jq failure.
-  bypass_json=$(gh api "repos/$REPO/rulesets/$existing_id" \
-    --jq '[.bypass_actors[] | {actor_id, actor_type, bypass_mode}]' 2>/dev/null || true)
+  existing_ruleset=$(gh api "repos/$REPO/rulesets/$existing_id" 2>/dev/null || true)
+  bypass_json=$(echo "$existing_ruleset" \
+    | jq '[.bypass_actors[] | {actor_id, actor_type, bypass_mode}]' 2>/dev/null || true)
   if ! echo "$bypass_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
     echo "ERROR: ruleset #$existing_id exists but its bypass_actors could not be read." >&2
     echo "       Refusing to proceed: a PUT now would WIPE existing bypass actors." >&2
     exit 1
   fi
   echo "Preserving $(echo "$bypass_json" | jq 'length') bypass actor(s) from ruleset #$existing_id."
+
+  # A PUT replaces the complete required-check list too. Refuse an accidental
+  # removal caused by desired-state drift; deleting a live gate must be an
+  # explicit, separately reviewed migration rather than a side effect here.
+  live_checks=$(echo "$existing_ruleset" | jq -r '
+    [.rules[] | select(.type == "required_status_checks")
+      | .parameters.required_status_checks[].context] | unique[]')
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    if ! printf '%s\n' "${REQUIRED_CHECKS[@]}" | grep -Fqx -- "$context"; then
+      echo "ERROR: desired ruleset would remove live required check '$context'." >&2
+      echo "       Add it to REQUIRED_CHECKS or migrate it explicitly in a separate PR." >&2
+      exit 1
+    fi
+  done <<< "$live_checks"
 fi
 
 # Build the required_status_checks array as JSON from REQUIRED_CHECKS.
@@ -173,7 +191,7 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
-          strict_required_status_checks_policy: true,
+          strict_required_status_checks_policy: false,
           required_status_checks: $checks
         } }
     ],
