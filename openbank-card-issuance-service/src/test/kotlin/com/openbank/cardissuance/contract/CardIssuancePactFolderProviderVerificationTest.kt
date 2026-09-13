@@ -136,4 +136,17 @@ class CardIssuancePactFolderProviderVerificationTest {
             Panache.withTransaction { cardRepository.persist(entity).replaceWith(Unit) }
         }
     }
+
+    /**
+     * A deliberate no-op: the contract asks for a card id nothing seeds, and the assertion is that
+     * the provider answers 404 for it.
+     *
+     * Declared anyway because Pact fails an interaction whose state has no handler
+     * (`MissingStateChangeMethod`), and because an empty method with this comment is the only place
+     * a reader learns the emptiness is the point rather than an unfinished fixture.
+     */
+    @State("no card exists with the unknown id")
+    fun stateNoSuchCard() {
+        // Nothing to seed. See the KDoc.
+    }
 }

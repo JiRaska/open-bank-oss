@@ -1,0 +1,253 @@
+quarkus:
+  application:
+    name: openbank-card-processing-service
+  http:
+    port: 8157
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_card_processing
+    # Flyway migrates the DEFAULT (Agroal/JDBC) datasource, so a literal jdbc url must be here: a
+    # service that only boots because the environment supplied one cannot start from this repo
+    # alone (check-flyway-default-datasource.py, #3080).
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_card_processing
+  flyway:
+    # Committing migrations does NOT run them — this key defaults to false, and security-scanner
+    # shipped a database with zero tables because of it (#3350).
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  # Outbound M2M: card-issuance, transaction-service and fraud-service all authenticate their
+  # callers. An unauthenticated call would 401 and be indistinguishable from an outage.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+  rest-client:
+    "card-issuance-api":
+      url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
+      connect-timeout: 2000
+      # The decision sits on the acquirer's critical path; a scheme expects an issuer answer well
+      # inside a second. This adapter fails CLOSED, so a timeout is a decline, not a hang.
+      read-timeout: 3000
+      scope: jakarta.inject.Singleton
+    "transaction-api":
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 3000
+      read-timeout: 10000
+      scope: jakarta.inject.Singleton
+    # Visa Developer Platform. mTLS is CONFIGURATION — Quarkus performs the handshake from the
+    # key-store/trust-store below, so there is no crypto in the adapter to get wrong. Both stores
+    # and the API key come from OpenBao; with none of them set the adapter reports NOT_BOUND and
+    # makes no request, which is a state rather than a failure.
+    "visa-api":
+      url: ${VISA_API_URL:https://sandbox.api.visa.com}
+      connect-timeout: 3000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
+      key-store: ${VISA_KEYSTORE_PATH:}
+      key-store-password: ${VISA_KEYSTORE_PASSWORD:}
+      trust-store: ${VISA_TRUSTSTORE_PATH:}
+      trust-store-password: ${VISA_TRUSTSTORE_PASSWORD:}
+    # Mastercard Developers. No client-level auth config: it signs each request with OAuth 1.0a,
+    # so the Authorization header is computed per call and cannot come from a static setting.
+    "mastercard-api":
+      url: ${MASTERCARD_API_URL:https://sandbox.api.mastercard.com}
+      connect-timeout: 3000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
+    "fraud-api":
+      # fraud-service is on 8133 in its own namespace. Verified against the Service object, not
+      # guessed from the port table — 8110 is sca-service, and a wrong port here would make every
+      # shadow score a connection error nobody would notice, because the score changes no outcome.
+      url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      connect-timeout: 2000
+      # Shadow only: this call must never be able to slow the money path meaningfully.
+      read-timeout: 2000
+      scope: jakarta.inject.Singleton
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+    console:
+      json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-card-processing-service
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      # ADR-0050 transactional-outbox egress. The dispatcher sets the key (= authorisation id) and
+      # the ce-id / idempotency-key / ce-type headers, so both serializers are required.
+      card-processing-events-out:
+        connector: smallrye-kafka
+        client.id: cardprocessing-${quarkus.uuid}
+        topic: openbank.card.processing.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+      console:
+        json: false
+    oidc:
+      enabled: false
+  openbank:
+    card-processing:
+      # A developer needs something to present authorisations with; production does not.
+      sandbox-acquirer-enabled: true
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: postgresql://localhost:5432/openbank_card_processing_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_card_processing_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    # The integration tests drive the outbox dispatcher and the hold sweep explicitly, so they never
+    # race an assertion. The cron path has its own @TestProfile that re-enables the scheduler — a
+    # test that calls a @Scheduled method directly cannot see the missing Vert.x context, which is
+    # the defect that matters (#2148).
+    scheduler:
+      enabled: false
+  openbank:
+    card-processing:
+      sandbox-acquirer-enabled: true
+      # Off in tests: a posting to a transaction-service that is not running would be a FAILED
+      # outcome on every clearing and drown the signal the tests are checking. The test that cares
+      # about posting asserts the OUTCOME value directly.
+      ledger-posting-enabled: false
+      fraud-scoring-enabled: false
+
+openbank:
+  outbox:
+    # Defaults to FALSE fleet-wide: a service with an outbox that does not set this dispatches
+    # nothing, with no error and attempt_count stuck at 0.
+    dispatch-enabled: true
+  card-processing:
+    # How long an unpresented hold survives. Seven days is the common scheme presentment window; a
+    # hold that never expires is a permanent freeze of the customer's money.
+    hold-expiry-days: ${CARD_HOLD_EXPIRY_DAYS:7}
+    hold-sweep-cron: "${CARD_HOLD_SWEEP_CRON:0 */15 * * * ?}"
+    hold-sweep-batch: ${CARD_HOLD_SWEEP_BATCH:200}
+    ledger-posting-enabled: ${CARD_LEDGER_POSTING_ENABLED:true}
+    fraud-scoring-enabled: ${CARD_FRAUD_SCORING_ENABLED:true}
+    # Never on in a deployed environment: it can move money end to end.
+    sandbox-acquirer-enabled: ${CARD_SANDBOX_ACQUIRER_ENABLED:false}
+    # card-issuance does not publish a per-card currency yet; stated here rather than hidden.
+    default-currency: ${CARD_DEFAULT_CURRENCY:CZK}
+    scheme:
+      # Which network answers a BIN lookup: simulator | visa | mastercard (ADR-0283 D1). This is
+      # the setting that makes "the bank chooses the network" a configuration change rather than a
+      # code change. The default is the simulator because it is the only binding that needs no
+      # commercial agreement — and a configured vendor binding that cannot answer reports its OWN
+      # failure rather than falling back here, so an unconfigured integration can never look like a
+      # working one.
+      bin-lookup: ${CARD_SCHEME_BIN_LOOKUP:simulator}
+      # Tokenisation and disputes take the same three names, and the vendor ones deliberately have
+      # NO adapter behind them: VTS/MDES and VROL/Mastercom are contract-only, with no free sandbox
+      # to build or verify against. Selecting one answers NOT_BOUND naming the contract, which puts
+      # the gap at the call site rather than only in a document — an adapter written from
+      # documentation nobody here can open would be unexecutable code that is green in every test.
+      tokenisation: ${CARD_SCHEME_TOKENISATION:simulator}
+      dispute: ${CARD_SCHEME_DISPUTE:simulator}
+      visa:
+        # Absent from this file on purpose, like every other credential: supplied as an environment
+        # variable from OpenBao. An empty value means this environment has no Visa credential, and
+        # the adapter says NOT_BOUND rather than pretending.
+        api-key: ${VISA_API_KEY:}
+      mastercard:
+        consumer-key: ${MASTERCARD_CONSUMER_KEY:}
+        # Base64 of a PKCS#8 RSA private key. A committed key is exactly what the gitleaks gate
+        # exists to stop; with none configured no signer bean is produced at all and the adapter
+        # reports NOT_BOUND.
+        signing-key: ${MASTERCARD_SIGNING_KEY:}
+        base-url: ${MASTERCARD_API_URL:}
+
+# OPA sidecar (ADR-0034). Advisory by default — without this block the AuthorizeInterceptor's
+# enforce=true default turns an unreachable sidecar into a 503 on every @Authorize endpoint.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

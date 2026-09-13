@@ -46,6 +46,7 @@ object TopicProducers {
         "openbank.clearing.batch.event" to "clearing-service",
         "openbank.security.ict.incident" to "security-scanner",
         "openbank.cards.events" to "card-issuance-service",
+        "openbank.card.processing.events" to "card-processing-service",
         "openbank.dispute.events" to "dispute-service",
         "openbank.domestic.payment.events" to "domestic-payment",
         "openbank.sepa.payment.events" to "sepa-payment",

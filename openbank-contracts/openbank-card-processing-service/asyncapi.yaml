@@ -1,0 +1,175 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Card Processing Service — card money-path events
+  version: 1.0.0
+  description: |
+    What the card money path publishes (ADR-0283 phase 1, #8809): an authorisation decision, the
+    clearing presentments against it, and the release of a hold nobody presented against.
+
+    A SEPARATE channel from `openbank.cards.events`, which carries card LIFECYCLE (issued, blocked,
+    limits changed). Folding them together would put an authorisation stream through consumers
+    written for a handful of lifecycle events a day.
+
+    Every message is the JSON serialisation of a Kotlin data class in
+    `com.openbank.cardprocessing.domain.event`, so each field below is a property name — there is no
+    literal key anywhere in the source to grep for. Read the type, not a grep.
+
+    No PAN, no card credential and no CVV appears in any message: a card is referenced by its
+    card-issuance id.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: mTLS Kafka; card-processing-service publishes with its dedicated KafkaUser.
+channels:
+  cardProcessingEvents:
+    address: openbank.card.processing.events
+    description: |
+      Producer: card-processing-service, via the transactional outbox (ADR-0050) — the row and the
+      business state commit together, and the dispatcher drains to Kafka afterwards.
+
+      Consumers: audit-service (evidentiary trail; the topic is in its incoming list and its
+      KafkaUser Read ACL, without which the subscription is ACL-denied as a silent retry loop).
+
+      Partitioning key: the authorisation id, so an authorisation, its clearings and its release stay
+      ordered relative to each other. A random key would let a consumer see a clearing before the
+      authorisation it belongs to.
+
+      Retention: 7 days (`retention.ms: 604800000`), cleanup policy delete — matching the sibling
+      payments topics. The durable record is the database row under a 7-year accounting retention;
+      the topic is a transport, not the archive.
+    messages:
+      cardAuthorised:
+        $ref: '#/components/messages/cardAuthorised'
+      cardDeclined:
+        $ref: '#/components/messages/cardDeclined'
+      cardCleared:
+        $ref: '#/components/messages/cardCleared'
+      cardHoldReleased:
+        $ref: '#/components/messages/cardHoldReleased'
+operations:
+  publishCardProcessingEvents:
+    action: send
+    channel:
+      $ref: '#/channels/cardProcessingEvents'
+components:
+  messages:
+    cardAuthorised:
+      name: card.authorised.v1
+      title: An authorisation was approved and funds are held
+      payload:
+        $ref: '#/components/schemas/cardAuthorised'
+    cardDeclined:
+      name: card.declined.v1
+      title: An authorisation was refused
+      payload:
+        $ref: '#/components/schemas/cardDeclined'
+    cardCleared:
+      name: card.cleared.v1
+      title: A clearing presentment was applied
+      payload:
+        $ref: '#/components/schemas/cardCleared'
+    cardHoldReleased:
+      name: card.hold_released.v1
+      title: A hold was released without the money moving
+      payload:
+        $ref: '#/components/schemas/cardHoldReleased'
+  schemas:
+    presentmentChannel:
+      type: string
+      enum: [CONTACTLESS, ONLINE, ATM, CHIP_AND_PIN]
+    cardAuthorised:
+      type: object
+      required: [authorizationId, cardId, accountId, partyId, amountMinorUnits, currencyCode, channel, category, expiresAt, occurredAt, sourceService]
+      properties:
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        amountMinorUnits:
+          type: integer
+          format: int64
+          description: Minor units, as the scheme message carries it. Never a decimal.
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        channel: { $ref: '#/components/schemas/presentmentChannel' }
+        mcc: { type: string, nullable: true }
+        category:
+          type: string
+          description: The merchant category card-issuance judged the MCC as; kept so a later clearing does not re-judge it.
+        merchantName: { type: string, nullable: true }
+        merchantCountry: { type: string, nullable: true }
+        expiresAt:
+          type: string
+          format: date-time
+          description: When an unpresented hold is released. A hold that never expires is a permanent freeze.
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardDeclined:
+      type: object
+      required: [authorizationId, cardId, accountId, partyId, amountMinorUnits, currencyCode, channel, reason, category, occurredAt, sourceService]
+      properties:
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        amountMinorUnits: { type: integer, format: int64 }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        channel: { $ref: '#/components/schemas/presentmentChannel' }
+        reason:
+          type: string
+          description: |
+            card-issuance's own DeclineReason name, carried verbatim, or ISSUER_UNAVAILABLE when the
+            issuer could not be reached. The two must never look alike: in a dispute, "the issuer was
+            down" and "you turned gambling off" are different facts.
+        category: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardCleared:
+      type: object
+      required: [authorizationId, cardId, accountId, clearedAmountMinorUnits, cumulativeClearedMinorUnits, currencyCode, fullyCleared, category, occurredAt, sourceService]
+      properties:
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        clearedAmountMinorUnits:
+          type: integer
+          format: int64
+          description: This presentment's amount.
+        cumulativeClearedMinorUnits:
+          type: integer
+          format: int64
+          description: Everything presented so far, which can never exceed the authorised amount.
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        fullyCleared:
+          type: boolean
+          description: False for a partial presentment, where the remainder stays held.
+        category: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardHoldReleased:
+      type: object
+      required: [authorizationId, cardId, accountId, releasedAmountMinorUnits, currencyCode, releaseKind, occurredAt, sourceService]
+      properties:
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        releasedAmountMinorUnits:
+          type: integer
+          format: int64
+          description: What the customer got back. The status alone does not say how much.
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        releaseKind:
+          type: string
+          enum: [REVERSAL, EXPIRY]
+          description: |
+            Operationally different and deliberately not one value: a rising EXPIRY share means
+            acquirers are not presenting, a rising REVERSAL share means they are cancelling.
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
