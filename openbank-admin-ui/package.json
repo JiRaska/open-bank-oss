@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "prebuild": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/collect-prod-readiness.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs",
+    "prebuild": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/collect-prod-readiness.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs",
     "build": "next build --webpack",
     "start": "next start -p 3000",
     "lint": "eslint .",
@@ -12,7 +12,7 @@
     "pretype-check": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-origination-graph.mjs",
     "generate:catalog-types": "node scripts/generate-product-catalog-v2-types.mjs",
     "type-check": "tsc --noEmit",
-    "pretest": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs",
+    "pretest": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs",
     "test": "vitest run",
     "test:contract": "vitest run src/test/*-pact.contract.test.ts",
     "pretest:coverage": "npm run pretest",
