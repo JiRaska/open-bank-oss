@@ -89,6 +89,9 @@ openbank:
   context:
     bank-scope: ${CONTEXT_BANK_SCOPE:openbank-cz}
     projection-generation: ${CONTEXT_PROJECTION_GENERATION:1}
+    # Compatibility window only. Production activation sets this true after every source emits
+    # a database-backed aggregateRevision; legacy timestamp ordering is measured separately.
+    require-strict-revisions: ${CONTEXT_REQUIRE_STRICT_REVISIONS:false}
     max-nodes: 100
     max-edges: 200
     query-timeout-ms: 500

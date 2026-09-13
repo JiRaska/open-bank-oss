@@ -312,7 +312,8 @@ class ContextApiIT {
         transactionId: UUID,
         disputeId: UUID,
         sourceVersion: Long,
-    ) = """{"schemaVersion":1,"sourceVersion":$sourceVersion,"eventType":"complaint.received",""" +
+    ) = """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
+        """"eventType":"complaint.received",""" +
         """"sourceService":"dispute-service","complaintId":"$complaintId",""" +
         """"reference":"$reference","status":"RECEIVED",""" +
         """"occurredAt":"$NOW","accountId":"$accountId","transactionId":"$transactionId",""" +
@@ -325,7 +326,8 @@ class ContextApiIT {
         status: String = "OPEN",
     ): String {
         val affectedServices = services.joinToString(",") { "\"$it\"" }
-        return """{"schemaVersion":1,"sourceVersion":$sourceVersion,"eventType":"ICT_INCIDENT_STATUS_CHANGED",""" +
+        return """{"schemaVersion":1,"sourceVersion":$sourceVersion,"aggregateRevision":$sourceVersion,""" +
+            """"eventType":"ICT_INCIDENT_STATUS_CHANGED",""" +
             """"sourceService":"security-scanner","occurredAt":"$NOW","incident":{"id":"$incidentId",""" +
             """"severity":"P1_CRITICAL","status":"$status","affectedServices":[$affectedServices],""" +
             """"detectedAt":"$NOW","updatedAt":"$NOW"}}"""
@@ -358,7 +360,7 @@ class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
         "dispute-events-in",
         "ict-incident-events-in",
-    )
+    ) + mapOf("openbank.context.require-strict-revisions" to "true")
 
     override fun stop() = InMemoryConnector.clear()
 }

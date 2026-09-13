@@ -28,6 +28,8 @@ class ComplaintProjectionConsumer(
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val timeoutMs: Int,
+    @ConfigProperty(name = "openbank.context.require-strict-revisions", defaultValue = "false")
+    private val requireStrictRevisions: Boolean,
 ) {
     private val projectionLagSeconds = AtomicLong().also {
         meters.gauge(METRIC_LAG, Tags.of("stream", "complaint"), it)
@@ -189,7 +191,15 @@ class ComplaintProjectionConsumer(
         val reference = root.text("reference")
         val status = root.text("status")
         val eventType = root.text("eventType")
-        val version = root.long("sourceVersion")
+        val compatibilityVersion = root.long("sourceVersion")
+        val aggregateRevision = root.long("aggregateRevision")
+        require(aggregateRevision > 0 || !requireStrictRevisions) {
+            "complaint event has no strict aggregateRevision"
+        }
+        if (aggregateRevision <= 0) {
+            meters.counter(METRIC_EVENTS, "stream", "complaint", "outcome", "legacy_revision").increment()
+        }
+        val version = aggregateRevision.takeIf { it > 0 } ?: compatibilityVersion
         val occurredAt = Instant.parse(root.text("occurredAt"))
         require(
             version > 0 &&

@@ -6,7 +6,8 @@
 Architektonické rozhodnutí přijato v [ADR-0303](../adr/0303-banking-context-graph-and-authorized-hybrid-retrieval.md), 2026-09-13. Implementační backlog: [#9945](https://github.com/JiRaska/open-bank-oss/issues/9945).
 P0/P1 implementuje Customer 360 vizualizaci, bezpečný sdílený context-service, complaint
 projekci a agregovaný dopad ICT incidentů v admin UI. Deployment je záměrně připraven s
-nulovým počtem replik, dokud produkční workload gate nepotvrdí rozpočty. P2/P3 a hybridní
+durabilními outbox zdroji a striktními revizemi agregátů. Má záměrně nulový počet replik,
+dokud produkční workload gate nepotvrdí replay hranici a rozpočty. P2/P3 a hybridní
 vektorové hledání zůstávají plánem; níže uvedené cíle nejsou tvrzením o již naměřeném výkonu.
 
 ## Co má operátor získat

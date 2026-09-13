@@ -29,6 +29,8 @@ class IncidentProjectionConsumer(
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val timeoutMs: Int,
+    @ConfigProperty(name = "openbank.context.require-strict-revisions", defaultValue = "false")
+    private val requireStrictRevisions: Boolean,
 ) {
     private val projectionLagSeconds = AtomicLong().also { meters.gauge(METRIC_LAG, Tags.of("stream", "incident"), it) }
 
@@ -179,7 +181,15 @@ class IncidentProjectionConsumer(
     private fun parse(root: JsonNode): IncidentProjectionEvent {
         val incident = root.path("incident")
         val id = incident.text("id")
-        val sourceVersion = root.long("sourceVersion")
+        val compatibilityVersion = root.long("sourceVersion")
+        val aggregateRevision = root.long("aggregateRevision")
+        require(aggregateRevision > 0 || !requireStrictRevisions) {
+            "ICT incident event has no strict aggregateRevision"
+        }
+        if (aggregateRevision <= 0) {
+            meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_revision").increment()
+        }
+        val sourceVersion = aggregateRevision.takeIf { it > 0 } ?: compatibilityVersion
         val eventType = root.text("eventType")
         val severity = incident.text("severity")
         val status = incident.text("status")
@@ -189,6 +199,7 @@ class IncidentProjectionConsumer(
         val services = servicesNode.takeIf { it.isArray }?.map { it.asText().trim() }.orEmpty()
         require(
             runCatching { UUID.fromString(id) }.isSuccess &&
+                compatibilityVersion > 0 &&
                 sourceVersion > 0 &&
                 eventType in EVENT_TYPES &&
                 severity.isNotBlank() &&
