@@ -92,25 +92,33 @@ def validate(expr: str) -> list[str]:
 
 
 def crons_in(path: Path) -> list[tuple[str, str]]:
-    """(key, raw value) for every *cron* key under the `openbank` root of a service config."""
+    """(dotted key path, raw value) for every *cron* key ANYWHERE in a service config.
+
+    The walk used to start at the `openbank` root only (#6253), which left two populations
+    unvalidated while the gate printed OK: a cron under another root (agent-service's production
+    `agent.oversight.cron`, read by OversightService) and every cron inside a profile block
+    (`"%test": openbank: ...`), which the scheduler parses at that profile's boot just the same.
+    The key is reported as its full path so a finding says where it sits, not only its leaf.
+    """
     try:
         doc = list(yaml.safe_load_all(path.read_text()))[0]
     except (yaml.YAMLError, IndexError):
         return []
     out: list[tuple[str, str]] = []
 
-    def walk(node):
+    def walk(node, prefix: str):
         if isinstance(node, dict):
             for key, value in node.items():
+                here = f"{prefix}.{key}" if prefix else str(key)
                 if isinstance(value, str) and "cron" in str(key):
-                    out.append((str(key), value))
+                    out.append((here, value))
                 else:
-                    walk(value)
+                    walk(value, here)
         elif isinstance(node, list):
-            for item in node:
-                walk(item)
+            for i, item in enumerate(node):
+                walk(item, f"{prefix}[{i}]")
 
-    walk((doc or {}).get("openbank"))
+    walk(doc or {}, "")
     return out
 
 
@@ -158,7 +166,36 @@ def self_test() -> int:
         failed += 1
     else:
         print("  PASS  ${VAR:default} is unwrapped to its default")
-    print(f"self-test: {len(cases) + 1 - failed}/{len(cases) + 1} passed")
+
+    # SCOPE (#6253): everything above exercises validate() alone, so it could not see that
+    # crons_in() only ever looked under `openbank`. Drive the real walker over a fixture whose
+    # crons sit under the `openbank` root, under a profile block, and under a foreign root.
+    import tempfile  # self-test only
+
+    fixture = (
+        "openbank:\n  a:\n    check-cron: 0 15 3 * * ?\n"
+        '"%test":\n  openbank:\n    a:\n      check-cron: 0 0 5 31 2 ?\n'
+        "agent:\n  oversight:\n    cron: ${AGENT_OVERSIGHT_CRON:0 0 25 * * ?}\n"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        cfg = Path(d) / "application.yaml"
+        cfg.write_text(fixture)
+        found = dict(crons_in(cfg))
+    scope_checks = [
+        ("a cron under the openbank root is found", "openbank.a.check-cron" in found),
+        ("a cron inside a %test profile block is found", "%test.openbank.a.check-cron" in found),
+        ("a cron under a foreign root (agent.oversight.cron) is found", "agent.oversight.cron" in found),
+        # Present AND rejected for the planted reason. `found.get(key, "")` alone would pass when
+        # the key is missing, because validate("") reports a field-count problem -- vacuous.
+        ("the foreign-root cron's committed default is validated and rejected (hour 25)",
+         "agent.oversight.cron" in found
+         and any("hour: 25" in p for p in validate(unwrap(found["agent.oversight.cron"])))),
+    ]
+    for name, ok in scope_checks:
+        failed += not ok
+        print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+    total = len(cases) + 1 + len(scope_checks)
+    print(f"self-test: {total - failed}/{total} passed")
     return 1 if failed else 0
 
 
