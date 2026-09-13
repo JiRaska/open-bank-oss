@@ -70,6 +70,8 @@ class IctIncidentServiceTest {
         val payload = objectMapper.readTree(recordSlot.captured.value())
         assertThat(payload.get("eventType").asText()).isEqualTo("ICT_INCIDENT_REPORTED")
         assertThat(payload.get("sourceService").asText()).isEqualTo("security-scanner")
+        assertThat(payload.get("schemaVersion").asInt()).isEqualTo(1)
+        assertThat(payload.get("sourceVersion").asLong()).isPositive()
     }
 
     @Test

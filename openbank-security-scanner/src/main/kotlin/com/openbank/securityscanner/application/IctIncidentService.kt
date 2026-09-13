@@ -124,6 +124,8 @@ class IctIncidentService(
     private fun publishEvent(eventType: String, incident: IctIncident) {
         val payload = objectMapper.writeValueAsString(
             mapOf(
+                "schemaVersion" to 1,
+                "sourceVersion" to incident.updatedAt.toEpochNanoseconds(),
                 "eventType" to eventType,
                 "incident" to incident,
                 "occurredAt" to Instant.now(clock),
@@ -148,3 +150,6 @@ class IctIncidentService(
         internal const val SOURCE_SERVICE = "security-scanner"
     }
 }
+
+private fun Instant.toEpochNanoseconds(): Long =
+    Math.addExact(Math.multiplyExact(epochSecond, 1_000_000_000L), nano.toLong())
