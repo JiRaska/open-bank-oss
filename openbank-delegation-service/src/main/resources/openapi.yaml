@@ -649,16 +649,6 @@ components:
 
         Absent on an operator/back-office call, which is gated by role and OPA instead.
       schema: { type: string, format: uuid }
-    CustomerActorPartyId:
-      name: X-Customer-Actor-Party-Id
-      in: header
-      required: false
-      description: |
-        The natural person authenticated by customer-edge. Required together with
-        X-Customer-Party-Id on customer preview/offer calls. It equals the principal for an
-        individual profile; for an organization profile it differs and the service verifies the
-        actor's active PartyMandate before accepting the request. Never supplied by the app.
-      schema: { type: string, format: uuid }
     DelegationId:
       name: id
       in: path
