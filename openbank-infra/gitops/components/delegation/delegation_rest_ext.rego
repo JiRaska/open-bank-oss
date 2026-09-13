@@ -47,6 +47,7 @@ allowed_reasons contains "operator-delegation-write" if {
 	role in input.principal.roles
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
+    input.action != "delegation.recertification.confirm"
 }
 
 # Durable lifecycle approvals are enumerated rather than inheriting the broad delegation prefix:
@@ -115,4 +116,10 @@ allowed_reasons contains "service-delegation-check" if {
 	input.principal.type == "HUMAN"
 	startswith(input.principal.id, "service-account-")
 	input.action == "delegation.check"
+}
+
+# Only the authenticated customer edge may record a customer's review, regardless of other roles.
+prohibited if {
+    input.action == "delegation.recertification.confirm"
+    not input.principal.id == "service-account-openbank-edge"
 }

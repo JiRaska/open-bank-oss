@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "4f290d77df2e8927"
+    openbank.tech/policy-checksum: "4a8a405d13dda3db"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -629,6 +629,7 @@ data:
     	role in input.principal.roles
     	startswith(input.action, "delegation.")
         not startswith(input.action, "delegation.approval.")
+        input.action != "delegation.recertification.confirm"
     }
 
     # Durable lifecycle approvals are enumerated rather than inheriting the broad delegation prefix:
@@ -697,6 +698,12 @@ data:
     	input.principal.type == "HUMAN"
     	startswith(input.principal.id, "service-account-")
     	input.action == "delegation.check"
+    }
+
+    # Only the authenticated customer edge may record a customer's review, regardless of other roles.
+    prohibited if {
+        input.action == "delegation.recertification.confirm"
+        not input.principal.id == "service-account-openbank-edge"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

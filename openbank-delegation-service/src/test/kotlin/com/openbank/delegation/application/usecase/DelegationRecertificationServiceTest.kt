@@ -10,6 +10,7 @@ import com.openbank.delegation.domain.model.DelegationRecertificationCycle
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import jakarta.ws.rs.ForbiddenException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -54,6 +55,20 @@ class DelegationRecertificationServiceTest {
         coVerify(exactly = 1) {
             repository.confirm(cycle.id, grantor, OffsetDateTime.now(clock))
         }
+    }
+
+    @Test
+    fun `confirmation requires an authenticated customer party`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { service.confirm(cycle.id, grantor, null) } }
+            .isInstanceOf(ForbiddenException::class.java)
+        coVerify(exactly = 0) { repository.confirm(any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirmation rejects a different customer party`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { service.confirm(cycle.id, grantor, UUID.randomUUID()) } }
+            .isInstanceOf(DelegationCallerMismatchException::class.java)
+        coVerify(exactly = 0) { repository.confirm(any(), any(), any()) }
     }
 
     private fun sampleCycle() = DelegationRecertificationCycle(

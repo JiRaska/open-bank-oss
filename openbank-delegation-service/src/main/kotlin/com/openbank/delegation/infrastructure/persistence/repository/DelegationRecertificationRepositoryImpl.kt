@@ -92,9 +92,19 @@ class DelegationRecertificationRepositoryImpl(
     override suspend fun listPendingByGrantor(grantorPartyId: UUID): List<DelegationRecertificationCycle> {
         val rows = Panache.withSession {
             find(
-                "grantorPartyId = ?1 and status = ?2 order by dueAt asc",
+                """
+                from DelegationRecertificationEntity cycle
+                where cycle.grantorPartyId = ?1 and cycle.status = ?2
+                  and exists (
+                    select grant.id from DelegationGrantEntity grant
+                    where grant.id = cycle.delegationId and grant.status = ?3
+                      and grant.lifecycleRevision = cycle.expectedLifecycleRevision
+                  )
+                order by cycle.dueAt asc
+                """.trimIndent(),
                 grantorPartyId,
                 DelegationRecertificationStatus.PENDING,
+                DelegationStatus.ACTIVE,
             ).list<DelegationRecertificationEntity>()
         }.awaitSuspending()
         return rows.map { it.toDomain() }

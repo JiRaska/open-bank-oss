@@ -224,6 +224,10 @@ class DelegationResource(
     ): DelegationRecertificationResponse {
         requireNotNull(grantorPartyId) { "query parameter 'grantorPartyId' is required" }
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        // Authenticate the customer scope before returning even an already recorded confirmation.
+        if (identity.principal.name != "service-account-openbank-edge" || customerPartyId != grantorPartyId) {
+            throw ForbiddenException("recertification confirmation requires the grantor's customer session")
+        }
         val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
         idempotencyStore.get(cacheKey)?.let { cached ->
             return objectMapper.readValue(cached.responseBody, DelegationRecertificationResponse::class.java)

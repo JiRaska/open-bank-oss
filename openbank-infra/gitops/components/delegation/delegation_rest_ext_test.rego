@@ -194,3 +194,14 @@ test_check_is_not_open_to_an_anonymous_caller if {
 test_base_policy_is_loaded if {
 	"operator-read-any" in allowed_reasons with input as {"principal": operator, "action": "delegation.read"}
 }
+
+# Assert the final composed decision: a different allow reason must not admit customer confirmation.
+test_only_edge_may_confirm_recertification if {
+    every principal in [operator, admin, viewer, services_m2m, {"type": "HUMAN", "roles": ["ROLE_ADMIN"]}] {
+        allow == false with input as {"principal": principal, "action": "delegation.recertification.confirm"}
+    }
+}
+
+test_edge_confirmation_final_decision_allows if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.recertification.confirm"}
+}

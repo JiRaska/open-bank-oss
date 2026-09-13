@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.DelegationRecertificationRep
 import com.openbank.delegation.domain.model.DelegationRecertificationCycle
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.ForbiddenException
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -39,6 +40,9 @@ class DelegationRecertificationService(
         grantorPartyId: UUID,
         callerPartyId: CallerPartyId,
     ): DelegationRecertificationCycle {
+        if (callerPartyId == null) {
+            throw ForbiddenException("recertification confirmation requires a customer-scoped caller")
+        }
         requireCallerIs(callerPartyId, grantorPartyId)
         return repository.confirm(recertificationId, grantorPartyId, OffsetDateTime.now(clock))
     }
