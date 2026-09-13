@@ -44,6 +44,7 @@ class ProvisioningCycleSchedulerTest {
             loans =
             mockk(relaxed = true) {
                 every { countActive() } returns Uni.createFrom().item(0L)
+                every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
             },
             provisioning =
             mockk(relaxed = true) {
@@ -138,6 +139,38 @@ class ProvisioningCycleSchedulerTest {
     }
 
     @Test
+    fun `a closed loan provision cannot hide an active loan missing provision`() {
+        // Two different loans: one closed with a period row, one active without one.
+        // The two totals are both 1, but the uncovered ACTIVE population is also 1.
+        val registry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+        val coverageLoans = mockk<com.openbank.lending.application.port.out.LoanRepository> {
+            every { countActive() } returns Uni.createFrom().item(1L)
+            every { countActiveWithoutProvisioning("2026-06") } returns Uni.createFrom().item(1L)
+        }
+        val coverageRows = mockk<com.openbank.lending.application.port.out.ProvisioningRepository> {
+            every { countForPeriod("2026-06") } returns Uni.createFrom().item(1L)
+        }
+        val observed = ProvisioningCycleScheduler(
+            cycle,
+            batchSize = 500,
+            maxBatches = 1,
+            clock = clock,
+            domainMetrics = mockk(relaxed = true),
+            loans = coverageLoans,
+            provisioning = coverageRows,
+            registry = registry,
+        )
+        observed.onStart(io.quarkus.runtime.StartupEvent())
+        every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome("2026-06", 500, 0))
+
+        observed.runProvisioningPass().await().indefinitely()
+
+        assertThat(registry.get("openbank.lending.provisioning.unprovisioned").gauge().value()).isEqualTo(1.0)
+        registry.close()
+    }
+
+    @Test
     fun `the drain stops at the batch cap rather than running unbounded`() {
         // Every batch full: the book never says it is exhausted. The cap is what ends the tick, and
         // the remainder waits a whole cycle interval — which is why this path warns.
@@ -152,6 +185,7 @@ class ProvisioningCycleSchedulerTest {
             loans =
             mockk(relaxed = true) {
                 every { countActive() } returns Uni.createFrom().item(0L)
+                every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
             },
             provisioning =
             mockk(relaxed = true) {

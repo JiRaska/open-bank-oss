@@ -289,6 +289,18 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
     }.map { it.toLong() }
 
     @WithSession
+    override fun countActiveWithoutProvisioning(period: String): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(l) FROM LoanEntity l WHERE l.status = :active AND NOT EXISTS (" +
+                "SELECT 1 FROM LoanProvisioningEntity p WHERE p.loanId = l.id AND p.period = :period)",
+            java.lang.Long::class.java,
+        )
+            .setParameter("active", com.openbank.lending.domain.model.LoanStatus.ACTIVE)
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
     override fun findActiveWithoutProvisioning(period: String, limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
             "FROM LoanEntity l WHERE l.status = :active AND NOT EXISTS (" +

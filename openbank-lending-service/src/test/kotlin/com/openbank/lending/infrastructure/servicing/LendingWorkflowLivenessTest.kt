@@ -162,6 +162,7 @@ class LendingWorkflowLivenessTest {
                 loans =
                 mockk(relaxed = true) {
                     every { countActive() } returns Uni.createFrom().item(5L)
+                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
                 },
                 provisioning =
                 mockk(relaxed = true) {
@@ -215,6 +216,7 @@ class LendingWorkflowLivenessTest {
                 loans =
                 mockk(relaxed = true) {
                     every { countActive() } returns Uni.createFrom().item(5L)
+                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
                 },
                 provisioning =
                 mockk(relaxed = true) {

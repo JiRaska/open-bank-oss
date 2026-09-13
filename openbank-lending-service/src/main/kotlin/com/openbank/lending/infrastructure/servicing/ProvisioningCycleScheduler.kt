@@ -120,7 +120,7 @@ class ProvisioningCycleScheduler(
     }
 
     /**
-     * Count both sides after the drain and publish the shortfall.
+     * Count missing ACTIVE loans directly after the drain. Total period rows also include closed loans.
      *
      * Deliberately AFTER the pass, not before: the question is whether the period is covered once
      * the cycle has done what it can, and a count taken first would report the backlog the pass was
@@ -132,18 +132,20 @@ class ProvisioningCycleScheduler(
      * diagnoses. The previous values stay in place, exactly as OrphanedPartyGauge does.
      */
     private fun publishCoverage(period: String): Uni<Void> = loans.countActive().flatMap { active ->
-        provisioning.countForPeriod(period).invoke { covered ->
-            activeLoans.set(active)
-            provisionedThisPeriod.set(covered)
-            unprovisioned.set(maxOf(0L, active - covered))
-            if (active > covered) {
-                log.warnf(
-                    "IFRS 9 provisioning coverage for %s: %d of %d ACTIVE loans have no " +
-                        "provisioning row after this pass — the period is NOT fully provisioned",
-                    period,
-                    active - covered,
-                    active,
-                )
+        provisioning.countForPeriod(period).flatMap { covered ->
+            loans.countActiveWithoutProvisioning(period).invoke { missing ->
+                activeLoans.set(active)
+                provisionedThisPeriod.set(covered)
+                unprovisioned.set(missing)
+                if (missing > 0) {
+                    log.warnf(
+                        "IFRS 9 provisioning coverage for %s: %d of %d ACTIVE loans have no " +
+                            "provisioning row after this pass — the period is NOT fully provisioned",
+                        period,
+                        missing,
+                        active,
+                    )
+                }
             }
         }
     }.replaceWithVoid()
