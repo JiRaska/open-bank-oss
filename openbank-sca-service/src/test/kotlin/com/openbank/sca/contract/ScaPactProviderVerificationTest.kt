@@ -20,6 +20,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.restassured.RestAssured.given
 import io.vertx.core.Vertx
 import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
@@ -28,6 +29,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
@@ -155,5 +157,17 @@ class ScaPactProviderVerificationTest {
             ),
         )
         Unit
+    }
+}
+
+/** Real HTTP role boundary, separate from Pact's template-only context initialization. */
+@QuarkusTest
+@QuarkusTestResource(com.openbank.sca.it.PostgresRedisTestResource::class)
+@TestSecurity(user = "pact-unprivileged-caller", roles = ["ROLE_VIEWER"])
+class ScaPactProviderAuthorizationTest {
+    @Test
+    fun `a caller without a permitted role cannot read the challenge contract`() {
+        given().get("/api/v1/sca/challenges/99999999-9999-9999-9999-999999999999")
+            .then().statusCode(403)
     }
 }

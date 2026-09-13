@@ -3,6 +3,7 @@
 package com.openbank.sca.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.domain.model.DeviceApprovalDecision
@@ -86,7 +87,7 @@ class PostgresScaDecisionStore(
         }
 
     private fun auditMessage(entity: ScaDeviceDecisionEntity, partyId: UUID): OutboxMessage {
-        val eventId = UUID.randomUUID()
+        val eventId = Ids.newId()
         return OutboxMessage(
             eventId = eventId,
             aggregateId = entity.challengeId,

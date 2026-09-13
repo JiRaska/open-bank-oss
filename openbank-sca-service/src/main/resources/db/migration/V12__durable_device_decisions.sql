@@ -1,3 +1,5 @@
+-- Rollback: retain the table and signature evidence. Pause initiation and drain all unexpired
+-- challenges before replacing every writer with an older binary; Redis has no copy of these decisions.
 -- Retain signature evidence after authorization expiry. No automatic deletion policy is implied.
 -- Rollout/rollback require draining unexpired challenges before switching decision stores.
 CREATE TABLE sca_device_decisions (

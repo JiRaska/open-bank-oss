@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sca.application.port.out.EnrolledDeviceRepository
 import com.openbank.sca.domain.model.EnrolledDevice
@@ -96,7 +97,7 @@ class EnrolledDeviceRepositoryImpl :
     }
 
     private fun revocationEvent(device: EnrolledDeviceEntity, actorId: String, cancelled: Int): OutboxMessage {
-        val eventId = UUID.randomUUID()
+        val eventId = Ids.newId()
         return OutboxMessage(
             eventId = eventId,
             aggregateId = device.id,

@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.sca.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
@@ -15,6 +16,8 @@ import kotlin.io.path.readText
 /** Runs the generated deployment policy with the deployment's OPA image and mount layout. */
 class ScaOpaTestResource : QuarkusTestResourceLifecycleManager {
     private var container: GenericContainer<*>? = null
+
+    private var started = false
 
     override fun start(): Map<String, String> {
         check(DockerClientFactory.instance().isDockerAvailable) { "Docker is required for the enforced OPA flow" }
@@ -38,11 +41,18 @@ class ScaOpaTestResource : QuarkusTestResourceLifecycleManager {
         }
         container = opa
         opa.start()
+        started = true
+        TestInfrastructureEvidence.record("opa", opa.dockerImageName, "started")
         return mapOf("opa.url" to "http://${opa.host}:${opa.getMappedPort(OPA_PORT)}", "opa.timeout-ms" to "5000")
     }
 
     override fun stop() {
-        container?.stop()
+        container?.let {
+            it.stop()
+            if (started) TestInfrastructureEvidence.record("opa", it.dockerImageName, "stopped")
+        }
+        started = false
+        container = null
     }
 
     private fun imageFromDeployment(): String {
