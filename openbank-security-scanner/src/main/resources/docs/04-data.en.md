@@ -5,7 +5,8 @@
 Dedicated PostgreSQL schema `openbank_security` in the `openbank` database (shared cluster, schema-per-service isolation).
 
 **The service persists `ict_incidents` and `ict_incident_outbox`.** `V6` adds a monotonic
-`aggregate_revision` and the transactional hand-off table. Scan results remain in-memory only.
+`aggregate_revision` and the transactional hand-off table; `V7` preserves synthetic-test origin
+on that hand-off. Scan results remain in-memory only.
 
 Consequently:
 
@@ -60,7 +61,8 @@ outbox status, attempt, claim, error and timestamp fields.
 | `V3__hibernate_sequences.sql` | Created the Hibernate/Panache sequence used for the outbox surrogate key | Applied; the sequence is dropped by V4 |
 | `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — the outbox had no producer (#4709) | Applied out of order (#5628) |
 | `V5__create_ict_incidents.sql` | Created `ict_incidents` (columns above) + indexes on `created_at`, `status`, `severity` — moves the DORA ICT incident register out of the in-memory map (#4728) | Applied predecessor to V6 |
-| `V6__ict_incident_transactional_outbox.sql` | Adds strict incident revisions and the dedicated claim-safe transactional outbox | Current head; production relay activation is staged separately |
+| `V6__ict_incident_transactional_outbox.sql` | Adds strict incident revisions and the dedicated claim-safe transactional outbox | Applied predecessor to V7; production relay activation is staged separately |
+| `V7__synthetic_outbox_taint.sql` | Adds a non-null synthetic-origin marker with a safe false backfill | Current head; preserves ADR-0252 test provenance across relay |
 
 > V1 is absent — the scanner was stateless in its first iteration and V2 is the first migration that
 > landed. V2 and V3 are deliberately kept as files rather than deleted: both are recorded as applied

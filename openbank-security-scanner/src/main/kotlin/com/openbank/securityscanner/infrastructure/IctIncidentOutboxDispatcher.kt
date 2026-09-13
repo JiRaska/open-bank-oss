@@ -36,16 +36,35 @@ class IctIncidentOutboxDispatcher(
         identity = "ict-incident-outbox-dispatcher",
     )
     @Bulkhead(1)
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100)
-    @Timeout(30000)
+    @CircuitBreaker(
+        requestVolumeThreshold = CIRCUIT_BREAKER_VOLUME,
+        failureRatio = CIRCUIT_BREAKER_FAILURE_RATIO,
+        delay = CIRCUIT_BREAKER_DELAY_MS,
+    )
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(DISPATCH_TIMEOUT_MS)
     suspend fun dispatch() {
         if (dispatchEnabled) dispatchScheduledBatch()
     }
 
     @Bulkhead(1)
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100)
-    @Timeout(3000)
+    @CircuitBreaker(
+        requestVolumeThreshold = CIRCUIT_BREAKER_VOLUME,
+        failureRatio = CIRCUIT_BREAKER_FAILURE_RATIO,
+        delay = CIRCUIT_BREAKER_DELAY_MS,
+    )
+    @Retry(maxRetries = MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS)
+    @Timeout(PUBLISH_TIMEOUT_MS)
     override suspend fun publishWithResilience(entry: OutboxEntry) = publisher.publish(entry)
+
+    private companion object {
+        const val CIRCUIT_BREAKER_VOLUME = 10
+        const val CIRCUIT_BREAKER_FAILURE_RATIO = 0.5
+        const val CIRCUIT_BREAKER_DELAY_MS = 5_000L
+        const val MAX_RETRIES = 2
+        const val RETRY_DELAY_MS = 200L
+        const val RETRY_JITTER_MS = 100L
+        const val DISPATCH_TIMEOUT_MS = 30_000L
+        const val PUBLISH_TIMEOUT_MS = 3_000L
+    }
 }

@@ -133,6 +133,12 @@ mp:
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  outbox:
+    # Outbox delivery is part of the service contract. Production may override this to false only
+    # during the documented schema/broker activation gate; the GitOps rollout currently does so.
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
   security-scanner:
     scan-interval-minutes: 30
     # URLs use full Kubernetes in-cluster DNS (<name>.<namespace>.svc:<port>)

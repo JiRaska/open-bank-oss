@@ -5,7 +5,8 @@
 Vlastní PostgreSQL schema `openbank_security` v databázi `openbank` (sdílený cluster, izolace schema-per-service).
 
 **Služba persistuje `ict_incidents` a `ict_incident_outbox`.** Migrace `V6` přidává monotónní
-`aggregate_revision` a transakční předávací tabulku. Výsledky skenů zůstávají pouze in-memory.
+`aggregate_revision` a transakční předávací tabulku; `V7` na ní zachovává původ syntetického testu.
+Výsledky skenů zůstávají pouze in-memory.
 
 Z toho plyne:
 
@@ -60,7 +61,8 @@ pro stav, počet pokusů, claim, chybu a časové značky.
 | `V3__hibernate_sequences.sql` | Vytvořila Hibernate/Panache sekvenci pro surrogate klíč outboxu | Aplikována; sekvenci ruší V4 |
 | `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — outbox neměl producenta (#4709) | Aplikována mimo pořadí (#5628) |
 | `V5__create_ict_incidents.sql` | Vytvořila `ict_incidents` (sloupce výše) + indexy na `created_at`, `status`, `severity` — přesouvá registr ICT incidentů dle DORA z in-memory mapy do DB (#4728) | Aplikovaný předchůdce V6 |
-| `V6__ict_incident_transactional_outbox.sql` | Přidává striktní revize incidentu a dedikovaný claim-safe transakční outbox | Aktuální hlava; produkční relay se aktivuje samostatně |
+| `V6__ict_incident_transactional_outbox.sql` | Přidává striktní revize incidentu a dedikovaný claim-safe transakční outbox | Aplikovaný předchůdce V7; produkční relay se aktivuje samostatně |
+| `V7__synthetic_outbox_taint.sql` | Přidává povinný příznak syntetického původu s bezpečným backfillem na false | Aktuální hlava; zachovává testovací původ dle ADR-0252 přes relay |
 
 > V1 chybí — scanner byl v první iteraci bezestavový a V2 je první migrací, která vznikla. V2 a V3
 > jsou záměrně ponechány jako soubory a nesmazány: obě jsou zaznamenány jako aplikované v živé

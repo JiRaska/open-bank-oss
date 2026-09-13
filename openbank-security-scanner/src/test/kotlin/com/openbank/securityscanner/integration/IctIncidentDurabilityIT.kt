@@ -108,23 +108,23 @@ class IctIncidentDurabilityIT {
         "aggregateRevision" to rs.getLong("aggregate_revision"),
     )
 
-    private fun selectOutbox(id: UUID): Map<String, Any?>? = dataSource.connection.use { conn ->
-        conn.prepareStatement(
-            "SELECT aggregate_revision, event_type, status, payload FROM ict_incident_outbox " +
-                "WHERE aggregate_id = ? ORDER BY aggregate_revision DESC LIMIT 1",
-        ).use { stmt ->
-            stmt.setObject(1, id)
-            stmt.executeQuery().use { rs ->
-                if (!rs.next()) {
-                    null
-                } else {
-                    mapOf(
-                        "aggregateRevision" to rs.getLong("aggregate_revision"),
-                        "eventType" to rs.getString("event_type"),
-                        "status" to rs.getString("status"),
-                        "payload" to rs.getString("payload"),
-                    )
-                }
+    private fun selectOutbox(id: UUID): Map<String, Any?>? = dataSource.connection.use { conn -> queryOutbox(conn, id) }
+
+    private fun queryOutbox(conn: Connection, id: UUID): Map<String, Any?>? = conn.prepareStatement(
+        "SELECT aggregate_revision, event_type, status, payload FROM ict_incident_outbox " +
+            "WHERE aggregate_id = ? ORDER BY aggregate_revision DESC LIMIT 1",
+    ).use { stmt ->
+        stmt.setObject(1, id)
+        stmt.executeQuery().use { rs ->
+            if (!rs.next()) {
+                null
+            } else {
+                mapOf(
+                    "aggregateRevision" to rs.getLong("aggregate_revision"),
+                    "eventType" to rs.getString("event_type"),
+                    "status" to rs.getString("status"),
+                    "payload" to rs.getString("payload"),
+                )
             }
         }
     }
