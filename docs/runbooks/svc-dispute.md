@@ -30,7 +30,7 @@ triaging an incident that starts on `dispute`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8135` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `dispute`); dashboards in Grafana.
 - Logs: `kubectl logs -n dispute deploy/dispute-service -f`, or Loki
   `{namespace="dispute"}`.
