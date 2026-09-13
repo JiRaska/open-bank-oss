@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.12.0...sanctions-service-v0.13.0) (2026-09-13)
+
+
+### Features
+
+* **sanctions:** answer 202 on refresh-all and defer imports to the scheduler ([#9184](https://github.com/JiRaska/open-bank-oss/issues/9184)) ([056d5e7](https://github.com/JiRaska/open-bank-oss/commit/056d5e774a16702e590030c6d6b74295b9920c15))
+
+
+### Bug Fixes
+
+* **sanctions:** guard sanctions_outbox created_at plausibility at INSERT ([#9319](https://github.com/JiRaska/open-bank-oss/issues/9319)) ([33d0d87](https://github.com/JiRaska/open-bank-oss/commit/33d0d87f81cf5434db710f3c7374b189b8385ec6))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.2...sanctions-service-v0.12.0) (2026-09-08)
 
 

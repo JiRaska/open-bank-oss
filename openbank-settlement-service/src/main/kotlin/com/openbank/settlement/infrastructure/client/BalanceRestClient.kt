@@ -41,9 +41,25 @@ data class MoneyMovementRequest(
     val description: String,
 )
 
-data class BalanceResponse(
-    val accountId: UUID,
-    val currency: String,
-    val availableBalance: BigDecimal,
-    val currentBalance: BigDecimal,
-)
+/**
+ * What balance-service actually puts on the wire for `POST /balances/{id}/{credit,debit}`, narrowed
+ * to what this service reads.
+ *
+ * It used to bind `availableBalance` and `currentBalance` as non-nullable [BigDecimal]. Those two
+ * names have never been on the wire: `BalanceResource.credit/debit` returns the domain `Balance`
+ * straight to Jackson, so the payload carries that class's property names — `bookedAmount`,
+ * `availableAmount`, `reservedAmount`, `pendingAmount`. A missing non-nullable Kotlin property is a
+ * deserialisation failure, so every real credit and debit failed on the way back, AFTER the money
+ * had moved (#8673).
+ *
+ * Nothing could see it. The only test coverage constructed `BalanceResponse` in Kotlin or stubbed
+ * WireMock with a body copied from this class, so both sides of the assertion came from the same
+ * wrong shape and agreed with each other — the consumer-pact trap in the repo guide, one layer
+ * down.
+ *
+ * The fields are not renamed, they are REMOVED: no code path in settlement-service reads a balance
+ * off this response, and a field that is never read is a way to fail on someone else's schema for
+ * nothing. Jackson ignores the unknown remainder, so this binds only the two values that identify
+ * the movement, and it cannot break again when balance-service adds a field.
+ */
+data class BalanceResponse(val accountId: UUID, val currency: String)

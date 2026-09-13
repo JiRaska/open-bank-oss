@@ -30,7 +30,7 @@ triaging an incident that starts on `interest`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8125` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `interest`); dashboards in Grafana.
 - Logs: `kubectl logs -n interest deploy/interest-service -f`, or Loki
   `{namespace="interest"}`.
