@@ -58,6 +58,19 @@ REQUIRED_CHECKS=(
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
 
+# Contexts introduced by the phase-1 migration. Before the ruleset can require
+# them, the exact current default-branch commit must already have emitted every
+# one successfully. This proves both claims the migration relies on: the matrix
+# display names match GitHub's real check names, and the path-aware Admin UI
+# aggregator is healthy. A renamed shard, a missing job, a queued run or a real
+# build failure therefore stops this script before it can deadlock main.
+MIGRATION_CHECKS=(
+  "gates (gitops-api)"
+  "gates (lint-supplychain-security)"
+  "gates (registry-kotlin-data)"
+  "Admin UI"
+)
+
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
 # >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
 # a second maintainer.
@@ -77,6 +90,31 @@ if [ -z "$REPO" ]; then
   REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 fi
 echo "Target repository: $REPO"
+
+# A ruleset PUT is all-or-nothing and takes effect immediately. Validate new
+# contexts against one immutable SHA rather than a branch name that can move
+# between API calls. `--paginate --slurp` also handles repositories whose HEAD
+# emits more than GitHub's default page of check runs.
+default_branch=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
+default_sha=$(gh api "repos/$REPO/commits/$default_branch" --jq '.sha')
+check_runs=$(gh api "repos/$REPO/commits/$default_sha/check-runs?per_page=100" \
+  --paginate --slurp | jq '[.[].check_runs[]]')
+
+for context in "${MIGRATION_CHECKS[@]}"; do
+  conclusion=$(echo "$check_runs" | jq -r --arg context "$context" '
+    map(select(.name == $context)) | sort_by(.id) | last | .conclusion // "missing"')
+  case "$conclusion" in
+    success|neutral|skipped)
+      echo "Preflight: $context = $conclusion on $default_sha"
+      ;;
+    *)
+      echo "ERROR: refusing to require '$context': latest result on default-branch" >&2
+      echo "       commit $default_sha is '$conclusion' (missing/null means it never ran)." >&2
+      echo "       Wait for that exact check to succeed or fix its workflow first." >&2
+      exit 1
+      ;;
+  esac
+done
 
 # Look up an existing ruleset of this name UP FRONT — we need its id both for the
 # idempotent upsert below AND to carry over its bypass_actors.
