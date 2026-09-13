@@ -4914,7 +4914,10 @@ gates:
 
       files=()
       while IFS= read -r f; do files+=("$f"); done < <(
-        find .github/scripts openbank-infra/scripts docs -name '*.py' -type f | sort
+        # openbank-infra/aws and openbank-document-renderer are DEPLOYED Python (the
+        # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
+        # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
+        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
