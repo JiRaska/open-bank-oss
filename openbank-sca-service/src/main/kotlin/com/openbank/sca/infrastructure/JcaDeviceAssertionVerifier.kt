@@ -4,20 +4,13 @@
 
 package com.openbank.sca.infrastructure
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.sca.application.port.out.DeviceAssertionVerifier
-import com.openbank.sca.application.port.out.ScaDecisionStore
-import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.SignatureAlgorithm
-import io.quarkus.redis.datasource.ReactiveRedisDataSource
-import io.quarkus.redis.datasource.value.SetArgs
-import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
-import java.util.UUID
 
 /**
  * Verifies device assertions with the JDK crypto provider (ADR-0021). ECDSA P-256 /
@@ -33,6 +26,8 @@ import java.util.UUID
 @ApplicationScoped
 class JcaDeviceAssertionVerifier : DeviceAssertionVerifier {
 
+    // A malformed or unsupported assertion is a non-approval; do not log attacker-supplied material.
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override fun verify(
         publicKeySpkiB64: String,
         algorithm: SignatureAlgorithm,
@@ -55,31 +50,5 @@ class JcaDeviceAssertionVerifier : DeviceAssertionVerifier {
     } catch (e: Exception) {
         // Fail closed: any malformed key/signature is a non-approval, never a success.
         false
-    }
-}
-
-/**
- * Transient decision store backed by Redis, mirroring [RedisOtpStore]: a decision is
- * keyed by challenge id and expires with the challenge. Durable audit of the decision
- * is carried separately by the outbox/audit trail.
- */
-@ApplicationScoped
-class RedisScaDecisionStore(private val redis: ReactiveRedisDataSource, private val objectMapper: ObjectMapper) :
-    ScaDecisionStore {
-    private val strings = redis.value(String::class.java)
-
-    override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean {
-        require(ttlSeconds > 0) { "Decision TTL must be positive" }
-        val previous = strings.setGet(
-            "sca:decision:${decision.challengeId}",
-            objectMapper.writeValueAsString(decision),
-            SetArgs().nx().ex(ttlSeconds),
-        ).awaitSuspending()
-        return previous == null
-    }
-
-    override suspend fun find(challengeId: UUID): DeviceApprovalDecision? {
-        val raw = strings.get("sca:decision:$challengeId").awaitSuspending() ?: return null
-        return objectMapper.readValue(raw, DeviceApprovalDecision::class.java)
     }
 }

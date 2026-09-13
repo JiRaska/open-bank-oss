@@ -200,3 +200,20 @@ external notification. Those remain separate launch controls. See the consumptio
   paths. The tests exercise the local guard with advisory OPA and do not establish that
   a production policy grants a service call. Credential revocation, recovery and
   attestation validation are separate controls. Rollback reopens the ownership bypass.
+
+- **2026-09-13 — Durable signed decisions.** PostgreSQL is authoritative for device
+  decisions; an accepted first decision and its `SCA_DEVICE_DECIDED` outbox event commit
+  in one transaction. A challenge row lock, eligibility check and expected challenge
+  version prevent competing or stale acceptance. The retained record preserves the
+  signature and signed bytes; expiry closes authorization without erasing evidence or
+  reopening the first-decision slot. The audit identifies a credential, not a verified
+  human or hardware-attestation result. This adds signature evidence to the existing
+  audit topic, so its access and retention controls apply. The existing key records must
+  remain available for later verification. No automatic deletion is introduced.
+  Upgrade and rollback require quiescing initiation and draining active challenges;
+  mixed Redis/PostgreSQL writers are unsafe. Follow
+  [the migration and rollback runbook](../runbooks/sca-durable-decisions.md).
+  Real PostgreSQL/Redis HTTP tests prove persistence after cache removal, identical
+  decision/outbox transaction IDs, rollback on audit failure, signature fidelity and
+  expiry retention. Concurrent store claims preserve one winner. These tests do not
+  establish live Kafka receipt, device attestation or credential revocation.

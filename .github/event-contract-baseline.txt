@@ -27,8 +27,6 @@ openbank-party-service:openbank.party.events
 openbank-pid-service:openbank.pid.events
 openbank-pid-service:party.events
 openbank-sanctions-service:openbank.sanctions.screening.event
-openbank-sca-service:openbank.notification.requests
-openbank-sca-service:openbank.sca.events
 openbank-sdd-service:openbank.sdd.event
 openbank-security-scanner:openbank.security.ict.incident
 openbank-sepa-instant:openbank.sepa.instant.events

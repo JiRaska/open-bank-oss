@@ -46,8 +46,8 @@ data class EnrolledDevice(
 )
 
 /**
- * A signature-verified decision recorded against a challenge. Persisted transiently
- * (mirrors the OTP store) — it only needs to outlive the challenge.
+ * A signature-verified decision recorded against a challenge. The decision and its
+ * audit event are durable; expiry limits authorization, not evidence retention.
  */
 data class DeviceApprovalDecision(
     val challengeId: UUID,
@@ -56,6 +56,7 @@ data class DeviceApprovalDecision(
     /** Base64-encoded signature over [dynamicLinkingPayload]. Retained for audit. */
     val signatureB64: String,
     val decidedAt: OffsetDateTime,
+    val challengeVersion: Int = 0,
 )
 
 /**

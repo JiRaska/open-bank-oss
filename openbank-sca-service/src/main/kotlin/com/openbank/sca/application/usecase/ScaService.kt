@@ -284,7 +284,7 @@ class ScaService(
         // used to be two — `enrolledDeviceRepository.save(...)` followed by
         // `outboxRepository.save(...)`, each opening its own `Panache.withTransaction`, measured
         // as xmin 751 vs 752 — so a crash in between enrolled the device and lost the event with
-        // nothing to retry it. This is sca's only outbox write.
+        // nothing to retry it. Decision acceptance has its own atomic outbox write.
         return try {
             enrolledDeviceRepository.saveWithOutbox(
                 device,
@@ -357,6 +357,7 @@ class ScaService(
                 decision = command.decision,
                 signatureB64 = command.signatureB64,
                 decidedAt = now,
+                challengeVersion = challenge.version,
             ),
             ttlSeconds = ttl,
         )

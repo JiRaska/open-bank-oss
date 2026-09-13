@@ -43,17 +43,17 @@ class ScaLifecycleSafetyIT {
     @Inject lateinit var dataSource: DataSource
 
     @Test
-    fun `Redis preserves the first signed decision`(): Unit = runBlocking {
+    fun `the durable store preserves the first signed decision`() {
         val first = DeviceApprovalDecision(
-            UUID.randomUUID(),
+            seed("PENDING", OffsetDateTime.now().plusMinutes(5)),
             "test-credential",
             DeviceDecisionType.DENIED,
             "test-signature",
             OffsetDateTime.now(),
         )
-        assertThat(decisions.record(first, 60)).isTrue()
-        assertThat(decisions.record(first.copy(decision = DeviceDecisionType.APPROVED), 60)).isFalse()
-        assertThat(decisions.find(first.challengeId)?.decision).isEqualTo(DeviceDecisionType.DENIED)
+        assertThat(onContext { decisions.record(first, 60) }).isTrue()
+        assertThat(onContext { decisions.record(first.copy(decision = DeviceDecisionType.APPROVED), 60) }).isFalse()
+        assertThat(onContext { decisions.find(first.challengeId) }?.decision).isEqualTo(DeviceDecisionType.DENIED)
     }
 
     @Test
@@ -94,25 +94,27 @@ class ScaLifecycleSafetyIT {
     }
 
     @Test
-    fun `concurrent Redis claims acknowledge exactly one decision`(): Unit = runBlocking {
-        val id = UUID.randomUUID()
+    fun `concurrent database claims acknowledge exactly one decision`(): Unit = runBlocking {
+        val id = seed("PENDING", OffsetDateTime.now().plusMinutes(5))
         val results = (1..8).map { index ->
-            async {
-                index to decisions.record(
-                    DeviceApprovalDecision(
-                        id,
-                        "test-$index",
-                        DeviceDecisionType.APPROVED,
-                        "signature-$index",
-                        OffsetDateTime.now(),
-                    ),
-                    60,
-                )
+            async(Dispatchers.IO) {
+                index to onContext {
+                    decisions.record(
+                        DeviceApprovalDecision(
+                            id,
+                            "test-$index",
+                            DeviceDecisionType.APPROVED,
+                            "signature-$index",
+                            OffsetDateTime.now(),
+                        ),
+                        60,
+                    )
+                }
             }
         }.awaitAll()
         val accepted = results.filter { it.second }
         assertThat(accepted).hasSize(1)
-        assertThat(decisions.find(id)?.credentialId).isEqualTo("test-${accepted.single().first}")
+        assertThat(onContext { decisions.find(id) }?.credentialId).isEqualTo("test-${accepted.single().first}")
     }
 
     @Test
