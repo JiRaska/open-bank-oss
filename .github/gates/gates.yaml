@@ -2229,6 +2229,40 @@ gates:
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
 
+  # The DECLARATION half of the auto-deploy red watch (issue #9130). Measured 2026-09-13: the
+  # scheduled auto-deploy lane had been red for 27 hours — ten scheduled runs in a row — and
+  # the watch had run green throughout, because its population was the three newest completed
+  # runs of ANY event. auto-deploy also runs on `push` (the services one merge touched), those
+  # runs are green about a different subject, and they land between scheduled ticks:
+  # `2271 schedule ✗ | 2270 schedule ✗ | 2269 push ✓` read as not stuck, and the not-stuck branch
+  # would have closed any issue on that push green. The decision was inline in a github-script
+  # block, unreachable by any test — the same shape this repo already refused for
+  # classify-can-i-deploy-block.sh.
+  #
+  # The population rule (rules.yaml: ci_watches.lane_scoped_population) now lives in
+  # detect-auto-deploy-stuck.py, whose --self-test holds it to exactly that fixture as the
+  # known-positive plus the known-negatives; this gate keeps the workflow invoking the script
+  # and refuses an inline `listWorkflowRuns`, so the decision cannot quietly move back to where
+  # nothing can falsify it.
+  - id: auto-deploy-red-watch-declaration
+    name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # 0.3s measured; offline, two files read
+    review_after: "2027-03-13"
+    rationale: >-
+      A watch that asserts a verdict about one lane of a workflow must draw its population from
+      that lane; drawn from all lanes it is green about a different subject. Re-examine when the
+      subject-based watch (per-service durable-block verdicts published by auto-deploy) lands,
+      which subsumes the run-streak proxy this protects.
+    min_subjects: 1
+    selftest: |
+      python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml"]
+    run: |
+      python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
+
   # The spot-kill auto-retry is a control with no audience: it is `workflow_run`-triggered, so
   # its red is addressed to nobody, and its whole design is to act unattended. Until #6255 its
   # decision logic was a `run:` block, which means GitHub Actions on a real `workflow_run` event
@@ -4643,6 +4677,35 @@ gates:
   # Needs GH_TOKEN, which the shard job already exports. Exit 2 = the verdict could not be
   # computed, which is a failure and not a clean — a permission-shaped absence is
   # byte-identical to a real one.
+  # `gh` without a token in scope does not degrade, it exits non-zero on the first call — and
+  # under `set -e` that ends the step. Measured 2026-09-13: 31 steps invoke gh, exactly one had
+  # no GH_TOKEN/GITHUB_TOKEN — admin-ui-deploy.yml's deploy-source guard, where `gh pr list`
+  # sits in the if-branch taken only when a deploy branch for the SHA already exists. That is
+  # the recovery path, so the path that existed to re-admit a stuck build was the one that could
+  # not run, and no green run ever reached it. Point-fixed alongside this gate; baseline EMPTY.
+  #
+  # Design constraint, learned on the first scan of this tree: match the COMMAND POSITION, not
+  # the substring. `gh workflow run auto-deploy.yml -f services=<svc>` inside an echoed
+  # remediation message is not a call (auto-deploy.yml), and a gate that flags correct code is
+  # worth less than nothing. Comment lines are stripped; that echoed message is a self-test
+  # known-negative.
+  - id: workflow-gh-token-declared
+    name: "every workflow step that invokes gh has a token in scope (enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 15   # 0.7s measured over 34 workflow files
+    review_after: "2027-03-13"
+    rationale: >-
+      A tokenless gh call fails closed, and the one measured instance sat on a recovery path no
+      green run exercises. Re-examine if gh ever starts falling back to an ambient credential in
+      Actions, which would make the absence harmless.
+    min_subjects: 20   # 31 today
+    selftest: python3 .github/scripts/check-workflow-gh-token.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-workflow-gh-token.py"]
+    run: |
+      python3 .github/scripts/check-workflow-gh-token.py
+
   - id: agent-pr-guard
     name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
     group: lint
