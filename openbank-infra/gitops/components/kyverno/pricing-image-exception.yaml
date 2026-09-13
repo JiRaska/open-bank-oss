@@ -25,7 +25,9 @@
 # failure denied whenever SLSA happened to be evaluated last. The two images were two draws
 # of that order. The SLSA ClusterPolicy has since been removed from admission until Kyverno
 # scopes verdicts per policy (>= v1.19.0), so its entry is gone from this exception; the
-# signature and SBOM entries remain because those Enforce policies still share the status.
+# signature and SBOM entries remained because those Enforce policies still shared the status.
+# Since the signature check moved into verify-openbank-image-sbom-attestation (#9805 item 4),
+# the one SBOM entry below covers both.
 #
 # BLAST RADIUS
 # Namespace `pricing` only. That namespace holds one private, non-public console and its
@@ -60,10 +62,6 @@ spec:
           namespaces:
             - pricing
   exceptions:
-    - policyName: verify-openbank-image-signatures
-      ruleNames:
-        - verify-cosign-signature
-        - autogen-verify-cosign-signature
     - policyName: verify-openbank-image-sbom-attestation
       ruleNames:
         - verify-cyclonedx-sbom-attestation
