@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -83,3 +86,24 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Mutation testing on the security-critical domain (ADR-0063 / ADR-0030 D3, issue #8349). Weekly +
+// manual via pitest.yml, advisory — never a per-PR gate.
+//
+// Why this service is in scope while clearing/swift/lending are deliberately not: the exclusion in
+// pitest.yml is about THIN domains (one model file, no branching worth mutating), not about
+// money-path membership. PSD2/GDPR consent: the lifecycle decides whether a third party may read an account at all, and the
+// suppression rules decide whether a customer contact is lawful. A surviving mutant there is a
+// revocation that does not revoke.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.consent.domain.*")
+    targetTests = setOf("com.openbank.consent.domain.*", "com.openbank.consent.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
+    // must not fail the run, so the threshold is 0 until the score is measured and sustained.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.consent.domain.*Kt")
+}
