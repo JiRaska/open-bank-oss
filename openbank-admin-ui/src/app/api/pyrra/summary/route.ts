@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
+// Pyrra writes the governed SLO's 30-day increase recording rules into Prometheus.
+// Reading those rules through Admin UI's existing Prometheus transport returns the
+// same availability and error-budget evidence as Pyrra without adding another
+// plaintext service edge or trying to bypass Pyrra's user-facing identity gate.
+
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
+const TARGET = 0.999
 const CUSTOMER_JOURNEY_SLOS = [
   'openbank-transaction-availability',
   'openbank-ledger-availability',
@@ -14,100 +20,73 @@ const CUSTOMER_JOURNEY_SLOS = [
   'openbank-fraud-availability',
 ] as const
 
-type Objective = {
-  labels?: { __name__?: string }
-  target?: number
-  window?: string
-  description?: string
+type Sample = { metric: Record<string, string>; value: [number, string] }
+
+function prometheusBase(): string {
+  if (process.env.SERVICES_HOST === 'container') return 'http://prometheus:9090'
+  return process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
 }
 
-type Status = {
-  availability?: { percentage?: number; total?: number; errors?: number }
-  budget?: { remaining?: number }
-}
-
-function pyrraBase(): string {
-  if (process.env.SERVICES_HOST === 'container') return 'http://pyrra-api:9099/tools/pyrra'
-  return process.env.PYRRA_URL ?? 'http://localhost:9099/tools/pyrra'
-}
-
-async function rpc<T>(method: 'List' | 'GetStatus', body: object, signal: AbortSignal): Promise<T> {
-  const response = await fetch(`${pyrraBase()}/objectives.v1alpha1.ObjectiveService/${method}`, {
-    method: 'POST',
+async function queryVector(query: string, signal: AbortSignal): Promise<Map<string, number>> {
+  const response = await fetch(`${prometheusBase()}/api/v1/query?query=${encodeURIComponent(query)}`, {
     signal,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'Connect-Protocol-Version': '1',
-    },
-    body: JSON.stringify(body),
+    headers: { Accept: 'application/json' },
   })
-  if (!response.ok) throw new Error(`pyrra responded ${response.status}`)
-  return response.json() as Promise<T>
-}
+  if (!response.ok) throw new Error(`prometheus responded ${response.status}`)
+  const payload = await response.json() as { status?: unknown; data?: { result?: unknown } }
+  if (payload.status !== 'success' || !Array.isArray(payload.data?.result)) throw new Error('invalid prometheus response')
 
-function finite(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
+  const rows = new Map<string, number>()
+  for (const raw of payload.data.result as Sample[]) {
+    const slo = raw?.metric?.slo
+    const value = Array.isArray(raw?.value) ? Number(raw.value[1]) : Number.NaN
+    if (typeof slo !== 'string' || !CUSTOMER_JOURNEY_SLOS.includes(slo as typeof CUSTOMER_JOURNEY_SLOS[number]) || !Number.isFinite(value) || value < 0) {
+      throw new Error('invalid prometheus sample')
+    }
+    rows.set(slo, value)
+  }
+  return rows
 }
 
 export async function GET() {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
+  const selector = 'openbank-(transaction|ledger|sepa-instant|domestic-payment|settlement|fraud)-availability'
 
   try {
-    const list = await rpc<{ objectives?: Objective[] }>('List', {}, controller.signal)
-    const objectives = Array.isArray(list.objectives) ? list.objectives : []
-    const byName = new Map(objectives.flatMap(objective => {
-      const name = objective.labels?.__name__
-      return typeof name === 'string' ? [[name, objective] as const] : []
-    }))
+    const [totals, errors] = await Promise.all([
+      queryVector(`sum by (slo) (traces_spanmetrics_calls:increase30d{slo=~"${selector}"})`, controller.signal),
+      queryVector(`sum by (slo) (traces_spanmetrics_calls:increase30d{slo=~"${selector}",status_code="STATUS_CODE_ERROR"})`, controller.signal),
+    ])
 
-    const selected = CUSTOMER_JOURNEY_SLOS.flatMap(name => {
-      const objective = byName.get(name)
-      return objective && finite(objective.target) ? [{ name, objective }] : []
-    })
-
-    const rows = await Promise.all(selected.map(async ({ name, objective }) => {
-      try {
-        const result = await rpc<{ status?: Status[] }>('GetStatus', {
-          expr: `{__name__="${name}"}`,
-        }, controller.signal)
-        const status = Array.isArray(result.status) && result.status.length === 1 ? result.status[0] : null
-        const remaining = status?.budget?.remaining
-        const availability = status?.availability?.percentage
-        return {
-          name,
-          target: objective.target,
-          window: objective.window ?? null,
-          description: objective.description ?? null,
-          budgetRemaining: finite(remaining) ? remaining : null,
-          availability: finite(availability) ? availability : null,
-          requestCount: finite(status?.availability?.total) ? status.availability.total : null,
-        }
-      } catch {
-        return {
-          name,
-          target: objective.target,
-          window: objective.window ?? null,
-          description: objective.description ?? null,
-          budgetRemaining: null,
-          availability: null,
-          requestCount: null,
-        }
+    const objectives = CUSTOMER_JOURNEY_SLOS.map(name => {
+      const total = totals.get(name)
+      if (total === undefined || total === 0) {
+        return { name, target: TARGET, window: '30d', budgetRemaining: null, availability: null, requestCount: total ?? null }
       }
-    }))
+      const errorCount = errors.get(name) ?? 0
+      const errorRatio = errorCount / total
+      return {
+        name,
+        target: TARGET,
+        window: '30d',
+        budgetRemaining: 1 - errorRatio / (1 - TARGET),
+        availability: 1 - errorRatio,
+        requestCount: total,
+      }
+    })
 
     return NextResponse.json({
       available: true,
-      configured: objectives.length,
-      monitored: rows.length,
-      objectives: rows,
+      configured: CUSTOMER_JOURNEY_SLOS.length,
+      monitored: objectives.filter(objective => objective.requestCount !== null).length,
+      objectives,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     return NextResponse.json({
       available: false,
-      error: error instanceof DOMException && error.name === 'AbortError' ? 'pyrra_timeout' : 'pyrra_unreachable',
-      configured: 0,
+      error: error instanceof DOMException && error.name === 'AbortError' ? 'prometheus_timeout' : 'pyrra_evidence_unreachable',
+      configured: CUSTOMER_JOURNEY_SLOS.length,
       monitored: 0,
       objectives: [],
     }, { status: 502, headers: { 'Cache-Control': 'no-store' } })

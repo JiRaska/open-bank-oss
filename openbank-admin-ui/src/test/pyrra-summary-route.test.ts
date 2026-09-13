@@ -2,73 +2,68 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const objective = (name: string) => ({
-  labels: { __name__: name },
-  target: 0.999,
-  window: '2592000s',
-  description: `${name} availability`,
+const response = (rows: { slo: string; value: number }[]) => Response.json({
+  status: 'success',
+  data: { result: rows.map(row => ({ metric: { slo: row.slo }, value: [1_789_000_000, String(row.value)] })) },
 })
 
-describe('Pyrra summary route', () => {
+describe('Pyrra evidence summary route', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
-    delete process.env.PYRRA_URL
+    delete process.env.PROMETHEUS_URL
   })
 
-  it('returns a bounded customer-journey summary from Pyrra Connect RPC', async () => {
-    process.env.PYRRA_URL = 'http://pyrra.test/tools/pyrra'
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input)
-      if (url.endsWith('/List')) {
-        return Response.json({ objectives: [
-          objective('openbank-transaction-availability'),
-          objective('unrelated-service-availability'),
-        ] })
-      }
-      expect(url).toBe('http://pyrra.test/tools/pyrra/objectives.v1alpha1.ObjectiveService/GetStatus')
-      expect(init?.headers).toMatchObject({ 'Connect-Protocol-Version': '1' })
-      expect(JSON.parse(String(init?.body))).toEqual({ expr: '{__name__="openbank-transaction-availability"}' })
-      return Response.json({ status: [{
-        availability: { percentage: 0.9998, total: 12_500, errors: 2.5 },
-        budget: { remaining: 0.8 },
-      }] })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { GET } = await import('@/app/api/pyrra/summary/route')
-    const response = await GET()
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({
-      available: true,
-      configured: 2,
-      monitored: 1,
-      objectives: [{
-        name: 'openbank-transaction-availability',
-        budgetRemaining: 0.8,
-        availability: 0.9998,
-        requestCount: 12_500,
-      }],
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('distinguishes a reachable objective without samples from an unreachable Pyrra API', async () => {
+  it('derives availability and remaining budget from Pyrra recording rules', async () => {
+    process.env.PROMETHEUS_URL = 'https://prometheus.test'
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({ objectives: [objective('openbank-ledger-availability')] }))
-      .mockResolvedValueOnce(Response.json({ status: [] }))
+      .mockResolvedValueOnce(response([{ slo: 'openbank-transaction-availability', value: 10_000 }]))
+      .mockResolvedValueOnce(response([{ slo: 'openbank-transaction-availability', value: 2 }]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { GET } = await import('@/app/api/pyrra/summary/route')
+    const result = await GET()
+
+    expect(result.status).toBe(200)
+    const body = await result.json()
+    expect(body).toMatchObject({ available: true, configured: 6, monitored: 1 })
+    expect(body.objectives).toContainEqual(expect.objectContaining({
+      name: 'openbank-transaction-availability',
+      target: 0.999,
+      window: '30d',
+      availability: 0.9998,
+      budgetRemaining: expect.closeTo(0.8, 10),
+      requestCount: 10_000,
+    }))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith('https://prometheus.test/api/v1/query'))).toBe(true)
+  })
+
+  it('treats absent error series as zero but does not call zero traffic healthy', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response([
+        { slo: 'openbank-ledger-availability', value: 2_500 },
+        { slo: 'openbank-fraud-availability', value: 0 },
+      ]))
+      .mockResolvedValueOnce(response([]))
     vi.stubGlobal('fetch', fetchMock)
     const { GET } = await import('@/app/api/pyrra/summary/route')
 
-    const noSamples = await GET()
-    await expect(noSamples.json()).resolves.toMatchObject({
-      available: true,
-      objectives: [{ name: 'openbank-ledger-availability', budgetRemaining: null, availability: null }],
-    })
+    const result = await GET()
+    const body = await result.json()
+    expect(body.objectives).toContainEqual(expect.objectContaining({
+      name: 'openbank-ledger-availability', availability: 1, budgetRemaining: 1,
+    }))
+    expect(body.objectives).toContainEqual(expect.objectContaining({
+      name: 'openbank-fraud-availability', availability: null, budgetRemaining: null, requestCount: 0,
+    }))
+  })
 
-    fetchMock.mockReset().mockRejectedValue(new Error('offline'))
-    const offline = await GET()
-    expect(offline.status).toBe(502)
-    await expect(offline.json()).resolves.toMatchObject({ available: false, error: 'pyrra_unreachable' })
+  it('returns a typed failure instead of fabricating healthy evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    const { GET } = await import('@/app/api/pyrra/summary/route')
+
+    const result = await GET()
+    expect(result.status).toBe(502)
+    await expect(result.json()).resolves.toMatchObject({ available: false, error: 'pyrra_evidence_unreachable', objectives: [] })
   })
 })
