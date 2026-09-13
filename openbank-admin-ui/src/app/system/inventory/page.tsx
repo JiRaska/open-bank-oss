@@ -283,7 +283,7 @@ export default function TechInventoryPage() {
                 padding: '12px 16px', borderBottom: '1px solid var(--border)',
                 background: 'var(--warning-bg)',
                 fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
-                letterSpacing: '0.06em', color: 'var(--warning)',
+                letterSpacing: '0.06em', color: 'var(--warning-text)',
                 display: 'flex', alignItems: 'center', gap: '6px',
               }}>
                 <AlertTriangle size={14} />
@@ -417,7 +417,7 @@ function AggregateRow({
       <td style={{ padding: '12px 16px' }}>
         <span className="tag mono">{agg.primaryVersion}</span>
         {agg.lts && agg.component === 'Quarkus' && (
-          <span className="tag" style={{ marginLeft: '6px', background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }}>LTS</span>
+          <span className="tag" style={{ marginLeft: '6px', background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }}>LTS</span>
         )}
       </td>
       <td style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
@@ -426,18 +426,18 @@ function AggregateRow({
       </td>
       <td style={{ padding: '12px 16px' }}>
         {aligned ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--success)', fontWeight: 500, fontSize: '12px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--success-text)', fontWeight: 500, fontSize: '12px' }}>
             <CheckCircle2 size={12} /> {t('V souladu', 'Aligned')}
           </span>
         ) : (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--warning)', fontWeight: 500, fontSize: '12px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--warning-text)', fontWeight: 500, fontSize: '12px' }}>
             <AlertTriangle size={12} /> {t('Drift', 'Drift')} ({agg.versions.length})
           </span>
         )}
       </td>
       <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
         {cveEvidence?.state === 'unavailable' ? (
-          <span style={{ color: 'var(--warning)' }}>{t('CVE stav nedostupný', 'CVE status unavailable')}</span>
+          <span style={{ color: 'var(--warning-text)' }}>{t('CVE stav nedostupný', 'CVE status unavailable')}</span>
         ) : cveEvidence?.state === 'loading' ? (
           <span style={{ color: 'var(--text-tertiary)' }}>{t('Ověřuji CVE…', 'Checking CVEs…')}</span>
         ) : cves.length > 0 ? (
@@ -454,7 +454,7 @@ function AggregateRow({
         ) : agg.supportUntil && agg.component === 'Quarkus' ? (
           <span>{t('Podpora do', 'Support until')} {agg.supportUntil}</span>
         ) : osvCoordinates(agg.component) && cveEvidence?.state === 'verified' ? (
-          <span style={{ color: 'var(--success)' }}>{t('Žádné známé CVE', 'No known CVE')}</span>
+          <span style={{ color: 'var(--success-text)' }}>{t('Žádné známé CVE', 'No known CVE')}</span>
         ) : (
           <span style={{ color: 'var(--text-tertiary)' }}>—</span>
         )}

@@ -418,6 +418,12 @@ spec:
             namespace: tpp-registry
             cluster: tpp-registry-db
             origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: wealth
+            cluster: wealth-db
+            origin: manifest
 
         # The NUMERATOR, from a series Prometheus writes itself. `up` exists for every
         # target, 0 when the scrape fails -- so a cluster that is down still appears here
