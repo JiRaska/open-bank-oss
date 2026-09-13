@@ -32,6 +32,36 @@ Investigation must not create a synchronous dependency in payment processing.
 
 ## Decision
 
+### D0 — One shared stack, multiple policy-bound lenses
+
+We will build one `context-service` and one operational stack for all context-graph
+uses. It owns one canonical identity namespace, typed/bitemporal edge envelope,
+provenance contract, event projector, PostgreSQL adjacency store, full-text/pgvector
+retrieval, bounded query engine, OPA integration, durable read audit, observability,
+backup/rebuild process and admin UI explorer. Fraud/AML, corporate KYC, payment
+complaints, lending, authorization review and incident impact are lenses over that
+platform, not independent databases or services.
+
+Sharing does not mean one undifferentiated data pool or workload. Tables and indexes
+are partitioned by bank scope, sensitivity/lens and stable entity hash where the
+measured distribution requires it. Each lens has an allow-listed ontology, source
+contracts, OPA capability/purpose, query templates, retention policy, quotas and
+worker/connection pool. Interactive reads, semantic retrieval, ingestion and rebuilds
+have separate workload classes. A noisy lens cannot consume another lens's reserved
+capacity or weaken its field/edge policy. Deployment may scale worker/query replicas
+independently while preserving one codebase and one owning service.
+
+Shared nodes reference authoritative identities; lens-specific observations/edges
+retain their source and classification. An edge admitted for one purpose is not
+automatically visible from another lens. Cross-lens traversal is denied unless a
+policy explicitly allows the edge and both classifications. There is no global
+"show the whole bank" query.
+
+Delivery sequence is control-driven: ADR-0308 is P0; ADR-0306 and ADR-0309 are P1
+bounded pilots; ADR-0304 and ADR-0305 are P2 cross-party lenses; ADR-0307 is P3 after
+financial aggregation reconciliation. Business urgency and delivery order are tracked
+separately: Fraud/AML is critical, but its disclosure scope makes it a later safe rollout.
+
 ### D1 — One explainable context view, delivered in bounded slices
 
 We will expose a small authorized neighborhood, expandable deliberately, with evidence
@@ -146,6 +176,21 @@ retrieval and independent vector scaling are the measured limiting workload. Eit
 choice needs a new decision covering licensing/edition, authorization integration,
 HA, backup/restore, residency and resource cost; neither replaces the access service.
 
+### D7 — Scale by partition and workload class before adding datastores
+
+The first scale unit is a stateless query/projector replica. PostgreSQL partitions and
+indexes follow measured bank-scope, lens, time and entity-degree distributions; read
+replicas may serve snapshot reads only when their lag is exposed and security revocation
+is checked on the current authorization path. Projection generation is immutable during
+a query, so cursors and pages cannot cross rebuild generations.
+
+Capacity planning includes edge/provenance rows, indexes, vector values, WAL, replicas,
+backups, replay headroom and audit writes. Autoscaling uses queue depth, query latency
+and saturation, with hard admission control before database collapse. High-degree and
+long-path analyses move to snapshot-bound asynchronous jobs. Sharding or a specialist
+graph/vector store is introduced only after the shared workload benchmark identifies
+the limiting dimension and a recovery/security exercise proves the new boundary.
+
 ## Alternatives considered
 
 - **Vector database as the whole context model:** rejected. Semantic proximity cannot
@@ -215,3 +260,9 @@ current revocations and tombstones.
 - [pgvector indexing and filtering](https://github.com/pgvector/pgvector)
 - [Neo4j vector-index memory configuration](https://neo4j.com/docs/operations-manual/current/performance/vector-index-memory-configuration/)
 - [Qdrant filtering](https://qdrant.tech/documentation/search/filtering/)
+- [ADR-0304 — Fraud and AML relationship investigation](0304-fraud-and-aml-relationship-investigation.md)
+- [ADR-0305 — Corporate KYC ownership and authority graph](0305-corporate-kyc-ownership-and-authority-graph.md)
+- [ADR-0306 — Payment complaint and return trace](0306-payment-complaint-and-return-trace.md)
+- [ADR-0307 — Lending exposure, guarantor and collateral graph](0307-lending-exposure-guarantor-and-collateral-graph.md)
+- [ADR-0308 — Effective-time authorization evidence graph](0308-effective-time-authorization-evidence-graph.md)
+- [ADR-0309 — Incident business impact graph](0309-incident-business-impact-graph.md)

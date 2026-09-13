@@ -86,6 +86,30 @@ nejselektivnějších filtrů, nejen rychlost neomezeného top-k. Sdílený ANN 
 také ovlivňovat výkon/recall mezi tenanty; pro silné oddělení použít partitioning
 nebo samostatná úložiště. Žádná tato optimalizace nesmí uvolnit autorizační predikát.
 
+## Priority a sdílený cílový stack
+
+Obchodní priorita říká, jak cenný problém řešíme. Pořadí nasazení říká, kdy máme
+dostatečně prokázané bezpečnostní a výkonové předpoklady. Fraud/AML je obchodně
+kritické, ale nezačíná jako první produkční pilot, protože jako první potřebuje
+bezpečně procházet vazby mezi více klienty.
+
+| Pořadí | Čočka | Důvod pořadí | ADR |
+| --- | --- | --- | --- |
+| P0 | Efektivní autorizace a audit přístupů | Společná bezpečnostní podmínka všech skutečných investigací. | [ADR-0308](../adr/0308-effective-time-authorization-evidence-graph.md) |
+| P1 | Reklamace a dohledání platby | Jeden přidělený případ, omezená a ověřitelná cesta; první real-data pilot. | [ADR-0306](../adr/0306-payment-complaint-and-return-trace.md) |
+| P1 | Dopad incidentu | Nejdřív agregovaný pohled bez identifikace klientů; prověří škálu a čerstvost. | [ADR-0309](../adr/0309-incident-business-impact-graph.md) |
+| P2 | Fraud / AML | Kritická obchodní hodnota; až po důkazu izolace případů a skrytých cest. | [ADR-0304](../adr/0304-fraud-and-aml-relationship-investigation.md) |
+| P2 | Firemní KYC | Vyžaduje více stran, bitemporalitu a rekurzivní vlastnictví. | [ADR-0305](../adr/0305-corporate-kyc-ownership-and-authority-graph.md) |
+| P3 | Úvěrové expozice | Nejsložitější finanční agregace, sdílené zajištění a money-path citlivost. | [ADR-0307](../adr/0307-lending-exposure-guarantor-and-collateral-graph.md) |
+
+Všechny čočky sdílejí jeden `context-service`, kanonický model, eventový projektor,
+PostgreSQL adjacency store, pgvector/full-text retrieval, OPA integraci, audit,
+observabilitu, obnovu a UI explorer. Čočka přidává pouze typované vztahy, zdrojové
+kontrakty, policy balík, pevné query šablony, retenci a rozpočet. Data jsou oddělena
+partitiony podle banky, citlivosti/čočky a podle naměřené distribuce entity; výpočetní
+práce je rozdělena do tříd interactive, semantic, ingest a replay s vlastními pooly,
+kvótami a admission control.
+
 ## Datový model a konzistence
 
 - `context_node`: interní ID, bankovní/tenantní hranice, typ, odkaz na zdroj,
