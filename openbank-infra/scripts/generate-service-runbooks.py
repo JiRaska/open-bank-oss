@@ -341,7 +341,7 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-{short}-service
+# Runbook — {module}
 
 > Operational runbook for the `{short}` service. Data domain **{domain}**,
 > classification **{classification}**, datastore **{datastore}**.
@@ -413,7 +413,9 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     plugin-free restart is offered alongside the plugin form on purpose: a runbook that assumes a
     kubectl plugin on the reader's laptop fails in exactly the situation it exists for.
     """
-    svc = f"{short}-service"
+    # The workload's real name, not `<short>-service`: released modules without the suffix deploy
+    # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
+    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
     if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
@@ -556,6 +558,18 @@ def all_services() -> list[str]:
     for short in gitops_facts.money_path_services(REPO):
         if gitops_facts.module_dir(short, REPO).is_dir():
             out.add(short)
+    # Every RELEASED module that is actually DEPLOYED needs one too (#6253). The `-service` glob
+    # plus the money-path list left 14 out — customer-edge (durable passkey state in Redis),
+    # product-catalog, security-scanner, admin-ui and the control-plane agents — and
+    # `git diff --exit-code docs/runbooks/` could never report a runbook nobody generated.
+    # Released = has a version.txt (rules.yaml: released_unit_marker); deployed = a Deployment or
+    # Rollout in gitops whose own metadata.name is the module, so a merely-mentioned module or an
+    # undeployed one (no workload to operate) does not get a runbook of fictional commands.
+    for version_txt in REPO.glob("openbank-*/version.txt"):
+        short = version_txt.parent.name.removeprefix("openbank-")
+        short = short.removesuffix("-service")
+        if gitops_facts.workload_name(short, GITOPS) is not None:
+            out.add(short)
     return sorted(out)
 
 
@@ -697,13 +711,33 @@ def self_test() -> int:
     case("the assertion is read case- and whitespace-insensitively",
          owns_no_database({"ownsNoDatabase": " TRUE ", "primaryDatastore": "PostgreSQL"}) is True)
 
+    # ORPHANS (#6253): the drift gate cannot see a runbook the generator stops producing — the file
+    # stays on disk and diffs clean. Reverting the population widening proved it (gate green).
+    case("a committed runbook the population no longer generates is an orphan",
+         orphan_runbooks({"svc-ledger.md", "svc-customer-edge.md"}, {"ledger"}) == ["svc-customer-edge.md"])
+    case("a population that generates every committed runbook has no orphans",
+         orphan_runbooks({"svc-ledger.md", "svc-customer-edge.md"}, {"ledger", "customer-edge"}) == [])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook deployment/DR classifier is falsifiable (20 cases)")
+    print("self-test ok: runbook deployment/DR classifier is falsifiable (22 cases)")
     return 0
+
+
+def orphan_runbooks(existing: set[str], population: set[str]) -> list[str]:
+    """`svc-*.md` filenames on disk that no module in the population generates.
+
+    The drift gate regenerates and diffs, so it sees a runbook whose CONTENT drifted and one that
+    is MISSING — but a file the generator simply stops writing stays on disk unchanged and diffs
+    clean. Measured (#6253): reverting the population widening dropped 14 modules from the
+    population and the gate still passed. An orphan is exactly that silent state.
+    """
+    wanted = {f"svc-{short}.md" for short in population}
+    return sorted(name for name in existing if name not in wanted)
+
 
 def main():
     if "--self-test" in sys.argv:
@@ -727,6 +761,19 @@ def main():
         out.write_text(render(short), encoding="utf-8")
         created += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
+    # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
+    if not args.services:
+        existing = {p.name for p in RUNBOOKS.glob("svc-*.md")}
+        orphans = orphan_runbooks(existing, set(targets))
+        for name in orphans:
+            print(
+                f"::error file=docs/runbooks/{name}::{name} is committed but no module in the "
+                f"generator's population produces it, so it can never be regenerated and will go "
+                f"stale unseen. Either the module left the population (restore it) or it is gone "
+                f"(delete the runbook)."
+            )
+        if orphans:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
