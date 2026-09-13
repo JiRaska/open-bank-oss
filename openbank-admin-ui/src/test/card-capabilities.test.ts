@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import {
@@ -98,5 +98,21 @@ describe('card capability registry loader', () => {
 
     expect(isDeliberatelyPortless(portless)).toBe(true)
     expect(isDeliberatelyPortless(capability)).toBe(false)
+  })
+})
+
+describe('card capability image build', () => {
+  it('stages the authoritative registry where prebuild resolves it', () => {
+    const dockerfile = readFileSync(path.join(process.cwd(), 'Dockerfile'), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n')
+
+    expect(dockerfile).toContain(
+      'cp /repo/openbank-libs/governance/card-capabilities.yaml /governance-src/openbank-libs/governance/card-capabilities.yaml',
+    )
+    expect(dockerfile).toContain(
+      'COPY --from=governance-collector /governance-src/openbank-libs/governance/card-capabilities.yaml /openbank-libs/governance/card-capabilities.yaml',
+    )
   })
 })

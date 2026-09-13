@@ -107,6 +107,7 @@ RUN set -e; \
     cp /repo/docs/threat-models/*.md /governance-bundle/threat-models/ 2>/dev/null || true; \
     cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
     cp /repo/openbank-libs/governance/rules.yaml /governance-src/openbank-libs/governance/rules.yaml; \
+    cp /repo/openbank-libs/governance/card-capabilities.yaml /governance-src/openbank-libs/governance/card-capabilities.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
@@ -239,6 +240,9 @@ COPY --from=openapi-collector /openapi-bundle/openbank-product-catalog/openapi.y
 # single file it reads at its repo-relative path; otherwise prebuild cannot distinguish a missing
 # policy from an empty policy and correctly refuses to produce a misleading scorecard.
 COPY --from=governance-collector /governance-src/openbank-libs/governance/rules.yaml /openbank-libs/governance/rules.yaml
+# Card Center derives its matrix during `npm run prebuild`. Preserve the authoritative registry at
+# the same repo-relative path used outside Docker; otherwise image builds fail after PR CI passes.
+COPY --from=governance-collector /governance-src/openbank-libs/governance/card-capabilities.yaml /openbank-libs/governance/card-capabilities.yaml
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=true
 # Source-map upload to GlitchTip (#3235). The token arrives as a BuildKit SECRET, not a build arg:
