@@ -2,8 +2,9 @@
 # Kyverno image-signature verification — ECR read via EKS Pod Identity
 # (ADR-0029/0030 D4).
 #
-# The `verify-openbank-image-signatures` ClusterPolicy (gitops/components/
-# kyverno/) verifies every `openbank-*` image against the Cosign KMS public key
+# The `verify-openbank-image-sbom-attestation` ClusterPolicy (gitops/components/
+# kyverno/; the signature check lived in verify-openbank-image-signatures until
+# #9805) verifies every `openbank-*` image against the Cosign KMS public key
 # at admission. To fetch the image manifest + the `.sig` artifact, Kyverno's
 # admission controller must authenticate to the private ECR registry — without a
 # durable credential it gets `401 Unauthorized` on the signature pull, so the

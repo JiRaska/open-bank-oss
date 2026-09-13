@@ -7,7 +7,8 @@
 // claim. Emits security-graph.json from two source-of-truth trees:
 //   - gitops/components/*/network-policies.yaml (+ temporal's)  → L3/L4 ingress
 //     coverage, per real GitOps-derived NetworkPolicies (gen-network-policies.py)
-//   - gitops/components/kyverno/verify-images-policy.yaml       → admission / supply chain
+//   - gitops/components/kyverno/verify-sbom-attestation-policy.yaml → admission / supply chain
+//     (signature + SBOM attestation in one policy since #9805; verify-images-policy.yaml is gone)
 //
 // Honest by construction: every status flag below is read from a manifest that
 // is actually wired into ArgoCD (no ArgoCD Application or Terraform resource
@@ -38,7 +39,7 @@ const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'security
 
 const INFRA = path.join(REPO, 'openbank-infra')
 const COMPONENTS_DIR = path.join(INFRA, 'gitops', 'components')
-const KYVERNO_FILE = path.join(COMPONENTS_DIR, 'kyverno', 'verify-images-policy.yaml')
+const KYVERNO_FILE = path.join(COMPONENTS_DIR, 'kyverno', 'verify-sbom-attestation-policy.yaml')
 
 // Kinds gen-network-policies.py's callers actually run pods under (ADR-0098
 // migrated ten money-path services from Deployment to Rollout; both remain).
@@ -195,7 +196,7 @@ const supplyChain = deriveSupplyChain()
 const out = {
   schema: 'openbank.security-posture/v1',
   source: 'derived from openbank-infra: gitops/components/*/network-policies.yaml, ' +
-    'gitops/components/kyverno/verify-images-policy.yaml (istio: no mesh deployed, see note)',
+    'gitops/components/kyverno/verify-sbom-attestation-policy.yaml (istio: no mesh deployed, see note)',
   collectedAt: new Date().toISOString(),
   istio,
   network,

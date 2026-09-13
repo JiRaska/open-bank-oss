@@ -730,7 +730,8 @@ jobs:
             echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
-      # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
+      # verify-openbank-image-sbom-attestation (Enforce) also verifies the image signature
+      # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
       # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig

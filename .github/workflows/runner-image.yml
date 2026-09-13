@@ -142,7 +142,7 @@ jobs:
           COSIGN_KEY="awskms:///alias/openbank-cosign-signing"
           FAIL=0
           if ! cosign verify --key "$COSIGN_KEY" "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
-            echo "::error::signature verification FAILED — rejected by verify-openbank-image-signatures (Enforce)."
+            echo "::error::signature verification FAILED — rejected by verify-openbank-image-sbom-attestation (Enforce), which verifies the image signature too."
             FAIL=1
           fi
           if ! cosign verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then

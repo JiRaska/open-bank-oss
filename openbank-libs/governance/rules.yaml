@@ -1585,8 +1585,8 @@ provenance:
     # therefore it was verified".
     basis: declared_images_not_running_pods
     enforcement_rule: >-
-      No image-provenance policy (verify-openbank-image-signatures,
-      verify-openbank-image-sbom-attestation, or any successor) may be set to
+      No image-provenance policy (verify-openbank-image-sbom-attestation, which since
+      2026-09-13 also carries the image-signature check, or any successor) may be set to
       validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
       green run of it. An unattested image is never rejected at the moment it is created --
       only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
