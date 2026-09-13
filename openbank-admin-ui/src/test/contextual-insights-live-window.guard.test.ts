@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const source = (page: 'ledger' | 'transactions') =>
-  readFileSync(new URL(`../app/${page}/page.tsx`, import.meta.url), 'utf8')
+  readFileSync(resolve(__dirname, `../app/${page}/page.tsx`), 'utf8')
 
 describe('operational insights use a live window', () => {
   it.each(['ledger', 'transactions'] as const)('%s does not inherit business-search dates', page => {
