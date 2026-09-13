@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.243.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.0...admin-ui-v0.243.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** review notification decisions ([#9352](https://github.com/JiRaska/open-bank-oss/issues/9352)) ([0f241ae](https://github.com/JiRaska/open-bank-oss/commit/0f241aefb66eca1a85ef3f299829270bd81e18f7))
+* **admin-ui:** stage governance registries in image builds ([#9969](https://github.com/JiRaska/open-bank-oss/issues/9969)) ([9b36367](https://github.com/JiRaska/open-bank-oss/commit/9b363672f5e8c6624b4773a45066634d494b5b5a))
+
 ## [0.243.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.242.0...admin-ui-v0.243.0) (2026-09-13)
 
 
