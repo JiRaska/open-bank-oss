@@ -5,6 +5,7 @@
 package com.openbank.sanctions.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
@@ -130,7 +131,7 @@ class SanctionsChangePublisherImpl(
     }
 
     private suspend fun persistChunks(session: Mutiny.Session, listId: UUID, listType: SanctionsListType, count: Long) {
-        val publicationId = UUID.randomUUID()
+        val publicationId = Ids.randomId()
         val chunkCount = (count + IDS_PER_EVENT - 1) / IDS_PER_EVENT
         var after = 0L
         var index = 0L
