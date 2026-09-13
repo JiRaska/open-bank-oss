@@ -55,6 +55,7 @@ class TerminationService(
     private val complianceGuard: CompliancePackGuard,
     private val quotes: SettlementQuoteRepository,
     private val clock: Clock,
+    private val provisioning: com.openbank.lending.application.port.out.ProvisioningRepository,
 ) : TerminateLoanUseCase {
 
     override fun requestSettlementQuote(loanId: LoanId, actor: String): Uni<SettlementQuote> =
@@ -182,10 +183,11 @@ class TerminationService(
                 )
                 transitionLoan(loan, LoanStatus.WITHDRAWN, actor, "statutory withdrawal within cooling-off")
                     .flatMap { withdrawn ->
-                        transitionLoan(withdrawn, LoanStatus.UNWOUND, actor, "contract unwound (ADR-0215 D4)")
+                        unwindJournal(withdrawn, outstanding, dayInterest).flatMap {
+                            transitionLoan(withdrawn, LoanStatus.UNWOUND, actor, "contract unwound (ADR-0215 D4)")
+                        }
                     }.flatMap { unwound ->
-                        unwindJournal(unwound, outstanding, dayInterest)
-                            .flatMap { emitDomainEvent(unwound, "loan.withdrawn") }
+                        emitDomainEvent(unwound, "loan.withdrawn")
                             .flatMap { releaseCollateral(unwound) }
                             .map { unwound }
                     }
@@ -306,14 +308,13 @@ class TerminationService(
     // --- helpers -----------------------------------------------------------------------------------
 
     private fun withLoanQuote(loanId: LoanId, block: (Loan) -> Uni<SettlementQuote>): Uni<SettlementQuote> =
-        loans.findById(loanId).flatMap { loan ->
+        loans.withLocked(loanId) { loan ->
             loan?.let(block) ?: Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
         }
 
-    private fun withLoan(loanId: LoanId, block: (Loan) -> Uni<Loan>): Uni<Loan> =
-        loans.findById(loanId).flatMap { loan ->
-            loan?.let(block) ?: Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
-        }
+    private fun withLoan(loanId: LoanId, block: (Loan) -> Uni<Loan>): Uni<Loan> = loans.withLocked(loanId) { loan ->
+        loan?.let(block) ?: Uni.createFrom().failure(IllegalArgumentException("Loan not found: $loanId"))
+    }
 
     private fun packFor(loan: Loan) = applications.findById(loan.applicationId).map { application ->
         application?.let {
@@ -329,7 +330,12 @@ class TerminationService(
 
     private fun transitionLoan(loan: Loan, to: LoanStatus, actor: String, reason: String): Uni<Loan> {
         LoanTerminationPolicy.requireAllowed(loan.status, to)
-        return loans.update(loan.copy(status = to))
+        val release = if (to in setOf(LoanStatus.SETTLED, LoanStatus.UNWOUND)) {
+            provisioning.releaseAllowance(loan, events, LocalDate.now(clock))
+        } else {
+            Uni.createFrom().item(Unit)
+        }
+        return release.flatMap { loans.update(loan.copy(status = to)) }
             .call { updated -> events.emit(loanEvidence(loan, loan.status, to, actor, reason)) }
     }
 

@@ -26,19 +26,11 @@ import java.util.UUID
  * No score, no probability, no ranking. The ADR-0213 output contract is outcome + reasons + rule
  * ids + versions + input hash, and a read model must not invent a number the engine never
  * produced. The affordability ratios are the exact figures the ASSESSMENT leg computed
- * (`OriginationDecisionService.affordabilityRatios`), never a re-estimate.
+ * at evaluation time; historical rows without stored ratios return null.
  */
 data class DecisionReasonView(val code: String, val ruleId: String?)
 
-/**
- * DSTI/DTI as the engine reads them plus the total-debt-service DSTI the engine does NOT read.
- *
- * `dsti` is `new installment / verified income` — the figure `PolicyAttribute.DSTI` carries into
- * the affordability table today. `dstiIncludingExistingDebt` adds `existingDebtServiceMonthly`,
- * the CNB/EBA definition of debt-service-to-income. Both are exposed so the console can show the
- * gap rather than hide it; changing which one the ENGINE uses is a credit-policy decision
- * (ADR-0213 D4), not a read-model change.
- */
+/** Persisted total-debt ratios. The legacy alias is equal to dsti for new decisions. */
 data class AffordabilityRatios(val dsti: BigDecimal, val dti: BigDecimal, val dstiIncludingExistingDebt: BigDecimal)
 
 /** One engine-evaluated application, decoded from its pinned evidence fields. */
@@ -159,3 +151,18 @@ object DecisionEvidenceCodec {
     private fun fragments(csv: String?): List<String> =
         csv.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }
+
+/** Whole active book, grouped in the database. Only same-date evidence contributes risk amounts. */
+data class CreditPortfolioSummary(
+    val currency: String,
+    val asOf: LocalDate,
+    val loans: Long,
+    val unassessed: Long,
+    val stale: Long,
+    val demonstration: Long,
+    val pending: Long,
+    val outstanding: BigDecimal,
+    val ecl: BigDecimal,
+    val stage23Outstanding: BigDecimal,
+    val over90Outstanding: BigDecimal,
+)

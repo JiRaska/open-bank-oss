@@ -15,11 +15,13 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
+import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.application.port.out.StarterCreditPolicy
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
@@ -33,12 +35,16 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.lending.DelinquencyBucket
+import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
@@ -76,7 +82,28 @@ class LendingGlOutcomeTest {
 
     @org.junit.jupiter.api.BeforeEach
     fun stubEventEmitter() {
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { loans.withLocked<Any>(any(), any()) } answers {
+            loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
+        }
+        every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
+
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
     }
     private val clock = Clock.fixed(Instant.parse("2026-04-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
@@ -198,6 +225,54 @@ class LendingGlOutcomeTest {
         return captured
     }
 
+    private fun sameDayAllowance() = LoanProvisioningRecord(
+        loanId = loanId,
+        period = "2026-04-01",
+        asOf = LocalDate.parse("2026-04-01"),
+        outstandingBalance = eur("11053.81"),
+        daysPastDue = 32,
+        bucket = DelinquencyBucket.DPD_31_60,
+        stage = Ifrs9Stage.STAGE_2,
+        expectedCreditLoss = eur("900.00"),
+        createdAt = OffsetDateTime.now(clock),
+        modelVersion = "test-model-v1",
+    )
+
+    @Test
+    fun `write-off consumes same-day allowance without double counting previously recognized loss`() {
+        val loan = activeLoan()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(delinquentSchedule())
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(sameDayAllowance())
+        val postings = captureLedger()
+        postings += LedgerPosting("initial-allowance", partyId, eur("900.00"), PostingKind.PROVISIONING)
+
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "risk-officer")).await().indefinitely()
+
+        val balances = ledgerBalances(postings)
+        assertDoubleEntryHolds(balances)
+        assertThat(balances.of(gl.loanLossAllowance)).isEqualByComparingTo("0.00")
+        assertThat(balances.of(gl.loanLossExpense)).isEqualByComparingTo("11164.35")
+        assertThat(balances.of(gl.loansReceivable)).isEqualByComparingTo("-11053.81")
+        assertThat(balances.of(gl.interestReceivable)).isEqualByComparingTo("-110.54")
+    }
+
+    @Test
+    fun `failed allowance release prevents terminal write-off persistence`() {
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan())
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(delinquentSchedule())
+        every { provisioning.findLatestByLoan(loanId) } returns Uni.createFrom().item(sameDayAllowance())
+        captureLedger()
+        every { ledger.post(match { it.kind == PostingKind.PROVISIONING }) } returns
+            Uni.createFrom().failure(IllegalStateException("allowance posting unavailable"))
+
+        assertThatThrownBy {
+            service.writeOff(loanId, WriteOffRequest(writtenOffBy = "risk-officer")).await().indefinitely()
+        }.hasMessageContaining("allowance posting unavailable")
+        verify(exactly = 0) { loans.update(any()) }
+    }
+
     // --- write-off ------------------------------------------------------------------------------
 
     @Test
@@ -207,7 +282,23 @@ class LendingGlOutcomeTest {
         every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         service.writeOff(loanId, WriteOffRequest(writtenOffBy = "risk-officer")).await().indefinitely()
@@ -236,7 +327,23 @@ class LendingGlOutcomeTest {
         every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(delinquentSchedule())
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         service.writeOff(loanId, WriteOffRequest(writtenOffBy = "risk-officer")).await().indefinitely()
@@ -283,7 +390,23 @@ class LendingGlOutcomeTest {
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         every { installments.markPaid(any(), any()) } returns Uni.createFrom().item(1)
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         // Both flows against ONE captured ledger: write off the loan, then attempt a recovery on the
@@ -316,7 +439,23 @@ class LendingGlOutcomeTest {
         every { installments.deleteUnpaid(loanId) } returns Uni.createFrom().item(2)
         every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         service.reschedule(
@@ -360,7 +499,23 @@ class LendingGlOutcomeTest {
         val rows = slot<List<LoanInstallment>>()
         every { installments.saveAll(capture(rows)) } answers { Uni.createFrom().item(rows.captured) }
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
 
         service.reschedule(
@@ -392,7 +547,23 @@ class LendingGlOutcomeTest {
         every { installments.deleteUnpaid(loanId) } returns Uni.createFrom().item(2)
         every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         service.reschedule(
@@ -454,7 +625,23 @@ class LendingGlOutcomeTest {
         every { installments.deleteUnpaid(loanId) } returns Uni.createFrom().item(2)
         every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
         every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
-        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(any<LendingOutboxMessage>()) } answers {
+            val message = firstArg<LendingOutboxMessage>()
+            if (message.eventType == "lending.allowance.posting") {
+                val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload)
+                ledger.post(
+                    LedgerPosting(
+                        tree["reference"].asText(),
+                        UUID.fromString(tree["partyId"].asText()),
+                        Money.of(tree["amount"].decimalValue().setScale(2), tree["currency"].asText()),
+                        com.openbank.lending.application.port.out.PostingKind.PROVISIONING,
+                        LocalDate.parse(tree["accountingDate"].asText()),
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }
         val postings = captureLedger()
 
         service.reschedule(

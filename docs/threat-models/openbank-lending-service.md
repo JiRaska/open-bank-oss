@@ -101,10 +101,13 @@
   - **Wrong-direction journal.** `LendingJournalFactory.buildProvisioningLines` is unit-tested for both
     signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
     loan principal GL (Loans Receivable) is never touched by a provisioning entry.
-  - **Roadmap gap, not yet mitigated:** the batch scan (`LoanRepository.findActive(limit)`) is a single
-    page with no continuation cursor — a book larger than `limit` silently leaves the tail unprovisioned
-    for that cycle with no alert. Acceptable for a first increment on a small loan book; needs a
-    pagination/completeness check before the book grows past one batch.
+  - **Batch completeness:** `findUnprovisioned` drains successive batches of every nonterminal exposure,
+    including defaulted loans. Daily immutable keys support current-date completeness checks.
+  - **Crash and concurrency integrity:** provisioning and terminal transitions lock and refresh the loan.
+    Snapshot/state changes and frozen allowance commands commit in one database transaction. The
+    outbox retries the same amount, accounting date and ledger idempotency reference; provisioning
+    evidence is published only after ledger acknowledgement. Pending/failed commands suppress UI ratios.
+    This is eventual accounting consistency, not a distributed transaction with the ledger.
 - **Disbursement customer-credit correctness (#3931, new this slice).** The new §2 items 7-8
   crossing carries its own specific risks and mitigations:
   - **Paying nobody.** Fixed by this PR — see item 8. Verified against a real customer: a
@@ -216,8 +219,11 @@
   provisioning cycle's ECL is only as good as `ConservativeRiskParameterSource`'s flat constants — a
   **model-risk gap**, not a security control gap, but load-bearing enough to call out here: do not treat
   the provisioning cycle's output as an examiner-ready capital number.
-- **Provisioning batch completeness** — `LoanRepository.findActive(limit)` has no pagination/continuation;
-  a book larger than one batch silently under-provisions the tail with no alert (see §3).
+- **Model validation and operations** — the demonstration parameter source fails closed unless explicitly
+  enabled. A reviewed model implementation, parameter provenance, calibration, forward-looking scenarios,
+  SICR/cure methodology and accounting reconciliation remain prerequisites for production use.
+  Operators must monitor and recover failed allowance commands; a committed assessment alone is not
+  proof that its ledger movement has completed.
 - **Impairment-movement immutability** — append-only / tamper-evident storage for IFRS 9 stage and ECL
   movements feeding FINREP F 12, to strengthen the tampering/repudiation posture at rest. `loan_provisioning`
   is insert-only from the application code today, but nothing at the DB level prevents an UPDATE/DELETE.
@@ -709,8 +715,8 @@ What that changes, and what it does not:
 
 ## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
 
-`CreditRiskResource` adds four read-only endpoints under `/api/v1/lending/risk`
-(`decisions`, `decisions/summary`, `portfolio`, `policy`) for the admin-ui credit-risk console
+`CreditRiskResource` exposes five read-only endpoints under `/api/v1/lending/risk`
+(`decisions`, `decisions/summary`, `portfolio`, `portfolio/summary`, `policy`) for the admin-ui credit-risk console
 and notebook export. No mutation: the console renders decisions and never makes them
 (ADR-0227 D4 keeps disposal in the approval inbox). What changes the trust picture is the
 **breadth of one read**: a single call returns every evaluated applicant's affordability inputs
@@ -718,9 +724,18 @@ and notebook export. No mutation: the console renders decisions and never makes 
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all four paths. |
+| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all five paths. |
 | **I**nfo disclosure | Bulk export of PII via `limit` | Clamped server-side to 1..1000 (`CreditRiskInsightService.MAX_LIMIT`); the endpoint is a console read, not a data feed — the warehouse (ADR-0022) is the sanctioned bulk path once the lending topic is wired to the sink (tracked). |
-| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; the affordability ratios call the ASSESSMENT leg's own `OriginationDecisionService.affordabilityRatios`, so a console figure and an engine figure cannot diverge. The total-DSTI figure (`dstiIncludingExistingDebt`) is labelled as **not** what the engine reads. |
+| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; DSTI and DTI are persisted at evaluation, including existing debt service and outstanding debt. Historical missing ratios remain unknown rather than being recomputed under a different formula. |
 | **R**epudiation | "Which policy produced this?" | Every row carries the pinned table versions and input hash; `/policy` reports `codeSeeded=true` while `StarterCreditPolicy` is the binding, so a reader knows the tables cannot have been changed without a reviewed commit. |
 | **D**oS | Repeated book-wide reads | Two `GROUP BY` aggregates and two capped, indexed reads (`decided_engine_at`, `disbursed_at`, `(loan_id, period)`); no joins over installments. Same rate-limit posture as the other reads. |
 | **S**poofing / **E**oP | n/a | No write path; no identity is taken from the request. |
+
+### Credit-risk integrity controls (2026-09-09)
+
+The portfolio summary aggregates the entire nonterminal book per currency. Missing, stale,
+demonstration-model and pending-ledger records are counted explicitly and prevent a green ratio
+in the admin UI. The capped detail endpoint is diagnostic only. API errors and invalid response
+contracts render an error rather than a zero exposure. Override rates require a recorded human
+actor and decision time. Stage 3 uses conditional default probability one; this correction does
+not validate the remaining loss model. See [rollout prerequisites](../credit-risk-rollout.md).

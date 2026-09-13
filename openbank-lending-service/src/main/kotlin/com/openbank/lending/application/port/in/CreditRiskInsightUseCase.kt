@@ -26,6 +26,8 @@ interface CreditRiskInsightUseCase {
     /** Every loan with its latest provisioning record (null where never assessed). [limit] clamped. */
     fun portfolio(limit: Int): Uni<List<LoanRiskView>>
 
+    fun portfolioSummary(asOf: LocalDate): Uni<List<com.openbank.lending.domain.model.CreditPortfolioSummary>>
+
     /** The bundle the engine evaluates as of [asOf], flagged when it is the code-seeded starter. */
     fun activePolicy(asOf: LocalDate): Uni<CreditPolicyView>
 }

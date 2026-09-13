@@ -24,8 +24,8 @@ import java.time.ZoneOffset
 import java.util.function.Supplier
 
 /**
- * The IFRS 9 provisioning posting loop must run the cycle for the clock's current calendar month with
- * the configured batch size, warn when the batch may have truncated the active loan book, and let a
+ * The IFRS 9 provisioning posting loop must run the cycle for the clock's current calendar date with
+ * the configured batch size and let a
  * cycle failure surface (mirrors [InterestAccrualSchedulerTest]).
  */
 class ProvisioningCycleSchedulerTest {
@@ -52,37 +52,36 @@ class ProvisioningCycleSchedulerTest {
 
     @Test
     fun `runs the cycle for the clock's current period with the configured batch size`() {
-        every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
-            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 3, journalsPosted = 1))
+        every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06-15", loansAssessed = 3, journalsQueued = 1))
 
         val result = scheduler.runProvisioningPass().await().indefinitely()
 
         assertThat(result).isNull()
-        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06", any(), 500) }
+        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06-15", any(), 500) }
     }
 
     @Test
     fun `completes quietly when the assessed count is below the batch size`() {
-        every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
-            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 3, journalsPosted = 0))
+        every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
+            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06-15", loansAssessed = 3, journalsQueued = 0))
 
         scheduler.runProvisioningPass().await().indefinitely()
 
-        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06", any(), 500) }
+        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06-15", any(), 500) }
     }
 
     @Test
-    fun `warns when the assessed count reaches the batch size (possible truncation)`() {
-        every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
-            Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 500, journalsPosted = 12))
+    fun `accepts a completed cycle spanning multiple batches`() {
+        every { cycle.runProvisioningCycle("2026-06-15", any(), 500) } returns
+            Uni.createFrom().item(
+                ProvisioningRunOutcome(period = "2026-06-15", loansAssessed = 1001, journalsQueued = 12),
+            )
 
-        // No assertion on the log line itself (no log-capture harness here) — this test's purpose is
-        // coverage of the `loansAssessed >= batchSize` branch and confirming it doesn't affect the
-        // pass's outcome (still completes normally, no exception).
         val result = scheduler.runProvisioningPass().await().indefinitely()
 
         assertThat(result).isNull()
-        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06", any(), 500) }
+        verify(exactly = 1) { cycle.runProvisioningCycle("2026-06-15", any(), 500) }
     }
 
     @Test
