@@ -131,27 +131,26 @@ class ProvisioningCycleScheduler(
      * gauge that could fail the job would make a diagnostic more dangerous than the thing it
      * diagnoses. The previous values stay in place, exactly as OrphanedPartyGauge does.
      */
-    private fun publishCoverage(period: String): Uni<Void> =
-        loans.countActive().flatMap { active ->
-            provisioning.countForPeriod(period).invoke { covered ->
-                activeLoans.set(active)
-                provisionedThisPeriod.set(covered)
-                unprovisioned.set(maxOf(0L, active - covered))
-                if (active > covered) {
-                    log.warnf(
-                        "IFRS 9 provisioning coverage for %s: %d of %d ACTIVE loans have no " +
-                            "provisioning row after this pass — the period is NOT fully provisioned",
-                        period,
-                        active - covered,
-                        active,
-                    )
-                }
+    private fun publishCoverage(period: String): Uni<Void> = loans.countActive().flatMap { active ->
+        provisioning.countForPeriod(period).invoke { covered ->
+            activeLoans.set(active)
+            provisionedThisPeriod.set(covered)
+            unprovisioned.set(maxOf(0L, active - covered))
+            if (active > covered) {
+                log.warnf(
+                    "IFRS 9 provisioning coverage for %s: %d of %d ACTIVE loans have no " +
+                        "provisioning row after this pass — the period is NOT fully provisioned",
+                    period,
+                    active - covered,
+                    active,
+                )
             }
-        }.replaceWithVoid()
-            .onFailure().recoverWithItem { e ->
-                log.warnf(e, "IFRS 9 provisioning coverage could not be counted; leaving the previous gauge values")
-                null
-            }
+        }
+    }.replaceWithVoid()
+        .onFailure().recoverWithItem { e ->
+            log.warnf(e, "IFRS 9 provisioning coverage could not be counted; leaving the previous gauge values")
+            null
+        }
 
     @Scheduled(
         every = "{lending.provisioning.cycle.every}",
@@ -234,6 +233,7 @@ class ProvisioningCycleScheduler(
 
     private companion object {
         const val METRICS_SERVICE_TAG = "lending"
+
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "lending-provisioning-cycle"
 
