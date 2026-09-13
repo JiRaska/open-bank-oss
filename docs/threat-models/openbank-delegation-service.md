@@ -19,6 +19,7 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ApprovalGroup` rosters and thresholds used to select future corporate operation approvers.
 
 ## Lifecycle approval execution
 
@@ -82,6 +83,7 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T24 | A caller forges an entity profile, reuses a revoked mandate, or intercepts the authority lookup | The edge derives the human actor from the authenticated token; it is not accepted from the app. delegation-service re-checks the selected principal and the actor's currently active mandate at issuance time against party-service, before consuming SCA. Unknown, inactive, malformed and unavailable results fail closed. The new east-west call uses party-service's parallel private-CA mTLS listener on 8443: hostname verification authenticates the server, a namespace-local cert identifies delegation-service, and TLS 1.3 is pinned; OIDC and namespace/port NetworkPolicy remain independent controls. An event-only projection was rejected for this admission decision because bootstrap/replay lag and a revocation race would trade authorization freshness for availability. Residual: this establishes statutory/owner representation, not a delegated employee capability such as `delegation.manage`. |
 | T22 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
 | T23 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
+| T25 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -212,6 +214,20 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the grantee-response endpoints: `granteePartyId` on accept/decline/renounce and `scaSessionId` on accept. Both are authorization-relevant — `granteePartyId` names WHO is responding to the grant and `scaSessionId` is the SCA evidence for accepting it — so a null reaching the use case is a delegation transition with no identified actor. The `X-Customer-Party-Id` header stays nullable by design (its absence is what distinguishes a bank-initiated call). No new caller or boundary. Rollback: revert.
 - **2026-08-08** — Cumulative ceilings became a control (ADR-0249 D3). New inbound REST surface: reserve / confirm / release on `/delegations/{id}/reservations`, boundary 4 above, rows T14 and T15. `dailyLimit` / `monthlyLimit` stop being refused (#3613) because a place now exists where spend is observed *before* it happens. Two properties carry the row: concurrency is a `FOR UPDATE` row lock on the grant, not an in-JVM lock (which does nothing across replicas), and idempotency is a unique index on `(grant_id, idempotency_key)`, not a read-then-write. Windows are `AccountingClock.BANK_ZONE` per ADR-0207 D1 rather than a second hand-written `ZoneId.of("Europe/Prague")`. Residual, unchanged: no audit envelope on the new transitions (T4), no rail other than the edge's delegated-payment path asks the counter, and pre-#3613 grants still carry ceilings nobody counted. Rollback: revert — the reservation table is additive and no existing path reads it.
+## Approval-group history and projection recovery
+
+Every create, revise and deactivate now appends the full roster revision in the same database
+transaction as the mutable current row and transactional outbox message. The current table remains
+the fast management view; `delegation_approval_group_revisions` is the authoritative historical
+source for audit and reconciliation. Product services bootstrap from the dedicated compacted
+`openbank.delegation.approval-group-revisions` stream, keyed by `groupId:revision`, rather than
+calling delegation-service synchronously on an authorization path. Rows are
+immutable and uniquely keyed by `(group_id, revision)`, while a deterministic primary key makes a
+duplicate write fail rather than create two histories. A later internal reconciliation endpoint
+can repopulate that stream under an audited recovery procedure; N-of-M remains off until consumer
+health and operation snapshotting are proven. Rollback keeps the append-only table because
+dropping it would erase evidence even though no existing authorization path depends on it.
+
 # Client draft preview
 
 `POST /api/v1/delegations/preview` deliberately creates no authority. It repeats the caller,

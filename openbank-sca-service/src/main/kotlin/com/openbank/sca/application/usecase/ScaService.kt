@@ -401,6 +401,7 @@ class ScaService(
             command.amount,
             command.currency,
             command.creditor,
+            command.reference,
             command.documentSha256,
             command.ceremonyId,
             command.cardId,
@@ -433,6 +434,8 @@ class ScaService(
             "Potvrďte sdílení přístupu k vašemu produktu"
         ScaPurpose.DELEGATION_ACCEPT ->
             "Potvrďte přijetí sdíleného přístupu"
+        ScaPurpose.DELEGATION_APPROVAL_GROUP ->
+            "Potvrďte změnu skupiny schvalovatelů"
         ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
             "Potvrďte výběr ze spořicího cíle"
     }

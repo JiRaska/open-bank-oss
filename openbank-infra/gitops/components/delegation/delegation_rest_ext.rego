@@ -87,6 +87,8 @@ allowed_reasons contains "edge-service-delegation" if {
         "delegation.preview",
 		"delegation.read",
 		"delegation.list",
+        "delegation.approval-group.read",
+        "delegation.approval-group.manage",
 		"delegation.accept",
 		"delegation.decline",
 		"delegation.renounce",

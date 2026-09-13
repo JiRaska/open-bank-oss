@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2ec45ea0f849dc7a"
+        openbank.tech/policy-checksum: "dfc04fbdc5e632f4"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation

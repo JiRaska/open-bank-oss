@@ -6,6 +6,7 @@ package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.authz.Authorize
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -15,6 +16,7 @@ import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -92,6 +94,69 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     fun sharedWithMe(): Response {
         val partyId = partyId()
         return upstream.get("$delegationServiceUrl$UPSTREAM/grantee/$partyId", partyId)
+    }
+
+    /** Client-managed approver rosters for the currently selected personal/business profile. */
+    @GET
+    @Path("/approval-groups")
+    @Blocking
+    fun approvalGroups(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/approval-groups", partyId)
+    }
+
+    @POST
+    @Path("/approval-groups/sca-reference")
+    @Authorize(action = "customer.delegation.approval-group.manage", resource = "")
+    suspend fun approvalGroupScaReference(body: String?): Response =
+        upstream.post("$delegationServiceUrl$UPSTREAM/approval-groups/sca-reference", partyId(), body ?: "{}")
+
+    @POST
+    @Path("/approval-groups")
+    @Blocking
+    fun createApprovalGroup(body: String?): Response {
+        val context = partyContext()
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/approval-groups",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun approvalGroup(@PathParam("id") id: UUID): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/approval-groups/$id", partyId)
+    }
+
+    @PUT
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun reviseApprovalGroup(@PathParam("id") id: UUID, body: String?): Response {
+        val context = partyContext()
+        return upstream.put(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @DELETE
+    @Path("/approval-groups/{id}")
+    @Blocking
+    fun deactivateApprovalGroup(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        return upstream.deleteWithHeaders(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**

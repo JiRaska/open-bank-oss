@@ -163,6 +163,16 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # One canonical value per immutable roster revision. The `groupId:revision` key preserves
+      # every historical revision under compaction and allows new product services to bootstrap.
+      approval-group-revisions-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-approval-groups-${quarkus.uuid}
+        topic: openbank.delegation.approval-group-revisions
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:

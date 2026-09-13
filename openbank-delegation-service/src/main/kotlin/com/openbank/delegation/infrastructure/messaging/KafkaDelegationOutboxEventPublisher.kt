@@ -24,6 +24,7 @@ import java.util.UUID
 class KafkaDelegationOutboxEventPublisher(
     @Channel("delegation-events-out") private val delegationEventsEmitter: MutinyEmitter<String>,
     @Channel("spend-reservation-state-out") private val spendReservationStateEmitter: MutinyEmitter<String>,
+    @Channel("approval-group-revisions-out") private val approvalGroupRevisionEmitter: MutinyEmitter<String>,
     private val objectMapper: ObjectMapper,
 ) : OutboxEventPublisher {
 
@@ -37,31 +38,49 @@ class KafkaDelegationOutboxEventPublisher(
         emitterFor(entry).sendMessage(Message.of(withSourceService(entry.payload)).addMetadata(meta)).awaitSuspending()
     }
 
-    private fun emitterFor(entry: OutboxEntry): MutinyEmitter<String> =
-        if (entry.eventType == DelegationSpendReservationStateChanged.EVENT_TYPE) {
-            spendReservationStateEmitter
-        } else {
-            delegationEventsEmitter
-        }
+    private fun emitterFor(entry: OutboxEntry): MutinyEmitter<String> = when {
+        entry.eventType == DelegationSpendReservationStateChanged.EVENT_TYPE -> spendReservationStateEmitter
+        entry.eventType in APPROVAL_GROUP_EVENT_TYPES -> approvalGroupRevisionEmitter
+        else -> delegationEventsEmitter
+    }
 
-    private fun partitionKey(entry: OutboxEntry): String {
-        if (entry.eventType != DelegationSpendReservationStateChanged.EVENT_TYPE) {
-            return OutboxKafkaHeaders.partitionKey(entry)
-        }
-        val payload = try {
-            objectMapper.readTree(entry.payload)
-        } catch (exception: JsonProcessingException) {
-            throw IllegalArgumentException("reservation state payload is not valid JSON", exception)
-        }
-        require(payload != null && payload.isObject) { "reservation state payload must be a JSON object" }
+    private fun partitionKey(entry: OutboxEntry): String = when {
+        entry.eventType == DelegationSpendReservationStateChanged.EVENT_TYPE -> reservationCompactionKey(entry)
+        entry.eventType in APPROVAL_GROUP_EVENT_TYPES -> approvalGroupRevisionCompactionKey(entry)
+        else -> OutboxKafkaHeaders.partitionKey(entry)
+    }
+
+    private fun approvalGroupRevisionCompactionKey(entry: OutboxEntry): String {
+        val payload = parseObjectPayload(entry, "approval-group revision")
+        val revision = requiredPositiveRevision(payload, "revision", "approval-group revision")
+        return "${entry.aggregateId}:$revision"
+    }
+
+    private fun reservationCompactionKey(entry: OutboxEntry): String {
+        val payload = parseObjectPayload(entry, "reservation state")
         val reservationId = runCatching { UUID.fromString(payload.required("reservationId").textValue()) }
             .getOrElse { throw IllegalArgumentException("reservation state reservationId is not a UUID", it) }
         require(reservationId == entry.aggregateId) { "reservationId must equal outbox aggregateId" }
-        val revision = payload.required("reservationVersion")
-        require(revision.isIntegralNumber && revision.canConvertToLong()) {
-            "reservationVersion must be an integer"
+        val revision = requiredPositiveRevision(payload, "reservationVersion", "reservation state")
+        return DelegationSpendReservationStateChanged.compactionKey(reservationId, revision)
+    }
+
+    private fun parseObjectPayload(entry: OutboxEntry, label: String): ObjectNode {
+        val payload = try {
+            objectMapper.readTree(entry.payload)
+        } catch (exception: JsonProcessingException) {
+            throw IllegalArgumentException("$label payload is not valid JSON", exception)
         }
-        return DelegationSpendReservationStateChanged.compactionKey(reservationId, revision.longValue())
+        require(payload is ObjectNode) { "$label payload must be a JSON object" }
+        return payload
+    }
+
+    private fun requiredPositiveRevision(payload: ObjectNode, field: String, label: String): Long {
+        val revision = payload.required(field)
+        require(revision.isIntegralNumber && revision.canConvertToLong()) {
+            "$label $field must be an integer"
+        }
+        return revision.longValue().also { require(it >= 1) { "$label $field must be positive" } }
     }
 
     /**
@@ -107,6 +126,12 @@ class KafkaDelegationOutboxEventPublisher(
          * and the same spelling `TopicAttribution` already derives for this topic.
          */
         internal const val SOURCE_SERVICE = "delegation-service"
+
+        private val APPROVAL_GROUP_EVENT_TYPES = setOf(
+            "ApprovalGroupCreated",
+            "ApprovalGroupRevised",
+            "ApprovalGroupDeactivated",
+        )
 
         private val log: Logger = Logger.getLogger(KafkaDelegationOutboxEventPublisher::class.java)
     }

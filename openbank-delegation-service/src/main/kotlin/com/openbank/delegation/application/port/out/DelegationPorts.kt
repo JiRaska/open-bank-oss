@@ -79,7 +79,11 @@ interface ScaChallengeClient {
      * one challenge. Reading `status == "COMPLETED"` alone never gave that: it is a fact that
      * stays true forever, which is what made one ceremony reusable for unlimited grants.
      */
-    suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot
+    suspend fun consumeChallenge(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        reference: String? = null,
+    ): ScaChallengeSnapshot
 }
 
 /**

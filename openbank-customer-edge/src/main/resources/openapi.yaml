@@ -23,7 +23,13 @@ info:
   # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
   # same file. A skipped number is harmless; a collided one is not, and whoever lands second
   # takes the next free version (ADR-0048).
-  version: 1.62.0
+  # 1.61.0 -> 1.62.0 (on main): approval-group snapshot on the delegation draft response.
+  #
+  # 1.62.0 -> 1.63.0 (#9417, this branch): additive — SCA-bound approval groups. This branch held
+  # 1.61.0 and main OVERTOOK it, which `api-contract gate` reads as a bump going backwards. Nothing
+  # open claims 1.63.0. Re-read off live origin/main WITH the open PRs after any rebase — a taken
+  # version is textually identical to a free one, so no merge can catch the collision (ADR-0048).
+  version: 1.63.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
