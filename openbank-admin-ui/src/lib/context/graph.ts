@@ -35,6 +35,11 @@ export interface ContextNeighborhood {
 }
 
 const classifications = new Set(['INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'])
+const namespaces = new Set(['COMPLAINT', 'INCIDENT'])
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value))
+}
 
 export function parseContextNeighborhood(value: unknown): ContextNeighborhood {
   if (!value || typeof value !== 'object') throw new Error('invalid context graph')
@@ -43,9 +48,19 @@ export function parseContextNeighborhood(value: unknown): ContextNeighborhood {
     || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error('invalid context graph')
   if (!graph.nodes.every(node => node && typeof node.key === 'string' && typeof node.type === 'string'
     && typeof node.label === 'string' && typeof node.sourceSystem === 'string'
-    && classifications.has(node.classification))) throw new Error('invalid context nodes')
+    && typeof node.sourceRef === 'string' && namespaces.has(node.namespace)
+    && classifications.has(node.classification) && isTimestamp(node.validFrom)
+    && isTimestamp(node.recordedAt) && Number.isSafeInteger(node.sourceVersion) && node.sourceVersion > 0
+    && (node.validTo === null || isTimestamp(node.validTo)))) throw new Error('invalid context nodes')
   const keys = new Set(graph.nodes.map(node => node.key))
+  const rootNode = graph.nodes.find(node => node.key === graph.root)
+  if (!rootNode || !graph.nodes.every(node => node.namespace === rootNode.namespace)) {
+    throw new Error('invalid context root')
+  }
   if (!graph.edges.every(edge => edge && typeof edge.id === 'string' && typeof edge.relation === 'string'
-    && keys.has(edge.from) && keys.has(edge.to))) throw new Error('invalid context edges')
+    && typeof edge.evidenceRef === 'string' && edge.namespace === rootNode.namespace
+    && keys.has(edge.from) && keys.has(edge.to) && isTimestamp(edge.validFrom)
+    && isTimestamp(edge.recordedAt) && Number.isSafeInteger(edge.sourceVersion) && edge.sourceVersion > 0
+    && (edge.validTo === null || isTimestamp(edge.validTo)))) throw new Error('invalid context edges')
   return graph as ContextNeighborhood
 }

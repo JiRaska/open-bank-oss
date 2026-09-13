@@ -24,6 +24,13 @@ export function ComplaintContextInvestigation() {
   }), [graph])
   const byKey = new Map(positions.map(node => [node.key, node]))
   const selectedNode = graph?.nodes.find(node => node.key === selected)
+  const timeline = useMemo(() => (graph?.nodes ?? [])
+    .filter(node => node.type === 'PAYMENT_STAGE' || node.type === 'RAIL_EVIDENCE')
+    .map(node => ({
+      ...node,
+      relation: graph?.edges.find(edge => edge.to === node.key)?.relation ?? node.type,
+    }))
+    .sort((left, right) => left.sourceVersion - right.sourceVersion), [graph])
 
   async function investigate(event: FormEvent) {
     event.preventDefault(); setState('loading'); setGraph(null); setSelected(null)
@@ -56,7 +63,7 @@ export function ComplaintContextInvestigation() {
     {state === 'denied' && <p role="alert" style={{ color: 'var(--danger)' }}>{t('Pro tento případ nemáte aktivní oprávnění.', 'You do not have an active assignment for this case.')}</p>}
     {state === 'missing' && <p role="status">{t('Pro tuto referenci zatím není projekce.', 'No projection exists for this reference yet.')}</p>}
     {state === 'error' && <p role="alert" style={{ color: 'var(--danger)' }}>{t('Kontextová služba není dostupná.', 'The context service is unavailable.')}</p>}
-    {graph && <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(220px, 1fr)', gap: 16, marginTop: 18 }}>
+    {graph && <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(240px, 1fr)', gap: 16, marginTop: 18 }}>
       <div style={{ overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
         <svg viewBox="0 0 800 440" style={{ display: 'block', minWidth: 620 }} role="group" aria-label={t('Graf souvislostí reklamace', 'Complaint relationship graph')}>
           {graph.edges.map(edge => { const from = byKey.get(edge.from); const to = byKey.get(edge.to); return from && to
@@ -71,6 +78,16 @@ export function ComplaintContextInvestigation() {
         {selectedNode ? <><strong>{selectedNode.label}</strong><p>{selectedNode.type} · {selectedNode.classification}</p><p>{t('Zdroj', 'Source')}: {selectedNode.sourceSystem}</p><p>{t('Platné od', 'Valid from')}: {new Date(selectedNode.validFrom).toLocaleString()}</p></> : <p>{t('Vyberte uzel pro podklad.', 'Select a node to inspect its evidence.')}</p>}
         {graph.truncated && <p role="status" style={{ color: 'var(--warning-text)' }}>{t('Výsledek dosáhl bezpečnostního limitu.', 'The result reached its safety limit.')}</p>}
       </aside>
+      {timeline.length > 0 && <section style={{ gridColumn: '1 / -1', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }} aria-labelledby="payment-lifecycle-title">
+        <h3 id="payment-lifecycle-title" style={{ margin: '0 0 10px', fontSize: 15 }}>{t('Časová osa platby', 'Payment timeline')}</h3>
+        <ol style={{ display: 'grid', gap: 8, margin: 0, paddingInlineStart: 24 }}>
+          {timeline.map(item => <li key={item.key}>
+            <strong>{item.relation.replaceAll('_', ' ')}</strong>
+            {' · '}{new Date(item.validFrom).toLocaleString()}
+            <span style={{ color: 'var(--text-secondary)' }}> · {item.sourceSystem}</span>
+          </li>)}
+        </ol>
+      </section>}
     </div>}
   </section>
 }
