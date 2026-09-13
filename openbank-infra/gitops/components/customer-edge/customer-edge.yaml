@@ -242,6 +242,18 @@ spec:
               value: https://campaign-service.campaign.svc:8443
             - name: OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE
               value: /mnt/campaign-tls/ca.crt
+            # Member-get-member for the app (CustomerReferralResource). referral-service serves
+            # HTTPS on 8443 with a cert from the same openbank-ca ClusterIssuer as campaign, so the
+            # trust file above covers it. Declared here so gen-network-policies.py opens the
+            # customer-edge -> referral ingress allow.
+            - name: REFERRAL_SERVICE_URL
+              value: https://referral-service.referral.svc:8443
+            # Lístky for the app (CustomerLoyaltyResource). loyalty-service has no gitops workload
+            # yet (see openbank-loyalty-service/CLAUDE.md), so these routes answer 502 until it is
+            # deployed; declaring the edge now means its generated ingress allow-list will already
+            # admit customer-edge on the day the workload lands.
+            - name: LOYALTY_SERVICE_URL
+              value: http://loyalty-service.loyalty.svc:8157
             - name: STATEMENT_SERVICE_URL
               value: http://statement-service.statements.svc:8136
             - name: STANDING_ORDER_SERVICE_URL

@@ -163,6 +163,11 @@ openbank:
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
     incentive-service-url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
+    # Lístky (ADR-0282) and member-get-member for the app (CustomerLoyaltyResource /
+    # CustomerReferralResource). referral-service serves HTTPS on 8443 with the platform CA, the
+    # same trust file the campaign call already uses.
+    loyalty-service-url: ${LOYALTY_SERVICE_URL:http://loyalty-service.loyalty.svc:8157}
+    referral-service-url: ${REFERRAL_SERVICE_URL:https://referral-service.referral.svc:8443}
     statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
     standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}
