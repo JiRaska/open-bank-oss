@@ -9,6 +9,7 @@ import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import com.openbank.libs.authz.AuthzDecision
 import com.openbank.libs.authz.PolicyDecisionPoint
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -26,8 +27,17 @@ class ContextQueryServiceTest {
     private val assignments = mockk<CaseAssignmentPort>()
     private val audit = mockk<ContextReadAuditPort>(relaxed = true)
     private val pdp = mockk<PolicyDecisionPoint>()
-    private val service =
-        ContextQueryService(graph, assignments, audit, pdp, Clock.fixed(now, ZoneOffset.UTC), 100, 200)
+    private val service = ContextQueryService(
+        graph,
+        assignments,
+        audit,
+        pdp,
+        Clock.fixed(now, ZoneOffset.UTC),
+        SimpleMeterRegistry(),
+        100,
+        200,
+        "openbank-cz",
+    )
     private val actor = Investigator("operator-7", listOf("ROLE_COMPLIANCE"))
     private val context = InvestigationContext("case-42", "PAYMENT_COMPLAINT", now)
 
@@ -65,7 +75,8 @@ class ContextQueryServiceTest {
             pdp.allow(
                 match {
                     it.attributes["assignmentVerified"] == true &&
-                        it.attributes["purpose"] == "PAYMENT_COMPLAINT"
+                        it.attributes["purpose"] == "PAYMENT_COMPLAINT" &&
+                        it.attributes["bankScope"] == "openbank-cz"
                 },
             )
         }
@@ -88,7 +99,7 @@ class ContextQueryServiceTest {
             false,
         )
 
-        val impact = service.incident("inc-1", actor, context)
+        val impact = service.incident("inc-1", actor, context.copy(purpose = "INCIDENT_IMPACT"))
         assertThat(impact.affectedByType).containsEntry("PAYMENT", 2).containsEntry("WORKFLOW", 1)
         assertThat(impact.total).isEqualTo(3)
         assertThat(impact.drilldownAvailable).isFalse()

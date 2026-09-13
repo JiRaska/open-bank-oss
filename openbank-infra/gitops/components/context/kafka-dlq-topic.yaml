@@ -1,0 +1,26 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.context-service.dispute-events
+  namespace: messaging
+  labels: { strimzi.io/cluster: openbank-cluster }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.context-service.ict-incident-events
+  namespace: messaging
+  labels: { strimzi.io/cluster: openbank-cluster }
+  annotations: { argocd.argoproj.io/sync-wave: "-2" }
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete

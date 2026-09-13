@@ -1,0 +1,51 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: context-service
+  namespace: messaging
+  annotations: { argocd.argoproj.io/sync-wave: "-2" }
+  labels: { strimzi.io/cluster: openbank-cluster }
+spec:
+  authentication: { type: tls }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: openbank.dispute.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.security.ict.incident, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.dispute-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.ict-incident-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: group, name: openbank-context-service, patternType: literal }
+        operations: [Read]
+        host: "*"
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: context-service-kafka-keystore
+  namespace: context
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }
+  target: { name: context-service-kafka-keystore, creationPolicy: Owner, deletionPolicy: Retain }
+  dataFrom: [{ extract: { key: context-service } }]
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: kafka-cluster-ca-truststore
+  namespace: context
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }
+  target: { name: kafka-cluster-ca-truststore, creationPolicy: Owner, deletionPolicy: Retain }
+  dataFrom: [{ extract: { key: openbank-cluster-cluster-ca-cert } }]

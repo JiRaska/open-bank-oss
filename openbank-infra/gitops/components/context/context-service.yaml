@@ -1,0 +1,107 @@
+# Staged at zero until auto-deploy publishes and pins the first attested image. The activation
+# change only raises replicas; all data, identity and policy dependencies are provisioned here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: context-service
+  namespace: context
+  labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
+spec:
+  replicas: 0
+  selector: { matchLabels: { app.kubernetes.io/name: context-service } }
+  template:
+    metadata:
+      annotations: { openbank.tech/policy-checksum: "a85e6e134ab9a3b9" }
+      labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: context-service
+          image: openbank-context-service:bootstrap
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8149 }
+            - { name: management, containerPort: 8085 }
+          env:
+            - { name: QUARKUS_DATASOURCE_JDBC_URL, value: jdbc:postgresql://context-db-rw.context.svc:5432/openbank_context }
+            - { name: QUARKUS_DATASOURCE_REACTIVE_URL, value: vertx-reactive:postgresql://context-db-rw.context.svc:5432/openbank_context }
+            - { name: POSTGRES_USER, value: openbank }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: context-db-app, key: password } }
+            - { name: QUARKUS_OIDC_AUTH_SERVER_URL, value: http://keycloak.iam.svc:8080/realms/openbank }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: context-service-oidc, key: OIDC_CLIENT_SECRET } }
+            - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
+            - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
+            - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: context-service-kafka-keystore, key: user.password } }
+            - { name: KAFKA_SSL_TRUSTSTORE_LOCATION, value: /mnt/kafka-ca/ca.p12 }
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: kafka-cluster-ca-truststore, key: ca.password } }
+            - { name: CONTEXT_BANK_SCOPE, value: openbank-cz }
+            - { name: CONTEXT_PROJECTION_GENERATION, value: "1" }
+            - { name: QUARKUS_CONFIG_LOCATIONS, value: /mnt/msg-config/override.properties }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "2", memory: 1Gi }
+          readinessProbe: { httpGet: { path: /q/health/ready, port: management }, initialDelaySeconds: 10 }
+          livenessProbe: { httpGet: { path: /q/health/live, port: management }, initialDelaySeconds: 20 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: kafka-user, mountPath: /mnt/kafka-user, readOnly: true }
+            - { name: kafka-ca, mountPath: /mnt/kafka-ca, readOnly: true }
+            - { name: msg-override, mountPath: /mnt/msg-config, readOnly: true }
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          args: [run, --server, --addr=0.0.0.0:8181, --bundle, /bundle]
+          ports: [{ name: opa, containerPort: 8181 }]
+          readinessProbe: { httpGet: { path: "/health?bundles=true", port: opa }, initialDelaySeconds: 5 }
+          livenessProbe: { httpGet: { path: /health, port: opa } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          volumeMounts:
+            - { name: opa-bundle, mountPath: /bundle/rest.rego, subPath: rest.rego, readOnly: true }
+            - { name: opa-bundle, mountPath: /bundle/agents.rego, subPath: agents.rego, readOnly: true }
+            - { name: opa-bundle, mountPath: /bundle/rules/data.yaml, subPath: rules-data.yaml, readOnly: true }
+            - { name: opa-bundle, mountPath: /bundle/agents/data.yaml, subPath: agents-data.yaml, readOnly: true }
+            - { name: opa-bundle, mountPath: /bundle/.manifest, subPath: manifest.json, readOnly: true }
+            - { name: opa-tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        - { name: opa-tmp, emptyDir: {} }
+        - { name: kafka-user, secret: { secretName: context-service-kafka-keystore } }
+        - { name: kafka-ca, secret: { secretName: kafka-cluster-ca-truststore } }
+        - { name: msg-override, configMap: { name: context-service-msg-override } }
+        - { name: opa-bundle, configMap: { name: context-service-opa-bundle } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: context-service, namespace: context }
+spec:
+  selector: { app.kubernetes.io/name: context-service }
+  ports:
+    - { name: http, port: 8149, targetPort: http }
+    - { name: management, port: 8085, targetPort: management }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata: { name: context-service, namespace: context }
+spec:
+  selector: { matchLabels: { app.kubernetes.io/name: context-service } }
+  podMetricsEndpoints: [{ port: management, path: /q/metrics, interval: 30s }]

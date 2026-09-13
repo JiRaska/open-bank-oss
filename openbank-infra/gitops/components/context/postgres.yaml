@@ -1,0 +1,18 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: context-db
+  namespace: context
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage: { storageClass: gp3, size: 5Gi }
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  postgresql:
+    parameters:
+      max_connections: "100"
+      statement_timeout: "750ms"
+  bootstrap:
+    initdb: { database: openbank_context, owner: openbank }

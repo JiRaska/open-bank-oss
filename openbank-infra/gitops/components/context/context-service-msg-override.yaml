@@ -1,0 +1,16 @@
+# SmallRye YAML preserves dots in leaf keys as quoted key text, so group.id and
+# auto.offset.reset must come from a properties ConfigSource. The first generation replays the
+# retained complaint stream; its idempotency ledger makes that replay safe.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: context-service-msg-override
+  namespace: context
+  labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.dispute-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.dispute-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.ict-incident-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.ict-incident-events-in.auto.offset.reset=earliest

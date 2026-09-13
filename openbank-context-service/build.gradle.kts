@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(project(":openbank-libs-domain"))
@@ -28,6 +29,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(project(":openbank-libs-testing"))
 }
 

@@ -27,8 +27,17 @@ import java.util.UUID
 @Table(name = "context_nodes")
 class ContextNodeEntity : PanacheEntityBase() {
     @Id
+    @Column(name = "node_row_id")
+    lateinit var id: UUID
+
     @Column(name = "node_key")
     lateinit var key: String
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "projection_generation")
+    var projectionGeneration: Long = 1
 
     @Column(name = "namespace")
     lateinit var namespace: String
@@ -68,6 +77,12 @@ class ContextEdgeEntity : PanacheEntityBase() {
     @Column(name = "edge_id")
     lateinit var id: UUID
 
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Column(name = "projection_generation")
+    var projectionGeneration: Long = 1
+
     @Column(name = "namespace")
     lateinit var namespace: String
 
@@ -106,6 +121,9 @@ class CaseAssignmentEntity : PanacheEntityBase() {
     @Column(name = "assignment_id")
     lateinit var id: UUID
 
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
     @Column(name = "principal_id")
     lateinit var principalId: String
 
@@ -131,6 +149,9 @@ class ContextReadAuditEntity : PanacheEntityBase() {
     @Id
     @Column(name = "audit_id")
     lateinit var id: UUID
+
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
 
     @Column(name = "principal_id")
     lateinit var principalId: String
@@ -163,6 +184,8 @@ class ContextReadAuditEntity : PanacheEntityBase() {
 @ApplicationScoped
 class ContextGraphRepository(
     private val sessions: Mutiny.SessionFactory,
+    @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
+    @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextGraphPort {
     override suspend fun neighborhood(
@@ -174,34 +197,37 @@ class ContextGraphRepository(
     ): ContextNeighborhood? {
         val rootNode = sessions.withSession { session ->
             session.createQuery(
-                "from ContextNodeEntity where key = :root and namespace = :namespace and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
+                "from ContextNodeEntity where key = :root and bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
                 ContextNodeEntity::class.java,
             ).setParameter(
                 "root",
                 root,
-            ).setParameter("namespace", namespace.name).setParameter("asOf", asOf).singleResultOrNull
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("namespace", namespace.name).setParameter("asOf", asOf).singleResultOrNull
         }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() ?: return null
         val edges = sessions.withSession { session ->
             session.createQuery(
-                "from ContextEdgeEntity where namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and (validTo is null or validTo > :asOf) order by recordedAt desc",
+                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and (validTo is null or validTo > :asOf) order by recordedAt desc",
                 ContextEdgeEntity::class.java,
             ).setParameter(
                 "namespace",
                 namespace.name,
-            ).setParameter("root", root).setParameter("asOf", asOf).setMaxResults(
-                maxEdges + 1,
-            ).resultList
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("root", root).setParameter("asOf", asOf).setMaxResults(
+                    maxEdges + 1,
+                ).resultList
         }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
         val boundedEdges = edges.take(maxEdges)
         val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
         val nodes = sessions.withSession { session ->
             session.createQuery(
-                "from ContextNodeEntity where namespace = :namespace and key in (:keys) and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
+                "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and namespace = :namespace and key in (:keys) and validFrom <= :asOf and (validTo is null or validTo > :asOf)",
                 ContextNodeEntity::class.java,
             ).setParameter(
                 "namespace",
                 namespace.name,
-            ).setParameter("keys", keys).setParameter("asOf", asOf).resultList
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("keys", keys).setParameter("asOf", asOf).resultList
         }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
         return ContextNeighborhood(
             root,
@@ -235,29 +261,33 @@ class ContextGraphRepository(
 @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
 class CaseAssignmentRepository(
     private val sessions: Mutiny.SessionFactory,
+    @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : CaseAssignmentPort {
     override suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean =
         sessions.withSession { session ->
             session.createQuery(
-                "select count(a) from CaseAssignmentEntity a where principalId = :principal and caseId = :caseId and purpose = :purpose and validFrom <= :at and validTo > :at",
+                "select count(a) from CaseAssignmentEntity a where bankScope = :bankScope and principalId = :principal and caseId = :caseId and purpose = :purpose and validFrom <= :at and validTo > :at",
                 java.lang.Long::class.java,
             )
                 .setParameter(
                     "principal",
                     principalId,
-                ).setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("at", at).singleResult
+                ).setParameter("bankScope", bankScope).setParameter("caseId", caseId)
+                .setParameter("purpose", purpose).setParameter("at", at).singleResult
         }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
 }
 
 @ApplicationScoped
 class ContextReadAuditRepository(
     private val sessions: Mutiny.SessionFactory,
+    @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextReadAuditPort {
     override suspend fun record(entry: ContextReadAudit) {
         val entity = ContextReadAuditEntity().apply {
             id = UUID.randomUUID()
+            this.bankScope = this@ContextReadAuditRepository.bankScope
             principalId = entry.principalId
             caseId = entry.caseId
             purpose = entry.purpose

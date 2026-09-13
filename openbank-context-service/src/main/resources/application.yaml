@@ -35,6 +35,43 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
+  mp:
+    messaging:
+      incoming:
+        dispute-events-in:
+          connector: smallrye-in-memory
+        ict-incident-events-in:
+          connector: smallrye-in-memory
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      dispute-events-in:
+        connector: smallrye-kafka
+        topic: openbank.dispute.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.dispute-events
+      ict-incident-events-in:
+        connector: smallrye-kafka
+        topic: openbank.security.ict.incident
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.ict-incident-events
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -44,6 +81,8 @@ authz:
   enforce: true
 openbank:
   context:
+    bank-scope: ${CONTEXT_BANK_SCOPE:openbank-cz}
+    projection-generation: ${CONTEXT_PROJECTION_GENERATION:1}
     max-nodes: 100
     max-edges: 200
     query-timeout-ms: 500
