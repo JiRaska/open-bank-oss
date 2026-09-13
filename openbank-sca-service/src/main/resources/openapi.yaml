@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.9.2
+  version: 1.10.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -164,6 +164,37 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/sca/parties/{partyId}/devices/{deviceId}:
+    delete:
+      tags: [SCA]
+      summary: Revoke an enrolled device credential
+      description: |
+        Revokes the owned credential and cancels its pending or completed, unconsumed
+        approvals in the same transaction as the audit event. Repeated revocation is a
+        successful no-op. Public keys and prior signatures remain as evidence. Customers
+        must own the party; the money-path four-eyes policy also applies in enforced mode.
+      operationId: revokeScaDevice
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: deviceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Credential revoked or already revoked
+        '401':
+          description: Authentication required
+        '403':
+          description: Ownership or authorization policy rejected the request
+        '404':
+          description: No such device belongs to the party
+        '409':
+          description: Revocation transaction conflicted; reconcile before retrying
+
   /api/v1/sca/parties/{partyId}/devices:
     get:
       tags: [SCA]
@@ -251,7 +282,7 @@ paths:
         '401':
           description: Invalid device assertion
         '403':
-          description: Device does not belong to the challenge party
+          description: Device is revoked or does not belong to the challenge party
         '404':
           description: Challenge or device not found
         '409':
@@ -451,6 +482,10 @@ components:
           type: string
           format: date-time
           description: When the device credential was enrolled.
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Revocation time; a revoked credential cannot be reactivated by enrollment.
 
     RecordDecisionRequest:
       type: object

@@ -119,3 +119,38 @@ test_extension_is_loaded if {
 	"operator-sca-write" in rest.allowed_reasons with input as {"principal": operator, "action": "scaChallenge.initiate"}
 		with data.rules as rules_mock
 }
+
+revocation_rules := object.union(rules_mock, {
+	"money_path_services": ["openbank-sca-service"],
+	"money_path_action_prefixes": {"sca": ["device", "scaChallenge"]},
+	"four_eyes": {"verbs": ["revoke"], "actions": []},
+})
+
+# Credential revocation grants are owner scoped and retain the money-path obligation.
+test_customer_can_request_own_device_revocation if {
+	decision := rest.allow with input as {
+		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"action": "device.revoke",
+		"resource": {"id": "party-owner"},
+	}
+		with data.rules as revocation_rules with data.openbank.bundle as {"version": "test"}
+	decision.allow == true
+}
+
+test_customer_cannot_request_foreign_device_revocation if {
+	not rest.allow with input as {
+		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"action": "device.revoke",
+		"resource": {"id": "party-other"},
+	}
+		with data.rules as revocation_rules
+}
+
+test_customer_device_revocation_requires_four_eyes if {
+	rest.four_eyes_required with input as {
+		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"action": "device.revoke",
+		"resource": {"id": "party-owner"},
+	}
+		with data.rules as revocation_rules
+}

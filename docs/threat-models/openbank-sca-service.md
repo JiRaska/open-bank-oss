@@ -217,3 +217,25 @@ external notification. Those remain separate launch controls. See the consumptio
   decision/outbox transaction IDs, rollback on audit failure, signature fidelity and
   expiry retention. Concurrent store claims preserve one winner. These tests do not
   establish live Kafka receipt, device attestation or credential revocation.
+
+
+## Credential revocation and outstanding approvals
+
+`DELETE /api/v1/sca/parties/{partyId}/devices/{deviceId}` checks customer ownership before
+accessing the credential and authorizes `device.revoke`. OPA permits a customer's request
+only for their own party; the money-path four-eyes obligation remains in force.
+`ScaDeviceRevocationIT` covers own/foreign and unresolved identities; the REST policy
+suite checks the owner grant and the unchanged approval requirement.
+
+Revocation locks the credential before updating its unconsumed pending/completed
+challenges. Decision persistence takes the same locks in the same order and rechecks the
+credential. Bulk cancellation increments challenge versions, preventing stale verification
+from restoring approval (`ScaLifecycleSafetyIT`). Consumed operations are not reversed.
+The credential marker, cancellations and `DEVICE_REVOKED` event share one transaction;
+a deliberate outbox failure verifies rollback. Retained keys and signatures remain evidence.
+
+All writers must support the marker before revocation traffic begins. A rollback to a
+binary ignoring revocation is unsafe after the first revocation. See
+[the rollout and rollback procedure](../runbooks/sca-device-revocation.md).
+This change does not establish hardware attestation, identity recovery, customer-edge
+passkey revocation or a live end-to-end four-eyes approval proof.

@@ -8,6 +8,7 @@ import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
+import com.openbank.sca.domain.model.ScaStatus
 import com.openbank.sca.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -44,9 +45,10 @@ class ScaLifecycleSafetyIT {
 
     @Test
     fun `the durable store preserves the first signed decision`() {
+        val id = seed("PENDING", OffsetDateTime.now().plusMinutes(5))
         val first = DeviceApprovalDecision(
-            seed("PENDING", OffsetDateTime.now().plusMinutes(5)),
-            "test-credential",
+            id,
+            credential(id),
             DeviceDecisionType.DENIED,
             "test-signature",
             OffsetDateTime.now(),
@@ -96,13 +98,14 @@ class ScaLifecycleSafetyIT {
     @Test
     fun `concurrent database claims acknowledge exactly one decision`(): Unit = runBlocking {
         val id = seed("PENDING", OffsetDateTime.now().plusMinutes(5))
+        val credentials = (1..8).associateWith { credential(id) }
         val results = (1..8).map { index ->
             async(Dispatchers.IO) {
                 index to onContext {
                     decisions.record(
                         DeviceApprovalDecision(
                             id,
-                            "test-$index",
+                            credentials.getValue(index),
                             DeviceDecisionType.APPROVED,
                             "signature-$index",
                             OffsetDateTime.now(),
@@ -114,7 +117,11 @@ class ScaLifecycleSafetyIT {
         }.awaitAll()
         val accepted = results.filter { it.second }
         assertThat(accepted).hasSize(1)
-        assertThat(onContext { decisions.find(id) }?.credentialId).isEqualTo("test-${accepted.single().first}")
+        assertThat(
+            onContext {
+                decisions.find(id)
+            }?.credentialId,
+        ).isEqualTo(credentials.getValue(accepted.single().first))
     }
 
     @Test
@@ -154,6 +161,26 @@ class ScaLifecycleSafetyIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = "test-revocation-operator", roles = ["ROLE_OPERATOR"])
+    fun `a stale verifier cannot resurrect a revoked credential approval`() {
+        val id = seed("PENDING", OffsetDateTime.now().plusMinutes(5))
+        val device = credential(id)
+        val stale = onContext { repository.findById(id) }!!
+        assertThat(
+            onContext {
+                decisions.record(
+                    DeviceApprovalDecision(id, device, DeviceDecisionType.APPROVED, "test", OffsetDateTime.now()),
+                    60,
+                )
+            },
+        ).isTrue()
+        given().delete("/api/v1/sca/parties/${stale.partyId}/devices/$device").then().statusCode(204)
+        assertThatThrownBy { onContext { repository.save(stale.complete(OffsetDateTime.now())) } }
+            .isInstanceOf(com.openbank.sca.application.port.out.ScaConcurrentUpdateException::class.java)
+        assertThat(onContext { repository.findById(id) }?.status).isEqualTo(ScaStatus.CANCELLED)
+    }
+
     private fun seed(status: String, expires: OffsetDateTime): UUID {
         val id = UUID.randomUUID()
         dataSource.connection.use { connection ->
@@ -170,6 +197,23 @@ class ScaLifecycleSafetyIT {
             }
         }
         return id
+    }
+
+    private fun credential(challenge: UUID): String {
+        val id = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO sca_enrolled_devices " +
+                    "(id, party_id, credential_id, public_key_spki, algorithm, created_at) " +
+                    "SELECT ?, party_id, ?, 'repository-test-key', 'ES256', now() FROM sca_challenges WHERE id = ?",
+            ).use { query ->
+                query.setObject(1, id)
+                query.setString(2, id.toString())
+                query.setObject(3, challenge)
+                assertThat(query.executeUpdate()).isEqualTo(1)
+            }
+        }
+        return id.toString()
     }
 
     private fun <T> onContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {

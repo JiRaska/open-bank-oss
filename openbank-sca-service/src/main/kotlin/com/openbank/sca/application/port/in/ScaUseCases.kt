@@ -85,6 +85,12 @@ interface ConsumeScaUseCase {
     suspend fun consume(command: ConsumeScaCommand): ScaChallenge
 }
 
+data class RevokeDeviceCommand(val partyId: UUID, val deviceId: UUID, val actorId: String)
+
+interface RevokeDeviceUseCase {
+    suspend fun revoke(command: RevokeDeviceCommand)
+}
+
 data class ListDevicesQuery(val partyId: UUID)
 
 /** List device credentials enrolled to a party (used by the onboarding cockpit, ADR-0068). */

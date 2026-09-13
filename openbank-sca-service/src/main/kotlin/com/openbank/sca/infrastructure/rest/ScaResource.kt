@@ -21,11 +21,14 @@ import com.openbank.sca.application.port.`in`.ListDevicesQuery
 import com.openbank.sca.application.port.`in`.ListDevicesUseCase
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.RevokeDeviceCommand
+import com.openbank.sca.application.port.`in`.RevokeDeviceUseCase
 import com.openbank.sca.application.port.`in`.VerifyScaCommand
 import com.openbank.sca.application.port.`in`.VerifyScaUseCase
 import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
 import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
+import com.openbank.sca.application.usecase.DeviceRevokedException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
 import com.openbank.sca.application.usecase.ScaChallengeAlreadyConsumedException
 import com.openbank.sca.application.usecase.ScaChallengeExpiredException
@@ -49,6 +52,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -86,10 +90,17 @@ data class EnrolledDeviceResponse(
     val credentialId: String,
     val algorithm: SignatureAlgorithm,
     val enrolledAt: String,
+    val revokedAt: String? = null,
 ) {
     companion object {
-        fun from(d: EnrolledDevice) =
-            EnrolledDeviceResponse(d.id, d.partyId, d.credentialId, d.algorithm, d.createdAt.toString())
+        fun from(d: EnrolledDevice) = EnrolledDeviceResponse(
+            d.id,
+            d.partyId,
+            d.credentialId,
+            d.algorithm,
+            d.createdAt.toString(),
+            d.revokedAt?.toString(),
+        )
     }
 }
 
@@ -191,6 +202,7 @@ class ScaResource(
     private val getSca: GetScaUseCase,
     private val enrollDevice: EnrollDeviceUseCase,
     private val listDevices: ListDevicesUseCase,
+    private val revokeDevice: RevokeDeviceUseCase,
     private val recordDecision: RecordDeviceDecisionUseCase,
     private val consumeSca: ConsumeScaUseCase,
     private val idempotencyStore: IdempotencyStore,
@@ -307,6 +319,16 @@ class ScaResource(
             ),
         )
         return Response.status(201).entity(EnrolledDeviceResponse.from(device)).build()
+    }
+
+    @DELETE
+    @Path("/parties/{partyId}/devices/{deviceId}")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @Authorize(action = "device.revoke", resource = "#partyId")
+    suspend fun revoke(@PathParam("partyId") partyId: UUID, @PathParam("deviceId") deviceId: UUID): Response {
+        identity.requirePartyOwnership(partyId)
+        revokeDevice.revoke(RevokeDeviceCommand(partyId, deviceId, identity.principal.name))
+        return Response.noContent().build()
     }
 
     /**
@@ -432,6 +454,12 @@ class DeviceNotEnrolledMapper : ExceptionMapper<DeviceNotEnrolledException> {
 class DeviceCredentialConflictMapper : ExceptionMapper<CredentialAlreadyEnrolledException> {
     override fun toResponse(e: CredentialAlreadyEnrolledException): Response = Response.status(Response.Status.CONFLICT)
         .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Credential conflict")).build()
+}
+
+@Provider
+class DeviceRevokedMapper : ExceptionMapper<DeviceRevokedException> {
+    override fun toResponse(e: DeviceRevokedException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(err(ErrorCode.FORBIDDEN, e.message!!)).build()
 }
 
 @Provider

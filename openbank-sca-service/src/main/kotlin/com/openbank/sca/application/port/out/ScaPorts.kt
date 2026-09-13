@@ -71,6 +71,9 @@ interface EnrolledDeviceRepository {
      */
     suspend fun saveWithOutbox(device: EnrolledDevice, outboxMessage: OutboxMessage): EnrolledDevice
 
+    /** Revoke, cancel unconsumed approvals and append audit atomically; false means no owned device exists. */
+    suspend fun revokeWithAudit(partyId: UUID, deviceId: UUID, actorId: String): Boolean
+
     suspend fun findByCredentialId(credentialId: String): EnrolledDevice?
 
     suspend fun findByPartyId(partyId: UUID): List<EnrolledDevice>

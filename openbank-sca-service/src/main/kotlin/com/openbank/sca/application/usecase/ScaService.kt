@@ -18,6 +18,8 @@ import com.openbank.sca.application.port.`in`.ListDevicesQuery
 import com.openbank.sca.application.port.`in`.ListDevicesUseCase
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.RevokeDeviceCommand
+import com.openbank.sca.application.port.`in`.RevokeDeviceUseCase
 import com.openbank.sca.application.port.`in`.VerifyScaCommand
 import com.openbank.sca.application.port.`in`.VerifyScaUseCase
 import com.openbank.sca.application.port.out.DeviceAssertionVerifier
@@ -83,10 +85,11 @@ class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
     RuntimeException("Device credential not enrolled: $credentialId")
+class DeviceRevokedException(credentialId: String) : RuntimeException("Device credential is revoked: $credentialId")
 class DeviceOwnershipMismatchException(credentialId: String) :
     RuntimeException("Device credential does not belong to the challenge party: $credentialId")
 class CredentialAlreadyEnrolledException(credentialId: String) :
-    RuntimeException("Credential '$credentialId' is already enrolled by another party")
+    RuntimeException("Credential '$credentialId' is already enrolled and cannot be replaced")
 class InvalidDeviceAssertionException(id: UUID) : RuntimeException("Invalid device assertion for challenge: $id")
 
 @ApplicationScoped
@@ -113,7 +116,8 @@ class ScaService(
     EnrollDeviceUseCase,
     RecordDeviceDecisionUseCase,
     ListDevicesUseCase,
-    ConsumeScaUseCase {
+    ConsumeScaUseCase,
+    RevokeDeviceUseCase {
 
     @Inject
     constructor(
@@ -269,7 +273,7 @@ class ScaService(
 
     override suspend fun enroll(command: EnrollDeviceCommand): EnrolledDevice {
         enrolledDeviceRepository.findByCredentialId(command.credentialId)?.let { existing ->
-            if (existing.partyId == command.partyId) return existing
+            if (existing.partyId == command.partyId && existing.revokedAt == null) return existing
             throw CredentialAlreadyEnrolledException(command.credentialId)
         }
         val now = OffsetDateTime.now(clock)
@@ -321,6 +325,12 @@ class ScaService(
         }
     }
 
+    override suspend fun revoke(command: RevokeDeviceCommand) {
+        if (!enrolledDeviceRepository.revokeWithAudit(command.partyId, command.deviceId, command.actorId)) {
+            throw DeviceNotEnrolledException(command.deviceId.toString())
+        }
+    }
+
     override suspend fun listDevices(query: ListDevicesQuery): List<EnrolledDevice> =
         enrolledDeviceRepository.findByPartyId(query.partyId)
 
@@ -337,6 +347,7 @@ class ScaService(
 
         val device = enrolledDeviceRepository.findByCredentialId(command.credentialId)
             ?: throw DeviceNotEnrolledException(command.credentialId)
+        if (device.revokedAt != null) throw DeviceRevokedException(command.credentialId)
         if (device.partyId != challenge.partyId) throw DeviceOwnershipMismatchException(command.credentialId)
 
         // Dynamic linking (RTS Art. 5): the device must have signed THIS challenge's amount+payee.
