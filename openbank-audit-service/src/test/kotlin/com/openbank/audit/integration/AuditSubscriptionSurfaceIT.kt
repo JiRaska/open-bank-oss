@@ -201,6 +201,40 @@ class AuditSubscriptionSurfaceIT {
         assertThat(failures).`as`("issue #6035 wiring").isEmpty()
     }
 
+    @Test
+    fun `settlement state events reach the audit store with declared identity`() {
+        val topic = "openbank.settlement.events"
+        assertThat(subscribedTopics()).contains(topic)
+        val id = UUID.randomUUID().toString()
+        val eventId = UUID.randomUUID().toString()
+        val occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString()
+        val payload = """
+            {"eventId":"$eventId","eventType":"SETTLEMENT_STATE_CHANGED","schemaVersion":1,
+             "aggregateType":"SETTLEMENT","aggregateId":"$id","sourceService":"settlement-service",
+             "actorType":"SERVICE","occurredAt":"$occurredAt","previousStatus":"PENDING",
+             "status":"BOOKED","protocol":"LEDGER_PROJECTION","payerAccountId":"${UUID.randomUUID()}",
+             "payeeAccountId":"${UUID.randomUUID()}","amount":"321.45","currency":"CZK"}
+        """.trimIndent()
+        val source: InMemorySource<Message<String>> = connector.source(CHANNEL)
+        source.runOnVertxContext(true)
+        source.send(recordOn(topic, id, payload))
+        assertThat(awaitRows(setOf(id))[id]).isEqualTo("SETTLEMENT_STATE_CHANGED" to "settlement-service")
+        DriverManager.getConnection(jdbcUrl(), jdbcUser(), jdbcPassword()).use { connection ->
+            connection.prepareStatement(
+                "SELECT entry_id, aggregate_type, occurred_at, source_service_source FROM audit_entries WHERE aggregate_id = ?",
+            ).use { query ->
+                query.setString(1, id)
+                query.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1, UUID::class.java).toString()).isEqualTo(eventId)
+                    assertThat(rows.getString(2)).isEqualTo("SETTLEMENT")
+                    assertThat(rows.getTimestamp(3).toInstant()).isEqualTo(Instant.parse(occurredAt))
+                    assertThat(rows.getString(4)).isEqualTo("EVENT")
+                }
+            }
+        }
+    }
+
     /**
      * A record shaped exactly as SmallRye Kafka delivers one: the topic on
      * [io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata], the outbox event type
@@ -208,8 +242,11 @@ class AuditSubscriptionSurfaceIT {
      * value the consumer itself derives (`inferAggregateId`), rather than one the test writes to a
      * column directly.
      */
-    private fun recordOn(topic: String, marker: String): Message<String> {
-        val payload = """{"eventType":"$EVENT_TYPE","accountId":"$marker","occurredAt":"${Instant.now()}"}"""
+    private fun recordOn(
+        topic: String,
+        marker: String,
+        payload: String = """{"eventType":"$EVENT_TYPE","accountId":"$marker","occurredAt":"${Instant.now()}"}""",
+    ): Message<String> {
         val headers = RecordHeaders()
         headers.add(
             RecordHeader(
