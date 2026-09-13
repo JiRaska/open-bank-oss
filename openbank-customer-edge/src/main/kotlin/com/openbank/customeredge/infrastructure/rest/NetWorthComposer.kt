@@ -323,8 +323,7 @@ class NetWorthComposer {
      * Null means "could not ask", which the caller turns into UNAVAILABLE. An empty array is a
      * different return and means the owner answered with nothing.
      */
-    private fun fetchArray(url: String, partyId: UUID): ArrayNode? =
-        fetchNode(url, partyId) as? ArrayNode
+    private fun fetchArray(url: String, partyId: UUID): ArrayNode? = fetchNode(url, partyId) as? ArrayNode
 
     private fun fetchNode(url: String, partyId: UUID): JsonNode? {
         val response = runCatching { upstream.get(url, partyId.toString()) }.getOrElse {
