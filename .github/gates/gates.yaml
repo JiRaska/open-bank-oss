@@ -5435,3 +5435,19 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/workflows/dr-restore-verify.yml"
+      - ".github/scripts/test-dr-restore-workflow.py"
+      - "openbank-infra/gitops/dr-restore-templates"
+    selftest: python3 .github/scripts/test-dr-restore-workflow.py
+    run: python3 .github/scripts/test-dr-restore-workflow.py
