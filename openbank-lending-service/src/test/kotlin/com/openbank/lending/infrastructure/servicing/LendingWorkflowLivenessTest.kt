@@ -156,8 +156,17 @@ class LendingWorkflowLivenessTest {
                 maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
-                loans = mockk(relaxed = true),
-                provisioning = mockk(relaxed = true),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                loans =
+                mockk(relaxed = true) {
+                    every { countActive() } returns Uni.createFrom().item(5L)
+                },
+                provisioning =
+                mockk(relaxed = true) {
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
                 registry = null,
             )
 
@@ -200,8 +209,17 @@ class LendingWorkflowLivenessTest {
                 maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
-                loans = mockk(relaxed = true),
-                provisioning = mockk(relaxed = true),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                loans =
+                mockk(relaxed = true) {
+                    every { countActive() } returns Uni.createFrom().item(5L)
+                },
+                provisioning =
+                mockk(relaxed = true) {
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
                 registry = null,
             )
         scheduler.onStart(StartupEvent())

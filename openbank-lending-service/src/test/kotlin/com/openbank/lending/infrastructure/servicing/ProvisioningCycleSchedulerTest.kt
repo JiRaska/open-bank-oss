@@ -39,8 +39,16 @@ class ProvisioningCycleSchedulerTest {
             maxBatches = 40,
             clock = clock,
             domainMetrics = mockk(relaxed = true),
-            loans = mockk(relaxed = true),
-            provisioning = mockk(relaxed = true),
+            // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked Uni
+            // that never emits, and the pass awaits the coverage read after the drain.
+            loans =
+            mockk(relaxed = true) {
+                every { countActive() } returns Uni.createFrom().item(0L)
+            },
+            provisioning =
+            mockk(relaxed = true) {
+                every { countForPeriod(any()) } returns Uni.createFrom().item(0L)
+            },
             registry = null,
         )
 
@@ -139,8 +147,16 @@ class ProvisioningCycleSchedulerTest {
             maxBatches = 3,
             clock = clock,
             domainMetrics = mockk(relaxed = true),
-            loans = mockk(relaxed = true),
-            provisioning = mockk(relaxed = true),
+            // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked Uni
+            // that never emits, and the pass awaits the coverage read after the drain.
+            loans =
+            mockk(relaxed = true) {
+                every { countActive() } returns Uni.createFrom().item(0L)
+            },
+            provisioning =
+            mockk(relaxed = true) {
+                every { countForPeriod(any()) } returns Uni.createFrom().item(0L)
+            },
             registry = null,
         )
         every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
