@@ -66,6 +66,10 @@ metadata:
   name: kyb-db-daily
   namespace: kyb
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 50 4 * * *"
   backupOwnerReference: self
   cluster:
