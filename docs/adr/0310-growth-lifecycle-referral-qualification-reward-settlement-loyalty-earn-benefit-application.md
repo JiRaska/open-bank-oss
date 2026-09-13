@@ -213,11 +213,14 @@ foreground):
 ```
 
 - The ids are the ones the app's capability registry already consumes, verbatim, so no client-side
-  translation exists to drift. `id` is a closed enum in the spec; **clients must ignore ids they do not know**, and adding one is
-  a MINOR spec change. `state` is `live | unavailable`; a client treats any other value as
-  `unavailable`. `reason` is present only when `unavailable`: `NOT_BUILT` (no backend exists),
-  `NOT_DEPLOYED` (the backend is not wired in this environment), `DISABLED` (an operator switched
-  it off).
+  translation exists to drift (`business.tax` is the business VAT/tax outlook). `id` is a closed
+  enum in the spec; **clients must ignore ids they do not know**, and adding one is a MINOR spec
+  change. `state` is `live | unavailable`; a client treats any other value as `unavailable`.
+- `reason` is present only when `unavailable`: `NOT_BUILT` (no backend exists), `NOT_DEPLOYED` (the
+  backend is not wired in this environment), `DISABLED` (an operator switched it off). **It is
+  informational only** — for operators, logs and support. The app does not branch on it; `state`
+  alone decides demo versus live, so a reason value can be added or renamed without a client
+  change.
 - **Computed from configuration only, never from a live health probe** — a flapping probe would make
   a product appear and disappear; runtime failures stay the per-route 502/503 they are today. A
   capability is `live` iff its operator switch `openbank.edge.capabilities.<id>.enabled` is true
