@@ -3042,6 +3042,25 @@ gates:
   # inside the build and the pact stays unverified, which looks identical to the
   # strand the reconciler was built to remove. Reads the committed pacts, so no
   # broker and no credentials.
+  # End-of-support is DERIVED from SECURITY.md's policy and carried in every release's evidence
+  # bundle (#9881). The derivation has two ways to be quietly wrong — taking the build time instead
+  # of the release date, and inventing the "90 days after supersession" bound for a beta release
+  # that has no successor yet — and nothing else would ever notice either; this runs its table.
+  - id: release-support-period-derivation
+    selftest_exempt: "is-a-test-suite"
+    name: "release end-of-support is derived from the policy, not invented (#9881, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 10   # pure date arithmetic over a fixture table
+    rationale: >-
+      The end-of-support date in a release's evidence bundle is a public CRA commitment computed
+      by a script no other check reads; a wrong rule would publish wrong dates on every release
+      while every release still verified green.
+    review_after: 2027-03-13
+    min_subjects: 6   # 8 derivation cases today (2026-09-13)
+    run: |
+      python3 .github/scripts/release_support_period.py --self-test
+
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
