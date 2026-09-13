@@ -3,9 +3,10 @@
 
 package com.openbank.referral.application
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.referral.application.port.out.ReferralAuditRepository
-import com.openbank.referral.application.port.out.ReferralEventPublisher
 import com.openbank.referral.application.port.out.ReferralInviteRepository
 import com.openbank.referral.application.port.out.ReferralProgramRepository
 import com.openbank.referral.application.port.out.ReferralRewardRepository
@@ -17,7 +18,6 @@ import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
 import com.openbank.referral.domain.ReferralProgram
-import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
 import com.openbank.referral.domain.RewardStatus
@@ -40,9 +40,9 @@ class ReferralService(
     private val programs: ReferralProgramRepository,
     private val invites: ReferralInviteRepository,
     private val rewards: ReferralRewardRepository,
-    private val events: ReferralEventPublisher,
     private val audit: ReferralAuditRepository,
     private val clock: Clock,
+    private val objectMapper: ObjectMapper,
 ) {
     private val random = SecureRandom()
 
@@ -190,34 +190,27 @@ class ReferralService(
             requestedAt = now,
             rewardedAt = null,
         )
-        val created = rewards.create(reward)
-        publishAudited(
-            ReferralEvent.Qualified(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = program.id,
-                inviteId = invite.id,
-                referrerPartyId = invite.referrerPartyId,
-                refereePartyId = invite.refereePartyId,
-                qualificationEventId = eventId,
-            ),
-            created.id,
-            actor,
-            now,
+        val qualified = ReferralEvent.Qualified(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = program.id,
+            inviteId = invite.id,
+            referrerPartyId = invite.referrerPartyId,
+            refereePartyId = invite.refereePartyId,
+            qualificationEventId = eventId,
         )
-        publishAudited(
-            ReferralEvent.RewardRequested(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = program.id,
-                inviteId = invite.id,
-                rewardReference = created.rewardReference,
-                amount = created.amount,
-                currency = created.currency,
-            ),
-            created.id,
-            actor,
-            now,
+        val rewardRequested = ReferralEvent.RewardRequested(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = program.id,
+            inviteId = invite.id,
+            rewardReference = reward.rewardReference,
+            amount = reward.amount,
+            currency = reward.currency,
+        )
+        val created = rewards.create(
+            reward,
+            listOf(outboxMessage(reward.id, qualified), outboxMessage(reward.id, rewardRequested)),
         )
         audit.append("REWARD_REQUESTED", created.id, actor, created.rewardReference, now)
         return created
@@ -232,41 +225,32 @@ class ReferralService(
             LedgerOutcome.REJECTED -> RewardStatus.RETRYABLE
             LedgerOutcome.REVERSED -> RewardStatus.REVERSED
         }
-        val updated = rewards.outcome(reference, next.name, now)
-        publishAudited(
-            ReferralEvent.RewardOutcome(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = reward.programId,
-                inviteId = reward.inviteId,
-                rewardReference = reference,
-                outcome = outcome,
-            ),
-            updated.id,
-            actor,
-            now,
+        val rewardOutcome = ReferralEvent.RewardOutcome(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = reward.programId,
+            inviteId = reward.inviteId,
+            rewardReference = reference,
+            outcome = outcome,
         )
+        val updated = rewards.outcome(reference, next.name, now, outboxMessage(reward.id, rewardOutcome))
         audit.append("LEDGER_${outcome.name}", updated.id, actor, reference, now)
         return updated
     }
 
     /**
-     * Publishes [event] and records the transport outcome in the audit trail when nothing left the
-     * process. An undelivered money-path event must be visible in the evidentiary record, not only
-     * in a log line — the caller cannot otherwise tell a dropped reward from a delivered one.
+     * Builds the durable outbox row for [event]. Written in the SAME transaction as the reward
+     * state change ([ReferralRewardRepository.create] / [.outcome]) — never handed to a live
+     * transport from here. See the port's KDoc for why: a hand-carried publish outside the
+     * state-changing transaction is exactly the atomicity gap #7190 replaced.
      */
-    private suspend fun publishAudited(event: ReferralEvent, aggregateId: UUID, actor: String, at: Instant) {
-        val outcome = events.publish(event)
-        if (outcome != ReferralPublishOutcome.HANDED_TO_TRANSPORT) {
-            audit.append(
-                "EVENT_NOT_PUBLISHED",
-                aggregateId,
-                actor,
-                "type=${event.eventType} eventId=${event.eventId} outcome=${outcome.name}",
-                at,
-            )
-        }
-    }
+    private fun outboxMessage(aggregateId: UUID, event: ReferralEvent) = OutboxMessage(
+        eventId = event.eventId,
+        aggregateId = aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = event.occurredAt,
+    )
 
     private fun randomToken(): String {
         val bytes = ByteArray(TOKEN_BYTES)

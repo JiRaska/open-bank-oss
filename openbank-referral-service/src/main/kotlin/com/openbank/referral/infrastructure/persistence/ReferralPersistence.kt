@@ -1,6 +1,7 @@
 package com.openbank.referral.infrastructure.persistence
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.referral.application.ReferralService
 import com.openbank.referral.application.port.out.ReferralAuditRepository
 import com.openbank.referral.application.port.out.ReferralInviteRepository
@@ -13,11 +14,14 @@ import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralProgram
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.RewardStatus
+import com.openbank.referral.infrastructure.persistence.repository.ReferralOutboxRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
@@ -187,6 +191,10 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
 @ApplicationScoped class PanacheReferralRewardRepository :
     ReferralRewardRepository,
     PanacheRepository<ReferralRewardEntity> {
+
+    @Inject
+    lateinit var outboxRepo: ReferralOutboxRepositoryImpl
+
     override suspend fun findByInviteAndEvent(i: UUID, e: String) = Panache.withSession {
         find("inviteId = ?1 and qualificationEventId = ?2", i, e).firstResult<ReferralRewardEntity>()
     }.awaitSuspending()?.toDomain()
@@ -196,36 +204,45 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             r,
         ).firstResult<ReferralRewardEntity>()
     }.awaitSuspending()?.toDomain()
-    override suspend fun create(r: ReferralReward) = Panache.withTransaction {
+
+    // Persists the reward row and every outbox message in ONE transaction (ADR-0049/ADR-0050):
+    // qualification always writes Qualified + RewardRequested together, and a crash between the
+    // two writes must not be possible.
+    override suspend fun create(r: ReferralReward, outbox: List<OutboxMessage>) = Panache.withTransaction {
         persist(
             ReferralRewardEntity().apply {
-                id =
-                    r.id
+                id = r.id
                 inviteId = r.inviteId
                 programId = r.programId
                 referrerPartyId = r.referrerPartyId
                 refereePartyId = r.refereePartyId
-                qualificationEventId =
-                    r.qualificationEventId
+                qualificationEventId = r.qualificationEventId
                 rewardReference = r.rewardReference
                 amount = r.amount
                 currency = r.currency
-                status =
-                    r.status.name
+                status = r.status.name
                 createdAt = r.createdAt
                 requestedAt = r.requestedAt
             },
-        )
+        ).chain { _ -> persistOutbox(outbox) }
     }.awaitSuspending().let { r }
-    override suspend fun outcome(ref: String, status: String, at: Instant) = Panache.withTransaction {
-        find("rewardReference", ref).firstResult<ReferralRewardEntity>().map { e ->
-            requireNotNull(e)
-            e.status =
-                status
-            if (status == RewardStatus.REWARDED.name)e.rewardedAt = at
-            e.toDomain()
+
+    override suspend fun outcome(ref: String, status: String, at: Instant, outbox: OutboxMessage) =
+        Panache.withTransaction {
+            find("rewardReference", ref).firstResult<ReferralRewardEntity>()
+                .call { _ -> outboxRepo.persistInTransaction(outbox) }
+                .map { e ->
+                    requireNotNull(e)
+                    e.status = status
+                    if (status == RewardStatus.REWARDED.name) e.rewardedAt = at
+                    e.toDomain()
+                }
+        }.awaitSuspending()
+
+    private fun persistOutbox(messages: List<OutboxMessage>): Uni<Void> =
+        messages.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, msg ->
+            acc.flatMap { outboxRepo.persistInTransaction(msg).replaceWithVoid() }
         }
-    }.awaitSuspending()
 }
 
 @ApplicationScoped class PanacheReferralAuditRepository :

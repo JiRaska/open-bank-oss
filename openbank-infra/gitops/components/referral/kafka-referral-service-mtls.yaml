@@ -1,0 +1,104 @@
+# Kafka mTLS identity + ACLs for referral-service (ADR-0137 mTLS-only cluster posture;
+# kafka.yaml sets allow.everyone.if.no.acl.found: "false" fleet-wide, so every deployed Kafka
+# client needs an explicit KafkaUser + ACL before its first deploy — same requirement
+# document-service/notification-service already meet).
+#
+# referral-service PRODUCES only (#7190's outbox relay): Qualified/RewardRequested/RewardOutcome
+# each to its own topic per application.yaml's mp.messaging.outgoing. It has no @Incoming
+# channel, so this KafkaUser needs Write+Describe on the three topics and nothing else — no
+# consumer-group ACL.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
+# this service's Kafka traffic. These resources live in `messaging` (where the Strimzi User
+# Operator watches); the User Operator mints a per-user Secret of the same name there
+# (user.crt/key/p12 + user.password + ca.crt). Those secrets are projected into the `referral`
+# namespace by the External Secrets below.
+---
+# ── KafkaUser: referral-service ────────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land before the
+    # referral-service Deployment rolls pods onto mTLS; lower waves sync first and ArgoCD
+    # blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: referral-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.referral.qualified.v1
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.referral.reward-requested.v1
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.referral.reward-outcome.v1
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: referral-service keystore ─────────────────────────────────
+# Projects the Strimzi-minted referral-service Secret from `messaging` into `referral`.
+# dataFrom.extract copies every key verbatim (preserves binary PKCS#12). deletionPolicy: Retain
+# so a transient store/RBAC blip never deletes a live cert.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    # ADR-0279 #18: Strimzi-issued client keystore. The User Operator renews the cert; this is the date by which
+    # the projection must be re-checked if it has not.
+    openbank.io/rotation-deadline: "2027-09-06"
+  name: referral-service-kafka-keystore
+  namespace: referral
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: referral-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: referral-service
+---
+# ── ExternalSecret: cluster CA truststore ─────────────────────────────────────
+# Shared cluster-CA truststore — same for every client; one projection per namespace.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    # ADR-0279 #18: Cluster CA truststore projection, same renewal path as the keystore above.
+    openbank.io/rotation-deadline: "2027-09-06"
+  name: kafka-cluster-ca-truststore
+  namespace: referral
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
