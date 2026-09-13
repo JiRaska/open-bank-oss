@@ -42,6 +42,7 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.mockk)
     // Test-only (#5705): SettlementStrandedGaugeTest, SettlementActivitiesImplTest and
     // SettlementMetricsAdapterTest assert the alert expressions in

@@ -26,7 +26,9 @@ import io.mockk.mockk
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.WebApplicationException
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
@@ -39,6 +41,7 @@ class SettlementCoverPactTest {
     private val id = UUID.fromString("55555555-5555-5555-5555-555555555520")
     private val payer = UUID.fromString("a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1")
     private val payee = UUID.fromString("77777777-7777-7777-7777-777777777720")
+    private val missingAccount = UUID.fromString("88888888-8888-4888-8888-888888888820")
     private val mapper = jacksonObjectMapper()
     private val amount = BigDecimal("125.50")
 
@@ -62,6 +65,32 @@ class SettlementCoverPactTest {
             }.build(),
         ).toPact()
 
+    @Pact(consumer = "openbank-settlement-service", provider = "openbank-balance-service")
+    fun missingPayer(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no balance exists for the settlement cover account")
+        .uponReceiving("settlement cannot reserve cover for a missing payer")
+        .path("/api/v1/balances/$missingAccount/holds").method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(mapper.writeValueAsString(SettlementCoverRequest(amount, "CZK", "Settlement cover", id.toString())))
+        .willRespondWith().status(404).headers(mapOf("Content-Type" to "application/json"))
+        .body(newJsonBody { it.stringValue("error", "NOT_FOUND") }.build()).toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "missingPayer")
+    fun `a missing payer cannot be treated as reserved cover`(server: MockServer): Unit = runBlocking {
+        val repository = mockk<SettlementRepository>()
+        coEvery { repository.findById(id) } returns Settlement(
+            id, missingAccount, payee, amount, "CZK", SettlementStatus.PENDING,
+            Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z"),
+            SettlementProtocol.LEDGER_PROJECTION,
+        )
+        val client = mockk<BalanceRestClient>()
+        every { client.reserve(any(), any()) } answers { send(server, firstArg(), secondArg()) }
+        val failure = runCatching { SettlementCoverAdapter(client, repository).reservePayer(id) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(WebApplicationException::class.java)
+        assertThat((failure as WebApplicationException).response.status).isEqualTo(404)
+    }
+
     @Test
     @PactTestFor(pactMethod = "reserve")
     fun `adapter consumes a full nonexpiring payer reservation`(server: MockServer): Unit = runBlocking {
@@ -81,9 +110,11 @@ class SettlementCoverPactTest {
         val type = BalanceRestClient::class.java
         val path = type.getAnnotation(Path::class.java).value +
             type.methods.single { it.name == "reserve" }.getAnnotation(Path::class.java).value
-        val json = given().baseUri(server.getUrl()).contentType("application/json")
+        val response = given().baseUri(server.getUrl()).contentType("application/json")
             .body(mapper.writeValueAsString(body)).post(path.replace("{accountId}", account.toString()))
-            .then().statusCode(201).extract().asString()
-        return Uni.createFrom().item(mapper.readValue(json, SettlementCoverResponse::class.java))
+        if (response.statusCode != 201) {
+            return Uni.createFrom().failure(WebApplicationException(response.statusCode))
+        }
+        return Uni.createFrom().item(mapper.readValue(response.asString(), SettlementCoverResponse::class.java))
     }
 }
