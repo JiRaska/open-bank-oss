@@ -152,6 +152,25 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# card-processing-service: authorisation, clearing and hold-release events (ADR-0283 phase 1).
+# A SEPARATE topic from openbank.cards.events, not an addition to it: that one carries card LIFECYCLE
+# (issued, blocked, limits changed) and is consumed by campaign and audit, while this one carries
+# money movement at card volume. Folding them together would put an authorisation stream through
+# consumers written for a handful of lifecycle events a day.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.card.processing.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # payment.scheme-accepted — rail ACSC notification consumed by transaction-service
 # to settle a PROCESSING payment (ADR-0108). Produced by sepa-payment, sepa-instant,
 # domestic-payment, and swift-service after receiving pacs.002 ACSC from the scheme.

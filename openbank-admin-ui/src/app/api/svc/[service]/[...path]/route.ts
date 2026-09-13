@@ -34,6 +34,9 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'domestic-payment':       { container: 'openbank-domestic-payment',       port: 8116 },
   'aml-service':            { container: 'openbank-aml-service',            port: 8117 },
   'card-issuance-service':  { container: 'openbank-card-issuance-service',  port: 8118 },
+  // ADR-0283 phase 3: the Card Center's token and dispute desks read this service. Without the
+  // entry the browser cannot reach it at all and the screens can only show mock data.
+  'card-processing-service': { container: 'openbank-card-processing-service', port: 8157 },
   'fx-service':             { container: 'openbank-fx-service',             port: 8119 },
   'security-scanner-service': { container: 'openbank-security-scanner',     port: 8120 },
   'standing-order-service': { container: 'openbank-standing-order-service', port: 8121 },
