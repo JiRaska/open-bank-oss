@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.1...kyc-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **kyc:** exclude parties that predate the auto-open consumer from the orphan gauge ([#9853](https://github.com/JiRaska/open-bank-oss/issues/9853)) ([e587fdb](https://github.com/JiRaska/open-bank-oss/commit/e587fdb6cda554712a90137b43145aa5df5b95dc)), closes [#9726](https://github.com/JiRaska/open-bank-oss/issues/9726)
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.0...kyc-service-v0.15.1) (2026-09-13)
 
 
