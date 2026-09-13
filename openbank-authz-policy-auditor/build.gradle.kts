@@ -73,7 +73,7 @@ kover {
                 bound {
                     // Ratchet floor (ADR-0020): initial coverage from the domain-model test only;
                     // raise-only from here as adapters/activities gain tests.
-                    minValue = 5
+                    minValue = 85
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

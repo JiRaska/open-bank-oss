@@ -17,4 +17,3 @@ dependencyResolutionManagement {
 }
 
 includeBuild("../openbank-libs")
-
