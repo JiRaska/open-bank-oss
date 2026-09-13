@@ -3,42 +3,42 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-sepa-payment
+# Runbook — openbank-security-scanner
 
-> Operational runbook for the `sepa-payment` service. Data domain **payments**,
-> classification **confidential**, datastore **PostgreSQL**.
+> Operational runbook for the `security-scanner` service. Data domain **platform**,
+> classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
 
 | Field | Value |
 |---|---|
-| Service | `openbank-sepa-payment` |
-| HTTP port | `8115` |
-| Data domain | payments |
-| Datastore | PostgreSQL (database `openbank_sepa_payments`) |
-| Classification | confidential |
-| Retention | 7 years |
-| Lineage role | both |
+| Service | `openbank-security-scanner` |
+| HTTP port | `8120` |
+| Data domain | platform |
+| Datastore | PostgreSQL (database `openbank_security`) |
+| Classification | internal |
+| Retention | 1 year |
+| Lineage role | internal |
 
 ## Dependencies
 
 - **Upstream (this service consumes):** _none declared_
-- **Downstream (depends on this service):** `transaction-service`, `aml-service`, `audit-service`
+- **Downstream (depends on this service):** _none declared_
 
 A failure here propagates to the downstream services above — check them when
-triaging an incident that starts on `sepa-payment`.
+triaging an incident that starts on `security-scanner`.
 
 ## Health & probes
 
 - Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
-- Logs: `kubectl logs -n payments -l app.kubernetes.io/name=sepa-payment -f`, or Loki
-  `{namespace="payments"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `security-scanner`); dashboards in Grafana.
+- Logs: `kubectl logs -n security-scanner deploy/security-scanner-service -f`, or Loki
+  `{namespace="security-scanner"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl argo rollouts restart sepa-payment -n payments` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout sepa-payment -n payments --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
-- **Scale:** `kubectl scale rollout/sepa-payment -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
+- **Restart:** `kubectl rollout restart deploy/security-scanner-service -n security-scanner` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/security-scanner-service -n security-scanner --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -60,11 +60,11 @@ triaging an incident that starts on `sepa-payment`.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested
-> (`openbank-libs/governance/attestations.yaml: sepa-payment.dr_drill`).
+> (`openbank-libs/governance/attestations.yaml: security-scanner.dr_drill`).
 
 ## Escalation & break-glass
 
 - First responder: the owning squad's on-call (rotation tracked as the
-  `sepa-payment.oncall` attestation — until that is live, escalate via the team channel).
+  `security-scanner.oncall` attestation — until that is live, escalate via the team channel).
 - Break-glass cluster access is audited; use it only for a declared incident and
   record the justification.
