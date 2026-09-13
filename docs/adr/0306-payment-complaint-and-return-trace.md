@@ -70,13 +70,14 @@ benchmarks. Compare the trace to authoritative source fixtures and measure time-
 ### Delivered P1 slice
 
 Complaint events now carry a versioned contract and stable account, transaction and dispute
-references. The context projector consumes them idempotently and rejects duplicate or older
-source-issued ordering tokens into an isolated generation-scoped store. The current token is derived
-from source event time rather than a strict aggregate revision, so equal or regressed timestamps can
-leave the projection incomplete. An assigned investigator can open the bounded graph from the
+references. Complaint lifecycle mutations increment a database-backed aggregate revision under a
+row lock and commit the revision plus event in the existing transactional outbox. The context
+projector consumes them idempotently and rejects duplicate or older revisions into an isolated
+generation-scoped store; its temporary compatibility path for retained legacy events is measured
+and can be disabled after the replay boundary is proven clean. An assigned investigator can open the bounded graph from the
 disputes admin page; the server verifies assignment and OPA, commits the audit decision and returns
-source-backed evidence. A strict source revision plus full instruction, rail, booking and return
-producers remain follow-up work, so this ADR stays `partial`.
+source-backed evidence. Full instruction, rail, booking and return producers remain follow-up work,
+so this ADR stays `partial`.
 
 ## Alternatives considered
 
@@ -94,8 +95,8 @@ producers remain follow-up work, so this ADR stays `partial`.
 **Negative**
 - Producers need stable correlation identifiers and explicit missing-link handling.
 - Eventual consistency requires prominent freshness and incomplete-state semantics.
-- Timestamp ordering suppresses stale events but cannot prove causal order when source clocks collide
-  or regress; production producers need a strict per-aggregate revision.
+- Retained legacy topic records still use timestamp ordering until the migration boundary is proven
+  clean and strict-only consumption is enabled.
 
 **Neutral**
 - No payment, return, reversal or complaint transition moves into context-service.

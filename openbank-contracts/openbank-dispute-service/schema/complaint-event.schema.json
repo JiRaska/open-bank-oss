@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openbank.dev/schemas/openbank-dispute-service/complaint-event.schema.json",
   "title": "OpenBank complaint lifecycle event",
-  "description": "Backward-compatible complaint projection contract for openbank.dispute.events. sourceVersion is the aggregate transition instant in epoch nanoseconds and gives consumers deterministic last-write-wins ordering under replay.",
+  "description": "Backward-compatible complaint projection contract for openbank.dispute.events. aggregateRevision is the strict database-backed ordering token; sourceVersion remains for mixed-version readers during migration.",
   "type": "object",
   "properties": {
     "schemaVersion": { "const": 1 },
     "sourceVersion": { "type": "integer", "minimum": 1 },
+    "aggregateRevision": { "type": "integer", "minimum": 1 },
     "eventType": {
       "enum": ["complaint.received", "complaint.interim_reply", "complaint.resolved", "complaint.closed"]
     },

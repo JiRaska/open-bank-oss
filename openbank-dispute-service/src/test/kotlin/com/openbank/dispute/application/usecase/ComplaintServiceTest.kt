@@ -183,6 +183,7 @@ class ComplaintServiceTest {
         assertThat(result.interimReplyReason).isEqualTo("awaiting card-scheme response")
         assertThat(result.interimReplyAt).isNotNull()
         assertThat(result.status).isEqualTo(ComplaintStatus.RECEIVED)
+        assertThat(result.aggregateRevision).isEqualTo(2L)
         assertThat(saved.captured.dueDate).isEqualTo(LocalDate.of(2026, 5, 27))
     }
 
@@ -267,6 +268,8 @@ class ComplaintServiceTest {
         val result = serviceAt(LocalDate.of(2026, 6, 9)).file(fileRequest()).await().indefinitely()
         assertThat(outbox.captured.eventType).isEqualTo("complaint.received")
         assertThat(outbox.captured.aggregateId).isEqualTo(result.id)
+        val payload = ObjectMapper().readTree(outbox.captured.payload)
+        assertThat(payload["aggregateRevision"].asLong()).isEqualTo(1L)
     }
 
     private fun baseComplaint(

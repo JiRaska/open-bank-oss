@@ -119,7 +119,8 @@ class ComplaintService(private val complaintRepo: ComplaintRepository, private v
                 Uni.createFrom().failure(IllegalArgumentException("Complaint not found: $id"))
             } else {
                 val (updated, eventType) = transform(existing)
-                complaintRepo.update(updated, outboxFor(updated, eventType)).map(::withBreach)
+                val revised = updated.copy(aggregateRevision = existing.aggregateRevision + 1)
+                complaintRepo.update(revised, outboxFor(revised, eventType)).map(::withBreach)
             }
         }
 
@@ -161,6 +162,7 @@ internal fun outboxFor(complaint: Complaint, eventType: String): OutboxMessage =
 private fun complaintPayload(complaint: Complaint, eventType: String): String = buildString {
     val instant = complaint.updatedAt.toInstant()
     append("""{"schemaVersion":1,"sourceVersion":${instant.epochSecond * NANOS_PER_SECOND + instant.nano},""")
+    append(""""aggregateRevision":${complaint.aggregateRevision},""")
     append(""""eventType":"$eventType","complaintId":"${complaint.id}",""")
     append(""""reference":"${complaint.reference}","category":"${complaint.category}",""")
     append(""""channel":"${complaint.channel}","status":"${complaint.status}",""")
