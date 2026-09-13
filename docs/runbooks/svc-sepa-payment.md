@@ -30,7 +30,7 @@ triaging an incident that starts on `sepa-payment`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8115` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
 - Logs: `kubectl logs -n payments -l app.kubernetes.io/name=sepa-payment -f`, or Loki
   `{namespace="payments"}`.

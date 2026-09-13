@@ -149,6 +149,10 @@ jobs:
         name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # `gh pr list` below runs only on the recovery path (a deploy branch for this SHA
+          # already exists). Without a token gh exits non-zero under `set -e`, so that path —
+          # the one that exists to re-admit a stuck build — was the one that could not run.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"

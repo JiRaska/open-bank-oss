@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.2...pid-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the NATURAL_PERSON party type the service actually accepts ([#9932](https://github.com/JiRaska/open-bank-oss/issues/9932)) ([3c3e479](https://github.com/JiRaska/open-bank-oss/commit/3c3e4791bd9e35c39167f56eef0f539995314dbb)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.1...pid-service-v0.10.2) (2026-09-13)
 
 

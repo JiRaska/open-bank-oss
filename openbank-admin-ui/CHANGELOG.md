@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.243.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.242.0...admin-ui-v0.243.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** Card Center — the capability matrix screen (ADR-0283 phase 3) ([#8842](https://github.com/JiRaska/open-bank-oss/issues/8842)) ([0362988](https://github.com/JiRaska/open-bank-oss/commit/0362988c7aecadedb6aa29ddcd9eeef596e9bcd7))
+* **admin-ui:** render rollout-attested browser evidence distinctly from CI evidence ([#9917](https://github.com/JiRaska/open-bank-oss/issues/9917)) ([c7752a4](https://github.com/JiRaska/open-bank-oss/commit/c7752a43615a41cf694358682dc9434e5d32d99d)), closes [#7451](https://github.com/JiRaska/open-bank-oss/issues/7451)
+
+
+### Bug Fixes
+
+* **admin-ui:** keep embedded insights populated ([#9954](https://github.com/JiRaska/open-bank-oss/issues/9954)) ([79f84cd](https://github.com/JiRaska/open-bank-oss/commit/79f84cda1a35d501b349f160771b3b7e60fdf489))
+* **admin-ui:** keep operational insights live ([#9962](https://github.com/JiRaska/open-bank-oss/issues/9962)) ([865829f](https://github.com/JiRaska/open-bank-oss/commit/865829fc7f19929bc6bfd4f1adc966f9f9f86c5b))
+
+
+### Security
+
+* point every security.txt at the public disclosure policy, and check it stays there ([#9922](https://github.com/JiRaska/open-bank-oss/issues/9922)) ([9804804](https://github.com/JiRaska/open-bank-oss/commit/9804804309fd22c2c9c4a5e8d45c76b684f05037)), closes [#9880](https://github.com/JiRaska/open-bank-oss/issues/9880)
+
 ## [0.242.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.241.0...admin-ui-v0.242.0) (2026-09-13)
 
 

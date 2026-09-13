@@ -30,7 +30,7 @@ triaging an incident that starts on `clearing-simulator`.
 
 ## Health & probes
 
-- Readiness: `GET :8087/q/health/ready` · Liveness: `GET :8087/q/health/live`
+- Readiness: `TCP :8139` · Liveness: `GET :8087/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
 - Logs: `kubectl logs -n payments deploy/clearing-simulator -f`, or Loki
   `{namespace="payments"}`.

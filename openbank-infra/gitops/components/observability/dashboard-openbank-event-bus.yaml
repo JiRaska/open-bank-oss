@@ -92,7 +92,7 @@ data:
         {
           "id": 2,
           "type": "timeseries",
-          "title": "Dead-Letter Rate (should be ≈ 0)",
+          "title": "Current Dead Letters by Service",
           "gridPos": {
             "x": 14,
             "y": 0,
@@ -103,7 +103,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum by (service) (rate(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[1m]))",
+              "expr": "max by (service) (openbank_outbox_dead_lettered{job=\"observability/openbank-services\"})",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -130,12 +130,13 @@ data:
             "tooltip": {
               "mode": "multi"
             }
-          }
+          },
+          "description": "Items currently parked in a terminal dead-letter state."
         },
         {
           "id": 3,
           "type": "stat",
-          "title": "Dead Letters Today",
+          "title": "Current Dead-Lettered Items",
           "gridPos": {
             "x": 0,
             "y": 8,
@@ -146,7 +147,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum(increase(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[24h])) or vector(0)",
+              "expr": "sum(openbank_outbox_dead_lettered{job=\"observability/openbank-services\"}) or vector(0)",
               "legendFormat": "",
               "refId": "A"
             }
@@ -179,12 +180,13 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Current terminal dead-letter count across instrumented outboxes."
         },
         {
           "id": 4,
           "type": "gauge",
-          "title": "Dispatch Success Rate %",
+          "title": "Backlog-Free Services %",
           "gridPos": {
             "x": 5,
             "y": 8,
@@ -195,7 +197,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (sum(rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[5m])) or vector(0)) / clamp_min((sum(rate(openbank_outbox_dispatched_total{job=\"observability/openbank-services\"}[5m])) or vector(0)) + (sum(rate(openbank_outbox_dead_total{job=\"observability/openbank-services\"}[5m])) or vector(0)), 0.0001)",
+              "expr": "100 * count(openbank_outbox_backlog{job=\"observability/openbank-services\"} == 0) / clamp_min(count(openbank_outbox_backlog{job=\"observability/openbank-services\"}), 1)",
               "legendFormat": "",
               "refId": "A"
             }
@@ -236,7 +238,8 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Share of instrumented outboxes with no pending or failed rows."
         },
         {
           "id": 5,
