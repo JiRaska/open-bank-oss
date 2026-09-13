@@ -59,6 +59,19 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # ADR-0310 D1: AccountCreated -> recorded account.opened fact -> qualification. No group.id key:
+      # a dotted leaf key never reaches the connector (#2945), so the group is the fallback
+      # `quarkus.application.name` (openbank-referral-service), which is what the KafkaUser's group
+      # ACL names. The DLQ topic uses the NESTED form, the only one SmallRye's YAML source resolves.
+      account-created-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.referral.account-created-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
       referral-qualified-out:
         connector: smallrye-kafka
@@ -94,3 +107,9 @@ mp:
       enabled: false
     oidc:
       enabled: false
+  mp:
+    messaging:
+      incoming:
+        # No broker in tests: the ADR-0310 consumer is driven through InMemoryConnector.
+        account-created-in:
+          connector: smallrye-in-memory

@@ -51,6 +51,28 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # ADR-0310 D1: the `account-created-in` consumer. Read on the topic and on the group the
+      # connector falls back to (quarkus.application.name), and Write on its dead-letter topic —
+      # without that last one the DLQ send itself fails and the consumer wedges on the very
+      # failure it was meant to park (#5745).
+      - resource:
+          type: topic
+          name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-referral-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.referral.account-created-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── ExternalSecret: referral-service keystore ─────────────────────────────────
 # Projects the Strimzi-minted referral-service Secret from `messaging` into `referral`.
