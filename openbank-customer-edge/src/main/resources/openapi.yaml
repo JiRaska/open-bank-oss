@@ -3,13 +3,27 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  # 1.57.0 -> 1.58.0 (#9286): additive — customer-managed delegated account portfolios.
+  # 1.53.1 -> 1.54.0 (#9044): additive — optional termsVersionShown on OpenTermDepositRequest
+  # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
+  # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
+  # on POST /term-deposits.
+  # 1.54.0 -> 1.55.0 (#9119): additive — GET /merchants/{descriptorKey}/logo, and merchant.logoUrl
+  # now documented as a path on THIS edge. 1.54.0 was taken by #9044 while this branch was open, so
+  # this took the next minor.
+  # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
+  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # 1.58.0 -> 1.61.0 (#9417, this branch): additive — client-managed approval-group routes
-  # (ADR-0232). NOT the next integer: 1.59.0 is held by the open #9215 and 1.60.0 by #9237. Read
-  # off live origin/main together with the open PRs — a taken version is textually identical to a
-  # free one, so no merge can catch the collision.
-  version: 1.61.0
+  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
+  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
+  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
+  # (1.57.0) in the same turn as this edit and confirmed free with
+  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
+  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
+  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
+  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
+  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
+  # takes the next free version (ADR-0048).
+  version: 1.62.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -61,6 +75,36 @@ tags:
   - name: Complaints
 
 paths:
+  /net-worth:
+    get:
+      tags: [Profiles]
+      operationId: getNetWorth
+      summary: The caller's net worth, composed from the services that own each figure
+      description: |
+        Fans out to balance-service, lending-service, wealth-service and the ADR-0284 owner graph
+        (ADR-0301 D2). The party comes from the JWT; there is no path or query parameter.
+
+        A branch whose owner did not answer is UNAVAILABLE, never zero. This endpoint answers 200
+        with an honest partial tree rather than 5xx when one upstream is down, so a customer can
+        still see their cash while lending is unavailable. `totals.complete` is false whenever any
+        branch failed or was truncated, and `totals.missingBranches` names them. A client that
+        renders the totals while ignoring those fields is presenting a partial figure as final.
+
+        No currency conversion. Totals are per currency and `totals.converted` is always false; a
+        consolidated cross-currency figure is indicative only (ADR-0024) and is the client's to
+        compute through fx-service, showing the rate and its timestamp.
+
+        Declared holdings are labelled. Every leaf from wealth-service carries `valuationSource`
+        and `valuationAgeDays`: `CUSTOMER_DECLARED` means the customer typed the number and nobody
+        checked it, and a years-old figure is otherwise indistinguishable from a fresh one.
+
+        Entity stakes carry no amount at all (`valued: false`) and move no total: party-service
+        returns who may represent whom, not what an entity is worth.
+      responses:
+        '200':
+          description: The net-worth tree, possibly partial
+        '401':
+          description: Missing or invalid bearer token
   /products:
     get:
       tags: [Products]
@@ -3432,78 +3476,6 @@ paths:
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
 
-  /delegations/approval-groups/sca-reference:
-    post:
-      tags: [Delegation]
-      summary: Calculate the canonical reference that a management SCA must sign
-      operationId: calculateApprovalGroupScaReference
-      security: [{ customerOidc: [delegations:write] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
-      responses:
-        '200': {description: Pass reference as dynamicLinkingData.reference when initiating SCA}
-        '400': {description: Invalid create/revise shape}
-
-  /delegations/approval-groups:
-    get:
-      tags: [Delegation]
-      summary: List approval groups for the currently selected profile
-      operationId: listApprovalGroups
-      security: [{ customerOidc: [delegations:read] }]
-      responses:
-        '200': {description: Versioned groups, including inactive history}
-    post:
-      tags: [Delegation]
-      summary: Create an SCA-bound approval group
-      operationId: createApprovalGroup
-      security: [{ customerOidc: [delegations:write] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
-      responses:
-        '201': {description: Approval group created}
-        '400': {description: Invalid roster or SCA}
-
-  /delegations/approval-groups/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: {type: string, format: uuid}
-    get:
-      tags: [Delegation]
-      summary: Get an approval group owned by the selected profile
-      operationId: getApprovalGroup
-      security: [{ customerOidc: [delegations:read] }]
-      responses:
-        '200': {description: Approval group}
-        '404': {description: Missing or belongs to another profile}
-    put:
-      tags: [Delegation]
-      summary: Replace the roster under optimistic revision and fresh SCA
-      operationId: reviseApprovalGroup
-      security: [{ customerOidc: [delegations:write] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
-      responses:
-        '200': {description: Approval group revised}
-        '409': {description: expectedRevision is stale}
-    delete:
-      tags: [Delegation]
-      summary: Deactivate the group for future operation snapshots
-      operationId: deactivateApprovalGroup
-      security: [{ customerOidc: [delegations:write] }]
-      responses:
-        '200': {description: Approval group deactivated}
-
   /profiles:
     get:
       tags: [Profiles]
@@ -4016,38 +3988,6 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
 
-    ApprovalGroupScaReferenceRequest:
-      type: object
-      required: [name, members, threshold]
-      properties:
-        groupId: {type: string, format: uuid, description: Present only for revision}
-        expectedRevision: {type: integer, format: int64, minimum: 1, description: Required with groupId}
-        name: {type: string, minLength: 1, maxLength: 120}
-        members:
-          type: array
-          minItems: 1
-          maxItems: 50
-          uniqueItems: true
-          items: {type: string, format: uuid}
-        threshold: {type: integer, minimum: 1}
-    ApprovalGroupWriteRequest:
-      type: object
-      required: [name, members, threshold, scaSessionId]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 120}
-        members:
-          type: array
-          minItems: 1
-          maxItems: 50
-          uniqueItems: true
-          items: {type: string, format: uuid}
-        threshold: {type: integer, minimum: 1}
-        scaSessionId: {type: string, format: uuid}
-        expectedRevision:
-          type: integer
-          format: int64
-          minimum: 1
-          description: Required on PUT to prevent overwriting a newer roster.
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
