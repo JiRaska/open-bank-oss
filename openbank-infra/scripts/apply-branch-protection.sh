@@ -60,10 +60,12 @@ REQUIRED_CHECKS=(
 
 # Checks whose health this ruleset update relies on. Before the update, the
 # exact current default-branch commit must already have emitted every one with
-# a successful conclusion. This proves both claims the migration relies on: the matrix
-# display names match GitHub's real check names, and the path-aware Admin UI
-# aggregator is healthy. A renamed shard, a missing job, a queued run or a real
-# build failure therefore stops this script before it can deadlock main.
+# a successful conclusion. This proves that the names match GitHub's real check
+# names and that the jobs are healthy on that commit. The separate phase-1 PR
+# review must also verify `Admin UI` succeeds when its path-aware build is
+# skipped; a single default-branch push cannot prove that pull-request path.
+# A renamed shard, missing job, queued run or real build failure therefore stops
+# this script before it can deadlock main.
 PREFLIGHT_CHECKS=(
   "gates (gitops-api)"
   "gates (lint-supplychain-security)"
@@ -172,7 +174,9 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
-          strict_required_status_checks_policy: false,
+          # Conservative default for a brand-new ruleset. Existing rulesets do
+          # not use this value: their complete live rule is preserved below.
+          strict_required_status_checks_policy: true,
           required_status_checks: $checks
         } }
     ],
