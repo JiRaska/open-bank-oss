@@ -158,7 +158,7 @@ class NetWorthComposerTest {
         // years ago, and ADR-0301 D2 exists to prevent exactly that.
         assertThat(leaf.path("valuationSource").asText()).isEqualTo("CUSTOMER_DECLARED")
         assertThat(leaf.path("valuationAgeDays").asLong()).isEqualTo(1200L)
-        assertThat(leaf.path("sourceService").asText()).isEqualTo("wealth-service")
+        assertThat(leaf.path("owningService").asText()).isEqualTo("wealth-service")
     }
 
     @Test
@@ -202,7 +202,7 @@ class NetWorthComposerTest {
     @Test
     fun `every leaf names the service that answered for it`() {
         val root = composer(healthyUpstream()).compose(party)
-        val sources = root.path("branches").flatMap { b -> b.path("leaves").map { it.path("sourceService").asText() } }
+        val sources = root.path("branches").flatMap { b -> b.path("leaves").map { it.path("owningService").asText() } }
 
         assertThat(sources).isNotEmpty
         assertThat(sources).allSatisfy { assertThat(it).isNotBlank() }

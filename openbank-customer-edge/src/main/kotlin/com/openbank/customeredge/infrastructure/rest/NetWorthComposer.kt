@@ -138,7 +138,7 @@ class NetWorthComposer {
             balance.path("balances").forEach { pocket ->
                 leaves.add(
                     leaf(
-                        sourceService = "balance-service",
+                        owningService = "balance-service",
                         kind = "CASH",
                         label = account.path("iban").asText(accountId),
                         amount = pocket.path("bookedBalance").decimalValue(),
@@ -170,7 +170,7 @@ class NetWorthComposer {
                 ?: loan.path("principal")
             leaves.add(
                 leaf(
-                    sourceService = "lending-service",
+                    owningService = "lending-service",
                     kind = "LOAN",
                     label = loan.path("productCode").asText(loan.path("id").asText("loan")),
                     amount = amount.decimalValue(),
@@ -197,7 +197,7 @@ class NetWorthComposer {
         val leaves = objectMapper.createArrayNode()
         holdings.forEach { h ->
             val l = leaf(
-                sourceService = "wealth-service",
+                owningService = "wealth-service",
                 kind = h.path("holdingType").asText("DECLARED"),
                 label = h.path("label").asText(""),
                 amount = h.path("attributableAmount").decimalValue(),
@@ -227,7 +227,7 @@ class NetWorthComposer {
         val leaves = objectMapper.createArrayNode()
         profiles.forEach { p ->
             val l = objectMapper.createObjectNode()
-            l.put("sourceService", "party-service")
+            l.put("owningService", "party-service")
             l.put("kind", "ENTITY_STAKE")
             l.put("label", p.path("legalName").asText(p.path("partyId").asText("")))
             l.put("entityPartyId", p.path("partyId").asText(null))
@@ -298,8 +298,18 @@ class NetWorthComposer {
     }
 
     @Suppress("LongParameterList") // one field per wire property; a DTO here would be the same list
+    /**
+     * The wire field is `owningService`, NOT `sourceService`.
+     *
+     * `sourceService` is a contract word in this fleet: it means the module that EMITTED an event,
+     * and audit-service's TopicAttribution falls back to it, so a value disagreeing with the module
+     * directory splits one producer into two in every group-by (#5256/#5902). This is a REST
+     * response, not an event, and the value is deliberately a DIFFERENT service from the one
+     * answering the request — reusing the name would have been a collision with an established
+     * meaning, which `check-source-service-convention.py` caught.
+     */
     private fun leaf(
-        sourceService: String,
+        owningService: String,
         kind: String,
         label: String,
         amount: BigDecimal,
@@ -307,7 +317,7 @@ class NetWorthComposer {
         liability: Boolean,
     ): ObjectNode {
         val l = objectMapper.createObjectNode()
-        l.put("sourceService", sourceService)
+        l.put("owningService", owningService)
         l.put("kind", kind)
         l.put("label", label)
         l.put("amount", amount)
