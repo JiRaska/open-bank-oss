@@ -37,19 +37,20 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   }))
 
   await page.goto('/security/incidents')
-  await expect(page.getByText('Payment dependency outage')).toBeVisible()
+  const register = page.getByLabel('Scrollable ICT incident register')
+  await expect(register.getByText('Payment dependency outage', { exact: true })).toBeVisible()
   await expect(page.getByText('3', { exact: true }).first()).toBeVisible()
-  await expect(page.getByLabel('Scrollable ICT incident register').getByText('P1 · Critical')).toBeVisible()
+  await expect(register.getByText('P1 · Critical')).toBeVisible()
   await expect(page.getByText('No report ID').first()).toBeVisible()
 
   await page.getByLabel('Filter by severity').selectOption('P3_MEDIUM')
   await expect(page.getByRole('status')).toContainText('1 of 3 incidents')
-  await expect(page.getByText('Document latency')).toBeVisible()
-  await expect(page.getByText('Payment dependency outage')).toHaveCount(0)
+  await expect(register.getByText('Document latency', { exact: true })).toBeVisible()
+  await expect(register.getByText('Payment dependency outage', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Clear' }).click()
 
   await page.getByLabel('Search incidents').fill('document-service')
-  await expect(page.getByText('Document latency')).toBeVisible()
+  await expect(register.getByText('Document latency', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Clear' }).click()
   await page.getByText('What happened').first().click()
   await expect(page.getByText(/Customer payments were delayed/).first()).toBeVisible()
@@ -59,7 +60,7 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   const evidenceAlert = page.getByRole('alert').filter({ hasText: 'The register could not be verified' })
   await expect(evidenceAlert).toContainText('could not be verified')
   await expect(evidenceAlert).toContainText('last successfully verified snapshot')
-  await expect(page.getByText('Payment dependency outage')).toBeVisible()
+  await expect(register.getByText('Payment dependency outage', { exact: true })).toBeVisible()
   await expect(page.getByRole('status')).toContainText('3 of 3 incidents')
 
   await page.unroute('**/api/security/incidents')
@@ -68,7 +69,7 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
     body: JSON.stringify({ available: false, reason: 'unauthorized' }),
   }))
   await page.getByRole('button', { name: 'Refresh ICT incidents' }).click()
-  await expect(page.getByText('Payment dependency outage')).toHaveCount(0)
+  await expect(register.getByText('Payment dependency outage', { exact: true })).toHaveCount(0)
   await expect(page.getByText('last successfully verified snapshot')).toHaveCount(0)
   await expect(page.getByText(/Your role cannot view this register/)).toBeVisible()
 })
