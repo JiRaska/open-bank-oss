@@ -52,6 +52,19 @@ quarkus:
 
 mp:
   messaging:
+    incoming:
+      # ADR-0310 D3: a qualified referral earns the referrer Lístky. No group.id key: a dotted leaf
+      # key never reaches the connector (#2945), so the group is the fallback
+      # `quarkus.application.name` (openbank-loyalty-service). The DLQ topic uses the NESTED form,
+      # the only one SmallRye's YAML source resolves (#686).
+      referral-qualified-in:
+        connector: smallrye-kafka
+        topic: openbank.referral.qualified.v1
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.loyalty.referral-qualified-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
       loyalty-outbox-out:
         connector: smallrye-kafka
@@ -87,6 +100,9 @@ openbank:
       enabled: false
   mp:
     messaging:
+      incoming:
+        referral-qualified-in:
+          connector: smallrye-in-memory
       outgoing:
         loyalty-outbox-out:
           connector: smallrye-in-memory
