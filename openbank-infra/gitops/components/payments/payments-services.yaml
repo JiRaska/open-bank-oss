@@ -405,7 +405,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-99ae8caf
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-9f52ff42
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2707,7 +2707,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-99ae8caf
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-9f52ff42
 
           imagePullPolicy: IfNotPresent
           ports:
