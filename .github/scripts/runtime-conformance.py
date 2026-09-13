@@ -68,6 +68,7 @@ PROBES = (
     "canary_realisability",
     "image_tag_exists",
     "audit_attribution",
+    "scrape_coverage",
 )
 
 
@@ -417,12 +418,48 @@ def cmp_audit_attribution(claims: dict, facts: dict) -> list[str]:
     return findings
 
 
+# Namespaces that legitimately run pods nothing in this fleet scrapes. Declared rather than
+# pattern-matched: "does it look like infrastructure" is a judgement, and a judgement that lives in
+# a regex silently widens. Each entry is a decision someone can argue with.
+SCRAPE_EXEMPT_NAMESPACES = frozenset({
+    "kube-system", "kube-public", "kube-node-lease",
+    "argocd", "argo-rollouts", "cert-manager", "external-secrets", "kyverno",
+    "monitoring", "observability", "cnpg-system", "strimzi", "keycloak",
+    "arc-systems", "arc-runners", "openbao", "trivy-system",
+})
+
+
+def cmp_scrape_coverage(claims: dict, facts: dict) -> list[str]:
+    """A namespace running workloads that the fleet PodMonitor does not select.
+
+    Starts from the LIVE side on purpose — the claim side is only the scrape list, and the facts are
+    the namespaces that actually hold running pods, so a namespace declared nowhere in this repo is
+    visible instead of out of scope (#9072). Same shape as the backup comparator above (#9834): the
+    gitops-scoped gate is complete about gitops, and only the side holding the snapshot can ask the
+    other question.
+    """
+    findings = []
+    for ns, fact in sorted(facts.items()):
+        if ns in SCRAPE_EXEMPT_NAMESPACES or claims.get(ns, {}).get("scraped"):
+            continue
+        pods = fact.get("pods", 0)
+        if not pods:
+            continue
+        findings.append(
+            f"{ns}: {pods} running pod(s) and the fleet PodMonitor does not select this namespace — "
+            f"nothing scrapes it, and no gitops-scoped gate can see that, because the namespace is "
+            f"declared nowhere in this repo"
+        )
+    return findings
+
+
 COMPARATORS = {
     "backup_recoverability": cmp_backup_recoverability,
     "outbox_liveness": cmp_outbox_liveness,
     "canary_realisability": cmp_canary_realisability,
     "image_tag_exists": cmp_image_tag_exists,
     "audit_attribution": cmp_audit_attribution,
+    "scrape_coverage": cmp_scrape_coverage,
 }
 
 
@@ -433,6 +470,24 @@ def _sh(args: list[str]) -> str:
         return subprocess.run(args, capture_output=True, text=True, check=False).stdout
     except OSError:
         return ""
+
+
+def claim_scraped_namespaces(root: pathlib.Path) -> dict[str, dict]:
+    """The namespaces the fleet PodMonitor says Prometheus scrapes.
+
+    `check-podmonitor-namespace-coverage.py` answers "does every workload DECLARED IN GITOPS sit in
+    a scraped namespace". That is the right question about this repo and it cannot ask the other
+    one: a namespace that exists in the cluster and is declared nowhere here is outside its subject
+    set entirely, so it reads as covered (#9072 — `pricing`, deployed from a separate repository
+    into the shared sandbox, is scraped by nothing and no gate can see it).
+
+    Same shape as `backup_recoverability` (#9834): the gitops-scoped control is complete about
+    gitops, and only the side holding the live snapshot can start from what is actually running.
+    """
+    sys.path.insert(0, str(root / "openbank-infra" / "scripts"))
+    from gitops_facts import podmonitor_namespaces  # noqa: PLC0415
+
+    return {ns: {"scraped": True} for ns in podmonitor_namespaces(root / "openbank-infra" / "gitops")}
 
 
 def collect() -> dict:
@@ -467,6 +522,21 @@ def collect() -> dict:
             "replicas": item.get("spec", {}).get("replicas"),
         }
     snap["facts"]["canary_realisability"] = rollouts
+
+    # Namespaces that actually hold running pods. `kubectl get pods -A` rather than a label
+    # selector: the point is to see workloads this repo does NOT label, which is exactly what a
+    # selector would filter out (#9072). Non-Running phases are excluded so a namespace left
+    # holding Completed Job pods is not reported as an unscraped workload.
+    namespaces: dict[str, dict] = {}
+    raw = _sh(["kubectl", "get", "pods", "-A", "-o", "json"])
+    for item in _items(raw):
+        if (item.get("status", {}) or {}).get("phase") != "Running":
+            continue
+        ns = (item.get("metadata", {}) or {}).get("namespace")
+        if not ns:
+            continue
+        namespaces.setdefault(ns, {"pods": 0})["pods"] += 1
+    snap["facts"]["scrape_coverage"] = namespaces
 
     outbox: dict[str, dict] = {}
     audit: dict = {}
@@ -550,6 +620,7 @@ def check(root: pathlib.Path, snapshot: dict) -> int:
         "canary_realisability": claim_canary_rollouts(root),
         "image_tag_exists": claim_image_pins(root),
         "audit_attribution": claim_audit_producers(root),
+        "scrape_coverage": claim_scraped_namespaces(root),
     }
     facts = snapshot.get("facts", {})
     total = 0
@@ -852,6 +923,32 @@ def self_test() -> int:
         "audit: no facts at all is skipped, not passed",
         cmp_audit_attribution({"subscribed_topics": 21}, {}),
         [])
+
+    # scrape coverage (#9072): the live side is the subject, the PodMonitor list is the claim.
+    expect(
+        "scrape: a namespace with running pods that no PodMonitor selects is flagged",
+        len(cmp_scrape_coverage({"payments": {"scraped": True}}, {"pricing": {"pods": 2}})),
+        1)
+    expect(
+        "scrape: ... and the finding says nothing scrapes it",
+        "nothing scrapes it" in (cmp_scrape_coverage({}, {"pricing": {"pods": 2}}) or [""])[0],
+        True)
+    expect(
+        "scrape: a scraped namespace is clean",
+        cmp_scrape_coverage({"payments": {"scraped": True}}, {"payments": {"pods": 9}}),
+        [])
+    expect(
+        "scrape: a declared-exempt infrastructure namespace is not a finding",
+        cmp_scrape_coverage({}, {"kube-system": {"pods": 30}, "argocd": {"pods": 4}}),
+        [])
+    expect(
+        "scrape: a namespace with NO running pods is not a finding",
+        cmp_scrape_coverage({}, {"leftover": {"pods": 0}}),
+        [])
+    expect(
+        "scrape: the exemption list is DECLARED, not a pattern — 'pricing' is not in it",
+        "pricing" in SCRAPE_EXEMPT_NAMESPACES,
+        False)
 
     if fails:
         print("runtime-conformance: self-test FAIL")
