@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.15.0
+  version: 1.16.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
@@ -894,7 +894,7 @@ components:
       properties:
         partyType:
           type: string
-          enum: [INDIVIDUAL, LEGAL_ENTITY, SOLE_TRADER]
+          enum: [NATURAL_PERSON, LEGAL_ENTITY, SOLE_TRADER]
         givenName:
           type: string
         familyName:
