@@ -83,6 +83,10 @@ metadata:
   name: goalert-db-daily
   namespace: observability
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 20 3 * * *"
   backupOwnerReference: self
   cluster:
