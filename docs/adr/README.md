@@ -311,10 +311,10 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0303](0303-banking-context-graph-and-authorized-hybrid-retrieval.md) | Banking context graph and authorized hybrid retrieval | Accepted | Partial | admin-ui,database,authz,ai-agents | — |
 | [0304](0304-fraud-and-aml-relationship-investigation.md) | Fraud and AML relationship investigation | Accepted | Planned | fraud,aml-sanctions,authz,admin-ui | — |
 | [0305](0305-corporate-kyc-ownership-and-authority-graph.md) | Corporate KYC ownership and authority graph | Accepted | Planned | kyc,onboarding,authz,admin-ui | — |
-| [0306](0306-payment-complaint-and-return-trace.md) | Payment complaint and return trace | Accepted | Planned | disputes,payments,admin-ui,audit | — |
+| [0306](0306-payment-complaint-and-return-trace.md) | Payment complaint and return trace | Accepted | Partial | disputes,payments,admin-ui,audit | open-bank-oss |
 | [0307](0307-lending-exposure-guarantor-and-collateral-graph.md) | Lending exposure, guarantor and collateral graph | Accepted | Planned | lending,compliance,authz,admin-ui | — |
-| [0308](0308-effective-time-authorization-evidence-graph.md) | Effective-time authorization evidence graph | Accepted | Planned | authz,audit,security,admin-ui | — |
-| [0309](0309-incident-business-impact-graph.md) | Incident business impact graph | Accepted | Planned | resilience,observability,admin-ui,privacy-gdpr | — |
+| [0308](0308-effective-time-authorization-evidence-graph.md) | Effective-time authorization evidence graph | Accepted | Partial | authz,audit,security,admin-ui | open-bank-oss |
+| [0309](0309-incident-business-impact-graph.md) | Incident business impact graph | Accepted | Partial | resilience,observability,admin-ui,privacy-gdpr | open-bank-oss |
 
 ## By tag
 

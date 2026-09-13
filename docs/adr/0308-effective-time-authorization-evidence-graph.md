@@ -1,11 +1,11 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
 tags: [authz, audit, security, admin-ui]
 summary: "The shared context graph records effective-time authorization evidence and uses current OPA decisions for every read, enabling reviewers to explain past approvals without treating historical grants as current access."
 ---

@@ -121,7 +121,7 @@ _Also tagged `fraud`: 0102 0139 0140 0203 0230_
 
 - **[0085](0085-complaints-handling.md)** · Complaints handling — regulatory complaints as a first-class process · `partial` · Complaints handling extends dispute-service into a two-aggregate bounded context rather than a new service, adding a regulatory taxonomy, a statutory deadline clock as domain logic, and a register for CNB reporting.
 - **[0117](0117-dispute-and-complaint-lifecycle.md)** · Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection · `partial` · Disputes and complaints stay separate aggregates in one bounded context with PSD2 15/35 business-day deadline mechanics, a per-dispute SHA-256 evidence hash chain and an evidence-backed remediation outcome.
-- **[0306](0306-payment-complaint-and-return-trace.md)** · Payment complaint and return trace · `planned` · Payment complaints get a bounded source-backed lifecycle trace on the shared context graph, correlating instruction, rail, booking, return and case evidence without replacing authoritative payment state.
+- **[0306](0306-payment-complaint-and-return-trace.md)** · Payment complaint and return trace · `partial` · Payment complaints get a bounded source-backed lifecycle trace on the shared context graph, correlating instruction, rail, booking, return and case evidence without replacing authoritative payment state.
 
 ## onboarding
 
@@ -270,7 +270,7 @@ _Also tagged `authn`: 0065 0069 0073 0080 0094_
 - **[0229](0229-roles-single-source-persona-ia.md)** · Roles single source of truth and persona-driven information architecture _(proposed)_ · `planned` · One role vocabulary generated from rules.yaml into backend, realm and admin UI; navigation becomes persona-driven workspaces instead of one domain menu for everyone.
 - **[0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md)** · Delegated access: customer-to-party sharing with granular capabilities _(proposed)_ · `partial` · Delegation service owns granular, SCA-bound grants over products (accounts, cards, savings) and single objects (payment, statement, document) — incl. propose-only flows and external disclosure; event-fed enforcement; SME-ready.
 - **[0249](0249-dispositor-model-additional-cardholders-and-enforced-delegated-spending.md)** · Dispositor model: additional cardholders and enforced delegated spending _(proposed)_ · `partial` · Disponent model: a delegate may SPEND — an additional card in their own name with its own limits, and payments from a shared account inside ceilings that are actually counted, reserved in one authoritative place.
-- **[0308](0308-effective-time-authorization-evidence-graph.md)** · Effective-time authorization evidence graph · `planned` · The shared context graph records effective-time authorization evidence and uses current OPA decisions for every read, enabling reviewers to explain past approvals without treating historical grants as current access.
+- **[0308](0308-effective-time-authorization-evidence-graph.md)** · Effective-time authorization evidence graph · `partial` · The shared context graph records effective-time authorization evidence and uses current OPA decisions for every read, enabling reviewers to explain past approvals without treating historical grants as current access.
 
 _Also tagged `authz`: 0031 0089 0167 0169 0181 0195 0202 0224 0226 0227 0233 0280 0284 0292 0295 0296 0303 0304 0305 0307_
 
@@ -418,7 +418,7 @@ _Also tagged `observability`: 0059 0070 0075 0091 0112 0119 0160 0163 0218 0234 
 - **[0298](0298-clearing-submit-payment-natural-key-idempotency.md)** · Clearing submit is idempotent on the payment natural key · `shipped` · Clearing submit dedups on the payment natural key: a retry replays the existing item and uq_clearing_items_payment backstops the race, so one payment can never settle twice.
 - **[0299](0299-fx-cnb-ingest-inherent-idempotency.md)** · FX ČNB ingest is inherently idempotent on the fixing natural key · `shipped` · FX ČNB ingest is inherently idempotent: every rate is keyed (source, validFrom) check-first, so re-ingesting a day skips stored rows; documented, no code change.
 - **[0300](0300-sepa-returns-natural-key-idempotency.md)** · SEPA payment returns are idempotent on the pacs.004 natural key · `shipped` · SEPA pacs.004 returns are idempotent on the OrgnlEndToEndId natural key plus the RETURNED state guard: a re-delivered return replays, never reverses twice. Documented, no code change.
-- **[0309](0309-incident-business-impact-graph.md)** · Incident business impact graph · `planned` · Incident response uses a privacy-minimized impact lens on the shared context graph to map affected services, workflows and bounded business cases from observed telemetry and event evidence.
+- **[0309](0309-incident-business-impact-graph.md)** · Incident business impact graph · `partial` · Incident response uses a privacy-minimized impact lens on the shared context graph to map affected services, workflows and bounded business cases from observed telemetry and event evidence.
 
 _Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 0211 0218 0241 0244 0271 0277_
 

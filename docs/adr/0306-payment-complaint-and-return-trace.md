@@ -1,11 +1,11 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
 tags: [disputes, payments, admin-ui, audit]
 summary: "Payment complaints get a bounded source-backed lifecycle trace on the shared context graph, correlating instruction, rail, booking, return and case evidence without replacing authoritative payment state."
 ---

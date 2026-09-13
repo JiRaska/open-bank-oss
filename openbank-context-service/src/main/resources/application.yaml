@@ -1,0 +1,49 @@
+quarkus:
+  application:
+    name: openbank-context-service
+  http:
+    port: 8149
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_context
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_context
+  flyway:
+    migrate-at-start: true
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  smallrye-openapi:
+    store-schema-directory: target/openapi
+  management:
+    enabled: true
+    port: 8085
+    root-path: /q
+"%dev":
+  quarkus:
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+authz:
+  enforce: true
+openbank:
+  context:
+    max-nodes: 100
+    max-edges: 200
+    query-timeout-ms: 500

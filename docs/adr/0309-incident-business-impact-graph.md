@@ -1,11 +1,11 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
 tags: [resilience, observability, admin-ui, privacy-gdpr]
 summary: "Incident response uses a privacy-minimized impact lens on the shared context graph to map affected services, workflows and bounded business cases from observed telemetry and event evidence."
 ---
