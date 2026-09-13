@@ -170,13 +170,32 @@ BASELINE: dict[str, str] = {
     # The stale-entry check below enforces the removal.
     "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
         "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
-    # Surfaced by the libs scan (#7984): the spec's origination-state list is exactly
-    # libs-domain's OriginationState PLUS three invented values (APPROVED/PROPOSED/REJECTED) —
-    # the #5895 shape, invisible until the shared enum could pair. Lending is money-path, so the
-    # spec correction (dropping the three phantom values) goes through its own reviewed change.
+    # NOT drift, and the earlier reason here was WRONG in the dangerous direction (#5962). It said
+    # APPROVED/PROPOSED/REJECTED "have never existed in the code" and asked for a spec correction
+    # dropping them — which would have removed working API vocabulary from a money-path contract.
+    #
+    # They are accepted filter inputs, and they are TRANSLATED rather than ignored. The parameter is
+    # the `status` query filter of listRecentApplications, whose repository does:
+    #     mapStatusFilter(status) = OriginationState.entries.firstOrNull { it.name == status }
+    #         ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+    #         ?: throw IllegalArgumentException("Unknown application status: $status")
+    # and `mapLegacyStatus` maps PROPOSED -> SUBMITTED, APPROVED -> OFFERED, REJECTED -> DECLINED
+    # (MAPPABLE_LEGACY_STATUSES, libs-domain). So a client sending APPROVED gets the OFFERED rows,
+    # not an empty list and not a 400 — the spec's own description says the legacy names "remain
+    # accepted ... for compatibility; retired rows were migrated by V9", and the code agrees.
+    #
+    # The gate pairs a FILTER vocabulary (canonical states + the retired names still honoured) with
+    # the canonical enum alone, and cannot see the translation layer. Deliberate superset, same
+    # class as the campaign/document/ledger entries above.
+    #
+    # What IS still open, and is not this gate's question: whether the legacy vocabulary should be
+    # retired from the filter now that V9 has migrated the rows. That is an API-deprecation decision
+    # for the lending owner, and until it is made the spec is correct to publish what the endpoint
+    # accepts.
     "openbank-lending-service:APPROVED,ASSESSMENT,AWAITING_SIGNATURE,DECISION_PENDING,DECLINED,DISBURSED,DOCS_REQUIRED,DRAFT,EXPIRED,FOUR_EYES,KYC_PENDING,OFFERED,PROPOSED,READY_TO_DISBURSE,REFLECTION_PERIOD,REJECTED,SIGNED,SUBMITTED,WITHDRAWN":
-        "#7984 — OriginationState: spec advertises APPROVED/PROPOSED/REJECTED, which have never "
-        "existed in the code; real drift, needs a reviewed lending spec fix (money-path).",
+        "#5962 — listRecentApplications `status`: NOT drift. A deliberate superset of "
+        "OriginationState; PROPOSED/APPROVED/REJECTED are retired names the repository still "
+        "translates via LegacyOriginationMigration.mapLegacyStatus, so they return rows.",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
     # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
     # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —

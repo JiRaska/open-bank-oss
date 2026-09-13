@@ -67,6 +67,7 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:153: plai
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:155: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:160: plaintext http:// env value http://interest-service.interest.svc:8125
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:165: plaintext http:// env value http://kyc-service.kyc.svc:8114
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:173: plaintext http:// env value http://wealth-service.wealth.svc:8154
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:169: plaintext http:// env value http://lending-service.lending.svc:8126
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:171: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:173: plaintext http:// env value http://domestic-payment.payments.svc:8116

@@ -36,6 +36,11 @@ private const val TOKEN_BYTES = 32
 private const val DEFAULT_WINDOW_DAYS = 30L
 
 @ApplicationScoped
+// One use-case class mirrors the referral surface. The published-programme read added for the
+// catalogue (#7198) is the 11th function, and detekt's threshold FIRES AT 11 rather than above it.
+// Splitting a read that shares the repository and the clock with the rest of the surface would add
+// a class to satisfy a counter, not a boundary.
+@Suppress("TooManyFunctions")
 class ReferralService(
     private val programs: ReferralProgramRepository,
     private val invites: ReferralInviteRepository,
@@ -45,6 +50,11 @@ class ReferralService(
     private val clock: Clock,
 ) {
     private val random = SecureRandom()
+
+    suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
+
+    suspend fun publishedProgram(id: UUID): ReferralProgram? =
+        programs.find(id)?.takeIf { it.status == ProgramStatus.PUBLISHED }
 
     suspend fun createProgram(
         name: String,

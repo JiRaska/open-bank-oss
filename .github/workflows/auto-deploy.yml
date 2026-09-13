@@ -484,7 +484,18 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
