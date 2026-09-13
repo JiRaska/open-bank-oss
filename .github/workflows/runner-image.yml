@@ -108,7 +108,9 @@ jobs:
       # and every runner Pod was denied at admission — Kyverno reports "unverified image" on
       # the two Enforce policies as well, with the missing SLSA predicate as the only logged
       # error. Measured 2026-09-12: the passing control image (openbank-ledger-service) has
-      # cyclonedx AND slsaprovenance; openbank-ci-runner had cyclonedx only.
+      # cyclonedx AND slsaprovenance; openbank-ci-runner had cyclonedx only. Explained
+      # 2026-09-13 (#9805 item 4): Kyverno v1.12.5 lets the last-evaluated verify policy's
+      # verdict stand for the image in every policy, so an Audit failure could deny.
       #
       # cosign_sign_and_attest does all three — sign, CycloneDX SBOM, SLSA provenance — with
       # the same KMS key, and each step proves its own envelope landed with a
@@ -150,7 +152,7 @@ jobs:
             FAIL=1
           fi
           if ! cosign verify-attestation --key "$COSIGN_KEY" --type slsaprovenance "$IMAGE_DIGEST_REF" >/dev/null 2>&1; then
-            echo "::error::SLSA provenance attestation verification FAILED — verify-openbank-image-slsa-provenance is Audit, but its failure still denies every runner Pod (#9793)."
+            echo "::error::SLSA provenance attestation verification FAILED — the runner image must carry it: an Audit-mode SLSA policy denied every runner Pod in September (#9793), and that policy returns to admission after the Kyverno upgrade (#9805)."
             FAIL=1
           fi
           if [ "$FAIL" -eq 1 ]; then

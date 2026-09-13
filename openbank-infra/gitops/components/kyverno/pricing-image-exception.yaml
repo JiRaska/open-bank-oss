@@ -18,8 +18,14 @@
 # five, while openbank-pricing-service — identical attestation state — was admitted with
 # SLSA as a mere warning. Kyverno reports `unverified image` on the two Enforce policies
 # while logging only the SLSA error, so an exception naming only the failing policy would
-# leave two live denials. The asymmetry between those two images is unexplained and is
-# tracked as item 4 of #9805; this exception does not depend on explaining it.
+# leave two live denials.
+#
+# EXPLAINED 2026-09-13 (#9805 item 4): Kyverno v1.12.5 keeps ONE verification status per
+# image across all verify policies and the last-evaluated policy wins, so an Audit SLSA
+# failure denied whenever SLSA happened to be evaluated last. The two images were two draws
+# of that order. The SLSA ClusterPolicy has since been removed from admission until Kyverno
+# scopes verdicts per policy (>= v1.19.0), so its entry is gone from this exception; the
+# signature and SBOM entries remain because those Enforce policies still share the status.
 #
 # BLAST RADIUS
 # Namespace `pricing` only. That namespace holds one private, non-public console and its
@@ -33,9 +39,9 @@
 #   2. A rebuilt console image verifies all three predicates against the key these
 #      policies pin — signature, cyclonedx AND slsaprovenance.
 #   3. deploy/sandbox pinned to that image, and a dry-run Pod create in `pricing` admitted
-#      with this file removed. Admission is nondeterministic for unverifiable images
-#      (#9805 item 4), so repeat the probe and require unanimity; a single ADMITTED is
-#      roughly one-in-five a false pass.
+#      with this file removed. While the signature and SBOM policies are separate, an image
+#      failing one can still be admitted when the other is evaluated last (#9805 item 4), so
+#      repeat the probe and require unanimity; a single ADMITTED is not a pass.
 #
 # The July precedent for letting an exception outlive its cause is #908 -> #1053, and the
 # one from this morning is #9803 -> #9822, removed the same day. Match the second.
@@ -62,7 +68,3 @@ spec:
       ruleNames:
         - verify-cyclonedx-sbom-attestation
         - autogen-verify-cyclonedx-sbom-attestation
-    - policyName: verify-openbank-image-slsa-provenance
-      ruleNames:
-        - verify-slsa-provenance
-        - autogen-verify-slsa-provenance
