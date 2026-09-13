@@ -202,17 +202,18 @@ foreground):
   "capabilities": [
     { "id": "loyalty",              "state": "unavailable", "reason": "NOT_DEPLOYED" },
     { "id": "referrals",            "state": "unavailable", "reason": "DISABLED" },
-    { "id": "offers_inbox",         "state": "unavailable", "reason": "NOT_BUILT" },
-    { "id": "accept_payment",       "state": "unavailable", "reason": "NOT_BUILT" },
-    { "id": "all_money",            "state": "unavailable", "reason": "NOT_BUILT" },
-    { "id": "business_money_strip", "state": "unavailable", "reason": "NOT_BUILT" },
-    { "id": "pending_approvals",    "state": "unavailable", "reason": "NOT_BUILT" },
-    { "id": "game_points",          "state": "unavailable", "reason": "NOT_BUILT" }
+    { "id": "offers",              "state": "unavailable", "reason": "NOT_BUILT" },
+    { "id": "accept.settlement",   "state": "unavailable", "reason": "NOT_BUILT" },
+    { "id": "allmoney.linked",     "state": "unavailable", "reason": "NOT_BUILT" },
+    { "id": "business.tax",        "state": "unavailable", "reason": "NOT_BUILT" },
+    { "id": "approvals.multisig",  "state": "unavailable", "reason": "NOT_BUILT" },
+    { "id": "rewards.points",      "state": "unavailable", "reason": "NOT_BUILT" }
   ]
 }
 ```
 
-- `id` is a closed enum in the spec; **clients must ignore ids they do not know**, and adding one is
+- The ids are the ones the app's capability registry already consumes, verbatim, so no client-side
+  translation exists to drift. `id` is a closed enum in the spec; **clients must ignore ids they do not know**, and adding one is
   a MINOR spec change. `state` is `live | unavailable`; a client treats any other value as
   `unavailable`. `reason` is present only when `unavailable`: `NOT_BUILT` (no backend exists),
   `NOT_DEPLOYED` (the backend is not wired in this environment), `DISABLED` (an operator switched
