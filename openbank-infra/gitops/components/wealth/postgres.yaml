@@ -1,0 +1,60 @@
+# Single-owner Postgres for wealth-service, reconciled by the cluster-wide CNPG operator. CNPG
+# generates the `wealth-db-app` secret (username/password for the `openbank` owner) and a
+# `wealth-db-rw` Service — both consumed by the wealth-service Deployment for the reactive
+# datasource and Flyway migrations. One instance for sandbox FinOps; prod should raise to 3.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: wealth-db
+  namespace: wealth
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_wealth
+      owner: openbank
+  # WAL archiving + base backups to S3. A declared holding is the customer's own statement about
+  # their property and the evidence trail behind it (ADR-0301); governance.yaml sets retention at
+  # 10 years. Credentials from EKS Pod Identity on the wealth-db ServiceAccount.
+  #
+  # A backup that has never been configured reports the SAME success as one that works: CNPG's
+  # archiver is a no-op with a success exit code when no barmanObjectStore exists, and both the
+  # ContinuousArchiving condition and pg_stat_archiver agree with it. Verify by listing the
+  # objects (`aws s3 ls`), never by reading a condition.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/wealth-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: wealth-db-daily
+  namespace: wealth
+spec:
+  schedule: "0 55 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: wealth-db

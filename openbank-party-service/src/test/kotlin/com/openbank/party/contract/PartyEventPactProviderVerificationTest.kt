@@ -448,4 +448,14 @@ class PartyEventPactProviderVerificationTest {
         private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
         private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
     }
+
+    /**
+     * The negative state: deliberately seeds NOTHING — see the account-service twin. An unknown
+     * party id must answer 404, not a 200 with empty names, which VoP would read as a real "no
+     * name held" for the payee.
+     */
+    @State("no party exists with the unknown id")
+    fun noPartyWithUnknownId() {
+        // Intentionally empty.
+    }
 }

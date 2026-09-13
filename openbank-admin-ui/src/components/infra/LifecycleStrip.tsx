@@ -36,14 +36,18 @@ export interface CompLifecycle {
   urgency: Urgency
 }
 
+// These badges carry TEXT, so `color` has to clear AA 4.5:1 on its own `bg`. The hardcoded pairs
+// this replaced did not: #d97706 on #fffbeb measured 3.07:1 and #059669 on #f0fdf4 3.59:1 (axe,
+// /settings and /infrastructure). The `*-text` tokens are the ones tuned against every light
+// surface, and using them also makes dark theme follow — a literal cannot (#9749, ADR-0208 D2).
 const URGENCY: Record<Urgency, { cs: string; en: string; color: string; bg: string }> = {
-  current:           { cs: 'Aktuální',          en: 'Up to date',     color: '#059669', bg: '#ecfdf5' },
-  'patch-available': { cs: 'Dostupná záplata',  en: 'Patch available',color: '#d97706', bg: '#fffbeb' },
-  'major-available': { cs: 'Nový major',        en: 'New major',      color: '#2563eb', bg: '#eff6ff' },
-  vulnerable:        { cs: 'Zranitelnosti',     en: 'Vulnerable',     color: '#dc2626', bg: '#fef2f2' },
-  'eol-soon':        { cs: 'Blíží se EoL',      en: 'EoL approaching',color: '#dc2626', bg: '#fef2f2' },
-  eol:               { cs: 'Po konci podpory',  en: 'Past EoL',       color: '#991b1b', bg: '#fef2f2' },
-  unknown:           { cs: 'Neznámé',           en: 'Unknown',        color: '#6b7280', bg: '#f3f4f6' },
+  current:           { cs: 'Aktuální',          en: 'Up to date',     color: 'var(--success-text)', bg: 'var(--success-bg)' },
+  'patch-available': { cs: 'Dostupná záplata',  en: 'Patch available',color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  'major-available': { cs: 'Nový major',        en: 'New major',      color: 'var(--info-text)',    bg: 'var(--info-bg)' },
+  vulnerable:        { cs: 'Zranitelnosti',     en: 'Vulnerable',     color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  'eol-soon':        { cs: 'Blíží se EoL',      en: 'EoL approaching',color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  eol:               { cs: 'Po konci podpory',  en: 'Past EoL',       color: 'var(--danger-text)',  bg: 'var(--danger-bg)' },
+  unknown:           { cs: 'Neznámé',           en: 'Unknown',        color: 'var(--text-secondary)', bg: 'var(--surface-3)' },
 }
 
 type T = (cs: string, en: string) => string
@@ -124,7 +128,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
       {has ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)' }}>
           {lc.isLts && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#059669', fontWeight: 700 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--success-text)', fontWeight: 700 }}>
               <ShieldCheck size={12} /> LTS
             </span>
           )}
@@ -155,7 +159,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <ShieldAlert size={12} /> {t('CVE: zatím nesken.', 'CVE: not yet scanned')}
           </span>
         ) : data.cve.total === 0 ? (
-          <span style={{ color: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ color: 'var(--success-text)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <ShieldCheck size={12} /> {t('Žádné známé CVE', 'No known CVEs')}
           </span>
         ) : (

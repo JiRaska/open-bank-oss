@@ -342,14 +342,18 @@ export function hasAnyRole(roles: string[], ...required: Role[]): boolean {
   return required.some(r => roles.includes(r))
 }
 
+// These badges carry text, so each `color` has to clear AA 4.5:1 on its own `bg`. Four of the seven
+// did not — Admin 4.41:1, Payments 3.60:1, Auditor 3.07:1, API 3.54:1 — and the values below are the
+// measured minimum plus headroom. API is the one worth noting: no axe sweep could have found it,
+// because that role never rendered in a test session, so the table had to be measured directly (#9749).
 export const ROLE_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  ROLE_ADMIN:      { label: "Admin",      color: "#dc2626", bg: "#fef2f2" },
+  ROLE_ADMIN:      { label: "Admin",      color: "#d52424", bg: "#fef2f2" },
   ROLE_OPERATOR:   { label: "Operator",   color: "#2563eb", bg: "#eff6ff" },
   ROLE_VIEWER:     { label: "Viewer",     color: "#6b7280", bg: "#f9fafb" },
   ROLE_COMPLIANCE: { label: "Compliance", color: "#7c3aed", bg: "#faf5ff" },
-  ROLE_PAYMENTS:   { label: "Payments",   color: "#059669", bg: "#f0fdf4" },
-  ROLE_AUDITOR:    { label: "Auditor",    color: "#d97706", bg: "#fffbeb" },
-  ROLE_API:        { label: "API",        color: "#0891b2", bg: "#ecfeff" },
+  ROLE_PAYMENTS:   { label: "Payments",   color: "#04815a", bg: "#f0fdf4" },
+  ROLE_AUDITOR:    { label: "Auditor",    color: "#ab5e04", bg: "#fffbeb" },
+  ROLE_API:        { label: "API",        color: "#067b98", bg: "#ecfeff" },
   ROLE_SUPERVISOR: { label: "Supervisor", color: "#be185d", bg: "#fdf2f8" },
   ROLE_KYC:        { label: "KYC",        color: "#0d9488", bg: "#f0fdfa" },
   ROLE_KYC_OPENER: { label: "KYC Opener", color: "#0d9488", bg: "#f0fdfa" },
