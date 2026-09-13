@@ -56,7 +56,6 @@ REQUIRED_CHECKS=(
   "Admin UI"                                 # CI — path-aware build + Playwright gate
   "Gitleaks"                                 # Secret scan
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
-  "OPA policy gate"                          # Existing live requirement — preserve, not part of this migration
 )
 
 # Checks whose health this ruleset update relies on. Before the update, the
@@ -70,7 +69,6 @@ PREFLIGHT_CHECKS=(
   "gates (lint-supplychain-security)"
   "gates (registry-kotlin-data)"
   "Admin UI"
-  "OPA policy gate"
 )
 
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
@@ -131,6 +129,7 @@ existing_id=$(gh api "repos/$REPO/rulesets" --jq \
 # there is no existing ruleset (first-time create). The list endpoint omits
 # bypass_actors, so fetch the individual ruleset.
 bypass_json='[]'
+live_checks_json='[]'
 # ADR-0272 rejects strict up-to-date enforcement at the measured merge rate:
 # it moves serialization into rebase loops without closing the merge race.
 # New rulesets follow that current decision; existing rulesets retain their
@@ -162,25 +161,24 @@ if [ -n "$existing_id" ]; then
   fi
   echo "Preserving strict-required-status-checks policy: $strict_json."
 
-  # A PUT replaces the complete required-check list too. Refuse an accidental
-  # removal caused by desired-state drift; deleting a live gate must be an
-  # explicit, separately reviewed migration rather than a side effect here.
-  live_checks=$(echo "$existing_ruleset" | jq -r '
+  # A PUT replaces the complete required-check list too. Carry every live
+  # context into the payload, including requirements managed outside this
+  # script. This migration may add checks, but can never remove one as a side
+  # effect of desired-state drift.
+  live_checks_json=$(echo "$existing_ruleset" | jq -c '
     [.rules[] | select(.type == "required_status_checks")
-      | .parameters.required_status_checks[].context] | unique[]')
-  while IFS= read -r context; do
-    [ -z "$context" ] && continue
-    if ! printf '%s\n' "${REQUIRED_CHECKS[@]}" | grep -Fqx -- "$context"; then
-      echo "ERROR: desired ruleset would remove live required check '$context'." >&2
-      echo "       Add it to REQUIRED_CHECKS or migrate it explicitly in a separate PR." >&2
-      exit 1
-    fi
-  done <<< "$live_checks"
+      | .parameters.required_status_checks[].context] | unique')
+  if ! echo "$live_checks_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "ERROR: ruleset #$existing_id required checks could not be read." >&2
+    exit 1
+  fi
+  echo "Preserving $(echo "$live_checks_json" | jq 'length') live required check(s)."
 fi
 
 # Build the required_status_checks array as JSON from REQUIRED_CHECKS.
 checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
-  | jq -R '{context: .}' | jq -cs .)
+  | jq -R . | jq -cs --argjson live "$live_checks_json" \
+    '(. + $live) | unique | map({context: .})')
 
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
