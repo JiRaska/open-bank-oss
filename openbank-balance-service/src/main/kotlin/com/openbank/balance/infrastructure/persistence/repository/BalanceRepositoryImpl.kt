@@ -11,6 +11,8 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
+import jakarta.persistence.OptimisticLockException
 import jakarta.persistence.Tuple
 import java.math.BigDecimal
 import java.util.UUID
@@ -49,6 +51,11 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
             .firstResult()
             .invoke { entity ->
                 if (entity != null) {
+                    // The domain mutation was prepared before this transaction loaded the row.
+                    // Hibernate only checks races after that load, so reject an already stale snapshot.
+                    if (entity.version + 1 != balance.version) {
+                        throw OptimisticLockException("Balance changed while preparing the update")
+                    }
                     entity.bookedAmount = balance.bookedAmount
                     entity.availableAmount = balance.availableAmount
                     entity.reservedAmount = balance.reservedAmount
@@ -233,14 +240,26 @@ class HoldRepositoryImpl(
     // transaction — the mirror of saveWithEvent.
     override suspend fun releaseWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
         Panache.withTransaction {
-            applyBalance(balance)
-                .flatMap {
-                    repo.find("holdId", hold.id).firstResult().invoke { entity ->
-                        entity?.releasedAt = hold.releasedAt
+            // Same lock order as ledger projection: pocket, then hold. Recheck the durable hold
+            // before applying the prepared snapshot; projection may have consumed it meanwhile.
+            balanceRepo.find("accountId = ?1 and currency = ?2", balance.accountId, balance.currency)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { pocket ->
+                    checkNotNull(pocket) { "Balance not found for hold release" }
+                    repo.find(
+                        "holdId",
+                        hold.id,
+                    ).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { found ->
+                        val current = requireNotNull(found) { "Hold not found for release" }
+                        if (current.releasedAt != null) {
+                            io.smallrye.mutiny.Uni.createFrom().item(current.toDomain())
+                        } else {
+                            applyBalance(balance).flatMap {
+                                current.releasedAt = hold.releasedAt
+                                outboxRepo.persistInTransaction(event.toOutboxMessage(mapper))
+                            }.replaceWith(hold)
+                        }
                     }
                 }
-                .flatMap { outboxRepo.persistInTransaction(event.toOutboxMessage(mapper)) }
-                .replaceWith(hold)
         }.awaitSuspending()
 
     private fun applyBalance(balance: Balance): io.smallrye.mutiny.Uni<*> =
@@ -248,6 +267,11 @@ class HoldRepositoryImpl(
             .firstResult()
             .invoke { entity ->
                 if (entity != null) {
+                    // The domain mutation was prepared before this transaction loaded the row.
+                    // Hibernate only checks races after that load, so reject an already stale snapshot.
+                    if (entity.version + 1 != balance.version) {
+                        throw OptimisticLockException("Balance changed while preparing the update")
+                    }
                     entity.bookedAmount = balance.bookedAmount
                     entity.availableAmount = balance.availableAmount
                     entity.reservedAmount = balance.reservedAmount

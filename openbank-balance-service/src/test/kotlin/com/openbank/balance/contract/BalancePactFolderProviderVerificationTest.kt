@@ -159,10 +159,11 @@ class BalancePactFolderProviderVerificationTest {
      * verification pass needs.
      */
     private suspend fun seedBalance(balance: Balance) {
-        if (balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency) == null) {
+        val current = balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency)
+        if (current == null) {
             balanceRepo.save(balance)
         } else {
-            balanceRepo.update(balance)
+            balanceRepo.update(balance.copy(version = current.version + 1))
         }
     }
 
