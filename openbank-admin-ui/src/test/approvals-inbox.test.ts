@@ -125,7 +125,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       // catch-all below and doubles up P-1 under a different domain label — exactly the
       // "unread source is indistinguishable from an empty one" trap this file's other tests
       // are named for, just self-inflicted by an unguarded fallback instead of a missing fetch.
-      if (url.includes('communications/approvals') || url.includes('communication-service')) {
+      if (url.includes('communications/approvals') || url.includes('communication-service') || url.includes('/sca/approvals')) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       }
       if (url.includes('delegations/approvals') || url.includes('delegation-service')) {
@@ -525,4 +525,24 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.party).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
+  it('includes SCA approvals with the authenticated operator and a bounded queue', async () => {
+    const mock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      if (url.includes('/api/v1/sca/approvals')) {
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer operator-token')
+        expect(new URL(url).searchParams.get('limit')).toBe('50')
+        return Promise.resolve(Response.json([
+          { id: 'sca-1', action: 'device.revoke', resourceId: 'party@device', makerId: 'maker', createdAt: '2026-09-13T10:00:00Z' },
+        ]))
+      }
+      return Promise.resolve(Response.json([]))
+    })
+    vi.stubGlobal('fetch', mock)
+    const body = await (await (await route()).GET()).json()
+    expect(body.sources.sca).toBe('ok')
+    expect(body.items).toContainEqual({
+      id: 'sca-1', domain: 'sca', action: 'device.revoke', resourceId: 'party@device',
+      maker: 'maker', proposedAt: '2026-09-13T10:00:00Z',
+    })
+  })
+
 })

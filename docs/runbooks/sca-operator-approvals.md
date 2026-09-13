@@ -7,6 +7,12 @@ until its TTL expires. A missing record does not prove the associated operation 
 The checker sends `{"approve": true}` or `{"approve": false}`. The maker cannot decide
 their own request; the same identity representation is used in both checks.
 
+The admin approval inbox includes SCA and links to `/approvals/sca/{id}`. The workbench
+shows the maker and exact bound target. Approval requires an explicit target review; for
+enrollment the checker must also supply the matching fingerprint from the verified request.
+A separate confirmation records the decision. If its response is uncertain, reload the
+record before another decision. The workbench never retries the business operation for the maker.
+
 When `authz.enforce` and `authz.four-eyes.enforce` are enabled and OPA requires approval,
 the original operation returns 202 with `approvalId` before its business write. After a
 different checker approves, the maker retries the identical operation with `X-Approval-Id`.
@@ -23,8 +29,8 @@ The service has no blanket exemption for operator identities.
 ## Deployment
 
 `AUTHZ_FOUR_EYES_ENFORCE` defaults to false. This change prepares the API and binding;
-it does not turn on the production manifest. Before enabling it, complete the admin review
-flow, exercise the real identity provider and Redis permissions, and run an enforced
+it does not turn on the production manifest. Before enabling it, exercise the admin review
+flow with the real identity provider and Redis permissions, and run an enforced
 maker/checker drill. Review both successful service-account ceremonies and refused human
 requests. All writers must have the atomic approval-store implementation; see
 [the shared upgrade precautions](atomic-four-eyes-approvals.md).
@@ -45,4 +51,6 @@ durable authorization evidence is a separate production requirement.
 `ScaFourEyesFlowIT` uses real HTTP, PostgreSQL, Redis and the generated deployment OPA
 bundle. Its policy image and bundle are declared Gradle inputs. It proves local enforcement,
 ownership parsing, maker/checker separation, field binding and existing service exemptions.
-It does not prove production identity wiring, live rollout or administrative UI readiness.
+The admin component and BFF tests cover review, bearer relay, redacted errors, duplicate clicks
+and uncertain responses. Playwright checks the signed-in mobile review and confirmation using
+a mocked service response. These checks do not prove production identity wiring or live rollout.
