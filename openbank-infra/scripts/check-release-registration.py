@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import pathlib
+import contextlib
+import io
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -191,6 +193,30 @@ def self_test() -> int:
     case("an empty pending set leaves the gate exactly as strict as before",
          three, {"openbank-a", "openbank-b"}, {"openbank-a", "openbank-b"}, True,
          "NOT in release-please-config.json", pending=set())
+    # The argv parsing is its own failure surface: an empty base must read as "no base", not as
+    # a ref named "" that git then fails to resolve. Each of these must be strict (no pending).
+    for label, argv, want_base in (
+        ("no --pr-base at all", ["prog"], ""),
+        ("--pr-base with an empty value", ["prog", "--pr-base", ""], ""),
+        ("--pr-base as the last argument, no value", ["prog", "--pr-base"], ""),
+        ("--pr-base with a real value", ["prog", "--pr-base", "abc123"], "abc123"),
+    ):
+        got = base_from_argv(argv)
+        if got != want_base:
+            fails.append(f"{label}: base_from_argv should be {want_base!r}, got {got!r}")
+        if not want_base:
+            # Must be strict AND must not have asked git about a ref named "": the empty-base
+            # fallback in newly_added_modules() would make the wrong answer look identical, so
+            # the discriminator is that nothing is probed at all (no warning is emitted).
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                got_pending = pending_from_argv(argv)
+            if got_pending:
+                fails.append(f"{label}: must leave the pending set empty (strict)")
+            if "did not resolve" in buf.getvalue():
+                fails.append(f"{label}: resolved an empty base as a git ref instead of "
+                             f"skipping the lookup")
+
     for label, have, cfg, man, want in (
         ("no version.txt found at all", set(), three, three, True),
         ("config read as empty", three, set(), three, True),
@@ -217,7 +243,7 @@ def self_test() -> int:
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
     print("self-test ok: release-registration is falsifiable "
-          "(12 comparison + 4 empty-read cases + a live read)")
+          "(12 comparison + 4 argv + 4 empty-read cases + a live read)")
     return 0
 
 
@@ -246,13 +272,31 @@ def newly_added_modules(base: str) -> set[str]:
     return modules_with_version_txt() - on_base
 
 
+def base_from_argv(argv: list[str]) -> str:
+    """The `--pr-base` value, or "" when it is absent or empty.
+
+    `--pr-base ""` is the same statement as no `--pr-base` at all: there is no PR base, so every
+    module is pre-existing and the gate is strict. The empty form exists because run-gates.py
+    derives a gate's `needs_base` from the COMMAND TEXT — a bare `$PR_DIFF_BASE` is classified
+    `required` and then refuses to run without one, which this gate must not be: it also runs on
+    a push to main, where no base exists.
+    """
+    if "--pr-base" not in argv:
+        return ""
+    i = argv.index("--pr-base") + 1
+    return argv[i] if i < len(argv) else ""
+
+
+def pending_from_argv(argv: list[str]) -> set[str]:
+    base = base_from_argv(argv)
+    return newly_added_modules(base) if base else set()
+
+
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
 
-    pending: set[str] = set()
-    if "--pr-base" in sys.argv:
-        pending = newly_added_modules(sys.argv[sys.argv.index("--pr-base") + 1])
+    pending = pending_from_argv(sys.argv)
 
     have_version = modules_with_version_txt()
     in_config = registered_packages()

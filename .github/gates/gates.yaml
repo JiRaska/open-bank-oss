@@ -1349,6 +1349,7 @@ gates:
     selftest_inputs: ["openbank-infra/scripts/check-release-registration.py"]
     selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
     selftest_expect: pass
+    needs_base: optional
     run: |
       # `--pr-base` defers ONE thing: a module whose `version.txt` this PR adds may be
       # unregistered yet, because the registry is derived from the version.txt set
@@ -1363,8 +1364,12 @@ gates:
       #
       # On a push to main there is no PR base and none is passed, so main is checked strictly —
       # which is what closes the deferral: `main-red-watch` escalates this gate going red there.
+      # The base is passed ALWAYS, empty included: run-gates.py derives `needs_base` from the
+      # command text, and a bare `$PR_DIFF_BASE` is classified `required` — which would refuse
+      # to run this gate on a push to main, where it is the strict reading that closes the
+      # deferral. `--pr-base ""` is read as "no base" by the script, with its own self-test case.
       python3 openbank-infra/scripts/check-release-registration.py \
-        ${PR_DIFF_BASE:+--pr-base "$PR_DIFF_BASE"}
+        --pr-base "${PR_DIFF_BASE:-}"
 
   # rules.yaml change_requirements.release_scope_mismatch / CLAUDE.md rule 2: release-please
   # attributes a commit to a component by the FILES IT TOUCHES under that component's
