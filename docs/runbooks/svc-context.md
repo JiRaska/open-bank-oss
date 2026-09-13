@@ -41,9 +41,9 @@ triaging an incident that starts on `context`.
 
 Do not increase replicas, restart, or use log/metrics commands to activate this staged
 workload. The reviewed activation procedure must first establish the signed image,
-GitOps sync, and actual cluster health. It will then use management health endpoints
-`GET :8085/q/health/ready` and
-`GET :8085/q/health/live`.
+GitOps sync, and actual cluster health. The declared probes are:
+
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 
 ## Common failure modes
 
