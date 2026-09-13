@@ -138,6 +138,7 @@ class SettlementServiceOriginateTest {
         override fun reverseDebit(settlementId: UUID) = Unit
         override fun reverseCredit(settlementId: UUID) = Unit
         override fun reverseBookToLedger(settlementId: UUID) = Unit
+        override fun recordBalanceStateUnknown(settlementId: UUID) = Unit
         override fun rejectSettlement(settlementId: UUID) = Unit
     }
 }

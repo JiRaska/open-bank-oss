@@ -41,6 +41,12 @@ enum class SettlementStatus {
     REVERSAL_FAILED,
 
     /**
+     * A forward debit or credit failed without establishing whether its movement committed.
+     * No automatic counter-movement is safe until the original references are reconciled.
+     */
+    BALANCE_STATE_UNKNOWN,
+
+    /**
      * A settlement journal **exists in the general ledger** and was not reversed, because
      * settlement-service cannot reverse a journal (see
      * `SettlementActivitiesImpl.reverseBookToLedger`). The GL owes a manual correcting entry.

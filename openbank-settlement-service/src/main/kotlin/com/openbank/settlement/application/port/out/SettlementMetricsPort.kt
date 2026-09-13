@@ -78,6 +78,7 @@ enum class SettlementStep {
     REVERSE_CREDIT,
     REVERSE_LEDGER_BOOK,
     REJECT,
+    RECORD_BALANCE_UNKNOWN,
 }
 
 /** Terminal outcome of one activity attempt. */

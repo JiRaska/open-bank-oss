@@ -52,16 +52,23 @@ class SettlementRepositoryImpl(private val repo: SettlementPanacheRepo, private 
     }.awaitSuspending() == 1
 
     override suspend fun updateStatus(id: UUID, status: SettlementStatus): Settlement = Panache.withTransaction {
-        repo.findById(id)
-            .invoke { entity ->
-                if (entity != null) {
-                    entity.status = status.name
-                    entity.updatedAt = clock.instant()
-                }
-            }
-            .map { entity ->
-                entity?.toDomain() ?: throw IllegalArgumentException("Settlement $id not found")
-            }
+        // A timed-out activity can finish after the workflow has recorded an unknown outcome.
+        // Guard in the UPDATE predicate, not in a preceding read, so a late forward write cannot
+        // erase the reconciliation obligation even when the two transactions race.
+        val update = if (status == SettlementStatus.DEBITED || status == SettlementStatus.CREDITED) {
+            repo.update(
+                "status = ?1, updatedAt = ?2 where id = ?3 and status <> ?4",
+                status.name,
+                clock.instant(),
+                id,
+                SettlementStatus.BALANCE_STATE_UNKNOWN.name,
+            )
+        } else {
+            repo.update("status = ?1, updatedAt = ?2 where id = ?3", status.name, clock.instant(), id)
+        }
+        update.flatMap { repo.findById(id) }.map { entity ->
+            entity?.toDomain() ?: throw IllegalArgumentException("Settlement $id not found")
+        }
     }.awaitSuspending()
 
     // Both queries are served by idx_settlements_status_created_at (V2). They run every 30s from

@@ -127,6 +127,7 @@ class SettlementStrandedGaugeTest {
             // #6037's two new outcomes. REVERSAL_FAILED is the one that matters: the money moved
             // and did NOT come back, and it was the only money-path state with no age series.
             "REVERSAL_FAILED",
+            "BALANCE_STATE_UNKNOWN",
             "LEDGER_REVERSAL_UNSUPPORTED",
             // #6410's two. The ledger compensation only became reachable with that issue, and it
             // now reports which of three situations the general ledger is in rather than assuming
