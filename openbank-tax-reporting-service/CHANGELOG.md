@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/v0.22.0...v0.23.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/v0.21.0...v0.22.0) (2026-09-08)
 
 
