@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.243.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.2...admin-ui-v0.243.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **infra:** verify image signature and SBOM in one Kyverno entry, for one verdict ([#9950](https://github.com/JiRaska/open-bank-oss/issues/9950)) ([ed77bae](https://github.com/JiRaska/open-bank-oss/commit/ed77baea9eab65b662a2a0e461bbd2e5e345fb1a))
+
 ## [0.243.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.1...admin-ui-v0.243.2) (2026-09-13)
 
 
