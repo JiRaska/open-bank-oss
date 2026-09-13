@@ -195,6 +195,34 @@ def workload_kind(short: str, gitops: Path) -> str:
     return "Deployment"
 
 
+def workload_name(short: str, gitops: Path) -> str | None:
+    """The `metadata.name` of the Deployment/Rollout that carries this service, or None.
+
+    Not derivable from the module name. Most workloads are `<short>-service`, but a released module
+    without the `-service` suffix deploys under its bare name — `openbank-customer-edge` runs as
+    Deployment `customer-edge`, `openbank-admin-ui` as `admin-ui`. A runbook that assumed the
+    suffix would hand an on-call engineer `kubectl ... deploy/customer-edge-service`, a resource
+    that does not exist, during the incident it was written for (#6253).
+
+    Same matching discipline as [workload_kind]: only a Deployment/Rollout whose own
+    `metadata.name` is one of the module's names counts.
+    """
+    names = module_names(short)
+    haystacks = (f"openbank-{short}-service", f"openbank-{short}")
+    for f in sorted(gitops.rglob("*.yaml")):
+        text = read(f)
+        if not any(h in text for h in haystacks):
+            continue
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
+                continue
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            if name and name.group(1) in names:
+                return name.group(1)
+    return None
+
+
 def service_namespace(short: str, gitops: Path) -> str | None:
     """The single namespace this service runs in, or None if it is not deployed.
 

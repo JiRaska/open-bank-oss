@@ -341,7 +341,7 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-{short}-service
+# Runbook — {module}
 
 > Operational runbook for the `{short}` service. Data domain **{domain}**,
 > classification **{classification}**, datastore **{datastore}**.
@@ -413,7 +413,9 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     plugin-free restart is offered alongside the plugin form on purpose: a runbook that assumes a
     kubectl plugin on the reader's laptop fails in exactly the situation it exists for.
     """
-    svc = f"{short}-service"
+    # The workload's real name, not `<short>-service`: released modules without the suffix deploy
+    # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
+    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
     if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
@@ -555,6 +557,18 @@ def all_services() -> list[str]:
     # three modules that move SEPA and domestic payments had no operational runbook at all (#2364).
     for short in gitops_facts.money_path_services(REPO):
         if gitops_facts.module_dir(short, REPO).is_dir():
+            out.add(short)
+    # Every RELEASED module that is actually DEPLOYED needs one too (#6253). The `-service` glob
+    # plus the money-path list left 14 out — customer-edge (durable passkey state in Redis),
+    # product-catalog, security-scanner, admin-ui and the control-plane agents — and
+    # `git diff --exit-code docs/runbooks/` could never report a runbook nobody generated.
+    # Released = has a version.txt (rules.yaml: released_unit_marker); deployed = a Deployment or
+    # Rollout in gitops whose own metadata.name is the module, so a merely-mentioned module or an
+    # undeployed one (no workload to operate) does not get a runbook of fictional commands.
+    for version_txt in REPO.glob("openbank-*/version.txt"):
+        short = version_txt.parent.name.removeprefix("openbank-")
+        short = short.removesuffix("-service")
+        if gitops_facts.workload_name(short, GITOPS) is not None:
             out.add(short)
     return sorted(out)
 
