@@ -59,13 +59,13 @@ REQUIRED_CHECKS=(
   "OPA policy gate"                          # Existing live requirement — preserve, not part of this migration
 )
 
-# Contexts introduced by the phase-1 migration. Before the ruleset can require
-# them, the exact current default-branch commit must already have emitted every
-# one with a successful conclusion. This proves both claims the migration relies on: the matrix
+# Checks whose health this ruleset update relies on. Before the update, the
+# exact current default-branch commit must already have emitted every one with
+# a successful conclusion. This proves both claims the migration relies on: the matrix
 # display names match GitHub's real check names, and the path-aware Admin UI
 # aggregator is healthy. A renamed shard, a missing job, a queued run or a real
 # build failure therefore stops this script before it can deadlock main.
-MIGRATION_CHECKS=(
+PREFLIGHT_CHECKS=(
   "gates (gitops-api)"
   "gates (lint-supplychain-security)"
   "gates (registry-kotlin-data)"
@@ -102,7 +102,7 @@ default_sha=$(gh api "repos/$REPO/commits/$default_branch" --jq '.sha')
 check_runs=$(gh api "repos/$REPO/commits/$default_sha/check-runs?per_page=100" \
   --paginate --slurp | jq '[.[].check_runs[]]')
 
-for context in "${MIGRATION_CHECKS[@]}"; do
+for context in "${PREFLIGHT_CHECKS[@]}"; do
   conclusion=$(echo "$check_runs" | jq -r --arg context "$context" '
     map(select(.name == $context)) | sort_by(.id) | last | .conclusion // "missing"')
   case "$conclusion" in
@@ -131,7 +131,11 @@ existing_id=$(gh api "repos/$REPO/rulesets" --jq \
 # there is no existing ruleset (first-time create). The list endpoint omits
 # bypass_actors, so fetch the individual ruleset.
 bypass_json='[]'
-strict_json='true'
+# ADR-0272 rejects strict up-to-date enforcement at the measured merge rate:
+# it moves serialization into rebase loops without closing the merge race.
+# New rulesets follow that current decision; existing rulesets retain their
+# live value so this context migration never changes stale-base policy.
+strict_json='false'
 if [ -n "$existing_id" ]; then
   # If the ruleset exists we MUST read its bypass actors successfully. A failed
   # fetch must ABORT, never fall back to empty — coercing a transient API error
