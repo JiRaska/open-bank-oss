@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.0...engagement-service-v0.14.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **engagement:** guard engagement_outbox created_at plausibility at INSERT ([#9307](https://github.com/JiRaska/open-bank-oss/issues/9307)) ([31b3daf](https://github.com/JiRaska/open-bank-oss/commit/31b3dafb848d58cb3e503d6c4fce49935934eaeb))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.13.0...engagement-service-v0.14.0) (2026-08-24)
 
 

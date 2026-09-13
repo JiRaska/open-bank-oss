@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.28.0...account-service-v0.29.0) (2026-09-13)
+
+
+### Features
+
+* **account:** authorize SCA-derived representatives ([#9405](https://github.com/JiRaska/open-bank-oss/issues/9405)) ([2dc9d72](https://github.com/JiRaska/open-bank-oss/commit/2dc9d72c10a87d2e9eb7b08e813d2bff75513eac))
+* **account:** record the terms version a term deposit opens under ([#9263](https://github.com/JiRaska/open-bank-oss/issues/9263)) ([848d79e](https://github.com/JiRaska/open-bank-oss/commit/848d79e8e54ab1137cc8b8d603390cbc03388147))
+* **delegation:** enforce organization grant authority ([#9522](https://github.com/JiRaska/open-bank-oss/issues/9522)) ([4f77c79](https://github.com/JiRaska/open-bank-oss/commit/4f77c792d4609251a843082b9ce0c8a09f1ad5ed))
+* **delegation:** project approval policy to account ([#9401](https://github.com/JiRaska/open-bank-oss/issues/9401)) ([58e3bbd](https://github.com/JiRaska/open-bank-oss/commit/58e3bbd91b1691ad05a150b53e02a4f0f6fb4df4))
+
+
+### Bug Fixes
+
+* **account:** guard account_outbox created_at plausibility at INSERT ([#9291](https://github.com/JiRaska/open-bank-oss/issues/9291)) ([875cff3](https://github.com/JiRaska/open-bank-oss/commit/875cff3b949134b079e605a2d2ec5842a0d4b87f))
+* **account:** publish EXPIRED on the withdrawal-proposal status filter ([#9669](https://github.com/JiRaska/open-bank-oss/issues/9669)) ([3890fd2](https://github.com/JiRaska/open-bank-oss/commit/3890fd2727857e516355dfc0cf8dd55b0bc3654c))
+* **account:** replay-safe authorization grants + withdrawal proposals + ADR-0295 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9063](https://github.com/JiRaska/open-bank-oss/issues/9063)) ([d65101b](https://github.com/JiRaska/open-bank-oss/commit/d65101bb1feea0f6a9f0bcf5a1c779f35d7288f1))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.4...account-service-v0.28.0) (2026-09-08)
 
 

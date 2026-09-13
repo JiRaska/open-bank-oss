@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.0...domestic-payment-v0.20.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** guard domestic_payment_outbox created_at plausibility at INSERT ([#9293](https://github.com/JiRaska/open-bank-oss/issues/9293)) ([f8d3145](https://github.com/JiRaska/open-bank-oss/commit/f8d31451a567b73ef183fb4a4bcbe8bdcd98efe5))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.1...domestic-payment-v0.20.0) (2026-09-08)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.3...document-service-v0.14.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **document:** guard document_outbox created_at plausibility at INSERT ([#9306](https://github.com/JiRaska/open-bank-oss/issues/9306)) ([9350475](https://github.com/JiRaska/open-bank-oss/commit/93504754bdeeed4b7b291a3eee5c6affe84c1b51))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.2...document-service-v0.14.3) (2026-09-08)
 
 

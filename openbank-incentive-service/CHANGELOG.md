@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.6.1...incentive-service-v0.6.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **incentive:** answer 404 for an offer that does not exist, before any conflict check ([#9795](https://github.com/JiRaska/open-bank-oss/issues/9795)) ([5ff4fe4](https://github.com/JiRaska/open-bank-oss/commit/5ff4fe4fc520b6ae733a7b999d556ed2e1034c24)), closes [#9794](https://github.com/JiRaska/open-bank-oss/issues/9794)
+* **incentive:** guard incentive_outbox occurred_at plausibility at INSERT ([#9310](https://github.com/JiRaska/open-bank-oss/issues/9310)) ([f5b97f3](https://github.com/JiRaska/open-bank-oss/commit/f5b97f3f107f624d740433df231340ebb8864cb1))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.6.0...incentive-service-v0.6.1) (2026-09-01)
 
 

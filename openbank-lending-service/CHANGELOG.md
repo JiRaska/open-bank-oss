@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.0...lending-service-v0.33.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **lending:** replay-safe applications/collateral/compliance proposals + ADR-0297 ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9077](https://github.com/JiRaska/open-bank-oss/issues/9077)) ([4219b4e](https://github.com/JiRaska/open-bank-oss/commit/4219b4e1b407293e2afe262e1177b2b8a4395fa8))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.2...lending-service-v0.33.0) (2026-09-08)
 
 

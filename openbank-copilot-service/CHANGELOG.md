@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.16.0...copilot-service-v0.17.0) (2026-09-13)
+
+
+### Features
+
+* **copilot:** ADR-0285 D5 published-style client (infra only, not wired) ([#9729](https://github.com/JiRaska/open-bank-oss/issues/9729)) ([cbdee07](https://github.com/JiRaska/open-bank-oss/commit/cbdee0763a5b6c355bba94b97bcb583fbfdf1b63))
+
+
+### Bug Fixes
+
+* **copilot:** publish the two ActionKind values the spec omits ([#9827](https://github.com/JiRaska/open-bank-oss/issues/9827)) ([37ab7cb](https://github.com/JiRaska/open-bank-oss/commit/37ab7cbc010f9421dcbdf9f8c2836a1aafebc871)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.15.0...copilot-service-v0.16.0) (2026-08-27)
 
 

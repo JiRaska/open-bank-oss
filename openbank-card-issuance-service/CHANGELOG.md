@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.5](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.4...card-issuance-service-v0.26.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **card-issuance:** corrupted persisted closedReason is LOUD, never a silent null ([#9413](https://github.com/JiRaska/open-bank-oss/issues/9413)) ([ddbcf34](https://github.com/JiRaska/open-bank-oss/commit/ddbcf34540eed292135967fd570e163ff0338078))
+* **card-issuance:** guard card_outbox created_at plausibility at INSERT ([#9301](https://github.com/JiRaska/open-bank-oss/issues/9301)) ([c939593](https://github.com/JiRaska/open-bank-oss/commit/c939593177452aa5778d873e25fce5c43045256d))
+
 ## [0.26.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.3...card-issuance-service-v0.26.4) (2026-09-08)
 
 

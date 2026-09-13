@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.2...aml-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **aml:** guard aml_outbox created_at plausibility at INSERT ([#9299](https://github.com/JiRaska/open-bank-oss/issues/9299)) ([792e3e4](https://github.com/JiRaska/open-bank-oss/commit/792e3e46f96043afadf149920ae72af28b685386))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.1...aml-service-v0.10.2) (2026-09-08)
 
 

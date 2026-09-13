@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.1...tpp-registry-service-v0.9.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **tpp-registry:** guard tpp_outbox created_at plausibility at INSERT ([#9323](https://github.com/JiRaska/open-bank-oss/issues/9323)) ([516c3e6](https://github.com/JiRaska/open-bank-oss/commit/516c3e60dedec7fe4e1af45e4cbe8667c7d4fc99))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.0...tpp-registry-service-v0.9.1) (2026-09-01)
 
 
