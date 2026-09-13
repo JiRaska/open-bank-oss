@@ -18,6 +18,8 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
+private const val NANOS_PER_SECOND = 1_000_000_000L
+
 data class ReportIncidentCommand(
     val title: String,
     val description: String,
@@ -152,4 +154,4 @@ class IctIncidentService(
 }
 
 private fun Instant.toEpochNanoseconds(): Long =
-    Math.addExact(Math.multiplyExact(epochSecond, 1_000_000_000L), nano.toLong())
+    Math.addExact(Math.multiplyExact(epochSecond, NANOS_PER_SECOND), nano.toLong())
