@@ -58,15 +58,6 @@ REQUIRED_CHECKS=(
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
 
-# Live requirements owned outside this script are retained only when they are
-# already present; they are not introduced on a fresh ruleset.
-PRESERVE_LIVE_CHECKS=("OPA policy gate")
-
-# Removing a live requirement must be explicit in the same reviewed change
-# that removes it from REQUIRED_CHECKS. Phase 2 will put "Validate manifests"
-# here; an empty list makes accidental removals fail closed.
-INTENTIONAL_REMOVALS=()
-
 # Checks whose health this ruleset update relies on. Before the update, the
 # exact current default-branch commit must already have emitted every one with
 # a successful conclusion. This proves both claims the migration relies on: the matrix
@@ -126,79 +117,41 @@ for context in "${PREFLIGHT_CHECKS[@]}"; do
   esac
 done
 
-# Look up an existing ruleset of this name UP FRONT — we need its id both for the
-# idempotent upsert below AND to carry over its bypass_actors.
-existing_id=$(gh api "repos/$REPO/rulesets" --jq \
-  ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)
+# A failed list read is not evidence that the ruleset is absent. Resolve one
+# unambiguous resource or abort before constructing any write.
+rulesets=$(gh api "repos/$REPO/rulesets" --paginate --slurp)
+existing_id=$(echo "$rulesets" | jq -er --arg name "$RULESET_NAME" '
+  if type != "array" or any(.[]; type != "array") then error("invalid ruleset listing")
+  else [ .[][] | select(.name == $name) | .id ] as $ids
+    | if ($ids | length) > 1 then error("ambiguous ruleset name")
+      elif ($ids | length) == 1 then $ids[0] | tostring else "" end
+  end')
 
-# PRESERVE bypass_actors. A ruleset PUT replaces the WHOLE resource, so a
-# hardcoded `bypass_actors: []` would silently WIPE any configured bypass (e.g.
-# the admin/automation RepositoryRole that lets the second instance admin-merge).
-# Read whatever is live and carry it over verbatim; only fall back to empty when
-# there is no existing ruleset (first-time create). The list endpoint omits
-# bypass_actors, so fetch the individual ruleset.
-bypass_json='[]'
-preserved_checks_json='[]'
-# ADR-0272 rejects strict up-to-date enforcement at the measured merge rate:
-# it moves serialization into rebase loops without closing the merge race.
-# Apply that decision consistently; the live ruleset already uses false, so
-# this migration does not change its stale-base policy.
-strict_json='false'
+live_json=''
 if [ -n "$existing_id" ]; then
-  # If the ruleset exists we MUST read its bypass actors successfully. A failed
-  # fetch must ABORT, never fall back to empty — coercing a transient API error
-  # to `[]` would silently strip the actors, reintroducing the very bug this
-  # guards against. A legitimately empty list serialises as "[]" (valid JSON),
-  # which is distinct from the empty string produced on gh/jq failure.
-  existing_ruleset=$(gh api "repos/$REPO/rulesets/$existing_id" 2>/dev/null || true)
-  bypass_json=$(echo "$existing_ruleset" \
-    | jq '[.bypass_actors[] | {actor_id, actor_type, bypass_mode}]' 2>/dev/null || true)
-  if ! echo "$bypass_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    echo "ERROR: ruleset #$existing_id exists but its bypass_actors could not be read." >&2
-    echo "       Refusing to proceed: a PUT now would WIPE existing bypass actors." >&2
+  live_json=$(gh api "repos/$REPO/rulesets/$existing_id")
+  echo "$live_json" | jq -e --arg name "$RULESET_NAME" '
+    .name == $name and .target == "branch" and
+    (.rules | type == "array") and (.conditions | type == "object") and
+    (.bypass_actors | type == "array") and
+    ([.rules[] | select(.type == "required_status_checks")] | length == 1) and
+    all(.rules[] | select(.type == "required_status_checks");
+      (.parameters.required_status_checks | type == "array") and
+      all(.parameters.required_status_checks[]; (.context | type == "string")))
+  ' >/dev/null || {
+    echo "ERROR: incomplete or ambiguous live ruleset; refusing update." >&2
     exit 1
-  fi
-  echo "Preserving $(echo "$bypass_json" | jq 'length') bypass actor(s) from ruleset #$existing_id."
-
-  # A PUT replaces the complete required-check list too. Classify every live
-  # context as desired, explicitly preserved, or intentionally removed. Any
-  # unclassified disappearance is desired-state drift and fails closed.
-  live_checks=$(echo "$existing_ruleset" | jq -r '
-    [.rules[] | select(.type == "required_status_checks")
-      | .parameters.required_status_checks[].context] | unique[]')
-  preserved_checks_json='[]'
-  while IFS= read -r context; do
-    [ -z "$context" ] && continue
-    if printf '%s\n' "${REQUIRED_CHECKS[@]}" | grep -Fqx -- "$context"; then
-      continue
-    fi
-    if printf '%s\n' "${PRESERVE_LIVE_CHECKS[@]}" | grep -Fqx -- "$context"; then
-      preserved_checks_json=$(echo "$preserved_checks_json" \
-        | jq -c --arg context "$context" '. + [$context] | unique')
-      continue
-    fi
-    if printf '%s\n' "${INTENTIONAL_REMOVALS[@]}" | grep -Fqx -- "$context"; then
-      echo "Intentionally removing live required check: $context"
-      continue
-    fi
-    echo "ERROR: desired ruleset would remove unclassified live check '$context'." >&2
-    echo "       Preserve it or declare its removal explicitly in a reviewed change." >&2
-    exit 1
-  done <<< "$live_checks"
-  echo "Preserving $(echo "$preserved_checks_json" | jq 'length') externally managed live check(s)."
+  }
 fi
 
 # Build the required_status_checks array as JSON from REQUIRED_CHECKS.
 checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
-  | jq -R . | jq -cs --argjson preserved "$preserved_checks_json" \
-    '(. + $preserved) | unique | map({context: .})')
+  | jq -R '{context: .}' | jq -cs .)
 
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
   --argjson approvals "$REQUIRED_APPROVALS" \
   --argjson checks "$checks_json" \
-  --argjson bypass "$bypass_json" \
-  --argjson strict "$strict_json" \
   '{
     name: $name,
     target: "branch",
@@ -219,12 +172,25 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
-          strict_required_status_checks_policy: $strict,
+          strict_required_status_checks_policy: false,
           required_status_checks: $checks
         } }
     ],
-    bypass_actors: $bypass
+    bypass_actors: []
   }')
+
+# Phase 1 is additive only. Preserve every live field and integration binding,
+# changing solely the required-check array by appending missing contexts.
+if [ -n "$existing_id" ]; then
+  payload=$(echo "$live_json" | jq --argjson checks "$checks_json" '
+    {name, target, enforcement, conditions, rules, bypass_actors}
+    | .rules |= map(if .type == "required_status_checks" then
+        .parameters.required_status_checks as $existing
+        | .parameters.required_status_checks += [
+            $checks[] | select(.context as $context |
+              all($existing[]; .context != $context))]
+      else . end)')
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "--- dry-run: ruleset payload ---"
@@ -234,7 +200,13 @@ fi
 
 # Idempotent upsert: $existing_id was resolved up front (see bypass preservation).
 if [ -n "$existing_id" ]; then
-  echo "Updating existing ruleset #$existing_id ..."
+  # Refuse an observed concurrent edit instead of overwriting another operator.
+  latest_json=$(gh api "repos/$REPO/rulesets/$existing_id")
+  if [ "$(echo "$latest_json" | jq -cS .)" != "$(echo "$live_json" | jq -cS .)" ]; then
+    echo "ERROR: ruleset changed during preparation; read and review it again." >&2
+    exit 1
+  fi
+  echo "Adding missing checks to existing ruleset #$existing_id ..."
   echo "$payload" | gh api -X PUT "repos/$REPO/rulesets/$existing_id" \
     --input - >/dev/null
   echo "Ruleset #$existing_id updated."
