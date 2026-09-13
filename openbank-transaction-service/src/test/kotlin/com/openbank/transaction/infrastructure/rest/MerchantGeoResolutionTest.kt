@@ -17,8 +17,8 @@ import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalo
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
-import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
