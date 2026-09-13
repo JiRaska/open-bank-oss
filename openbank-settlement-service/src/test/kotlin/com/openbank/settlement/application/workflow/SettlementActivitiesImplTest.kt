@@ -60,6 +60,21 @@ class SettlementActivitiesImplTest {
         updatedAt = Instant.now(),
     )
 
+    @Test
+    fun `unknown balance outcome persists a non-terminal state and never moves money`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { settlementRepository.updateStatus(id, SettlementStatus.BALANCE_STATE_UNKNOWN) } returns
+            settlement(id, SettlementStatus.BALANCE_STATE_UNKNOWN)
+
+        activities.recordBalanceStateUnknown(id)
+
+        coVerify { settlementRepository.updateStatus(id, SettlementStatus.BALANCE_STATE_UNKNOWN) }
+        coVerify { auditPublisher.publish(match { it.result == AuditResult.FAILURE }) }
+        coVerify(exactly = 0) { reverseDebitPort.reverseDebit(any()) }
+        coVerify(exactly = 0) { reverseCreditPort.reverseCredit(any()) }
+        coVerify(exactly = 0) { settlementRepository.updateStatus(id, SettlementStatus.REJECTED) }
+    }
+
     @BeforeEach
     fun setUp() {
         // TestableActivities overrides runOnVertxContext to run synchronously — the production impl

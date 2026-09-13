@@ -386,3 +386,14 @@ replacing the former in-memory stub), so settlement state is durable across rest
   old DTO against it `SettlementReversalIT` fails 3 of 7 with `value failed for JSON property
   availableBalance` — the production failure, reproduced in CI.
 
+
+## Unacknowledged forward movement
+
+A failed debit/credit activity does not prove that its remote write rolled back. Lost responses
+or a failed local state write can follow a committed movement. New workflow histories record
+`BALANCE_STATE_UNKNOWN` after such a failure and defer all counter-movements and rejection.
+The status remains non-terminal, is exported by the stranded gauge and has a critical alert.
+
+Residual risk: recovery requires reconciliation and an approved correction; there is no atomic
+cancel-or-reverse API yet. Old workflow histories retain their original command sequence for
+replay compatibility. A caller must not interpret the creation response as completed settlement.

@@ -120,6 +120,20 @@ class SettlementRepositoryImplIT {
     }
 
     @Test
+    fun `a late forward activity cannot erase an uncertain balance outcome`() {
+        for (lateStatus in listOf(SettlementStatus.DEBITED, SettlementStatus.CREDITED)) {
+            val settlement = newSettlement(SettlementStatus.BALANCE_STATE_UNKNOWN)
+            onVertxContext { repository.create(settlement) }
+
+            val updated = onVertxContext { repository.updateStatus(settlement.id, lateStatus) }
+
+            assertThat(updated.status).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+            assertThat(onVertxContext { repository.findById(settlement.id) }!!.status)
+                .isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+        }
+    }
+
+    @Test
     fun `claimForProcessing atomically wins PENDING to DEBITED exactly once`() {
         val settlement = newSettlement()
         onVertxContext { repository.create(settlement) }

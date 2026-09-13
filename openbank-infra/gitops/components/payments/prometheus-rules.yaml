@@ -464,6 +464,26 @@ spec:
               Its compensations ran but it never reached REJECTED, so the settlements table now
               disagrees with the ledger about a settlement that was unwound. Reconcile before the
               next accounting-day close.
+        - alert: SettlementBalanceStateUnknown
+          expr: |
+            max by (status) (
+              openbank_settlement_non_terminal{
+                service="settlement", status="BALANCE_STATE_UNKNOWN"
+              }
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            summary: "Settlement balance outcome requires reconciliation"
+            description: >-
+              A forward debit or credit exhausted its activity attempts without establishing
+              whether the balance movement committed. Do not issue a blind refund or mark the
+              settlement rejected. Reconcile the original movement references and preserve dual
+              control for any required correction.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-settlement.md"
+
         - alert: SettlementReversalFailed
           # REVERSAL_FAILED is written by SettlementActivitiesImpl.compensate when a balance
           # reversal was ATTEMPTED AND REFUSED — the common cause is a payee who already spent the
