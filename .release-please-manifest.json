@@ -57,7 +57,7 @@
   "openbank-transaction-service": "1.23.0",
   "openbank-vop-service": "0.5.0",
   "openbank-campaign-service": "0.40.0",
-  "openbank-tax-reporting-service": "0.29.0",
+  "openbank-tax-reporting-service": "0.30.0",
   "openbank-delegation-service": "0.15.0",
   "openbank-kyb-service": "0.3.0",
   "openbank-case-coordinator-agent": "0.8.1",
