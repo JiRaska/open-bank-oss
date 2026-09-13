@@ -3065,6 +3065,28 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # The verification reconciler's decision table (pact-reconcile-verifications.py) had a
+  # --self-test that NOTHING ran: the workflow invokes the script for real every ~30 minutes and
+  # never with --self-test, so its classification of owed / failing / never-published / broker
+  # error could regress with every run still green. #9776 is the case that made it matter — the
+  # broker's "Pacticipant X not found" was counted as an error for days, leaving an edge
+  # permanently unevaluated. The self-test pins that classification narrowly (exact sentence,
+  # exact edge side, 4xx only); falsified three ways before wiring in. No broker, no credentials.
+  - id: pact-reconcile-decision-table
+    selftest_exempt: "is-a-test-suite"
+    name: "pact verification reconciler classifies every broker answer (#9776, enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # pure classification over fixtures + a pacts/*.json scan, measured 0.1s
+    rationale: >-
+      The reconciler is the only control that finds a stranded pact, and its decision table ran
+      in no CI at all; a regression in how it classifies a broker answer would leave edges
+      silently unevaluated while every scheduled run stays green, which is how #9776 hid.
+    review_after: 2027-03-13
+    min_subjects: 25   # 27 decision cases today (2026-09-13); a floor just below the count, far above an emptied table
+    run: |
+      python3 .github/scripts/pact-reconcile-verifications.py --self-test
+
   # The other half of every other gate in this file. Every other gate here reads committed text,
   # because that is what CI can see; this one compares that text to what the cluster actually
   # does. Only the COMPARISON runs in CI — it is a pure function of (snapshot, repo) and is what
