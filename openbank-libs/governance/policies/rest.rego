@@ -96,21 +96,6 @@ allowed_reasons contains "compliance-read-any" if {
 	endswith(input.action, ".read")
 }
 
-# ADR-0304: assignment administration changes who can see restricted banking context. Only a
-# human administrator may perform these exact lifecycle actions; the context service persists the
-# independent maker/checker decision and immediately expires a revoked assignment.
-allowed_reasons contains "context-assignment-admin" if {
-	input.principal.type == "HUMAN"
-	"ROLE_ADMIN" in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
-	input.action in {
-		"context.assignment.propose",
-		"context.assignment.read",
-		"context.assignment.decide",
-		"context.assignment.revoke",
-	}
-}
-
 # AI agents go through this same query when the agent's tool wraps a REST call
 # (ADR-0031 D5). The charter check is delegated to agents.rego so we don't
 # duplicate the charter logic — call it through the unified package boundary.
@@ -509,38 +494,6 @@ four_eyes_exempt if {
 prohibited if {
 	input.action == "featureflag.flip"
 	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
-}
-
-prohibited if {
-	startswith(input.action, "context.assignment.")
-	startswith(input.principal.id, "service-account-")
-}
-
-# Context reads remain purpose-bound even if a broad role rule also allows *.read. This is a
-# second boundary behind context-service's assignment check.
-prohibited if {
-	input.action == "context.complaint.read"
-	object.get(input.attributes, "assignmentVerified", false) != true
-}
-
-prohibited if {
-	input.action == "context.complaint.read"
-	object.get(input.attributes, "purpose", "") != "PAYMENT_COMPLAINT"
-}
-
-prohibited if {
-	input.action == "context.incident.aggregate.read"
-	object.get(input.attributes, "assignmentVerified", false) != true
-}
-
-prohibited if {
-	input.action == "context.incident.aggregate.read"
-	object.get(input.attributes, "purpose", "") != "INCIDENT_IMPACT"
-}
-
-prohibited if {
-	startswith(input.action, "context.")
-	startswith(input.principal.id, "service-account-")
 }
 
 # ---------------------------------------------------------------------------------------

@@ -11,7 +11,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "a85e6e134ab9a3b9" }
+      annotations: { openbank.tech/policy-checksum: "c3fb0d0a2287a872" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -82,6 +82,7 @@ spec:
             limits: { cpu: 100m, memory: 64Mi }
           volumeMounts:
             - { name: opa-bundle, mountPath: /bundle/rest.rego, subPath: rest.rego, readOnly: true }
+            - { name: opa-bundle, mountPath: /bundle/context_rest_ext.rego, subPath: context_rest_ext.rego, readOnly: true }
             - { name: opa-bundle, mountPath: /bundle/agents.rego, subPath: agents.rego, readOnly: true }
             - { name: opa-bundle, mountPath: /bundle/rules/data.yaml, subPath: rules-data.yaml, readOnly: true }
             - { name: opa-bundle, mountPath: /bundle/agents/data.yaml, subPath: agents-data.yaml, readOnly: true }
