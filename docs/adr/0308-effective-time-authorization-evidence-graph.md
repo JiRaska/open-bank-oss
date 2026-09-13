@@ -2,6 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
+followup: "#9945 — ingest historical authorization evidence and add governed evidentiary export"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

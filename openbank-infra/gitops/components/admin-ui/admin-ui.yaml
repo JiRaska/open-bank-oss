@@ -125,7 +125,7 @@ spec:
             - name: CASE_COORDINATOR_URL
               value: http://case-coordinator-agent.platform.svc:8146
             - name: CONTEXT_SERVICE_URL
-              value: http://context-service.context.svc:8149
+              value: https://context-service.context.svc:8443
             # The phase-3 test check is an explicitly bounded ADMIN action. It is
             # not sent through discovery because this agent has its own namespace;
             # the dedicated BFF route relays the operator bearer to this one URL.

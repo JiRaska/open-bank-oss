@@ -2,6 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
+followup: "#9945 — complete payment rail and return-event correlation beyond dispute-owned references"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

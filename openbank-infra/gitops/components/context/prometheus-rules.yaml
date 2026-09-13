@@ -13,6 +13,7 @@ spec:
           for: 5m
           labels: { severity: critical, service: context-service }
           annotations:
+            subject_period: continuous
             summary: Context graph projection is rejecting complaint events
             description: Inspect the context-service consumer and its dedicated DLQ before replaying records.
         - alert: ContextProjectionStale
@@ -27,6 +28,7 @@ spec:
           for: 2m
           labels: { severity: critical, service: context-service }
           annotations:
+            subject_period: continuous
             summary: Context reads are failing closed because authorization is unavailable
             description: Restore the OPA sidecar or its policy bundle; do not bypass the decision point.
         - alert: ContextProjectionLatencyBudgetExceeded
@@ -34,6 +36,7 @@ spec:
           for: 15m
           labels: { severity: warning, service: context-service }
           annotations:
+            subject_period: continuous
             summary: Context projection p95 exceeds the 500 ms transaction budget
             description: Inspect PostgreSQL query plans and consumer concurrency before increasing the deadline.
         - alert: ContextReadLatencySloExceeded
@@ -41,5 +44,6 @@ spec:
           for: 15m
           labels: { severity: warning, service: context-service }
           annotations:
+            subject_period: continuous
             summary: Authorized context read p95 exceeds 300 ms
             description: Keep the graph bounds fixed and inspect OPA, audit and adjacency-query latency.

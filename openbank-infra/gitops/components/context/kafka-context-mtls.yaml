@@ -31,7 +31,9 @@ kind: ExternalSecret
 metadata:
   name: context-service-kafka-keystore
   namespace: context
-  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    openbank.io/rotation-deadline: "2027-09-13"
 spec:
   refreshInterval: 1h
   secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }
@@ -43,7 +45,9 @@ kind: ExternalSecret
 metadata:
   name: kafka-cluster-ca-truststore
   namespace: context
-  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    openbank.io/rotation-deadline: "2027-09-13"
 spec:
   refreshInterval: 1h
   secretStoreRef: { kind: ClusterSecretStore, name: kafka-messaging-certs }

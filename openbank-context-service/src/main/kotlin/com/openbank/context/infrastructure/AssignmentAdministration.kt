@@ -2,6 +2,7 @@
 package com.openbank.context.infrastructure
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -160,7 +161,7 @@ class AssignmentAdministrationService(
         val validFrom = request.validFrom ?: now
         validate(request, validFrom, now)
         val proposal = AssignmentProposalEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             bankScope = this@AssignmentAdministrationService.bankScope
             principalId = request.principalId.trim()
             caseId = request.caseId.trim()
@@ -218,7 +219,7 @@ class AssignmentAdministrationService(
                     session.persist(audit(value, "REJECTED", checker, null)).replaceWith(value)
                 } else {
                     val assignment = CaseAssignmentEntity().apply {
-                        this.id = UUID.randomUUID()
+                        this.id = Ids.newId()
                         this.bankScope = this@AssignmentAdministrationService.bankScope
                         principalId = value.principalId
                         caseId = value.caseId
@@ -267,7 +268,7 @@ class AssignmentAdministrationService(
 
     private fun audit(p: AssignmentProposalEntity, action: String, actor: String, assignmentId: UUID?) =
         AssignmentChangeAuditEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             bankScope = p.bankScope
             this.assignmentId = assignmentId
             proposalId = p.id
@@ -280,7 +281,7 @@ class AssignmentAdministrationService(
         }
 
     private fun audit(a: CaseAssignmentEntity, actor: String, now: Instant) = AssignmentChangeAuditEntity().apply {
-        id = UUID.randomUUID()
+        id = Ids.newId()
         bankScope = a.bankScope
         assignmentId = a.id
         action = "REVOKED"

@@ -10,6 +10,7 @@ import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.domain.ContextNeighborhood
 import com.openbank.context.domain.ContextNode
 import com.openbank.context.domain.DataClassification
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -286,7 +287,7 @@ class ContextReadAuditRepository(
 ) : ContextReadAuditPort {
     override suspend fun record(entry: ContextReadAudit) {
         val entity = ContextReadAuditEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             this.bankScope = this@ContextReadAuditRepository.bankScope
             principalId = entry.principalId
             caseId = entry.caseId

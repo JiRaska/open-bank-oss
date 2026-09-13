@@ -1,4 +1,4 @@
--- Additive P0/P1 schema. Rollback before production adoption: drop tables in reverse order.
+-- Rollback: before production adoption, drop tables in reverse order.
 -- After projections or audit records exist, retain the schema and disable consumers instead.
 CREATE TABLE context_nodes (
   node_row_id uuid PRIMARY KEY,

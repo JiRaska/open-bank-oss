@@ -2,6 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
+followup: "#9945 — correlate incident windows with observed business workflows and case-level evidence"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

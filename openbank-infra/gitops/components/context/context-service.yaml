@@ -26,8 +26,12 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }
+            - { name: https, containerPort: 8443 }
             - { name: management, containerPort: 8085 }
           env:
+            - { name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES, value: /mnt/context-tls/tls.crt }
+            - { name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES, value: /mnt/context-tls/tls.key }
+            - { name: QUARKUS_HTTP_SSL_PORT, value: "8443" }
             - { name: QUARKUS_DATASOURCE_JDBC_URL, value: jdbc:postgresql://context-db-rw.context.svc:5432/openbank_context }
             - { name: QUARKUS_DATASOURCE_REACTIVE_URL, value: vertx-reactive:postgresql://context-db-rw.context.svc:5432/openbank_context }
             - { name: POSTGRES_USER, value: openbank }
@@ -58,6 +62,7 @@ spec:
             capabilities: { drop: [ALL] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            - { name: context-tls, mountPath: /mnt/context-tls, readOnly: true }
             - { name: kafka-user, mountPath: /mnt/kafka-user, readOnly: true }
             - { name: kafka-ca, mountPath: /mnt/kafka-ca, readOnly: true }
             - { name: msg-override, mountPath: /mnt/msg-config, readOnly: true }
@@ -85,6 +90,7 @@ spec:
       volumes:
         - { name: tmp, emptyDir: {} }
         - { name: opa-tmp, emptyDir: {} }
+        - { name: context-tls, secret: { secretName: context-service-internal-tls } }
         - { name: kafka-user, secret: { secretName: context-service-kafka-keystore } }
         - { name: kafka-ca, secret: { secretName: kafka-cluster-ca-truststore } }
         - { name: msg-override, configMap: { name: context-service-msg-override } }
@@ -97,6 +103,7 @@ spec:
   selector: { app.kubernetes.io/name: context-service }
   ports:
     - { name: http, port: 8149, targetPort: http }
+    - { name: https, port: 8443, targetPort: https }
     - { name: management, port: 8085, targetPort: management }
 ---
 apiVersion: monitoring.coreos.com/v1
