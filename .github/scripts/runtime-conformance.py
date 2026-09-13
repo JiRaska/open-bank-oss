@@ -97,6 +97,35 @@ def claim_cnpg_clusters(root: pathlib.Path) -> dict[str, dict]:
     return out
 
 
+STAGED_ANNOTATION = "openbank.io/discovery-state: staged"
+
+
+def claim_staged_component_paths(root: pathlib.Path) -> set[str]:
+    """Component paths of ArgoCD Applications marked `discovery-state: staged`.
+
+    A staged Application is desired state that has deliberately NOT been rolled out: it carries no
+    `syncPolicy.automated`, so nothing it declares exists in the cluster yet. Without this, the
+    not-found branch below reports every database such an Application declares, forever, and the
+    only way to clear it is to deploy a service somebody decided not to deploy — the same
+    unactionable-forever failure the exemption route exists to avoid.
+
+    Safe to honour because the pairing is already enforced elsewhere: admin-ui's
+    `service-registry.guard` fails if an automated Application keeps the marker, so `staged` cannot
+    be left on something live. The join is the Application's own `source.path`, so it excuses
+    exactly the component directory that Application renders — not a namespace, which a second
+    Application could share.
+    """
+    out: set[str] = set()
+    for path in sorted(root.glob("openbank-infra/gitops/apps/*.yaml")):
+        text = _read(path)
+        if "kind: Application" not in text or STAGED_ANNOTATION not in text:
+            continue
+        m = re.search(r"^\s+path:\s*(\S+)\s*$", text, re.M)
+        if m:
+            out.add(m.group(1).strip().rstrip("/"))
+    return out
+
+
 def claim_app_backup_exemptions(root: pathlib.Path) -> dict[str, str]:
     """ArgoCD Application name -> the backup exemption its manifest declares, if any.
 
@@ -212,7 +241,12 @@ def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
 BACKUP_EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
 
 
-def cmp_backup_recoverability(claims: dict, facts: dict, app_exemptions: dict | None = None) -> list[str]:
+def cmp_backup_recoverability(
+    claims: dict,
+    facts: dict,
+    app_exemptions: dict | None = None,
+    staged_paths: set[str] | None = None,
+) -> list[str]:
     """A cluster that declares a backup must have a recovery point.
 
     `Ready` and `ContinuousArchiving` are deliberately NOT consulted: on 2026-08-07 all three
@@ -225,6 +259,12 @@ def cmp_backup_recoverability(claims: dict, facts: dict, app_exemptions: dict | 
             continue
         fact = facts.get(key)
         if fact is None:
+            # A staged Application's declarations are not supposed to be live yet. Only the
+            # not-found branch is waived: if the cluster IS running, every rule below still
+            # applies, so a staged component that got synced anyway cannot slip through.
+            src = (claim.get("source") or "")
+            if any(src.startswith(p + "/") for p in (staged_paths or set())):
+                continue
             findings.append(f"{key}: declares a backup destination but the cluster was not found at runtime")
         elif not fact.get("first_recoverability_point"):
             findings.append(
@@ -519,7 +559,11 @@ def check(root: pathlib.Path, snapshot: dict) -> int:
             continue
         comparator = COMPARATORS[probe]
         if probe == "backup_recoverability":
-            comparator = functools.partial(comparator, app_exemptions=claim_app_backup_exemptions(root))
+            comparator = functools.partial(
+                comparator,
+                app_exemptions=claim_app_backup_exemptions(root),
+                staged_paths=claim_staged_component_paths(root),
+            )
         for finding in comparator(claims[probe], facts[probe]):
             print(f"::warning::{probe}: {finding}")
             total += 1
@@ -603,6 +647,35 @@ def self_test() -> int:
     expect(
         "backup: a BLANK exemption reason does not count as an exemption",
         len(cmp_backup_recoverability({}, {"observability/glitchtip-pg": {"backup_exempt_reason": "   "}})),
+        1)
+    expect(
+        "backup: a STAGED Application's declared-but-absent cluster is not a finding",
+        cmp_backup_recoverability(
+            {"incentive/incentive-db": {"declares_backup": True,
+                                        "source": "openbank-infra/gitops/components/incentive/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"}),
+        [])
+    expect(
+        "backup: ... but a NON-staged component's absent cluster still is",
+        len(cmp_backup_recoverability(
+            {"party/party-db": {"declares_backup": True,
+                                "source": "openbank-infra/gitops/components/party/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"})),
+        1)
+    expect(
+        "backup: ... and a staged component that IS live is still held to a recovery point",
+        "no restore is possible" in first(cmp_backup_recoverability(
+            {"incentive/incentive-db": {"declares_backup": True,
+                                        "source": "openbank-infra/gitops/components/incentive/db.yaml"}},
+            {"incentive/incentive-db": {"phase": "Cluster in healthy state"}},
+            staged_paths={"openbank-infra/gitops/components/incentive"})),
+        True)
+    expect(
+        "backup: ... and a path PREFIX does not match a sibling component",
+        len(cmp_backup_recoverability(
+            {"incentive2/db": {"declares_backup": True,
+                               "source": "openbank-infra/gitops/components/incentive-legacy/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"})),
         1)
     expect(
         "backup: an exemption on the ARGOCD APPLICATION excuses the cluster it renders",
