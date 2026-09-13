@@ -75,3 +75,17 @@ be established. Expired rows remain evidence even though the authorization API r
 `ScaOperatorApprovalDurabilityIT` covers retained expiry evidence, concurrent checker/claim
 races and transaction rollback on audit failure. `EXECUTED` is still a claim made before the
 protected method runs; reconcile the business row and its own event to determine its outcome.
+
+## Local OIDC integration proof
+
+`ScaOidcApprovalIT` runs an isolated Keycloak realm using the pinned upstream base image from
+the deployment image's Dockerfile, alongside PostgreSQL, Redis and the generated OPA bundle.
+It obtains real operator and service-account tokens; it does not inject TestSecurity identities.
+The test covers maker/checker identity agreement, forbidden self-approval, exact request binding,
+one business write, durable audit actors, missing or tampered token rejection, customer role
+denial and the explicit shared-service/edge policy exemptions.
+
+The fixture generates its passwords and client secrets at startup and scopes its realm to the
+test container. This proves local token verification and policy integration with synthetic
+identities. The target deployment's identity-provider configuration and admin login flow still
+need an environment-specific drill before activation; this test does not enable production.

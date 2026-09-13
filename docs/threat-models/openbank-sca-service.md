@@ -271,3 +271,13 @@ Mixed Redis/PostgreSQL approval writers and restored Redis snapshots are unsafe:
 rollback require paused mutations and a verified drain of every live approval. Evidence tables
 remain intact on rollback. Production four-eyes activation still requires a reviewed rollout
 and real identity-provider validation; this storage change does not enable it.
+
+### Real-token integration coverage
+
+`ScaOidcApprovalIT` obtains tokens from an isolated upstream Keycloak realm and drives the
+actual OIDC authentication, generated OPA policy and PostgreSQL approval store. It verifies
+missing/tampered token rejection, customer denial, maker/checker identity agreement, one-use
+request binding and the two explicit service-account ceremony exemptions. The audit event's
+actor is checked against the authenticated principal. The fixture has only synthetic users
+and generates its credentials at startup. This is local integration coverage, not an
+attestation of the target deployment's identity-provider configuration or admin login flow.
