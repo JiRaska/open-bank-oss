@@ -721,7 +721,7 @@ export default function FxPage() {
                                 const days = p.days ?? [...s.days]
                                 return { ...p, days: active ? days.filter(d => d !== day) : [...days, day] }
                               })}
-                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
+                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: 700, borderRadius: '5px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-strong)' : 'var(--border)'}`, background: active ? 'var(--accent-strong)' : 'var(--surface-2)', color: active ? '#fff' : 'var(--text-tertiary)', transition: 'all 0.1s' }}>
                               {t(DAY_LABELS_CS[day], DAY_LABELS_EN[day])}
                             </button>
                           )
@@ -765,7 +765,7 @@ export default function FxPage() {
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString(numberLocale)}</td>
                       <td style={{ padding: '6px 16px', fontSize: '11px', fontWeight: 600 }}>
-                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
+                        <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent-strong)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
                       </td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{h.pair}</td>
                       <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{h.rate.toFixed(4)}</td>

@@ -315,7 +315,7 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             style={{
               padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
               border: `1px solid ${active === p.slug ? 'var(--accent)' : 'var(--border)'}`,
-              background: active === p.slug ? 'var(--accent)' : 'var(--surface)',
+              background: active === p.slug ? 'var(--accent-strong)' : 'var(--surface)',
               color: active === p.slug ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{p.name}</button>
@@ -330,8 +330,10 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{process.desc}</div>
           </div>
           <div style={{
-            padding: '6px 12px', background: '#fef2f2', border: '1px solid #fecaca',
-            borderRadius: '6px', fontSize: '11px', fontWeight: 600, color: '#dc2626',
+            // The regulation chip carries 11px TEXT, so it needs AA on its own tint: #dc2626 on
+            // #fef2f2 measured 4.41:1. The tokens are tuned for this and follow dark theme (#9749).
+            padding: '6px 12px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
+            borderRadius: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--danger-text)',
           }}>
             📋 {process.regulation}
           </div>

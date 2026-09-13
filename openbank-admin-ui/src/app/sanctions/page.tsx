@@ -113,7 +113,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
       </div>
       <button type="button" onClick={save} disabled={saving}
         style={{ alignSelf: 'flex-start', padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontWeight: 600,
-          background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
+          background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
           display: 'flex', alignItems: 'center', gap: '5px' }}>
         {saving ? <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} /> : null}
         {t('Uložit plán', 'Save schedule')}
@@ -798,7 +798,7 @@ export default function SanctionsPage() {
                                   </code>
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Zopakovat po schválení', 'Retry once approved')}
                                     </button>
                                     <button onClick={() => { setReviewFor(null); setPendingApproval(null) }}
@@ -836,7 +836,7 @@ export default function SanctionsPage() {
                                   )}
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id)} disabled={reviewBusy}
-                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
+                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
                                       {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Odeslat rozhodnutí', 'Submit decision')}
                                     </button>
                                     <button onClick={() => setReviewFor(null)}
@@ -1031,7 +1031,7 @@ export default function SanctionsPage() {
 
                 <button type="button" aria-busy={screening} aria-label={screening ? t('Prověřování probíhá', 'Screening in progress') : t('Spustit prověření sankcí', 'Run sanctions screening')} onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
                   style={{ padding: '10px 20px', borderRadius: '7px', fontSize: '13px', fontWeight: 700,
-                    background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none',
+                    background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
                     cursor: screening || !searchName.trim() || selectedListTypes.length === 0 ? 'not-allowed' : 'pointer',
                     opacity: screening || !searchName.trim() || selectedListTypes.length === 0 ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' }}>
@@ -1122,7 +1122,7 @@ export default function SanctionsPage() {
                   <Can permission="sanctions:manage">
                   <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
                     style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                      background: 'var(--accent)', color: 'var(--text-inverse)', border: 'none',
+                      background: 'var(--accent-strong)', color: 'var(--text-inverse)', border: 'none',
                       cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
                       display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={12} aria-hidden="true" />}

@@ -179,7 +179,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
       <div role="group" aria-label={t('Karty detailu produktu', 'Product detail sections')} style={{ display: 'flex', gap: '2px', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
         {tabs.map(tabItem => (
           <button key={tabItem.id} type="button" aria-pressed={tab === tabItem.id} onClick={() => setTab(tabItem.id as typeof tab)}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer', background: tab === tabItem.id ? 'var(--accent)' : 'transparent', color: tab === tabItem.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer', background: tab === tabItem.id ? 'var(--accent-strong)' : 'transparent', color: tab === tabItem.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s' }}>
             <span aria-hidden="true">{tabItem.icon}</span>{tabItem.label}
           </button>
         ))}
