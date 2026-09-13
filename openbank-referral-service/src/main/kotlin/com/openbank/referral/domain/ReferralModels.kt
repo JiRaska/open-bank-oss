@@ -122,7 +122,47 @@ sealed class ReferralEvent {
     }
 }
 
-class ReferralConflictException(message: String) : RuntimeException(message)
+/**
+ * A referrer's own view of one invite. Carries NOTHING about the referee — no party id, no name —
+ * and not the token (stored only as a hash, and a bearer secret once issued). [status] is already
+ * time-adjusted: an ISSUED invite whose window has passed reads as EXPIRED.
+ *
+ * [createdAt] comes from the invite's `INVITE_ISSUED` audit row, the only place the issue instant
+ * is recorded; it is null if that row is missing rather than guessed from another timestamp.
+ */
+data class ReferrerInviteView(
+    val id: UUID,
+    val status: InviteStatus,
+    val createdAt: Instant?,
+    val expiresAt: Instant,
+    val attributedAt: Instant?,
+    val reward: ReferrerRewardView?,
+)
+
+/** The referrer-side projection of the latest reward on an invite. */
+data class ReferrerRewardView(
+    val status: RewardStatus,
+    val amount: BigDecimal,
+    val currency: String,
+    val requestedAt: Instant?,
+    val rewardedAt: Instant?,
+)
+
+/**
+ * Machine-readable causes for a 409, so a caller (the customer edge) can branch without matching
+ * on message text. Null for conflicts nobody has needed to distinguish yet.
+ */
+enum class ReferralConflictReason {
+    EXPIRED,
+    SELF,
+    ALREADY_ATTRIBUTED,
+    NOT_ATTRIBUTABLE,
+    IDEMPOTENCY_KEY_REUSED,
+    PROGRAM_UNAVAILABLE,
+}
+
+class ReferralConflictException(message: String, val reason: ReferralConflictReason? = null) :
+    RuntimeException(message)
 
 class ReferralNotFoundException(message: String) : RuntimeException(message)
 

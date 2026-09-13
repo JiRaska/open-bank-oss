@@ -43,6 +43,35 @@ class ReferralResource(private val service: ReferralService, private val identit
         ?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND).build()
 
+    /**
+     * The invites [partyId] issued, as the REFERRER may see them. Reached through the customer
+     * edge, which supplies the token's party. Privacy is the point of the shape: no referee party
+     * id or name, no token or token hash, no idempotency key. Amount is a decimal STRING so no
+     * client parses a reward through a binary float.
+     */
+    @GET
+    @Path("/parties/{partyId}/invites")
+    suspend fun referrerInvites(@PathParam("partyId") partyId: UUID): Response = Response.ok(
+        service.listInvitesForReferrer(partyId).map { v ->
+            mapOf(
+                "id" to v.id.toString(),
+                "status" to v.status.name,
+                "createdAt" to v.createdAt?.toString(),
+                "expiresAt" to v.expiresAt.toString(),
+                "attributedAt" to v.attributedAt?.toString(),
+                "reward" to v.reward?.let { r ->
+                    mapOf(
+                        "status" to r.status.name,
+                        "amount" to r.amount.toPlainString(),
+                        "currency" to r.currency,
+                        "requestedAt" to r.requestedAt?.toString(),
+                        "rewardedAt" to r.rewardedAt?.toString(),
+                    )
+                },
+            )
+        },
+    ).build()
+
     @POST
     @Path("/programs")
     suspend fun create(req: CreateReferralProgramRequest): Response = Response.status(
