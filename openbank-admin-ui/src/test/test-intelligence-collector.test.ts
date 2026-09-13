@@ -20,6 +20,42 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it('drops a build attestation whose matched verdict disagrees with its own SHAs (#7451)', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-attestation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: admin-ui-sso-boundary
+    title: Admin UI SSO boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    capability: proves the public SSO hand-off
+    falsification: remove the SSO boundary
+`)
+    const envelope = (id: string, variant: string, buildAttestation: unknown) => JSON.stringify({
+      schemaVersion: 1,
+      run: { id, attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: `https://github.com/JiRaska/open-bank-oss/actions/runs/${id}`, observedAt: '2026-08-25T08:10:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: 'checks', variant, buildAttestation }],
+    })
+    // chromium: forged — claims a match the SHAs contradict. firefox: honest mismatch.
+    write(repo, 'openbank-admin-ui/test-run-history/chromium.json', envelope('b-1', 'chromium', { requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: true }))
+    write(repo, 'openbank-admin-ui/test-run-history/firefox.json', envelope('b-2', 'firefox', { requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: false }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const variants = report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')?.ci?.variants ?? []
+    const byBrowser = Object.fromEntries(variants.map(variant => [variant.browser, variant]))
+    expect(byBrowser.chromium?.buildAttestation).toBeUndefined()
+    expect(byBrowser.firefox?.buildAttestation).toEqual({ requestedSha: 'abc1234', observedSha: '9999999aaaa', matched: false })
+  })
+
   it('derives inventory, classifies an IT from JUnit identity, parses Kover and keeps missing evidence explicit', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-collector-'))
     dirs.push(repo)
@@ -118,7 +154,8 @@ scenarios:
       schemaVersion: 1,
       run: { id: 'browser-10', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/browser-10', observedAt: '2026-08-25T08:10:00Z' },
       component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed', variant: 'chromium' }],
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed', variant: 'chromium',
+        buildAttestation: { requestedSha: '1234567', observedSha: '123456789abc', matched: true } }],
     }))
     write(repo, 'openbank-admin-ui/test-intelligence-history/previous-snapshot.json', JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-24T06:00:00Z', totals: { components: 2 },
@@ -152,7 +189,8 @@ scenarios:
     expect(report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')).toMatchObject({
       status: 'active', executor: 'github-actions', ci: {
         state: 'passed', detail: '1/1 declared browser variants passed.',
-        variants: [expect.objectContaining({ browser: 'chromium', state: 'passed' })],
+        variants: [expect.objectContaining({ browser: 'chromium', state: 'passed',
+          buildAttestation: { requestedSha: '1234567', observedSha: '123456789abc', matched: true } })],
       },
     })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
