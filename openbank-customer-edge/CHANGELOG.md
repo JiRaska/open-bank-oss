@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.75.0...customer-edge-v0.76.0) (2026-09-13)
+
+
+### Features
+
+* **customer-edge:** expose Lístky and member-get-member to the app ([#9965](https://github.com/JiRaska/open-bank-oss/issues/9965)) ([02054bb](https://github.com/JiRaska/open-bank-oss/commit/02054bb71b7fbc23c8af92cf2dce725fa40c0212))
+
 ## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.74.1...customer-edge-v0.75.0) (2026-09-13)
 
 
