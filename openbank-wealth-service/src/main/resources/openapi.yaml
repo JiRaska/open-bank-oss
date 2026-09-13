@@ -1,0 +1,331 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Wealth Service API
+  # 1.0.0: first contract (ADR-0301 D1, issue #9771).
+  version: 1.0.0
+  description: |
+    Customer-declared off-platform holdings (ADR-0301). A declared holding is an asset or
+    liability the customer asserts and the bank does NOT hold: real estate, collectibles,
+    securities at another custodian, a stake in a company the platform has not onboarded.
+
+    Every valuation carries its `valuationSource`. `CUSTOMER_DECLARED` means the customer typed
+    the number: it is never verified, and no consumer may treat it as a bank position or feed it
+    into pricing or credit. Net worth is composed at the customer edge from the owning services
+    (ADR-0301 D2); this service is one labelled branch of that tree and holds no copy of any
+    on-platform figure.
+servers:
+  - url: http://localhost:8154
+tags:
+  - name: Wealth
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/holdings:
+    post:
+      tags: [Wealth]
+      operationId: declareHolding
+      summary: Declare a holding the bank does not hold
+      description: |
+        Idempotent on the natural key `(ownerPartyId, holdingType, externalReference)` when
+        `externalReference` is supplied: a replay returns the existing holding unchanged, and
+        deliberately does NOT apply a different amount carried by the retry.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclareHoldingRequest'
+      responses:
+        '201':
+          description: Holding declared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holding'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    get:
+      tags: [Wealth]
+      operationId: listHoldings
+      summary: List a party's active and pledged holdings
+      description: Withdrawn holdings are excluded.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Holdings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Holding'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/holdings/{id}:
+    get:
+      tags: [Wealth]
+      operationId: getHolding
+      summary: Read one holding
+      parameters:
+        - $ref: '#/components/parameters/HoldingId'
+      responses:
+        '200':
+          description: Holding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holding'
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Wealth]
+      operationId: withdrawHolding
+      summary: Withdraw a holding
+      description: |
+        Refused with 409 while the holding is `PLEDGED` as lending collateral. The release
+        arrives as a lending event; this service never calls lending (ADR-0301 D3).
+      parameters:
+        - $ref: '#/components/parameters/HoldingId'
+      responses:
+        '200':
+          description: Holding withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holding'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/holdings/{id}/valuations:
+    get:
+      tags: [Wealth]
+      operationId: getValuationHistory
+      summary: Every value ever asserted for this holding
+      description: |
+        Append-only and newest first by `recordedAt`, which is when the BANK learned the value and
+        is not the same as `valuedAt`, which is the date the value asserts. A backdated appraisal
+        is legitimate, so the two can disagree by years.
+      parameters:
+        - $ref: '#/components/parameters/HoldingId'
+      responses:
+        '200':
+          description: The valuation series
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecordedValuation'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/holdings/{id}/valuation:
+    put:
+      tags: [Wealth]
+      operationId: revalueHolding
+      summary: Restate a holding's value
+      description: |
+        Does not move any loan's ECL. Lending copied the figure into its own collateral row at
+        registration time and owns it from then on (ADR-0301 D3).
+      parameters:
+        - $ref: '#/components/parameters/HoldingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [valuation]
+              properties:
+                valuation:
+                  $ref: '#/components/schemas/Valuation'
+      responses:
+        '200':
+          description: Holding revalued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holding'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CustomerPartyId:
+      name: X-Customer-Party-Id
+      in: header
+      required: true
+      description: The owning party, stamped by the customer edge from the token it validated.
+      schema:
+        type: string
+        format: uuid
+    HoldingId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Malformed request or a missing required header
+    Unauthorized:
+      description: Missing or invalid bearer token
+    NotFound:
+      description: No such holding
+    Conflict:
+      description: The holding's current state forbids this transition
+
+  schemas:
+    HoldingType:
+      type: string
+      description: |
+        Closed vocabulary. Which side of net worth a holding falls on is fixed BY the type and
+        reported as `isLiability`; there is no separate side field, because REAL_ESTATE combined
+        with LIABILITY would mean nothing.
+      enum:
+        - REAL_ESTATE
+        - COLLECTIBLE
+        - EXTERNAL_SECURITIES
+        - EXTERNAL_COMPANY_STAKE
+        - VEHICLE
+        - EXTERNAL_DEPOSIT
+        - PRIVATE_CLAIM
+        - MORTGAGE
+        - CONSUMER_CREDIT
+        - PRIVATE_DEBT
+        - OTHER_LIABILITY
+
+    ValuationSource:
+      type: string
+      description: |
+        `CUSTOMER_DECLARED` is what the customer typed and is never verified.
+        `EXPERT_APPRAISAL` requires `appraiserReference`. `MARKET_REFERENCE` is supplied by the
+        caller with a named source; this service fetches no prices.
+      enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]
+
+    HoldingStatus:
+      type: string
+      enum: [ACTIVE, PLEDGED, WITHDRAWN]
+
+    Valuation:
+      type: object
+      required: [amount, currency, valuedAt, source]
+      properties:
+        amount:
+          type: number
+          minimum: 0
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        valuedAt:
+          type: string
+          format: date
+          description: When the value was ESTABLISHED, not when the row was written.
+        source:
+          $ref: '#/components/schemas/ValuationSource'
+        appraiserReference:
+          type: [string, 'null']
+
+    RecordedValuation:
+      type: object
+      required: [amount, currency, valuedAt, source, recordedAt]
+      properties:
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        valuedAt: { type: string, format: date }
+        source: { $ref: '#/components/schemas/ValuationSource' }
+        appraiserReference: { type: [string, 'null'] }
+        recordedAt:
+          type: string
+          format: date-time
+          description: When the bank learned this value.
+
+    DeclareHoldingRequest:
+      type: object
+      required: [holdingType, label, valuation]
+      properties:
+        holdingType:
+          $ref: '#/components/schemas/HoldingType'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 256
+        valuation:
+          $ref: '#/components/schemas/Valuation'
+        ownershipShare:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+          default: 1
+        externalReference:
+          type: [string, 'null']
+          maxLength: 128
+          description: The caller's stable handle — cadastre number, VIN, ISIN. Third component of the natural key.
+        documentIds:
+          type: array
+          description: document-service ids. Evidence is referenced, never stored here.
+          items:
+            type: string
+            format: uuid
+
+    Holding:
+      type: object
+      required:
+        - holdingId
+        - ownerPartyId
+        - holdingType
+        - isLiability
+        - label
+        - amount
+        - currency
+        - valuedAt
+        - valuationSource
+        - ownershipShare
+        - attributableAmount
+        - valuationAgeDays
+        - documentIds
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        holdingId: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        holdingType: { $ref: '#/components/schemas/HoldingType' }
+        isLiability: { type: boolean }
+        label: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+        valuedAt: { type: string, format: date }
+        valuationSource: { $ref: '#/components/schemas/ValuationSource' }
+        appraiserReference: { type: [string, 'null'] }
+        ownershipShare: { type: number }
+        attributableAmount:
+          type: number
+          description: amount x ownershipShare. Not a bank figure.
+        valuationAgeDays:
+          type: integer
+          format: int64
+          description: |
+            Days between `valuedAt` and today. On the wire because `valuedAt` alone makes a
+            years-old number look identical to a fresh one, and no rule may treat a stale
+            self-declared figure as current.
+        externalReference: { type: [string, 'null'] }
+        documentIds:
+          type: array
+          items: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/HoldingStatus' }
+        pledgedToLoanId: { type: [string, 'null'], format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
