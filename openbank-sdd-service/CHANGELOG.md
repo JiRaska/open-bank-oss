@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.1...sdd-service-v0.13.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **sdd:** guard sdd_outbox created_at plausibility at INSERT ([#9297](https://github.com/JiRaska/open-bank-oss/issues/9297)) ([6766f2f](https://github.com/JiRaska/open-bank-oss/commit/6766f2f414c01154edd1c4ed8585418b2f3dace1))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.0...sdd-service-v0.13.1) (2026-09-08)
 
 
