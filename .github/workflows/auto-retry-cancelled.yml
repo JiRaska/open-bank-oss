@@ -120,24 +120,36 @@ jobs:
   discover:
     name: Find recent runs requiring reconciliation
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Room for the rate-limit waits below (3 calls x up to 2 waits of 120s) plus the calls.
+    timeout-minutes: 15
     outputs:
       retry: ${{ steps.select.outputs.retry }}
       flakes: ${{ steps.select.outputs.flakes }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          sparse-checkout: .github/scripts/select-ci-reconcile-candidates.py
+          sparse-checkout: |
+            .github/scripts/select-ci-reconcile-candidates.py
+            .github/scripts/gh-retry.sh
+            .github/scripts/gh-transient-patterns.txt
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      # Through gh_retry, like every other API call in this workflow. Bare, this call was the one
+      # the #6255 lesson never reached: 8 of the last 13 failures of this workflow (2026-09-12/13)
+      # were `API rate limit exceeded for installation` (HTTP 403) on its first request, so the
+      # tick found no candidates and raised the retry-failure issue with nothing to retry.
+      # The wait is capped short on purpose: the 30-minute lookback spans six ticks, so a tick that
+      # still loses to the limit is re-covered by the next one rather than waited out here.
       - name: Read recent completions from the three watched workflows
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_RETRY_MAX_WAIT_SECONDS: "120"
         run: |
           set -euo pipefail
+          source .github/scripts/gh-retry.sh
           cutoff=$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
           for workflow in services-ci.yml security.yml dependency-submission.yml; do
-            gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+            gh_retry 3 -- gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
               -f status=completed -f per_page=100 -f "created=>=${cutoff}" --paginate --slurp \
               | jq 'map(.workflow_runs) | add' > "${RUNNER_TEMP}/${workflow}.json"
           done
@@ -205,6 +217,11 @@ jobs:
             .github/scripts/gh-retry.sh
             .github/scripts/gh-transient-patterns.txt
           sparse-checkout-cone-mode: false
+          # Under `with:`, not in the step below. #9730 inserted the assert step directly above
+          # this key, which moved it into that step's `run:` script: every candidate then died on
+          # `persist-credentials:: command not found` (exit 127) before any decision, and this
+          # checkout silently fell back to persisting the token in a job holding `actions: write`.
+          persist-credentials: false
 
       - name: Assert the sparse checkout is complete
         run: |
@@ -227,7 +244,6 @@ jobs:
             echo "[$section] patterns: $n"
           done
           [ "$missing" -eq 0 ]
-          persist-credentials: false
 
       - name: Re-run only if the runner was reclaimed
         env:
