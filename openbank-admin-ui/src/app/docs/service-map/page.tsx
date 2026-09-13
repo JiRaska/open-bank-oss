@@ -658,7 +658,7 @@ export default function ServiceMapPage() {
               style={{
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
-                background: filter === key ? 'var(--accent)' : 'var(--surface)',
+                background: filter === key ? 'var(--accent-strong)' : 'var(--surface)',
                 color: filter === key ? 'var(--text-inverse)' : 'var(--text-secondary)',
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>{label}</button>

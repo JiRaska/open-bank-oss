@@ -27,6 +27,10 @@
 # referral sandbox-d92d20f5) had reached exactly that state — every pin has since moved to a
 # real built tag — and two of them additionally justified themselves with prose main
 # contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
-# The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
-# that is the correct reading, not a missing file.
+# An empty file is a correct reading, not a missing file: the gate then reports 0 allowlisted
+# placeholders.
+#
+# You do not remove an entry by hand when its service first deploys: auto-deploy.yml's rewrite
+# step prunes every entry that its own tag rewrite leaves undeclared, in the same deploy PR,
+# using the gate's own enumeration. Adding one is still a human decision.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-wealth-service:sandbox-000000000

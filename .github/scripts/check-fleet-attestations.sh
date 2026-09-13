@@ -99,6 +99,24 @@ classify_failure() {
   printf 'UNKNOWN\n'
 }
 
+# Echo the stderr a verdict was classified FROM. Only UNKNOWN used to do this, and that is the one
+# class nobody has to diagnose — it already says "no verdict about this image". The two classes that
+# accuse something (ABSENT, UNATTESTED) discarded their evidence, so a wrong accusation could not be
+# told apart from a right one after the fact.
+#
+# Measured 2026-09-12 (issue #9860): run 34721055657 reported
+# `UNATTESTED openbank-security-scanner:sandbox-062c26af`, and a hand
+# `cosign verify-attestation --key <same> --type cyclonedx <same digest>` verified cleanly 25 minutes
+# later, with `.att` and `.sig` both present in ECR and the tag unmoved on main. cosign must
+# therefore have emitted one of the phrases `classify_failure` treats as positive-UNATTESTED, and
+# which one is the whole question — it was not retained anywhere. Note the retry loop cannot help
+# here by design: it breaks on any verdict that is not UNKNOWN, so a transient whose wording lands in
+# the UNATTESTED set is accepted on the first attempt.
+print_classified_stderr() {
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1" | sed 's/^/                  | /' | tail -5
+}
+
 selftest() {
   # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
   # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
@@ -230,6 +248,27 @@ STUB
   run_fixture "unattested + absent -> exit 1" 1 \
     "1 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-bare:t" "openbank-fixture-gone:t"
+  # The accusing verdicts must carry the stderr they were classified FROM (#9860). Asserted on the
+  # fixture above rather than as its own run: LAST_OUT holds that run's output, and the point is that
+  # the evidence sits next to the accusation in the log a reader actually opens. Without the echo in
+  # the UNATTESTED branch this assertion fails, which is the only reason to trust the echo is there.
+  cases=$((cases + 1))
+  if ! grep -qF '| Error: no matching attestations:' <<< "$LAST_OUT"; then
+    printf '  FAIL: an UNATTESTED verdict does not print the cosign stderr it was classified from\n'
+    printf '        (a wrong accusation would then be indistinguishable from a right one, #9860)\n'
+    printf '%s\n' "$LAST_OUT" | grep -A3 'UNATTESTED' | sed 's/^/          | /'
+    failures=$((failures + 1))
+  else
+    printf '  ok: an UNATTESTED verdict prints the stderr it was classified from\n'
+  fi
+  cases=$((cases + 1))
+  if ! grep -qF '| Error: MANIFEST_UNKNOWN: manifest unknown' <<< "$LAST_OUT"; then
+    printf '  FAIL: an ABSENT verdict does not print the cosign stderr it was classified from\n'
+    failures=$((failures + 1))
+  else
+    printf '  ok: an ABSENT verdict prints the stderr it was classified from\n'
+  fi
+
   # ONLY a probe failure -> 2, and crucially NOT 1: this is the case that used to be
   # published as a fleet gap, and the exit code is the only thing the caller reads.
   run_fixture "probe failure only -> exit 2 (not 1)" 2 \
@@ -587,12 +626,14 @@ for image in "${IMAGES[@]}"; do
         ALLOWED=$((ALLOWED + 1))
       else
         printf '  ABSENT      %s  <-- declared in gitops but NOT in the registry\n' "$short"
+        print_classified_stderr "$err"
         ABSENT=$((ABSENT + 1))
         ABSENT_IMAGES+=("$image")
       fi
       ;;
     UNATTESTED)
       printf '  UNATTESTED  %s  <-- no valid CycloneDX SBOM attestation\n' "$short"
+      print_classified_stderr "$err"
       UNATTESTED=$((UNATTESTED + 1))
       UNATTESTED_IMAGES+=("$image")
       ;;

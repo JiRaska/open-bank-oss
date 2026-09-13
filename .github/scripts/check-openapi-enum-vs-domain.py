@@ -119,6 +119,23 @@ BASELINE: dict[str, str] = {
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
     # lifecycle vs ApprovalStatus) and PENDING/SENT/FAILED (a payment status vs OutboxStatus) are
     # overlaps of vocabulary, not identity — the same shape as the pid-service entries below.
+    # MIS-PAIRINGS from the card scheme ports (ADR-0283 phase 2, #8810). Same class as the three
+    # below: shared libs enums clearing the overlap threshold against customer-edge spec enums that
+    # model a different concept. `CardScheme` is which network ADAPTER answered a capability call
+    # (VISA | MASTERCARD | SIMULATOR); the spec enum is which brand a card CARRIES, so it has no
+    # SIMULATOR and never will — publishing one would advertise a card brand that does not exist.
+    # `NetworkTokenStatus` pairs twice on ACTIVE/SUSPENDED alone, against a card-token lifecycle and
+    # a party lifecycle. Neither is drift, and reconciling either would mean changing a customer
+    # spec to match an enum it does not serve.
+    "openbank-customer-edge:MASTERCARD,VISA":
+        "#8810 — mis-pairing: card BRAND on the card resource vs libs CardScheme, which names the "
+        "answering ADAPTER and carries SIMULATOR by design.",
+    "openbank-customer-edge:ACTIVE,CANCELLED,EXPIRED,PENDING_CONFIRMATION,SUSPENDED":
+        "#8810 — mis-pairing: a card-token lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
+    "openbank-customer-edge:ACTIVE,CLOSED,MERGED,PENDING_KYC,SUSPENDED":
+        "#8810 — mis-pairing: a party lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
     "openbank-customer-edge:FAILED,MANUAL_REVIEW,PASSED,PENDING":
         "#7984 — mis-pairing: screening verdict shares FAILED/PENDING with libs OutboxStatus.",
     "openbank-customer-edge:APPROVED,EXPIRED,IN_PROGRESS,NOT_STARTED,REJECTED":
@@ -151,24 +168,48 @@ BASELINE: dict[str, str] = {
     # with the libs scan merged in, that quartet EXACTLY matches libs-domain's ApprovalStatus
     # (the ADR-0155 four-eyes vocabulary it was always meant to publish), so it no longer drifts.
     # The stale-entry check below enforces the removal.
+    # NOT drift — a DELIBERATE SUBSET, reason measured 2026-09-13 (#5962; it used to say only
+    # "ambiguous"). The values are `PackActivationView.state`, typed as libs ProposalState
+    # (PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED). CompliancePackActivationService persists
+    # PROPOSED on propose and, in decide, either `approve(...).markExecuted(...)` (EXECUTED) or
+    # `reject(...)` (REJECTED); no path anywhere in the service sets WITHDRAWN, so the spec is
+    # right not to publish it. APPROVED is only ever transient in memory, so publishing it is a
+    # harmless superset on a response, not a value a client can be refused for.
     "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
-        "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
-    # Surfaced by the libs scan (#7984): the spec's origination-state list is exactly
-    # libs-domain's OriginationState PLUS three invented values (APPROVED/PROPOSED/REJECTED) —
-    # the #5895 shape, invisible until the shared enum could pair. Lending is money-path, so the
-    # spec correction (dropping the three phantom values) goes through its own reviewed change.
+        "#5962 — PackActivationView.state: NOT drift. A deliberate subset of libs ProposalState; "
+        "no compliance-pack activation path sets WITHDRAWN (propose/decide persist PROPOSED, "
+        "EXECUTED or REJECTED only).",
+    # NOT drift, and the earlier reason here was WRONG in the dangerous direction (#5962). It said
+    # APPROVED/PROPOSED/REJECTED "have never existed in the code" and asked for a spec correction
+    # dropping them — which would have removed working API vocabulary from a money-path contract.
+    #
+    # They are accepted filter inputs, and they are TRANSLATED rather than ignored. The parameter is
+    # the `status` query filter of listRecentApplications, whose repository does:
+    #     mapStatusFilter(status) = OriginationState.entries.firstOrNull { it.name == status }
+    #         ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+    #         ?: throw IllegalArgumentException("Unknown application status: $status")
+    # and `mapLegacyStatus` maps PROPOSED -> SUBMITTED, APPROVED -> OFFERED, REJECTED -> DECLINED
+    # (MAPPABLE_LEGACY_STATUSES, libs-domain). So a client sending APPROVED gets the OFFERED rows,
+    # not an empty list and not a 400 — the spec's own description says the legacy names "remain
+    # accepted ... for compatibility; retired rows were migrated by V9", and the code agrees.
+    #
+    # The gate pairs a FILTER vocabulary (canonical states + the retired names still honoured) with
+    # the canonical enum alone, and cannot see the translation layer. Deliberate superset, same
+    # class as the campaign/document/ledger entries above.
+    #
+    # What IS still open, and is not this gate's question: whether the legacy vocabulary should be
+    # retired from the filter now that V9 has migrated the rows. That is an API-deprecation decision
+    # for the lending owner, and until it is made the spec is correct to publish what the endpoint
+    # accepts.
     "openbank-lending-service:APPROVED,ASSESSMENT,AWAITING_SIGNATURE,DECISION_PENDING,DECLINED,DISBURSED,DOCS_REQUIRED,DRAFT,EXPIRED,FOUR_EYES,KYC_PENDING,OFFERED,PROPOSED,READY_TO_DISBURSE,REFLECTION_PERIOD,REJECTED,SIGNED,SUBMITTED,WITHDRAWN":
-        "#7984 — OriginationState: spec advertises APPROVED/PROPOSED/REJECTED, which have never "
-        "existed in the code; real drift, needs a reviewed lending spec fix (money-path).",
-    # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
-    # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
-    # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
-    # match none of the Kotlin DTO's (givenName, familyName, birthdate, nationalities,
-    # verificationSource, bankIdSub, birthNumberRaw, initialRole, onboardingChannel). Same
-    # reason as above: fix the schema, then the enum.
-    "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
-        "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
-        "whose properties do not match the DTO at all; needs a schema fix first.",
+        "#5962 — listRecentApplications `status`: NOT drift. A deliberate superset of "
+        "OriginationState; PROPOSED/APPROVED/REJECTED are retired names the repository still "
+        "translates via LegacyOriginationMigration.mapLegacyStatus, so they return rows.",
+    # REMOVED 2026-09-13 (#5962): `openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER`. Its
+    # precondition ("fix the schema first") had already been met — CreatePartyRequest's properties
+    # now match the Kotlin DTO — so only the enum was left, and it is corrected to the domain's
+    # NATURAL_PERSON (PartyType, the DTO default, and the DB CHECK). The stale-entry check enforces
+    # the removal.
     # NOT drift — a DELIBERATE SUBSET (#5962). TransitionStatusRequest.targetStatus publishes
     # every status `SepaPayment.canTransitionTo` can reach; RECEIVED is the entry state and is
     # the target of no transition, so it is absent here while present on the read filter, which

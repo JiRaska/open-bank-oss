@@ -237,9 +237,12 @@ cosign_attest_slsa_provenance() {
     # sha256-<digest>.att tag once the cyclonedx attestation has created it: cosign's legacy
     # attestation model APPENDS to that one tag, so the second (SLSA) attestation dies with
     # `TAG_INVALID ... tag is immutable` (#8981). That is a registry constraint, not a missing
-    # attestation capability — and the kyverno SLSA-provenance policy is Audit-only, so an
-    # image without the SLSA envelope still deploys (signature + SBOM policies are Enforce
-    # and stay fatal above). Tolerate exactly this signature; every other failure is fatal.
+    # attestation capability. No admission policy currently checks SLSA (removed, #9805 item
+    # 4), so an image without the SLSA envelope still deploys (signature + SBOM policies are
+    # Enforce and stay fatal above). NOTE: while the Audit SLSA policy existed this premise was
+    # FALSE — Kyverno v1.12.5 let an Audit failure deny ~75 % of Pod creates. Re-examine this
+    # tolerance before that policy returns. Tolerate exactly this signature; every other
+    # failure is fatal.
     if grep -q 'TAG_INVALID' "$attest_out" && grep -qi 'immutable' "$attest_out"; then
       echo "WARNING: SLSA attestation for ${image} rejected by the immutable-tag repository" >&2
       echo "         (TAG_INVALID: the .att tag already exists from the SBOM attestation and" >&2

@@ -19,7 +19,11 @@ info:
   # (1.57.0) in the same turn as this edit and confirmed free with
   # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
   # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
-  version: 1.58.0
+  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
+  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
+  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
+  # takes the next free version (ADR-0048).
+  version: 1.62.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -71,6 +75,36 @@ tags:
   - name: Complaints
 
 paths:
+  /net-worth:
+    get:
+      tags: [Profiles]
+      operationId: getNetWorth
+      summary: The caller's net worth, composed from the services that own each figure
+      description: |
+        Fans out to balance-service, lending-service, wealth-service and the ADR-0284 owner graph
+        (ADR-0301 D2). The party comes from the JWT; there is no path or query parameter.
+
+        A branch whose owner did not answer is UNAVAILABLE, never zero. This endpoint answers 200
+        with an honest partial tree rather than 5xx when one upstream is down, so a customer can
+        still see their cash while lending is unavailable. `totals.complete` is false whenever any
+        branch failed or was truncated, and `totals.missingBranches` names them. A client that
+        renders the totals while ignoring those fields is presenting a partial figure as final.
+
+        No currency conversion. Totals are per currency and `totals.converted` is always false; a
+        consolidated cross-currency figure is indicative only (ADR-0024) and is the client's to
+        compute through fx-service, showing the rate and its timestamp.
+
+        Declared holdings are labelled. Every leaf from wealth-service carries `valuationSource`
+        and `valuationAgeDays`: `CUSTOMER_DECLARED` means the customer typed the number and nobody
+        checked it, and a years-old figure is otherwise indistinguishable from a fresh one.
+
+        Entity stakes carry no amount at all (`valued: false`) and move no total: party-service
+        returns who may represent whom, not what an entity is worth.
+      responses:
+        '200':
+          description: The net-worth tree, possibly partial
+        '401':
+          description: Missing or invalid bearer token
   /products:
     get:
       tags: [Products]

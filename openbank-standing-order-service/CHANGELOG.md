@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.3...standing-order-service-v0.16.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **standing-order:** guard standing_order_outbox created_at plausibility at INSERT ([#9321](https://github.com/JiRaska/open-bank-oss/issues/9321)) ([5d5473a](https://github.com/JiRaska/open-bank-oss/commit/5d5473a3fc26c9699414aa477c4893e50a1b5511))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.2...standing-order-service-v0.16.3) (2026-09-08)
 
 

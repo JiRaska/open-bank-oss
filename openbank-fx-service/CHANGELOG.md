@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.1...fx-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **fx:** guard fx_outbox created_at plausibility at INSERT ([#9296](https://github.com/JiRaska/open-bank-oss/issues/9296)) ([0e07c38](https://github.com/JiRaska/open-bank-oss/commit/0e07c38626edd78bf6e930c6fec20b41e3bb6eb6))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.0...fx-service-v0.15.1) (2026-09-03)
 
 
