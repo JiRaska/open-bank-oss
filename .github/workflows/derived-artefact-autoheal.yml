@@ -43,6 +43,12 @@ on:
       - "openbank-libs/governance/rules.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "prompts/registry.yaml"
+      # A new released component is a `version.txt` appearing anywhere, and the registry pair is
+      # derived from exactly that set (gen-release-registry.py). Without this path the autoheal
+      # cannot repair the failure it exists for: a clean merge dropping a registered component,
+      # which git reports as success and only `release-registration-consistency` sees.
+      - "*/version.txt"
+      - ".github/scripts/gen-release-registry.py"
       - "**/*.rego"
       - ".github/scripts/gen-*.py"
       - "docs/adr/gen-index.sh"
