@@ -81,16 +81,18 @@ outbox-published (ADR-0003) as `openbank.wealth.events` with `HoldingDeclared`, 
 ledger.
 
 **D2 — Net worth is composed at the customer edge from owning services and is never persisted
-by wealth-service.** `openbank-customer-edge` gains a `GET /api/v1/net-worth` that fans out to
+by wealth-service.** `openbank-customer-edge` gains a `GET /customer/v1/net-worth` that fans out to
 `balance-service` (on-platform balances), `lending-service` (loans, and approved collateral), the
 ADR-0284 owner graph (stakes in onboarded entities) and `wealth-service` (declared holdings), and
 returns a typed tree whose every leaf names its source service and its `asOf`. `wealth-service`
 holds no copy of any on-platform figure. The customer-facing rule of ADR-0089 is kept by
 construction: an authoritative figure is only ever a proxied answer from its owner, and a declared
 holding is labelled `CUSTOMER_DECLARED` on the wire so no consumer can mistake it for a bank
-position. The route is a flat noun because that is the edge's convention — every resource there is
-`/accounts`, `/cards`, `/activity`, `/complaints`, with the party taken from the `party_id` JWT
-claim — and no `/me` namespace exists to join.
+position. The route is a flat noun under the edge's own prefix, which is `/customer/v1` and not
+`/api/v1`: every resource there is `/accounts`, `/cards`, `/activity`, `/complaints`, with the party
+taken from the `party_id` JWT claim, and no `/me` namespace exists to join. This ADR said
+`/api/v1/net-worth` when it was written and that prefix belongs to the backing services, not to the
+edge; corrected in the change that built it (#9772).
 
 **D3 — A declared holding can be promoted to lending collateral; lending never reads
 wealth-service.** Promotion is a lending operation: the existing `POST

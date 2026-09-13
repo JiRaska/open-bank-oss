@@ -164,6 +164,47 @@ jobs_query() { # jobs_query <jq>
   gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" --jq "$1"
 }
 
+# ── THE TEXTUAL SIGNATURE (#9787) ────────────────────────────────────────────────────────────
+# The structural rule above models a reclaim as "the runner agent marked the step cancelled". That
+# is not what happens when the step's OWN process takes the SIGTERM and exits first: GitHub then
+# records a COMPLETED step with a non-zero exit, i.e. `failure`, and the job carries no cancelled
+# step at all. A long-running child that traps SIGTERM produces exactly that — measured on PR
+# #9172, run 34678808656, `Admin UI build` (Playwright with its web server): `cancelled_steps=0
+# failed_steps=1`, while the log ended with the canonical reclaim text and `exit code 143`.
+#
+# So this is a SECOND, independent recogniser, consulted only when the structural one declines.
+# It is deliberately narrow — BOTH the shutdown line and a 143 exit must be present in the same
+# job's log. Either alone is a normal thing: 143 is any SIGTERM (an OOM kill, a `timeout`), and
+# the shutdown line appears in jobs that were cancelled cleanly and already match the rule above.
+# Requiring the pair is what keeps this from becoming "retry every red job".
+RECLAIM_SHUTDOWN_TEXT="The runner has received a shutdown signal"
+RECLAIM_EXIT_TEXT="Process completed with exit code 143"
+
+failed_job_ids() {
+  jobs_query '.jobs[] | select(.conclusion == "failure") | .id'
+}
+
+# 0 = this job's log carries the pair. Non-zero = it does not, OR the log could not be read.
+# NOT retried and NOT escalated on an unreadable log: the structural rule has already declined,
+# so the run stays red either way, and the worst case of a missing log is the behaviour that was
+# there before this recogniser existed.
+job_log_shows_reclaim() { # job_log_shows_reclaim <job_id>
+  local log
+  log="$(gh_ api "repos/${GITHUB_REPOSITORY}/actions/jobs/$1/logs" 2>/dev/null)" || return 1
+  case "${log}" in *"${RECLAIM_SHUTDOWN_TEXT}"*) ;; *) return 1 ;; esac
+  case "${log}" in *"${RECLAIM_EXIT_TEXT}"*) ;; *) return 1 ;; esac
+  return 0
+}
+
+# The id of the first failed job whose log carries the pair, or empty.
+reclaimed_job_from_logs() {
+  local id
+  for id in $(failed_job_ids); do
+    if job_log_shows_reclaim "${id}"; then printf '%s' "${id}"; return 0; fi
+  done
+  return 1
+}
+
 main() {
   : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -217,8 +258,21 @@ main() {
   fi
 
   if [ "${count}" -eq 0 ]; then
-    echo "::notice title=spot-kill auto-retry::${RUN_URL:-${RUN_ID}} failed with no spot-kill signature (no job has a cancelled step and no failed step) — treating it as a real failure and NOT re-running."
-    decide no-spot-kill-signature "no failed job has a cancelled step and no failed step — a real build failure"
+    # The structural rule declined. Before calling this a real failure, ask the logs (#9787) —
+    # a step that took the SIGTERM itself leaves no cancelled step anywhere in the job data, so
+    # the reclaim is visible ONLY as text, and the red check is otherwise indistinguishable from
+    # a genuine test failure at every level a human or a gate looks at.
+    local reclaimed_id=""
+    reclaimed_id="$(reclaimed_job_from_logs || true)"
+    if [ -n "${reclaimed_id}" ]; then
+      echo "Re-running ${RUN_URL:-${RUN_ID}}: job ${reclaimed_id} has no cancelled step, but its log carries the reclaim signature and exit 143 (issue #9787)"
+      with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+      echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — job ${reclaimed_id}'s own process took the SIGTERM and exited 143, so no step was marked cancelled (attempt 2 of max 2)."
+      decide rerun-log-signature "job ${reclaimed_id} exited 143 after a runner shutdown signal — failed jobs re-run (attempt 2 of max 2)"
+      return 0
+    fi
+    echo "::notice title=spot-kill auto-retry::${RUN_URL:-${RUN_ID}} failed with no spot-kill signature (no job has a cancelled step and no failed step, and no failed job's log carries a shutdown signal with exit 143) — treating it as a real failure and NOT re-running."
+    decide no-spot-kill-signature "no failed job has the structural or the textual reclaim signature — a real build failure"
     return 0
   fi
   echo "Re-running ${RUN_URL:-${RUN_ID}}: ${count} job(s) killed mid-step by a runner reclaim (issue #2841)"
@@ -293,6 +347,13 @@ FIX
  {"name":"build (party)","conclusion":"success","steps":[{"name":"Gradle build","conclusion":"success"}]}]}
 FIX
 
+  # The #9787 shape: a failed job with NO cancelled step — the reclaim is only in the log text.
+  # Ids are present because this is the one case that goes on to fetch a job log by id.
+  cat > "${tmp}/sigterm-kill.json" <<'FIX'
+{"jobs":[
+ {"id":103517002677,"name":"Admin UI build","conclusion":"failure","steps":[{"name":"Install","conclusion":"success"},{"name":"E2E tests (Playwright)","conclusion":"failure"},{"name":"Publish evidence","conclusion":"skipped"}]}]}
+FIX
+
   # Assign the VARIABLE, not just the env var: the cap is read from the environment at script
   # startup, which is before this function runs, so exporting it here changes nothing. Measured
   # on the pre-library version: the suite took 196 s of pure `sleep` at the default backoff and
@@ -312,6 +373,12 @@ FIX
   unset GITHUB_STEP_SUMMARY || true
 
   local pass=0 fail=0 subjects=0
+  # Job-log fixtures for the #9787 recogniser. Written as one line each: the stub returns its
+  # scripted output verbatim, and only the presence of the two phrases is being tested.
+  local RECLAIM_LOG="[WebServer] error: aborted ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped. ##[error]Process completed with exit code 143."
+  local EXIT143_ONLY_LOG="Killed ##[error]Process completed with exit code 143."
+  local SHUTDOWN_ONLY_LOG="##[error]The runner has received a shutdown signal. ##[error]Process completed with exit code 1."
+  local PLAIN_FAILURE_LOG="1 failed - should render the audit trail ##[error]Process completed with exit code 1."
   local RL="gh: API rate limit exceeded for installation ... (HTTP 403)"
   local PERM="gh: Resource not accessible by integration (HTTP 403)"
 
@@ -357,6 +424,26 @@ FIX
   # ── the failure branch's signature ─────────────────────────────────────────────────────────
   case_ "partial spot-kill (failure) re-runs the failed jobs" failure 0 1 "0|@partial-kill" "0|ok"
   case_ "a real build failure is NOT re-run"                  failure 0 0 "0|@real-failure"
+
+  # ── the TEXTUAL signature (#9787), in both directions ──────────────────────────────────────
+  # The scripted calls are: structural jq (0 hits) -> failed-job-id jq -> that job's log -> rerun.
+  # PROVE-RETRY: no cancelled step anywhere, but the log carries the shutdown line AND exit 143.
+  case_ "a step that exited 143 on a shutdown signal IS re-run (#9787)" failure 0 1 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${RECLAIM_LOG}" "0|ok"
+  # PROVE-NO-RETRY, half the pair: 143 with no shutdown line is an ordinary SIGTERM — an OOM
+  # kill, a `timeout(1)`, a test harness killing its own child. Not a reclaim.
+  case_ "exit 143 WITHOUT a shutdown signal is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${EXIT143_ONLY_LOG}"
+  # PROVE-NO-RETRY, the other half: the shutdown line can appear in a job that was cancelled
+  # cleanly, which the STRUCTURAL rule already covers. Without a 143 this is not our case.
+  case_ "a shutdown signal WITHOUT exit 143 is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${SHUTDOWN_ONLY_LOG}"
+  # PROVE-NO-RETRY: an ordinary red suite. This is the case the widening must not swallow.
+  case_ "an ordinary failing test log is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${PLAIN_FAILURE_LOG}"
+  # An unreadable log leaves the pre-#9787 behaviour: declined, exit 0, nothing escalated.
+  case_ "an unreadable job log declines rather than escalating" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "1|HTTP 404: Not Found"
 
   # ── the re-run call's own error classes ────────────────────────────────────────────────────
   case_ "rerun 502 then success"           cancelled 0 2 "0|@reclaim" "1|failed to rerun: HTTP 502: Server Error" "0|ok"

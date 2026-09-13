@@ -121,6 +121,9 @@ class CustomerEdgeResource(
     @Inject
     lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
+    @Inject
+    lateinit var netWorthComposer: NetWorthComposer
+
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
 
@@ -760,6 +763,31 @@ class CustomerEdgeResource(
         }
         out.set<com.fasterxml.jackson.databind.JsonNode>("checks", checks)
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    // --- Net worth (ADR-0301 D2) ---
+
+    /**
+     * The caller's net worth, composed from the services that OWN each figure.
+     *
+     * A flat noun, not `/me/net-worth`: every resource here is `/accounts`, `/cards`, `/activity`,
+     * with the party taken from the JWT, and there is no `/me` namespace to join (ADR-0301 D2).
+     *
+     * Never fails soft to a smaller number. Each branch reports its own status, and a branch whose
+     * owner did not answer is UNAVAILABLE rather than zero — see [NetWorthComposer] for why that
+     * distinction is the whole design. The endpoint therefore answers 200 with an honest partial
+     * tree rather than 5xx when one upstream is down: the customer can still see their cash when
+     * lending is unavailable, and cannot mistake the total for a complete one.
+     */
+    @GET
+    @Path("/net-worth")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun netWorth(): Response {
+        val customer = customer()
+        return Response.ok(netWorthComposer.compose(customer.partyId))
+            .type(MediaType.APPLICATION_JSON)
+            .build()
     }
 
     // --- Loans (ADR lending; read-only customer view) ---
