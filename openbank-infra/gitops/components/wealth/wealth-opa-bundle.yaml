@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: wealth-service
     app.kubernetes.io/part-of: wealth
   annotations:
-    openbank.tech/policy-checksum: "5530493061636048"
+    openbank.tech/policy-checksum: "4248f4cc7bbd700e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1640,6 +1640,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
