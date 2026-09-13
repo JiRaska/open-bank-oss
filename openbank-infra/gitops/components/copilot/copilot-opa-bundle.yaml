@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "80505a8077ef9b78"
+    openbank.tech/policy-checksum: "fed2d2f7b31a3aef"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1712,6 +1712,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
