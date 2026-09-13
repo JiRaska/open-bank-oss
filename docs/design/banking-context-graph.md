@@ -218,8 +218,10 @@ exact referenci (počáteční cíl ≥ 0,95), nikoli jen latency benchmark výr
 2. **Bezpečná investigativní beta:** schválit model dat, OPA policy, hrozby a výkonové
    rozpočty; dodat izolovanou projekci, API kontrakt, audit a jednu trasu
    klient → účet → platba. Ověřit cross-role/cross-case/cross-tenant IDOR, skryté hrany,
-   revokaci, výpadek PDP/auditu, duplicity a opožděné eventy. Až potom skutečná klientská
-   data napříč případy. Pilot nejprve na syntetických datech.
+   revokaci, výpadek PDP/auditu, duplicity a opožděné eventy. Produkční zdroje musí
+   publikovat z transakčního outboxu nebo ekvivalentního replayable change logu a nést
+   striktní revizi agregátu; timestamp sám pořadí změn negarantuje. Až potom skutečná
+   klientská data napříč případy. Pilot nejprve na syntetických datech.
 3. **Sémantická vrstva:** schválené dokumenty a vyřešené případy, pgvector/full-text,
    relevance testy v češtině i angličtině, viditelně odlišené podobnosti od faktů.
 4. **Pokročilé analýzy:** schválené víceklientské vzorce, historické snapshoty a dávkové

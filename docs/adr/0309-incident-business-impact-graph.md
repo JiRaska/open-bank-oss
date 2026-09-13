@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#9945 — correlate incident windows with observed business workflows and case-level evidence"
+followup: "#9945 — add durable incident emission and aggregate revisions, then correlate incident windows with observed business workflows and case-level evidence"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -72,12 +72,15 @@ mode on synthetic incident replays before enabling case drill-down.
 
 ### Delivered P1 slice
 
-The context projector consumes the existing durable DORA incident stream from security-scanner,
-validates its source/schema/version and maintains the current incident-to-service impact edges.
-Updates replace stale service impact only when their source version is newer. The protected admin UI
-returns aggregate counts by affected type and never returns service or customer identifiers. Workflow
-and business-case observations need explicit source correlation contracts and remain follow-up work,
-so this ADR stays `partial`.
+The context projector consumes the existing DORA incident topic from security-scanner, validates its
+source/schema/version and maintains the current incident-to-service impact edges. Updates replace
+stale service impact only when their source-issued ordering token is newer. The producer currently
+persists the incident and emits directly in separate steps, and derives the token from `updatedAt`;
+delivery can therefore be missed and equal or regressed timestamps do not establish causal order.
+The protected admin UI returns aggregate counts by affected type and never returns service or
+customer identifiers. A transactional outbox (or equivalent replayable change log), a strict
+per-aggregate revision, workflow and business-case correlation remain activation prerequisites, so
+this ADR stays `partial` and the deployment stays at zero replicas.
 
 ## Alternatives considered
 
@@ -96,6 +99,8 @@ so this ADR stays `partial`.
 **Negative**
 - Accurate impact depends on correlation coverage and explicit unknown states.
 - Case drill-down needs cross-team assignment and privacy controls.
+- Direct post-persistence emission is not atomic, and timestamp-derived ordering cannot prove causal
+  order; production activation requires durable replay and strict aggregate revisions.
 
 **Neutral**
 - Incident declaration, severity and source observability systems remain authoritative.

@@ -31,11 +31,18 @@ read audit. It is outside every synchronous payment path.
 | Threat | Control | Residual risk |
 |---|---|---|
 | Spoofed purpose or case | Request values must match an active server-side assignment; creation needs an admin maker and distinct admin checker, is limited to 31 days, and is audited | Maker and checker can still collude; organizational access review remains required |
-| Tampered graph evidence | Kafka producer/consumer ACLs and mTLS, exact source/schema validation, monotonic source versions and evidence references | P0/P1 has no signed event envelope; signatures remain a follow-up |
+| Tampered graph evidence | Kafka producer/consumer ACLs and mTLS, exact source/schema validation, source-issued ordering tokens, stale/duplicate suppression and evidence references | Timestamp-derived ordering tokens can collide or regress; P0/P1 has no signed event envelope |
 | Repudiated read | Durable audit records principal, case, purpose, action, root, outcome and policy version before disclosure; DB triggers reject application updates/deletes | Audit table needs export to the fleet tamper-evident audit service before production |
 | Relationship disclosure | Role gate, assignment, OPA, namespace-specific fixed query, 100-node/200-edge bounds; denied requests return no counts | Broad assignment issuance could still expose linked cases |
 | Resource exhaustion | Indexed one-hop queries with hard result limits and 500 ms DB timeout; dedicated CNPG/resources; staged at zero until the 100 RPS plus payment-control workload gate passes | Hot roots need production-distribution evidence and per-principal rate limits before increasing bounds |
 | Privilege escalation | `authz.enforce=true`; service and OPA both bind each action to its exact purpose; M2M identities are hard-denied; PDP outage returns 503 | Human maker/checker entitlements need periodic access review |
+
+The ICT incident producer persists the authoritative incident and emits its Kafka record in separate
+steps. A failure between those steps can leave the projection incomplete. Its ordering token is also
+derived from `updatedAt`, so equal or regressed source clocks can suppress a later update. Production
+activation therefore requires a transactional outbox (or equivalent replayable change log) and a
+strict per-aggregate revision from the source. Until then, the zero-replica deployment is suitable
+only for synthetic replay and control validation.
 
 ## P1 privacy boundary
 
