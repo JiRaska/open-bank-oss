@@ -56,7 +56,7 @@ REQUIRED_CHECKS=(
   "Admin UI"                                 # CI — path-aware build + Playwright gate
   "Gitleaks"                                 # Secret scan
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
-  "OPA policy gate"                          # OPA policy — policy bundle validation
+  "OPA policy gate"                          # Existing live requirement — preserve, not part of this migration
 )
 
 # Contexts introduced by the phase-1 migration. Before the ruleset can require
@@ -71,6 +71,11 @@ MIGRATION_CHECKS=(
   "gates (registry-kotlin-data)"
   "Admin UI"
 )
+
+# OPA policy gate is deliberately absent from MIGRATION_CHECKS: it is already
+# required by the live ruleset. The live-check preservation guard below proves
+# it cannot be removed accidentally; MIGRATION_CHECKS covers only contexts this
+# phase is newly adding.
 
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
 # >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
@@ -191,6 +196,8 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
+          # Preserve the current live non-strict policy. Changing
+          # stale-base enforcement is outside this context-only migration.
           strict_required_status_checks_policy: false,
           required_status_checks: $checks
         } }
