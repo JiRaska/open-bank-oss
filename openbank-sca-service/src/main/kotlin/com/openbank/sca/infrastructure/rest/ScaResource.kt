@@ -268,8 +268,10 @@ class ScaResource(
     @Path("/parties/{partyId}/challenges/pending")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.read", resource = "#partyId")
-    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
-        getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> {
+        identity.requirePartyOwnership(partyId)
+        return getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    }
 
     /**
      * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
@@ -281,12 +283,7 @@ class ScaResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.list", resource = "#partyId")
     suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot list devices for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         return listDevices.listDevices(ListDevicesQuery(partyId)).map { EnrolledDeviceResponse.from(it) }
     }
 
@@ -300,18 +297,7 @@ class ScaResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.enroll", resource = "#partyId")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
-        // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
-        // the authenticated principal may only enroll devices for their OWN partyId.
-        // When the customer realm (ADR-0065) issues JWTs, the 'sub' claim carries the partyId;
-        // in the operator realm 'sub' is the operator user id — operators with ROLE_OPERATOR
-        // may enroll on behalf of a party (service-desk credential reset path, future scope).
-        // For now: reject if sub == UUID && sub != partyId (i.e. the caller is a party, not an operator).
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot enroll device for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         val device = enrollDevice.enroll(
             EnrollDeviceCommand(
                 partyId = partyId,
@@ -485,4 +471,16 @@ class ScaPartyMismatchMapper : ExceptionMapper<ScaChallengePartyMismatchExceptio
 class ScaDynamicLinkingMismatchMapper : ExceptionMapper<ScaDynamicLinkingMismatchException> {
     override fun toResponse(e: ScaDynamicLinkingMismatchException): Response = Response.status(Response.Status.CONFLICT)
         .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Dynamic linking mismatch")).build()
+}
+
+/** Customer self-service requires a resolved party; service identities remain subject to OPA. */
+private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
+    if (hasRole("ROLE_OPERATOR") || hasRole("ROLE_ADMIN")) return
+    val principalPartyId = principal?.name?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    if (hasRole("ROLE_CUSTOMER") && principalPartyId == null) {
+        throw ForbiddenException("Customer party identity is required")
+    }
+    if (principalPartyId != null && principalPartyId != partyId) {
+        throw ForbiddenException("Cannot access another party's SCA data")
+    }
 }

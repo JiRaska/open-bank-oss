@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.9.0
+  version: 1.9.1
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -143,6 +143,7 @@ paths:
     get:
       tags: [SCA]
       summary: List a party's pending unexpired approvals
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listPendingScaChallenges
       parameters:
         - name: partyId
@@ -167,6 +168,7 @@ paths:
     get:
       tags: [SCA]
       summary: List device credentials enrolled to a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listScaDevices
       parameters:
         - name: partyId
@@ -190,6 +192,7 @@ paths:
       tags: [SCA]
       summary: Enrol a device credential for decoupled approval (ADR-0021)
       description: >-
+        Customer callers must have a UUID party identity matching partyId.
         Idempotent on the credentialId natural key (ADR-0296): re-enrolling the same credential
         for the same party replays the original enrollment (201, no duplicate row;
         `credential_id UNIQUE`, V4, is the race backstop). The same credentialId presented for a

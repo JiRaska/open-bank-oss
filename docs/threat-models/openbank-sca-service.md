@@ -188,3 +188,15 @@ These tests use the local authorization test profile. They do not prove an enfor
 policy, device attestation, credential revocation, durable decision evidence or the delivery of an
 external notification. Those remain separate launch controls. See the consumption contract in
 `openbank-sca-service/src/main/resources/openapi.yaml`.
+
+- **2026-09-13 — Customer party identity enforcement.** Device enrollment, device
+  listing and pending challenge listing reject customer identities whose principal is
+  missing, malformed or different from the requested party. Previously an unparseable
+  principal bypassed the device ownership comparison. The local check now fails closed
+  before persistence or disclosure, including when ROLE_API accompanies ROLE_CUSTOMER.
+  Operator/admin roles retain their privileged path; service identities still require
+  the existing authorization policy. No new policy exemption is introduced. Real HTTP
+  tests cover rejection, zero enrollment/outbox writes and permitted owner/operator/service
+  paths. The tests exercise the local guard with advisory OPA and do not establish that
+  a production policy grants a service call. Credential revocation, recovery and
+  attestation validation are separate controls. Rollback reopens the ownership bypass.
