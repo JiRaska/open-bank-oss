@@ -43,12 +43,20 @@ metadata:
     app.kubernetes.io/name: onboarding-service
     app.kubernetes.io/part-of: onboarding
 data:
-  # NOT here yet: kyb-events-in. This ConfigMap is applied by Argo BEFORE auto-deploy bumps the
-  # image, so naming a channel here that the RUNNING image has no connector for is SRMSG00071 —
-  # a hard boot failure, not a degraded consumer (`msg-channel-image-parity` enforces exactly
-  # this ordering). Add the two kyb-events-in lines in a follow-up, once an image carrying the
-  # channel is deployed. Until then the channel runs on the fallback group id
-  # (quarkus.application.name), which the KafkaUser grants Read on for that reason.
+  # kyb-events-in is here now (#8882). The ordering constraint that kept it out is satisfied by
+  # measurement, not by assumption: this ConfigMap is applied by Argo BEFORE auto-deploy bumps the
+  # image, so naming a channel the RUNNING image has no connector for is SRMSG00071 — a hard boot
+  # failure, not a degraded consumer (`msg-channel-image-parity` enforces the ordering). The
+  # declared image is `sandbox-8db73dbb` (onboarding-service.yaml), and that commit's
+  # application.yaml carries `mp.messaging.incoming.kyb-events-in` with a `connector:` — checked
+  # with `git show 8db73dbb:openbank-onboarding-service/src/main/resources/application.yaml`, not
+  # inferred from the channel being on main. The channel landed in 3766d3de2 (#8863), which is an
+  # ancestor of that image.
+  #
+  # Effect of the change: the consumer moves off the fallback group id (quarkus.application.name)
+  # onto `onboarding-service-kyb`. Both names already carry a Read ACL on the onboarding KafkaUser,
+  # and `openbank.kyb.events` is new with no backlog, so forcing `earliest` here replays nothing of
+  # consequence — the reason this was safe to defer and is safe to land.
   override.properties: |
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=onboarding-service-party
@@ -57,3 +65,5 @@ data:
     mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.sca-events-in.group.id=onboarding-service-sca
     mp.messaging.incoming.sca-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.kyb-events-in.group.id=onboarding-service-kyb
+    mp.messaging.incoming.kyb-events-in.auto.offset.reset=earliest

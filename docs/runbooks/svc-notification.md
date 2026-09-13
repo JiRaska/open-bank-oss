@@ -30,7 +30,7 @@ triaging an incident that starts on `notification`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8112` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `notifications`); dashboards in Grafana.
 - Logs: `kubectl logs -n notifications deploy/notification-service -f`, or Loki
   `{namespace="notifications"}`.

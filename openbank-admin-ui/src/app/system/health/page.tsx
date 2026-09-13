@@ -15,6 +15,7 @@ import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
+import { OperationalEvidence } from '@/components/observability/OperationalEvidence'
 
 const POLL = 15_000
 
@@ -100,6 +101,8 @@ export default function SystemHealthPage() {
           </button>
         </div>}
       />
+
+      <OperationalEvidence />
 
       <ContextualInsights dashboardUid="openbank-slo" panels={HEALTH_INSIGHTS}
         titleCs="Dopad na zákazníky" titleEn="Customer impact"
@@ -366,8 +369,8 @@ function TechStackChips({ stack }: { stack: ServiceStack }) {
             ? `Quarkus ${stack.quarkus.version} LTS, supported until ${stack.quarkus.supportUntil ?? 'unknown'}`
             : `Quarkus ${stack.quarkus.version} (non-LTS)`}
           style={stack.quarkus.lts
-            ? { background: 'var(--success-bg)', color: 'var(--success)', border: 'none' }
-            : { background: 'var(--warning-bg)', color: 'var(--warning)', border: 'none' }}
+            ? { background: 'var(--success-bg)', color: 'var(--success-text)', border: 'none' }
+            : { background: 'var(--warning-bg)', color: 'var(--warning-text)', border: 'none' }}
         >
           Quarkus {stack.quarkus.version}{stack.quarkus.lts ? ' LTS' : ''}
         </span>

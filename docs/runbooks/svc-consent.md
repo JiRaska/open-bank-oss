@@ -30,7 +30,7 @@ triaging an incident that starts on `consent`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8106` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `consent`); dashboards in Grafana.
 - Logs: `kubectl logs -n consent -l app.kubernetes.io/name=consent-service -f`, or Loki
   `{namespace="consent"}`.

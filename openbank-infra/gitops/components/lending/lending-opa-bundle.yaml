@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "201dc2df822db969"
+    openbank.tech/policy-checksum: "fc1c38b58e9323f3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1063,6 +1063,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.10.0...clearing-service-v0.10.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **clearing:** guard clearing_outbox created_at plausibility at INSERT ([#9294](https://github.com/JiRaska/open-bank-oss/issues/9294)) ([13e6ee0](https://github.com/JiRaska/open-bank-oss/commit/13e6ee0e4e3180c903e7119414b2169cf90828b4))
+* **clearing:** replay-safe payment submit + ADR-0298 natural-key idempotency ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9402](https://github.com/JiRaska/open-bank-oss/issues/9402)) ([21b8066](https://github.com/JiRaska/open-bank-oss/commit/21b8066308339c86b5dce67d0a44f87110b2d99c))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.1...clearing-service-v0.10.0) (2026-09-08)
 
 

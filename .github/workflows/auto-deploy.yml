@@ -222,7 +222,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -484,7 +484,18 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -719,7 +730,8 @@ jobs:
             echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
-      # verify-openbank-image-signatures runs Enforce, so an UNSIGNED image is rejected
+      # verify-openbank-image-sbom-attestation (Enforce) also verifies the image signature
+      # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
       # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
       # used to push without signing, which is the other half of why deploys never landed.
       # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
@@ -879,9 +891,11 @@ jobs:
             fi
             # SLSA build provenance (ADR-0030 D4, #8590 #14): binds the image to the repo/commit/
             # workflow/run that built it — the claim neither the signature nor the SBOM attestation
-            # carries. Fatal in CI: kyverno's verify-openbank-image-slsa-provenance is Audit today
-            # and graduates like the SBOM policy did, so an image that ships without provenance
-            # becomes tomorrow's redeploy worklist.
+            # carries. Fatal in CI even though no admission policy checks SLSA right now: the
+            # kyverno SLSA policy was removed from admission (#9805 item 4 — v1.12.5 lets any
+            # verify policy's verdict overwrite the others per image) and returns once Kyverno
+            # scopes verdicts per policy, so an image built without provenance today is the
+            # redeploy worklist on that day. 12 such images existed when it was removed.
             if ! cosign_attest_slsa_provenance "$image"; then
               echo "::error::[${svc}] SLSA provenance attestation failed"
               rc=1; continue
@@ -1195,6 +1209,40 @@ jobs:
             done
           done
 
+          # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
+          # check-fleet-attestations.sh fails on an allowlist entry whose ref nothing under
+          # openbank-infra/gitops declares any more (#7740), and the first real deploy of a
+          # service that shipped with a placeholder tag is exactly what makes its entry
+          # undeclared. Left to a human, every deploy PR after that one inherits the red gate:
+          # on 2026-09-13 #9924 and #9931 both replaced wealth-service's `sandbox-000000000`
+          # and both failed `fleet-attestation-classifier` on the entry they had just orphaned.
+          #
+          # "Declared" is computed exactly as the gate computes it — the same position-blind
+          # IMAGE_RE over the same directory — so this can neither leave an entry the gate
+          # calls stale nor remove one the gate still counts as declared. A still-declared
+          # placeholder (a service not yet built) is kept, which is the case the file exists for.
+          PLACEHOLDER_FILE=.github/scripts/fleet-attestation-placeholders.txt
+          if [ "${#UPDATED[@]}" -gt 0 ] && [ -f "$PLACEHOLDER_FILE" ]; then
+            IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
+            declared="$(grep -rhoE "$IMAGE_RE" openbank-infra/gitops 2>/dev/null | sort -u || true)"
+            pruned=0
+            : > "${PLACEHOLDER_FILE}.new"
+            while IFS= read -r line || [ -n "$line" ]; do
+              if printf '%s' "$line" | grep -qE '^[[:space:]]*(#|$)' \
+                 || printf '%s\n' "$declared" | grep -qxF "$line"; then
+                printf '%s\n' "$line" >> "${PLACEHOLDER_FILE}.new"
+              else
+                echo "  [placeholder allowlist] pruned ${line#"${ECR_REGISTRY}"/} — no longer declared in gitops"
+                pruned=$((pruned + 1))
+              fi
+            done < "$PLACEHOLDER_FILE"
+            if [ "$pruned" -gt 0 ]; then
+              mv "${PLACEHOLDER_FILE}.new" "$PLACEHOLDER_FILE"
+            else
+              rm -f "${PLACEHOLDER_FILE}.new"
+            fi
+          fi
+
           if [ "${#UPDATED[@]}" -eq 0 ]; then
             echo "No manifests changed — all images already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -1231,7 +1279,11 @@ jobs:
           # a property rather than a hope: create-pull-request otherwise commits whatever is dirty,
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
-          add-paths: openbank-infra/gitops/**
+          # The placeholder allowlist rides along ONLY because the rewrite step prunes it in the
+          # same change that orphans an entry; nothing else in the job writes it.
+          add-paths: |
+            openbank-infra/gitops/**
+            .github/scripts/fleet-attestation-placeholders.txt
           # workflow_dispatch may run from a recovery ref. Without an explicit base,
           # create-pull-request targets that stale ref and includes every intervening main
           # commit in the deploy PR instead of only the rewritten GitOps manifests.

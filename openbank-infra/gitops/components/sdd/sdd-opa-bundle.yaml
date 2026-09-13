@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "8423981b0ab7060c"
+    openbank.tech/policy-checksum: "09b3c6cd5dc31a80"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -999,6 +999,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read

@@ -144,7 +144,7 @@ const GROUP_COLORS: Record<string, string> = {
   'Payments':     '#7c3aed',
   'PSD2':         '#d97706',
   'Platform':     '#6b7280',
-  'Cards':        '#db2777',
+  'Cards':        '#d02571',
   'Other':        '#64748b',
 }
 
@@ -621,8 +621,8 @@ export default function ApiCatalogPage() {
           <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--surface)',
+              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
+              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
               color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
@@ -755,7 +755,7 @@ export default function ApiCatalogPage() {
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
                     background: '#fdf4ff', border: '1px solid #fbcfe8',
-                    borderRadius: '6px', color: '#db2777', textDecoration: 'none',
+                    borderRadius: '6px', color: '#d02571', textDecoration: 'none',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />

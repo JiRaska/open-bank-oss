@@ -169,8 +169,31 @@ class CloseOrchestrator(
                         Uni.createFrom().item(Unit)
                     }
                     .onFailure().recoverWithUni { e ->
-                        failed.incrementAndGet()
                         val reason = classify(e)
+                        if (reason == CloseFailureReason.NOT_VIABLE) {
+                            // Same rule as the account-level path above, and for the same reason
+                            // (#862): a debris account is SKIPPED, never FAILED, so
+                            // StatementCloseFailures does not fire on data noise.
+                            //
+                            // It is reachable here and not only there because closePocketMonth
+                            // calls accountInfo.pocketAccount AGAIN, once per pocket — the outer
+                            // guard covers the outer read, not this one. Without this branch the
+                            // same account is skipped or failed depending on WHICH of the two
+                            // reads saw the debris, and a CloseFailure row is written carrying a
+                            // `reason` the published CloseFailure schema cannot express.
+                            skipped.incrementAndGet()
+                            metrics.pocketSkipped()
+                            log.infof(
+                                "Close skipped for %s/%s %s..%s (NOT_VIABLE): %s",
+                                accountId,
+                                currency,
+                                from,
+                                to,
+                                e.message,
+                            )
+                            return@recoverWithUni Uni.createFrom().item(Unit)
+                        }
+                        failed.incrementAndGet()
                         metrics.pocketFailed(reason)
                         log.errorf(e, "Close failed for %s/%s %s..%s (%s)", accountId, currency, from, to, reason)
                         recordFailure(runId, accountId, currency, from, to, reason, e)

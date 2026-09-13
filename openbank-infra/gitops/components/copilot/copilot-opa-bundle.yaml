@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "13229433cff13509"
+    openbank.tech/policy-checksum: "80505a8077ef9b78"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1005,6 +1005,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: card-dispute-evidence-agent
       tools:
         allow:
         - tier: read

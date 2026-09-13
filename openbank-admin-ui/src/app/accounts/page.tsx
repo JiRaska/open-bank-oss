@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { LoadMoreControl, PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
@@ -61,6 +61,9 @@ export default function AccountsPage() {
   const [ibanHint, setIbanHint]         = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreUnavailable, setLoadMoreUnavailable] = useState<UnavailableKind | null>(null)
+  // Bounds the DOM regardless of how much is already fetched — a fragment search can return
+  // a full page in one response, and the render must still stay capped (admin-ui pagination rule).
+  const [visible, setVisible] = useState(PAGE_SIZE)
   const activeSearch = useRef<AbortController | null>(null)
 
   const kind = classifyQuery(query)
@@ -81,6 +84,7 @@ export default function AccountsPage() {
     setIbanHint(null)
     setLoadingMore(false)
     setLoadMoreUnavailable(null)
+    setVisible(PAGE_SIZE)
   }
 
   async function search(value = query, cursor?: string) {
@@ -93,6 +97,7 @@ export default function AccountsPage() {
       setIbanHint(null)
       setUnavailable(null)
       setLoadMoreUnavailable(null)
+      setVisible(PAGE_SIZE)
     }
 
     if (k === 'empty') return
@@ -181,7 +186,10 @@ export default function AccountsPage() {
     return true
   }) ?? []
 
-  const hasMore = Boolean(result?.pagination.hasNextPage && result.pagination.nextCursor)
+  // What's actually rendered — capped at `visible` regardless of how much is in `filtered`.
+  const page = filtered.slice(0, visible)
+  const hasServerMore = Boolean(result?.pagination.hasNextPage && result.pagination.nextCursor)
+  const hasMore = hasServerMore || page.length < filtered.length
   const queryHelpVisible = !ibanHint && !result && !unavailable
 
   return (
@@ -337,7 +345,7 @@ export default function AccountsPage() {
 
         {/* Table */}
         {!unavailable && (
-          <div style={{ overflowX: 'auto' }}>
+          <div id="accounts-results" style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -368,7 +376,7 @@ export default function AccountsPage() {
                     />
                   </td></tr>
                 )}
-                {!loading && filtered.map(a => (
+                {!loading && page.map(a => (
                   <tr key={a.id}>
                     <td><span className="mono" style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 500 }}>{a.accountNumber}</span></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accountType}</span></td>
@@ -388,21 +396,22 @@ export default function AccountsPage() {
           </div>
         )}
 
-        {!unavailable && hasMore && (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <button
-              className="btn btn-secondary"
-              type="button"
-              aria-label={t('Zobrazit další účty', 'Load more accounts')}
-              style={{ fontSize: '12px' }}
-              aria-busy={loadingMore}
-              disabled={loadingMore}
-              onClick={() => void search(query, result?.pagination.nextCursor)}
-            >
-              {loadingMore ? t('Načítám další…', 'Loading more…') : t('Načíst další účty', 'Load more accounts')}
-              {' '}({filtered.length})
-            </button>
-          </div>
+        {!unavailable && result && page.length > 0 && (
+          <LoadMoreControl
+            loaded={page.length}
+            total={filtered.length}
+            hasMore={hasMore}
+            busy={loadingMore}
+            progressLabel={t(`Zobrazeno ${page.length} z ${filtered.length} účtů`, `Showing ${page.length} of ${filtered.length} accounts`)}
+            buttonLabel={t('Načíst další účty', 'Load more accounts')}
+            busyLabel={t('Načítám další…', 'Loading more…')}
+            buttonAriaLabel={t('Zobrazit další účty', 'Load more accounts')}
+            controls="accounts-results"
+            onLoadMore={() => {
+              setVisible(v => v + PAGE_SIZE)
+              if (page.length >= filtered.length && hasServerMore) void search(query, result?.pagination.nextCursor)
+            }}
+          />
         )}
         {!unavailable && loadMoreUnavailable && (
           <div style={{ padding: '0 16px 16px' }}>

@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -74,6 +74,16 @@ jobs:
           - openbank-delegation-service
           - openbank-vop-service
           - openbank-standing-order-service
+          # Security-critical, NOT money-path (#8349). The exclusion above is about THIN domains —
+          # one model file with nothing worth mutating — not about money-path membership. sca
+          # carries ScaChallenge + DeviceApproval (283 lines of lifecycle and attempt counting) and
+          # consent carries Consent + Suppression: a surviving mutant in either is an authentication
+          # check that never fires, or a revocation that does not revoke.
+          # Measured baselines on 2026-09-13 (`./gradlew :<svc>:pitest`, local, isolated home):
+          #   sca      56 mutations, 50 killed = 89%  (already above the 70% ambition)
+          #   consent 119 mutations, 78 killed = 66%  (just under; the gap is worth a look, not a gate)
+          - openbank-sca-service
+          - openbank-consent-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

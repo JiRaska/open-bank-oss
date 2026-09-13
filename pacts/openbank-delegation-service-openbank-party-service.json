@@ -1,0 +1,92 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET active entities represented by the authenticated actor",
+      "providerStates": [
+        {
+          "name": "an active human mandate exists for an active company"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3/acting-for"
+      },
+      "response": {
+        "body": [
+          {
+            "partyId": "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the legal-entity delegation principal",
+      "providerStates": [
+        {
+          "name": "an active human mandate exists for an active company"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
+      },
+      "response": {
+        "body": {
+          "id": "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9",
+          "legalName": "Pact Verify Trading Company a.s.",
+          "partyType": "COMPANY",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.legalName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a delegation principal the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/f9f9f9f9-e8e8-4d4d-8c8c-b7b7b7b7b7b7"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}

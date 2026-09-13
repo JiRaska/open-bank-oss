@@ -191,7 +191,7 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       {t('Výsledek je částečný. Nedostupné nebo nepovolené zdroje:', 'The result is partial. Unavailable or forbidden sources:')} {' '}
       {partial.map(([source, state]) => `${source} (${state})`).join(', ')}
     </div>}
-    {data.resourceDetailsTruncated && <div role="status" style={{ marginTop: 12, fontSize: 12, color: 'var(--warning)' }}>{t('Zobrazen je detail prvních 50 delegovaných zdrojů.', 'Showing details for the first 50 delegated resources.')}</div>}
+    {data.resourceDetailsTruncated && <div role="status" style={{ marginTop: 12, fontSize: 12, color: 'var(--warning-text)' }}>{t('Zobrazen je detail prvních 50 delegovaných zdrojů.', 'Showing details for the first 50 delegated resources.')}</div>}
 
     {attention.length > 0 && <aside aria-labelledby="delegation-attention-title" style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>

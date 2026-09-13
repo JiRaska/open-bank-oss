@@ -156,6 +156,16 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Čtení bulletinů', en: 'Bulletin reading' }, { cs: 'Posouzení dopadu', en: 'Impact assessment' }, { cs: 'Návrh termínu', en: 'Deadline proposals' }],
     accent: '#1d4ed8', glow: '#bfdbfe', shell: '#eff6ff', variant: 'guide', icon: CreditCard,
   },
+  // ADR-0283 phase 4. The charter ships enabled:false — no dispute feed is wired yet — but the
+  // console renders every governed agent, so a chartered agent with no persona shows up as
+  // "Nový kolega", which reads as an oversight rather than as a deliberate pre-registration.
+  'card-dispute-evidence-agent': {
+    name: { cs: 'Vera', en: 'Vera' }, role: { cs: 'Sběratelka důkazů ke sporům', en: 'Dispute evidence gatherer' },
+    purpose: { cs: 'Skládá podklady ke karetnímu sporu — transakci, autorizaci, doručení a komunikaci — do jednoho spisu ve lhůtě schématu.', en: 'Assembles a card dispute file — the transaction, its authorisation, delivery and correspondence — within the scheme deadline.' },
+    value: { cs: 'Banka odpovídá na spor úplným spisem; o samotném sporu rozhoduje člověk.', en: 'The bank answers a dispute with a complete file; a human decides the dispute itself.' },
+    talents: [{ cs: 'Sběr podkladů', en: 'Evidence collection' }, { cs: 'Hlídání lhůty schématu', en: 'Scheme deadline tracking' }, { cs: 'Příprava spisu', en: 'Case-file preparation' }],
+    accent: '#15803d', glow: '#bbf7d0', shell: '#f0fdf4', variant: 'lens', icon: SearchCheck,
+  },
   'case-coordinator': {
     name: { cs: 'Kord', en: 'Chord' }, role: { cs: 'Koordinátor případu', en: 'Case coordinator' },
     purpose: { cs: 'Svolává správné agenty ke složitému případu, hlídá rozpočet a hledá shodu.', en: 'Brings the right agents into a complex case, watches the budget and seeks convergence.' },

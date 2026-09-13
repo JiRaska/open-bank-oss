@@ -684,6 +684,28 @@ fire from *outside* it, so they stay here:
   Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
   a competing PR squash-merges it still lists the overlap as a diff even when the content already
   agrees. Read the content, not the diff.
+- **`git checkout <ref> -- <file>` is a WHOLE-FILE take, and it reads in the diff exactly like an
+  ordinary conflict resolution.** Resolving a conflict that way took `main`'s version of one page
+  entire and dropped 112 lines — including the feature the branch existed for. The PR stayed titled
+  "protect document template drafts" while protecting nothing, and nothing in the diff said so: the
+  file simply equalled main's. Same class three times in one queue (#9685); the other two were
+  smaller but identical in shape — one side's implementation taken wholesale, the other side's
+  tests left asserting behaviour that no longer exists.
+  **Two rules, and the second is the one that actually caught them.** Prefer a union merge to a
+  whole-file take when both sides changed the file; where the whole-file take really is right
+  (main carries an equivalent implementation), *say so in the commit message*, because that
+  sentence is the only thing distinguishing a considered decision from an accident. Then, after
+  resolving ANY merge, run the WHOLE module suite — not the tests you touched. In the worst of the
+  three, the single edited test was green while the suite was already red on a file never opened;
+  in another the assertion was e2e, so a local green proved nothing at all.
+  **Deliberately NOT a gate, and the measurement is why.** The mechanical signature is exact (a
+  file where the merge's blob equals main's while the branch had changed it), but across 69 open
+  PRs it fired 577 times over 21 PRs — mostly lockfiles and migrations legitimately superseded.
+  Narrowed to "a symbol the branch declared that exists nowhere in the merged tree" it gives 3 rows,
+  of which **1 is real**: symbol-level detection cannot tell a deletion from a rename, which is
+  inherent rather than a tuning problem. Same conclusion as `entity-column-names`: a gate that
+  cries wolf about correct code is worth less than nothing. Run it as a one-off audit after a bulk
+  conflict-resolution session instead.
 - **A merge git calls CLEAN can still DELETE content — it reports no conflict when two sides add
   neighbouring entries to the same list, and keeps only one.** Not a conflict resolved badly:
   nothing to resolve, nothing printed, exit 0. Twice on 2026-08-02, both while merging `main` into
@@ -830,6 +852,14 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `gh release create --notes` and `-f body=`; for an edit, `-F body=@file`.
   If you did use `--body`, re-read what was published (`gh pr view <n> --json body`) — grep it
   for `()` and for the phrases you meant to include.
+  **And `--body-file` has its own consequence: GitHub applies `.github/PULL_REQUEST_TEMPLATE.md`
+  only when no body is supplied, so a PR opened this way never carries the `## Security checklist`
+  section — which the enforced `security-checklist-money-path` gate requires on any PR touching a
+  money-path service.** The two rules are both right and cannot both be followed without a third
+  step: append that block to the body file yourself. Measured 2026-09-05: 50 of 67 open PRs had no
+  such section at all (#8757). The remediation is now cheap — the gate reads the LIVE body since
+  #8940, so editing the description and re-running is enough, where it previously needed an
+  otherwise-pointless empty commit to re-emit the event.
 - **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
   a git repository`,** which reads like a content or permissions problem rather than a cwd one.
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —

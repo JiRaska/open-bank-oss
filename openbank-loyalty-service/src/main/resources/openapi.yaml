@@ -5,8 +5,28 @@ info:
     The Lístek ledger (ADR-0282). Lístky are a closed-loop unit of bank obligation: earned for
     financial-health achievements, redeemable only against the reviewed benefit catalogue, never
     transferable between parties, never priced in any currency and never convertible to money.
-  version: 1.0.0
+  # 1.0.0 -> 1.1.0: additive — GET /api/v1/loyalty/parties/{partyId}/grants, the list the
+  # customer edge needs for the app's redeemed-benefits view.
+  version: 1.1.0
 paths:
+  /api/v1/loyalty/parties/{partyId}/grants:
+    get:
+      summary: A party's benefit grants, newest reservation first
+      description: >-
+        grantStatus is the stored value. GRANTED means owed and published for the delivering
+        engine, never applied; there is no active/applied state in this response.
+      parameters:
+        - {name: partyId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Grants (empty when the party has redeemed nothing)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/BenefitGrantView"}
+        "401": {description: Unauthenticated}
+        "403": {description: Not permitted}
   /api/v1/loyalty/parties/{partyId}:
     get:
       summary: A party's Lístek balance, entitlement to date and full ledger history
@@ -224,6 +244,20 @@ components:
           description: >-
             GRANTED means owed and published, never applied. The delivering engine reports
             application; nothing here is a receipt.
+    BenefitGrantView:
+      type: object
+      required: [grantId, benefitId, grantStatus, priceLeaves, reservedAt]
+      properties:
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus:
+          type: string
+          enum: [RESERVED, GRANTED, RELEASED, REVERSED]
+          description: GRANTED means owed and published, never applied.
+        priceLeaves: {type: integer}
+        reservedAt: {type: string, format: date-time}
+        grantedAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time, nullable: true}
     InsufficientLeaves:
       type: object
       properties:

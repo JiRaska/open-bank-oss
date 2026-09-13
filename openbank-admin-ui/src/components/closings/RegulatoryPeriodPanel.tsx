@@ -208,7 +208,7 @@ export function RegulatoryPeriodPanel() {
                 <button type="button" className="btn btn-secondary" onClick={() => void mutate('draft')} disabled={flight.busy} aria-busy={acting === 'draft'}>{t('Obnovit DRAFT (maker)', 'Refresh DRAFT (maker)')}</button>
                 <button type="button" className="btn btn-secondary" onClick={() => void verify()} disabled={flight.busy} aria-busy={acting === 'verify'}><CheckCircle2 size={13} aria-hidden="true" /> {acting === 'verify' ? t('Ověřuji…', 'Verifying…') : t('Nezávisle ověřit', 'Verify independently')}</button>
               </div>
-              {isOwnDraft && <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--warning)' }}>{t('Jste maker tohoto draftu. Zmrazení musí provést jiný operátor.', 'You are this draft’s maker. A different operator must freeze it.')}</p>}
+              {isOwnDraft && <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--warning-text)' }}>{t('Jste maker tohoto draftu. Zmrazení musí provést jiný operátor.', 'You are this draft’s maker. A different operator must freeze it.')}</p>}
               {verification?.matches && verification.balanced && !isOwnDraft && (
                 <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '12px', fontSize: '12px' }}>
                   <input type="checkbox" checked={confirmed} disabled={flight.busy} onChange={event => setConfirmed(event.target.checked)} />

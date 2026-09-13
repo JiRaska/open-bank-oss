@@ -6,6 +6,9 @@ package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthority
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
@@ -46,6 +49,7 @@ class DelegationRecertificationAudienceTest {
     private val scaClient: ScaChallengeClient = mockk()
     private val eligibilityClient: PartyEligibilityClient = mockk()
     private val ownershipClient: ResourceOwnershipClient = mockk()
+    private val authorityClient: GrantorAuthorityClient = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-07-31T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var service: DelegationService
@@ -57,7 +61,7 @@ class DelegationRecertificationAudienceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
+        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
@@ -67,8 +71,8 @@ class DelegationRecertificationAudienceTest {
     @Test
     fun `company recertification audience is explicit and persisted with the offered grant`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, "FULL", partyType = "COMPANY")
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, partyType = "COMPANY")
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, "FULL")
         val saved = slot<DelegationGrant>()
         coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
@@ -76,12 +80,13 @@ class DelegationRecertificationAudienceTest {
         service.offer(offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.CORPORATE))
 
         assertThat(saved.captured.recertificationAudience).isEqualTo(DelegationRecertificationAudience.CORPORATE)
+        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(grantor) }
     }
 
     @Test
     fun `company review audience is refused for a sole trader before SCA is consumed`() {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, "FULL", partyType = "SOLE_TRADER")
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, partyType = "SOLE_TRADER")
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, "FULL")
 
         assertThatThrownBy {
@@ -89,6 +94,40 @@ class DelegationRecertificationAudienceTest {
                 service.offer(offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.SME))
             }
         }.isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `matching review audience does not authorize a denied grantor`() {
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.DENIED, partyType = "COMPANY")
+
+        assertThatThrownBy {
+            runBlocking {
+                service.offer(
+                    offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.CORPORATE),
+                )
+            }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `matching review audience does not authorize an unverifiable grantor`() {
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE, partyType = "COMPANY")
+
+        assertThatThrownBy {
+            runBlocking {
+                service.offer(
+                    offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.CORPORATE),
+                )
+            }
+        }.isInstanceOf(DelegationGrantorAuthorityUnavailableException::class.java)
+        coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
@@ -106,6 +145,7 @@ class DelegationRecertificationAudienceTest {
         capabilities: Set<DelegationCapability> = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
     ) = OfferDelegationCommand(
         callerPartyId = grantor,
+        actorPartyId = grantor,
         grantorPartyId = grantor,
         granteePartyId = grantee,
         resourceType = DelegationResourceType.ACCOUNT,

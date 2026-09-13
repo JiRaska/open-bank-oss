@@ -54,7 +54,7 @@ export default async function ThreatModelRegistryPage() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
             <AlertTriangle size={15} style={{ color: 'var(--warning)' }} />
-            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--warning)' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--warning-text)' }}>
               {t('Money-path služby bez threat modelu', 'Money-path services missing a threat model')}
             </span>
           </div>
@@ -98,7 +98,7 @@ export default async function ThreatModelRegistryPage() {
                   {m.moneyPath && (
                     <span style={{
                       fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px',
-                      background: 'var(--danger-bg)', color: 'var(--danger)',
+                      background: 'var(--danger-bg)', color: 'var(--danger-text)',
                       border: '1px solid var(--danger)30', textTransform: 'uppercase', letterSpacing: '0.04em',
                     }}>
                       {t('Peněžní cesta', 'Money path')}

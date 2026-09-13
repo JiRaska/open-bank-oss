@@ -21,8 +21,18 @@ class DelegationPreviewOpenApiTest {
         assertThat(contract).contains("Historical audit metadata only")
     }
 
+    /**
+     * The 403 description was EXTENDED by this branch, not replaced: organization grant authority
+     * adds a second way to be refused — the caller is the right party but the acting human holds
+     * no active mandate for it. The literal is pinned rather than matched loosely because a
+     * substring of the old text still matches the new one, so a relaxed assertion would pass
+     * against a spec that had silently dropped the authority half.
+     */
     @Test
-    fun `preview rejects a caller who is not the grantor with 403`() {
-        assertThat(contract).contains("'403': { description: The authenticated party is not the grantor }")
+    fun `preview names both ways a caller is refused with 403`() {
+        assertThat(contract).contains(
+            "'403': { description: The authenticated party is not the grantor, " +
+                "or the actor has no active authority for it }",
+        )
     }
 }

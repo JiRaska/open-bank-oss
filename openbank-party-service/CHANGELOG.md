@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.0...party-service-v0.23.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **party:** guard party_outbox created_at plausibility at INSERT ([#9316](https://github.com/JiRaska/open-bank-oss/issues/9316)) ([7a5c9ca](https://github.com/JiRaska/open-bank-oss/commit/7a5c9ca1c0e39380e065cf8b4c06f6258b453ac9))
+* **party:** preserve statutory signature quorum ([#9391](https://github.com/JiRaska/open-bank-oss/issues/9391)) ([4a79a3b](https://github.com/JiRaska/open-bank-oss/commit/4a79a3b0d71fed27ae117600d8ab4af15ef11a80))
+* **party:** unparseable status filter is a 400, never the unfiltered list ([#9409](https://github.com/JiRaska/open-bank-oss/issues/9409)) ([c435857](https://github.com/JiRaska/open-bank-oss/commit/c435857162fc3f3359391c84e2769c016661afc2))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.2...party-service-v0.23.0) (2026-09-08)
 
 

@@ -38,13 +38,31 @@ function isIsoDate(value: string): boolean {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
+const MONTH_RE = /^(\d{4})-(\d{2})$/
+
+/**
+ * An accounting PERIOD, `YYYY-MM`. Shape and calendar month, for the same reason as [isIsoDate]:
+ * '2026-13' carries no quote and is injection-safe, but reaches ClickHouse as a comparison that
+ * silently matches nothing, turning a typo into an empty report rather than a named error.
+ *
+ * The format is not a guess. `LoanProvisioningEntity.period` is `@Column(name = "period",
+ * length = 7)` and lending-service's own tests pin the values — `runProvisioningCycle("2026-06",
+ * LocalDate.parse("2026-06-01"), ...)` and `period = "2026-08"`.
+ */
+function isIsoMonth(value: string): boolean {
+  const m = MONTH_RE.exec(value)
+  if (!m) return false
+  const month = Number(m[2])
+  return month >= 1 && month <= 12
+}
+
 export type ParamValue = string
 
 export interface ReportParam {
   name: string
   labelCs: string
   labelEn: string
-  type: 'date' | 'number' | 'enum'
+  type: 'date' | 'month' | 'number' | 'enum'
   required: boolean
   /** Fallback applied when a non-required parameter is absent. Must itself validate. */
   defaultValue?: string
@@ -65,6 +83,8 @@ export function validateParam(param: ReportParam, raw: string | null): string | 
   switch (param.type) {
     case 'date':
       return isIsoDate(value) ? value : null
+    case 'month':
+      return isIsoMonth(value) ? value : null
     case 'number': {
       if (!/^\d+(\.\d+)?$/.test(value)) return null
       const n = Number(value)
@@ -107,6 +127,21 @@ const TO: ReportParam = { name: 'to', labelCs: 'Do', labelEn: 'To', type: 'date'
 
 const dayRange = (p: Record<string, string>, column = 'day') =>
   `${column} BETWEEN toDate('${p.from}') AND toDate('${p.to}')`
+
+const FROM_MONTH: ReportParam = {
+  name: 'fromMonth', labelCs: 'Od období', labelEn: 'From period', type: 'month', required: true,
+}
+const TO_MONTH: ReportParam = {
+  name: 'toMonth', labelCs: 'Do období', labelEn: 'To period', type: 'month', required: true,
+}
+
+/**
+ * `period` is a `YYYY-MM` String column, not a date, so the range is a lexicographic BETWEEN.
+ * That is exact for this format — zero-padded, fixed width, most-significant first — and it is
+ * the reason the validator insists on both halves rather than accepting `2026-9`.
+ */
+const monthRange = (p: Record<string, string>, column = 'period') =>
+  `${column} BETWEEN '${p.fromMonth}' AND '${p.toMonth}'`
 
 export const REPORT_REGISTRY: readonly ReportEntry[] = [
   {
@@ -227,6 +262,153 @@ export const REPORT_REGISTRY: readonly ReportEntry[] = [
       FROM ${DB}.gold_risk_event_volume_daily
       WHERE ${dayRange(p)}
       ORDER BY day DESC, events DESC`,
+  },
+  // ── Financial pack (ADR-0286, #8976) ───────────────────────────────────────
+  //
+  // These three reuse the V14 credit-lifecycle gold views rather than re-deriving their figures in
+  // a new migration. That is deliberate and is the rule this registry is built on: one definition
+  // of each business figure lives with the schema. `gold_loan_provisioning_by_stage` already sums
+  // expected credit loss per period and stage; a second definition here would be a second answer
+  // to the same question, free to drift from the first.
+  //
+  // They tolerate an empty source by construction. The V14 marts were written ahead of their data
+  // (the lending subscription lands separately), so an empty result is the normal early state —
+  // the BFF's `available: false` path covers the warehouse being absent, and zero rows are simply
+  // zero rows.
+  {
+    id: 'finance-ifrs9-provisioning',
+    titleCs: 'IFRS 9 — opravné položky podle stupně',
+    titleEn: 'IFRS 9 — provisioning by stage',
+    descriptionCs: 'Očekávaná úvěrová ztráta a její pohyb podle období a stupně znehodnocení.',
+    descriptionEn: 'Expected credit loss and its movement per accounting period and impairment stage.',
+    permission: 'compliance:view',
+    params: [FROM_MONTH, TO_MONTH],
+    columns: [
+      { key: 'period', labelCs: 'Období', labelEn: 'Period', format: 'text' },
+      { key: 'stage', labelCs: 'Stupeň', labelEn: 'Stage', format: 'text' },
+      { key: 'loans', labelCs: 'Úvěrů', labelEn: 'Loans', format: 'number' },
+      { key: 'expected_credit_loss', labelCs: 'ECL', labelEn: 'ECL', format: 'money' },
+      { key: 'ecl_movement', labelCs: 'Pohyb ECL', labelEn: 'ECL movement', format: 'money' },
+    ],
+    sql: (p) => `
+      SELECT period, stage, loans, expected_credit_loss, ecl_movement
+      FROM ${DB}.gold_loan_provisioning_by_stage
+      WHERE ${monthRange(p)}
+      ORDER BY period DESC, stage`,
+  },
+  {
+    id: 'finance-stage-migration',
+    titleCs: 'Migrace mezi stupni IFRS 9',
+    titleEn: 'IFRS 9 stage migration',
+    descriptionCs: 'Přechody mezi stupni za období. Vyléčení se sleduje stejně jako zhoršení.',
+    descriptionEn: 'Stage transitions per period. Cures are tracked alongside deteriorations — a matrix that counts only one direction reads as a book that never recovers.',
+    permission: 'compliance:view',
+    params: [FROM_MONTH, TO_MONTH],
+    columns: [
+      { key: 'period', labelCs: 'Období', labelEn: 'Period', format: 'text' },
+      { key: 'previous_stage', labelCs: 'Z', labelEn: 'From', format: 'text' },
+      { key: 'new_stage', labelCs: 'Do', labelEn: 'To', format: 'text' },
+      { key: 'loans', labelCs: 'Úvěrů', labelEn: 'Loans', format: 'number' },
+      { key: 'deteriorations', labelCs: 'Zhoršení', labelEn: 'Deteriorations', format: 'number' },
+      { key: 'cures', labelCs: 'Vyléčení', labelEn: 'Cures', format: 'number' },
+    ],
+    sql: (p) => `
+      SELECT period, previous_stage, new_stage, loans, deteriorations, cures
+      FROM ${DB}.gold_loan_stage_migration
+      WHERE ${monthRange(p)}
+      ORDER BY period DESC, previous_stage, new_stage`,
+  },
+  {
+    id: 'finance-loan-vintage',
+    titleCs: 'Vintage křivka úvěrů',
+    titleEn: 'Loan vintage curve',
+    descriptionCs: 'Úvěry podle měsíce čerpání proti nejhoršímu dosaženému stupni.',
+    descriptionEn: 'Loans grouped by disbursement month against the worst stage each has reached. `never_migrated` is reported as its own fact, not asserted as Stage 1 — "no event" and "an event saying Stage 1" are different measurements.',
+    permission: 'compliance:view',
+    params: [FROM_MONTH, TO_MONTH],
+    columns: [
+      { key: 'vintage_month', labelCs: 'Měsíc čerpání', labelEn: 'Vintage month', format: 'text' },
+      { key: 'loans', labelCs: 'Úvěrů', labelEn: 'Loans', format: 'number' },
+      { key: 'never_migrated', labelCs: 'Bez migrace', labelEn: 'Never migrated', format: 'number' },
+      { key: 'reached_stage_2', labelCs: 'Dosáhlo st. 2', labelEn: 'Reached stage 2', format: 'number' },
+      { key: 'reached_stage_3', labelCs: 'Dosáhlo st. 3', labelEn: 'Reached stage 3', format: 'number' },
+      { key: 'ever_90_plus_dpd', labelCs: '90+ dpd', labelEn: 'Ever 90+ dpd', format: 'number' },
+    ],
+    sql: (p) => `
+      SELECT vintage_month, loans, never_migrated, reached_stage_2, reached_stage_3, ever_90_plus_dpd
+      FROM ${DB}.gold_loan_vintage
+      WHERE ${monthRange(p, 'vintage_month')}
+      ORDER BY vintage_month DESC`,
+  },
+
+  // ── Managerial pack (ADR-0286, #8976) ──────────────────────────────────────
+  //
+  // Day-keyed KPIs over gold views that already exist. No new DDL for the same reason as above.
+  {
+    id: 'mgmt-credit-decisions-daily',
+    titleCs: 'Denní rozhodnutí o úvěrech',
+    titleEn: 'Daily credit decisions',
+    descriptionCs: 'Schváleno / postoupeno / zamítnuto za den, včetně cenového pásma u schválených.',
+    descriptionEn: 'Approved / referred / declined per day, with the price band of approvals.',
+    permission: 'compliance:view',
+    params: [FROM, TO],
+    columns: [
+      { key: 'day', labelCs: 'Den', labelEn: 'Day', format: 'text' },
+      { key: 'evaluated', labelCs: 'Posouzeno', labelEn: 'Evaluated', format: 'number' },
+      { key: 'approved', labelCs: 'Schváleno', labelEn: 'Approved', format: 'number' },
+      { key: 'referred', labelCs: 'Postoupeno', labelEn: 'Referred', format: 'number' },
+      { key: 'declined', labelCs: 'Zamítnuto', labelEn: 'Declined', format: 'number' },
+      { key: 'approved_prime', labelCs: 'Schváleno PRIME', labelEn: 'Approved PRIME', format: 'number' },
+      { key: 'parties_evaluated', labelCs: 'Klientů', labelEn: 'Parties', format: 'number' },
+    ],
+    sql: (p) => `
+      SELECT day, evaluated, approved, referred, declined, approved_prime, parties_evaluated
+      FROM ${DB}.gold_credit_decision_outcomes
+      WHERE ${dayRange(p)}
+      ORDER BY day DESC`,
+  },
+  {
+    id: 'mgmt-platform-event-volume',
+    titleCs: 'Objem událostí platformy',
+    titleEn: 'Platform event volume',
+    descriptionCs: 'Události podle dne a služby. Syntetický provoz je z pohledu vyloučen.',
+    descriptionEn: 'Events per day and producing service. Synthetic traffic is excluded by the view (ADR-0252), so this is a management number and not a test-traffic number.',
+    permission: 'compliance:view',
+    params: [FROM, TO],
+    columns: [
+      { key: 'day', labelCs: 'Den', labelEn: 'Day', format: 'text' },
+      { key: 'source_service', labelCs: 'Služba', labelEn: 'Service', format: 'text' },
+      { key: 'aggregate_type', labelCs: 'Typ agregátu', labelEn: 'Aggregate type', format: 'text' },
+      { key: 'events', labelCs: 'Událostí', labelEn: 'Events', format: 'number' },
+    ],
+    sql: (p) => `
+      SELECT day, source_service, aggregate_type, sum(events) AS events
+      FROM ${DB}.gold_daily_event_volume
+      WHERE ${dayRange(p)}
+      GROUP BY day, source_service, aggregate_type
+      ORDER BY day DESC, events DESC`,
+  },
+  {
+    id: 'mgmt-onboarding-funnel-daily',
+    titleCs: 'Denní onboarding funnel',
+    titleEn: 'Daily onboarding funnel',
+    descriptionCs: 'Kroky onboardingu za den podle akce a metody KYC.',
+    descriptionEn: 'Onboarding steps per day by action and KYC method.',
+    permission: 'compliance:view',
+    params: [FROM, TO],
+    columns: [
+      { key: 'day', labelCs: 'Den', labelEn: 'Day', format: 'text' },
+      { key: 'step', labelCs: 'Krok', labelEn: 'Step', format: 'text' },
+      { key: 'action', labelCs: 'Akce', labelEn: 'Action', format: 'text' },
+      { key: 'kyc_method', labelCs: 'Metoda KYC', labelEn: 'KYC method', format: 'text' },
+      { key: 'sessions', labelCs: 'Relací', labelEn: 'Sessions', format: 'number' },
+    ],
+    sql: (p) => `
+      SELECT day, step, action, kyc_method, uniqExact(session_id) AS sessions
+      FROM ${DB}.gold_onboarding_funnel_events
+      WHERE ${dayRange(p)}
+      GROUP BY day, step, action, kyc_method
+      ORDER BY day DESC, sessions DESC`,
   },
 ]
 

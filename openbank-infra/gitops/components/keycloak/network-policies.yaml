@@ -182,6 +182,9 @@ spec:
               kubernetes.io/metadata.name: tpp-registry
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: wealth
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP

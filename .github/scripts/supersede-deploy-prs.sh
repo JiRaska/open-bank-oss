@@ -230,6 +230,22 @@ EOF
 # ── self-test ───────────────────────────────────────────────────────────────────────────────────
 # Falsification, not decoration: case 1 is the losing interleaving from #6231 (an older commit's PR
 # created LAST) and must fail; case 2 is the ordinary case and must still close the older PR.
+# Print WHAT THE ASSERTION SAW, not what the script printed (#6618).
+#
+# On 2026-08-23 case 2 failed on `main` with a byte-identical script, reporting "the older PR was
+# not closed" while the very output it echoed contained `would close #6225` as plain ASCII. Passed
+# on the 13 commits either side. Encoding, locale, a code change and the commit's own content were
+# all ruled out; what was never available is the bytes `grep` was actually given. An echoed string
+# cannot answer that — a stray CR, a truncated capture or an empty `$out` all render the same way
+# in a log, and the second of those looks exactly like the third.
+#
+# So every failure branch dumps the length and `od -c`. This does not fix the flake. It makes the
+# next occurrence say which of the three it is, which is the only thing that can.
+dump_out() { # dump_out <captured output>
+  printf '        captured %d byte(s):\n' "${#1}"
+  printf '%s' "$1" | od -c | sed 's/^/        /'
+}
+
 self_test() {
   local tmp rc out ok=0
   tmp="$(mktemp -d)"
@@ -278,7 +294,7 @@ HOOK
   if [ "$rc" -eq 0 ]; then
     echo "SELF-TEST FAIL case 1: stale KEEP exited 0 (must be non-zero)"; ok=1
   elif ! printf '%s' "$out" | grep -q '::error::supersede: #6225 pins aaaaaaaa, which is an ANCESTOR'; then
-    echo "SELF-TEST FAIL case 1: no ::error naming the ancestry; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 1: no ::error naming the ancestry; got: $out"; ok=1; dump_out "$out"
   elif printf '%s' "$out" | grep -q 'would close'; then
     echo "SELF-TEST FAIL case 1: it still closed the newer PR"; ok=1
   else
@@ -288,9 +304,9 @@ HOOK
   # case 2 — the ordinary case: KEEP is the NEWER commit. The older PR must still be closed.
   out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "SELF-TEST FAIL case 2: ordinary supersede exited $rc; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 2: ordinary supersede exited $rc; got: $out"; ok=1; dump_out "$out"
   elif ! printf '%s' "$out" | grep -q 'would close #6225'; then
-    echo "SELF-TEST FAIL case 2: the older PR was not closed; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 2: the older PR was not closed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 2 OK (ordinary supersede -> rc=$rc, older PR closed)"
   fi
@@ -298,7 +314,7 @@ HOOK
   # case 3 — unrelated shas must never be closed on a guess.
   out="$(run "$P" 1 cccccccccccccccccccccccccccccccccccccccc "$(printf '2\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
-    echo "SELF-TEST FAIL case 3: diverged pair was closed or failed; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 3: diverged pair was closed or failed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 3 OK (diverged -> warning, left open)"
   fi
@@ -306,7 +322,7 @@ HOOK
   # case 4 — an unparsable branch name is unknown, not permission.
   out="$(run "$P" 1 "$NEW" "$(printf '2\t%snot-a-sha' "$P")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
-    echo "SELF-TEST FAIL case 4: unparsable branch was closed or failed; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 4: unparsable branch was closed or failed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 4 OK (unparsable sha -> warning, left open)"
   fi
@@ -316,11 +332,11 @@ HOOK
   # Ancestry alone would CLOSE this; the coverage gate must refuse.
   out="$(run "$P" 7314 "$NEW" "$(printf '7313\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "SELF-TEST FAIL case 5: coverage-insufficient run exited $rc (must be 0, tidiness only); got: $out"; ok=1
+    echo "SELF-TEST FAIL case 5: coverage-insufficient run exited $rc (must be 0, tidiness only); got: $out"; ok=1; dump_out "$out"
   elif printf '%s' "$out" | grep -q 'would close #7313'; then
-    echo "SELF-TEST FAIL case 5: #7313 was closed despite #7314 never touching balance-service.yaml; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 5: #7313 was closed despite #7314 never touching balance-service.yaml; got: $out"; ok=1; dump_out "$out"
   elif ! printf '%s' "$out" | grep -q 'coverage check, issue #7621.*leaving #7313 OPEN'; then
-    echo "SELF-TEST FAIL case 5: no coverage warning naming #7313; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 5: no coverage warning naming #7313; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 5 OK (ancestor but disjoint files -> #7313 left OPEN, #7313/#7314/#7319 shape)"
   fi
@@ -329,9 +345,9 @@ HOOK
   # manifests, a genuine superset of #7320's aml-only diff. Must still close.
   out="$(run "$P" 7327 "$NEW" "$(printf '7320\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "SELF-TEST FAIL case 6: ordinary coverage-covered run exited $rc; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 6: ordinary coverage-covered run exited $rc; got: $out"; ok=1; dump_out "$out"
   elif ! printf '%s' "$out" | grep -q 'would close #7320'; then
-    echo "SELF-TEST FAIL case 6: #7320 was not closed despite #7327's superset diff; got: $out"; ok=1
+    echo "SELF-TEST FAIL case 6: #7320 was not closed despite #7327's superset diff; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
   fi

@@ -13,13 +13,8 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
-  # 1.57.0 -> 1.58.0 (#9286): additive — customer-managed delegated account portfolios.
-  #
-  # 1.58.0 -> 1.59.0 (#9215, this branch): additive — customer recertification review and evidence
-  # routes. 1.59.0 stays correct after #9286 landed 1.58.0 on main; 1.60.0 is held by the open
-  # #9237. Read off live origin/main in the same turn as this edit.
-  version: 1.59.0
+  # Additive recertification review and evidence routes.
+  version: 1.66.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -71,6 +66,36 @@ tags:
   - name: Complaints
 
 paths:
+  /net-worth:
+    get:
+      tags: [Profiles]
+      operationId: getNetWorth
+      summary: The caller's net worth, composed from the services that own each figure
+      description: |
+        Fans out to balance-service, lending-service, wealth-service and the ADR-0284 owner graph
+        (ADR-0301 D2). The party comes from the JWT; there is no path or query parameter.
+
+        A branch whose owner did not answer is UNAVAILABLE, never zero. This endpoint answers 200
+        with an honest partial tree rather than 5xx when one upstream is down, so a customer can
+        still see their cash while lending is unavailable. `totals.complete` is false whenever any
+        branch failed or was truncated, and `totals.missingBranches` names them. A client that
+        renders the totals while ignoring those fields is presenting a partial figure as final.
+
+        No currency conversion. Totals are per currency and `totals.converted` is always false; a
+        consolidated cross-currency figure is indicative only (ADR-0024) and is the client's to
+        compute through fx-service, showing the rate and its timestamp.
+
+        Declared holdings are labelled. Every leaf from wealth-service carries `valuationSource`
+        and `valuationAgeDays`: `CUSTOMER_DECLARED` means the customer typed the number and nobody
+        checked it, and a years-old figure is otherwise indistinguishable from a fresh one.
+
+        Entity stakes carry no amount at all (`valued: false`) and move no total: party-service
+        returns who may represent whom, not what an entity is worth.
+      responses:
+        '200':
+          description: The net-worth tree, possibly partial
+        '401':
+          description: Missing or invalid bearer token
   /products:
     get:
       tags: [Products]
@@ -3996,6 +4021,273 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /loyalty:
+    get:
+      tags: [Loyalty]
+      summary: The caller's Lístek balance, this year's earnings, next expiry and ledger history
+      description: >-
+        Party-scoped from the token. A projection of loyalty-service's summary: lot-level
+        remainingLeaves, ruleVersion and the party id are not exposed.
+      operationId: getLoyaltySummary
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltySummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/benefits:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed benefit catalogue (prices in Lístky, never in a currency)
+      operationId: listLoyaltyBenefits
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyBenefit'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/earn-sources:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed earn catalogue
+      description: A listed source is not a claim that anything awards it yet.
+      operationId: listLoyaltyEarnSources
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyEarnSource'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/redemptions:
+    post:
+      tags: [Loyalty]
+      summary: Redeem Lístky for a catalogue benefit
+      description: >-
+        The Idempotency-Key is forwarded unchanged; a retry with the same key answers
+        ALREADY_GRANTED with the original grant and burns nothing. grantStatus GRANTED means the
+        benefit is owed and published for its delivering engine, never that it has been applied.
+      operationId: redeemLoyaltyBenefit
+      security:
+        - customerOidc: [loyalty:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [benefitId]
+              properties:
+                benefitId: {type: string}
+      responses:
+        '200':
+          description: GRANTED or ALREADY_GRANTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyRedemption'}
+        '400': {description: Missing Idempotency-Key or benefitId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown benefit}
+        '409':
+          description: INSUFFICIENT_LEAVES — nothing was burned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyInsufficientLeaves'}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/grants:
+    get:
+      tags: [Loyalty]
+      summary: The caller's benefit grants, newest first
+      description: >-
+        grantStatus is reported as stored. There is no active/applied state: GRANTED means owed,
+        not delivered.
+      operationId: listLoyaltyGrants
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyGrant'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /referrals/program:
+    get:
+      tags: [Referral]
+      summary: The referral programme currently open for invites
+      description: >-
+        The newest PUBLISHED programme whose attribution window has not ended. Maker/checker
+        identities are not exposed.
+      operationId: getOpenReferralProgram
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Open programme
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralProgramSummary'}
+        '401': {description: Unauthenticated}
+        '404': {description: No programme is currently open}
+        '502': {description: Referral service unavailable}
+
+  /referrals/invites:
+    get:
+      tags: [Referral]
+      summary: The caller's own invites, newest first
+      description: >-
+        Never carries the referee's party id or name, nor the invite token. An ISSUED invite whose
+        expiresAt has passed is returned as EXPIRED. createdAt is null when the issue instant was
+        not recorded.
+      operationId: listReferralInvites
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Invites
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ReferralInviteSummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Referral service unavailable}
+    post:
+      tags: [Referral]
+      summary: Issue an invite as the caller
+      description: >-
+        The referrer is the token party; a party id in the body is ignored. The token is returned
+        ONCE, here — it is stored only as a hash. A reused Idempotency-Key is therefore a 409
+        IDEMPOTENCY_KEY_REUSED, not a replay: use a fresh key per invite, and after a lost response
+        read GET /referrals/invites instead of retrying.
+      operationId: issueReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [programId]
+              properties:
+                programId: {type: string, format: uuid}
+      responses:
+        '201':
+          description: Invite issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralInviteIssued'}
+        '400': {description: Missing Idempotency-Key or malformed programId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown programme}
+        '409':
+          description: PROGRAM_UNAVAILABLE or IDEMPOTENCY_KEY_REUSED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '502': {description: Referral service unavailable}
+
+  /referrals/attributions:
+    post:
+      tags: [Referral]
+      summary: Redeem an invite token as the invited customer
+      description: >-
+        The referee is the token party; any party id in the body is ignored. A replay by the same
+        customer answers 200. Attempts are limited per customer per hour (429), counted before the
+        token is looked up, so a miss costs the same as a hit.
+      operationId: attributeReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$'}
+      responses:
+        '200':
+          description: Attributed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [ATTRIBUTED]}
+        '400': {description: Missing Idempotency-Key or malformed token}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown invite}
+        '409':
+          description: SELF, ALREADY_ATTRIBUTED or REJECTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '410': {description: Invite has expired}
+        '429': {description: Too many redemption attempts}
+        '502': {description: Referral service unavailable}
+
 components:
   securitySchemes:
     customerOidc:
@@ -4003,6 +4295,117 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    LoyaltySummary:
+      type: object
+      required: [balance, earnedThisYear, history]
+      properties:
+        balance: {type: integer, description: Unspent, unexpired Lístky}
+        earnedThisYear: {type: integer}
+        nextExpiry: {type: string, format: date-time, nullable: true}
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/LoyaltyLedgerEntry'}
+    LoyaltyLedgerEntry:
+      type: object
+      required: [id, type, leaves, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, enum: [EARN, BURN, EXPIRE, REVERSE]}
+        leaves: {type: integer}
+        earnSourceId: {type: string, nullable: true}
+        benefitId: {type: string, nullable: true}
+        occurredAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    LoyaltyBenefit:
+      type: object
+      required: [id, engine, priceLeaves, validityDays, description]
+      properties:
+        id: {type: string}
+        engine: {type: string, enum: [FEE_WAIVER, INTEREST_BONUS, FX_REFERENCE_RATE]}
+        priceLeaves: {type: integer}
+        validityDays: {type: integer}
+        description: {type: string}
+    LoyaltyEarnSource:
+      type: object
+      required: [id, leaves, validityDays]
+      properties:
+        id: {type: string}
+        leaves: {type: integer}
+        validityDays: {type: integer}
+    LoyaltyRedemption:
+      type: object
+      required: [outcome, grantId, benefitId, grantStatus]
+      properties:
+        outcome: {type: string, enum: [GRANTED, ALREADY_GRANTED]}
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+    LoyaltyInsufficientLeaves:
+      type: object
+      required: [outcome, requiredLeaves, availableLeaves]
+      properties:
+        outcome: {type: string, enum: [INSUFFICIENT_LEAVES]}
+        requiredLeaves: {type: integer}
+        availableLeaves: {type: integer}
+    LoyaltyGrant:
+      type: object
+      required: [grantId, benefitId, grantStatus]
+      properties:
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+        grantedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null only for a grant that never reached GRANTED.
+        validUntil: {type: string, format: date-time, nullable: true}
+    ReferralProgramSummary:
+      type: object
+      required: [id, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt]
+      properties:
+        id: {type: string, format: uuid}
+        rewardAmount: {type: string, description: 'Decimal string, e.g. "500"'}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        qualifyingEvent: {type: string}
+        attributionWindowEndsAt: {type: string, format: date-time}
+    ReferralInviteIssued:
+      type: object
+      required: [id, token, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        token: {type: string, description: Shown once; share it with the invitee}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [ISSUED]}
+    ReferralInviteSummary:
+      type: object
+      required: [id, status, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [ISSUED, ATTRIBUTED, EXPIRED, REJECTED]}
+        createdAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time}
+        attributedAt: {type: string, format: date-time, nullable: true}
+        reward:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/ReferralRewardSummary'}]
+    ReferralRewardSummary:
+      type: object
+      required: [status, amount, currency]
+      properties:
+        status: {type: string, enum: [QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVERSED]}
+        amount: {type: string, description: Decimal string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        requestedAt: {type: string, format: date-time, nullable: true}
+        rewardedAt: {type: string, format: date-time, nullable: true}
+    ReferralConflict:
+      type: object
+      required: [error, reason]
+      properties:
+        error: {type: string}
+        reason:
+          type: string
+          enum: [SELF, ALREADY_ATTRIBUTED, REJECTED, PROGRAM_UNAVAILABLE, IDEMPOTENCY_KEY_REUSED]
     CreateDelegationPortfolio:
       type: object
       required: [name, accountIds]

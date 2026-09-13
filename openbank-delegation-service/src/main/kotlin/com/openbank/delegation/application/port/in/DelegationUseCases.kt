@@ -34,6 +34,7 @@ typealias CallerPartyId = UUID?
 
 interface DelegationCandidate {
     val callerPartyId: CallerPartyId
+    val actorPartyId: UUID?
     val grantorPartyId: UUID
     val granteePartyId: UUID
     val resourceType: DelegationResourceType
@@ -51,6 +52,7 @@ interface DelegationCandidate {
 
 data class PreviewDelegationCommand(
     override val callerPartyId: CallerPartyId,
+    override val actorPartyId: UUID? = null,
     override val grantorPartyId: UUID,
     override val granteePartyId: UUID,
     override val resourceType: DelegationResourceType,
@@ -68,6 +70,7 @@ data class PreviewDelegationCommand(
 
 data class OfferDelegationCommand(
     override val callerPartyId: CallerPartyId,
+    override val actorPartyId: UUID? = null,
     override val grantorPartyId: UUID,
     override val granteePartyId: UUID,
     override val resourceType: DelegationResourceType,

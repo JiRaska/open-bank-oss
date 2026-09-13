@@ -10,7 +10,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { formatAuditPayload, parseAuditEvidenceList, type AuditEvidence } from '@/lib/audit/auditEvidence'
+import { AUDIT_EVIDENCE_WINDOW, formatAuditPayload, parseAuditEvidenceList, type AuditEvidence } from '@/lib/audit/auditEvidence'
 
 const AUDIT_SERVICE = '/api/svc/audit-service'
 
@@ -43,7 +43,7 @@ export default function AuditPage() {
     const timeout = window.setTimeout(() => controller.abort(), 5000)
     setLoading(true); setUnavailable(null)
     try {
-      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${encodeURIComponent(query)}?limit=100`, { signal: controller.signal })
+      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${encodeURIComponent(query)}?limit=${AUDIT_EVIDENCE_WINDOW}`, { signal: controller.signal })
       if (activeSearch.current !== controller) return
       if (!res.ok) {
         if (loadedAggregateId !== query) {
@@ -84,6 +84,11 @@ export default function AuditPage() {
       }
     }
   }, [aggregateId, loadedAggregateId])
+
+  // A response holding exactly the window is evidence of TRUNCATION, not of a complete trail:
+  // audit-service clamps at AUDIT_EVIDENCE_WINDOW, so a full window cannot distinguish "this is
+  // everything" from "there is more". Below the window the service returned all it holds.
+  const windowFull = entries.length >= AUDIT_EVIDENCE_WINDOW
 
   return (
     <div>
@@ -126,7 +131,7 @@ export default function AuditPage() {
           </button>
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-          {t('Zadejte UUID libovolné entity pro zobrazení jejího auditního záznamu — účty, klienti, transakce, KYC případy atd.', 'Enter any entity UUID to see its full audit trail — accounts, parties, transactions, KYC cases, etc.')}
+          {t(`Zadejte UUID libovolné entity — účty, klienti, transakce, KYC případy atd. Jeden dotaz vrátí nejvýše ${AUDIT_EVIDENCE_WINDOW} nejnovějších událostí.`, `Enter any entity UUID — accounts, parties, transactions, KYC cases, etc. One query returns at most the ${AUDIT_EVIDENCE_WINDOW} newest events.`)}
         </div>
       </div>
 
@@ -147,7 +152,9 @@ export default function AuditPage() {
       {entries.length > 0 && (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)' }}>
-          {t(`Nejnovějších ${entries.length} událostí (limit 100) pro`, `Latest ${entries.length} events (100 maximum) for`)} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
+          {windowFull
+            ? t(`Nejnovějších ${entries.length} událostí — okno je plné (maximum ${AUDIT_EVIDENCE_WINDOW} na dotaz), starší události mohou existovat a nejsou zobrazeny, pro`, `Newest ${entries.length} events — the window is full (${AUDIT_EVIDENCE_WINDOW} maximum per query), so older events may exist and are not shown, for`)
+            : t(`Všech ${entries.length} událostí, které služba pro toto Aggregate ID vrátila (limit ${AUDIT_EVIDENCE_WINDOW} nedosažen), pro`, `All ${entries.length} events the service returned for this Aggregate ID (below the ${AUDIT_EVIDENCE_WINDOW} limit) for`)} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
           </div>
           <table className="data-table">
             <thead>
