@@ -2248,6 +2248,7 @@ gates:
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
     mode: enforced
+    budget_seconds: 10   # 0.3s measured; offline, two files read
     review_after: "2027-03-13"
     rationale: >-
       A watch that asserts a verdict about one lane of a workflow must draw its population from
@@ -4692,6 +4693,7 @@ gates:
     name: "every workflow step that invokes gh has a token in scope (enforced)"
     group: lint
     mode: enforced
+    budget_seconds: 15   # 0.7s measured over 34 workflow files
     review_after: "2027-03-13"
     rationale: >-
       A tokenless gh call fails closed, and the one measured instance sat on a recovery path no
