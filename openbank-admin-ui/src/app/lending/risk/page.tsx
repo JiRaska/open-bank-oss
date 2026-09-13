@@ -227,7 +227,7 @@ function CreditRiskConsole() {
         {(['decisions', 'policy', 'portfolio'] as const).map(id => (
           <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id}
             aria-label={id === 'decisions' ? t('Zobrazit rozhodnutí', 'Show decisions') : id === 'policy' ? t('Zobrazit politiku', 'Show policy') : t('Zobrazit portfolio', 'Show portfolio')}
-            style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === id ? 'var(--accent)' : 'var(--surface-3)', color: tab === id ? '#fff' : 'var(--text-secondary)' }}>
+            style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === id ? 'var(--accent-strong)' : 'var(--surface-3)', color: tab === id ? '#fff' : 'var(--text-secondary)' }}>
             {id === 'decisions' ? t('Rozhodnutí', 'Decisions') : id === 'policy' ? t('Politika', 'Policy') : t('Portfolio IFRS 9', 'IFRS 9 portfolio')}
           </button>
         ))}

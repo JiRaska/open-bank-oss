@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.1...settlement-service-v0.9.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **settlement:** stop binding balance fields balance-service has never emitted ([#9857](https://github.com/JiRaska/open-bank-oss/issues/9857)) ([26e8fe3](https://github.com/JiRaska/open-bank-oss/commit/26e8fe329cc2035ceb17b8086ca42927704751d9))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.0...settlement-service-v0.9.1) (2026-09-02)
 
 

@@ -77,6 +77,10 @@ metadata:
   name: anacredit-db-daily
   namespace: anacredit
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 3 3 * * *"
   backupOwnerReference: self
   cluster:
