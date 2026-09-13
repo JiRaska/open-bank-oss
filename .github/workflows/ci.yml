@@ -206,6 +206,9 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
+      - name: Enforce route-owned JavaScript budgets
+        run: npm run check:route-budgets
+
   # Gate job — always runs, maps to the "Admin UI" required check name.
   # Passes when ui-build succeeded or was skipped (no UI changes); fails when
   # ui-build itself failed. Backend-only PRs therefore never get blocked.
