@@ -88,9 +88,8 @@ import kotlin.reflect.jvm.kotlinFunction
  * see [requireFourEyes] — until a second, distinct principal decides a
  * [com.openbank.libs.approval.PendingApproval] via the service's own
  * approval-decide endpoint and the maker retries with `X-Approval-Id`.
- * Default off and no-op without a wired [ApprovalStore], so shipping this in
- * the shared libs JAR does not retroactively change behavior for services
- * that haven't opted in.
+ * Default off for services that have not opted in. Once enforcement is enabled,
+ * a missing [ApprovalStore] fails closed with HTTP 503.
  */
 @Authorize(action = "")
 @Interceptor
@@ -354,8 +353,8 @@ class AuthorizeInterceptor {
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
      * approver when OPA flagged it `four_eyes_required`. No-op (proceeds
-     * immediately) unless the service opted in via [fourEyesEnforce] AND wired
-     * an [ApprovalStore] — see the class KDoc.
+     * immediately) only while [fourEyesEnforce] is disabled. An opted-in service
+     * must wire an [ApprovalStore]; missing infrastructure fails closed.
      */
     private suspend fun requireFourEyes(annotation: Authorize, query: AuthzQuery, decision: AuthzDecision) {
         val fourEyesRequired = decision.attributes["four_eyes_required"] == true
@@ -383,19 +382,7 @@ class AuthorizeInterceptor {
         }
         if (!approvalStore.isResolvable) {
             meters?.authzFourEyes(annotation.action, "no_approval_store")
-            // Code review finding: this used to fall into the same silent-proceed branch as
-            // "four-eyes not required" / "not enforced", with no log at all — indistinguishable
-            // from a service correctly not opting in. Mirrors the log.errorf the PDP-missing
-            // branch above already uses for an analogous misconfiguration; still proceeds
-            // (ADR-0155 D3 deliberately keeps this a no-op, not a fail-closed 503) but now at
-            // least leaves an operator-visible trail that four-eyes was supposed to gate this.
-            log.errorf(
-                "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
-                    "but no ApprovalStore bean is wired — proceeding WITHOUT the second-approver gate. " +
-                    "Wire an ApprovalStore for this service or set authz.four-eyes.enforce=false until it is.",
-                annotation.action,
-            )
-            return
+            throw PolicyDecisionException("Four-eyes enforcement requires a configured ApprovalStore")
         }
         val store = approvalStore.get()
         val maker = query.principal.id
@@ -404,8 +391,7 @@ class AuthorizeInterceptor {
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
             val approval = store.find(approvalId)
-            if (approval.satisfies(annotation.action, resourceId, maker)) {
-                store.markExecuted(approvalId)
+            if (approval.satisfies(annotation.action, resourceId, maker) && store.markExecuted(approvalId) != null) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return
             }

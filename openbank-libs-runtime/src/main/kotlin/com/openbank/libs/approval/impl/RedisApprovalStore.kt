@@ -75,7 +75,8 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
     }
 
     override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
-        val approval = find(id) ?: return null
+        val raw = valueCommands.get(key(id)).awaitSuspending() ?: return null
+        val approval = decode(id, raw) ?: return null
         if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
         // Code review finding: without this, an already APPROVED/REJECTED/EXECUTED approval
         // could be re-decided — flipping an EXECUTED record back to APPROVED and letting the
@@ -88,21 +89,41 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
             decidedBy = decidedBy,
             decidedAt = OffsetDateTime.now(clock),
         )
-        save(decided, DECIDED_TTL_SECONDS)
-        return decided
+        return replaceIfUnchanged(raw, decided, ApprovalStatus.PENDING)
     }
 
     override suspend fun markExecuted(id: String): PendingApproval? {
-        val approval = find(id) ?: return null
-        // Defense-in-depth: AuthorizeInterceptor only calls this after its own status==APPROVED
-        // check, but a second concurrent consumption attempt on the same approval must not
-        // silently succeed twice — reject instead of overwriting an already-EXECUTED record.
+        val raw = valueCommands.get(key(id)).awaitSuspending() ?: return null
+        val approval = decode(id, raw) ?: return null
+        // The local guard rejects known invalid states; the atomic compare-and-set below
+        // also rejects another consumer that passed this guard against the same snapshot.
         if (approval.status != ApprovalStatus.APPROVED) {
             throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, approval.status)
         }
         val executed = approval.copy(status = ApprovalStatus.EXECUTED)
-        save(executed, DECIDED_TTL_SECONDS)
-        return executed
+        return replaceIfUnchanged(raw, executed, ApprovalStatus.APPROVED)
+    }
+
+    private suspend fun replaceIfUnchanged(
+        raw: String,
+        replacement: PendingApproval,
+        expected: ApprovalStatus,
+    ): PendingApproval? {
+        // Compare the exact stored bytes, not a re-encoding: an expired or concurrently
+        // changed approval must never be recreated by a late checker or consumer.
+        val outcome = redis.execute(
+            "EVAL",
+            COMPARE_AND_SET,
+            "1",
+            key(replacement.id),
+            raw,
+            encode(replacement),
+            DECIDED_TTL_SECONDS.toString(),
+        ).awaitSuspending().toInteger()
+        if (outcome == 1) return replacement
+        if (outcome == 0) return null
+        val current = find(replacement.id) ?: return null
+        throw InvalidApprovalStateException(replacement.id, expected, current.status)
     }
 
     private suspend fun save(approval: PendingApproval, ttlSeconds: Long) {
@@ -139,6 +160,13 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
     }
 
     private companion object {
+        const val COMPARE_AND_SET = """
+            local current = redis.call('GET', KEYS[1])
+            if not current then return 0 end
+            if current ~= ARGV[1] then return -1 end
+            redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+            return 1
+        """
         const val KEY_PREFIX = "approval:"
         const val SEPARATOR = "|"
         const val DECIDED_TTL_SECONDS = 86400L

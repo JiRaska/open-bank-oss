@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -640,7 +641,7 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
-    fun `four-eyes required and enforced but no ApprovalStore wired proceeds unchanged`() {
+    fun `four-eyes required and enforced refuses execution when no ApprovalStore is wired`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
         interceptor.pdp = mockk {
             every { isResolvable } returns true
@@ -648,8 +649,8 @@ class AuthorizeInterceptorTest {
         }
         interceptor.fourEyesEnforce = true
         interceptor.approvalStore = mockk { every { isResolvable } returns false }
-        val result = interceptor.authorize(makeCtx(annotatedMethod))
-        assertThat(result).isEqualTo("ok")
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(PolicyDecisionException::class.java)
     }
 
     @Test
@@ -683,6 +684,26 @@ class AuthorizeInterceptorTest {
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
         assertThat(runBlocking { store.find(pending.id) }?.status).isEqualTo(ApprovalStatus.EXECUTED)
+    }
+
+    @Test
+    fun `an approval disappearing during consumption cannot authorize execution`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val backing = InMemoryApprovalStore()
+        val pending = runBlocking { backing.create("party.read", null, "user-42") }
+        runBlocking { backing.decide(pending.id, "checker-99", approve = true) }
+        val disappearing = object : ApprovalStore by backing {
+            override suspend fun markExecuted(id: String): PendingApproval? = null
+        }
+        wirePdpAndStore(disappearing)
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        }
+        val thrown = catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        assertThat(thrown.response.status).isEqualTo(202)
     }
 
     @Test
