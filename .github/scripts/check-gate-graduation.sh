@@ -51,11 +51,17 @@ if [ "${1:-}" = "--self-test" ]; then
   past=$(date -u -v-1d +%Y-%m-%d 2>/dev/null || date -u -d 'yesterday' +%Y-%m-%d)
   future=$(date -u -v+1y +%Y-%m-%d 2>/dev/null || date -u -d '+1 year' +%Y-%m-%d)
 
+  # The reason assertions read "$out" from a here-string, never through `printf | grep -q`.
+  # This script runs under `set -o pipefail` (line 38) and `set +e` above does not undo it.
+  # `grep -q` exits at its first match and closes the pipe; if `printf` is still writing it
+  # dies of SIGPIPE, the pipeline returns 141, and the leading `!` reads that as "not found".
+  # That is a FALSE red: on 2026-09-13 main went red with "rc right, reason wrong (no 'has
+  # passed')" while the printed output contained exactly "has passed". 1 of 59 shard runs.
   expect() { local label="$1" body="$2" want="$3" sub="${4:-}" out rc
     printf '%b' "$body" > "$td/rules.yaml"
     out=$(bash "$0" "$td/rules.yaml" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
 
   # The only clean shape: advisory WITH a live date.
@@ -89,7 +95,7 @@ if [ "${1:-}" = "--self-test" ]; then
     printf '%b' "$body" > "$td/rules.yaml"
     out=$(bash "$0" --warn-days "$days" "$td/rules.yaml" 2>&1); rc=$?
     if [ "$rc" -ne 0 ]; then echo "::error::self-test: $label — warn mode must always exit 0, got $rc: $out" >&2; fails=$((fails+1))
-    elif ! printf '%s' "$out" | grep -qF -- "$want_sub"; then
+    elif ! grep -qF -- "$want_sub" <<< "$out"; then
       echo "::error::self-test: $label — no '$want_sub' in: $out" >&2; fails=$((fails+1)); fi; }
 
   soon=$(date -u -v+10d +%Y-%m-%d 2>/dev/null || date -u -d '+10 days' +%Y-%m-%d)
