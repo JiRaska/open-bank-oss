@@ -13,7 +13,6 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi } from '@/lib/api'
 import { PageHeader, StatusBadge } from '@/components/ui'
-import { AuthGuard } from '@/components/auth/AuthGuard'
 import { readApprovalId } from '@/lib/approvals/triage'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
@@ -78,7 +77,7 @@ function isNotificationPage(value: unknown): value is NotificationPage {
       && typeof item.createdAt === 'string')
 }
 
-function NotificationsContent() {
+export function NotificationsContent() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
@@ -340,10 +339,6 @@ function NotificationsContent() {
       </div>
     </div>
   )
-}
-
-export default function NotificationsPage() {
-  return <AuthGuard permission="notifications:view"><NotificationsContent /></AuthGuard>
 }
 
 /**
