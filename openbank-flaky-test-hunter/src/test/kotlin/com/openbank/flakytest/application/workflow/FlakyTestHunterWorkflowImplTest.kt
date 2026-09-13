@@ -5,19 +5,25 @@
 
 package com.openbank.flakytest.application.workflow
 
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.flakytest.domain.model.FindingSeverity
 import com.openbank.flakytest.domain.model.FindingStatus
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestScanSnapshot
+import io.temporal.client.WorkflowClientOptions
 import io.temporal.client.WorkflowOptions
+import io.temporal.common.converter.DefaultDataConverter
+import io.temporal.common.converter.JacksonJsonPayloadConverter
+import io.temporal.testing.TestEnvironmentOptions
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.worker.Worker
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import java.math.BigDecimal
 import java.time.Instant
 
@@ -28,6 +34,7 @@ import java.time.Instant
  *
  * Pure in-process Temporal test environment: no external Temporal server and no container.
  */
+@Timeout(20)
 class FlakyTestHunterWorkflowImplTest {
 
     private lateinit var env: TestWorkflowEnvironment
@@ -100,7 +107,20 @@ class FlakyTestHunterWorkflowImplTest {
 
     @BeforeEach
     fun setUp() {
-        env = TestWorkflowEnvironment.newInstance()
+        // Match TemporalClientProducer: the stock converter cannot deserialize Kotlin
+        // activity results and retries the workflow task instead of completing this test.
+        val converter = DefaultDataConverter.newDefaultInstance().withPayloadConverterOverrides(
+            JacksonJsonPayloadConverter(
+                JacksonJsonPayloadConverter.newDefaultObjectMapper().registerKotlinModule(),
+            ),
+        )
+        env = TestWorkflowEnvironment.newInstance(
+            TestEnvironmentOptions.newBuilder()
+                .setWorkflowClientOptions(
+                    WorkflowClientOptions.newBuilder().setDataConverter(converter).build(),
+                )
+                .build(),
+        )
         worker = env.newWorker(TASK_QUEUE)
         worker.registerWorkflowImplementationTypes(FlakyTestHunterWorkflowImpl::class.java)
     }
