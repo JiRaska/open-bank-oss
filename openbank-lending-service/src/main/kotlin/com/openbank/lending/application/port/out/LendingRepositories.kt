@@ -117,6 +117,9 @@ interface LoanRepository {
      */
     fun findActiveWithoutProvisioning(period: String, limit: Int): Uni<List<Loan>>
 
+    /** How many loans are ACTIVE right now — the denominator of the provisioning-coverage check. */
+    fun countActive(): Uni<Long>
+
     /** Per-status totals across the whole loan book (issue #3294). See the note on
      *  [LoanApplicationRepository.summariseByState]. */
     fun summariseByState(): Uni<List<LoanStateSummary>>
@@ -168,4 +171,7 @@ interface ProvisioningRepository {
 
     /** The latest persisted record per loan — one row per loan that has ever been assessed. */
     fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>>
+
+    /** How many loans carry a record for [period] — the numerator of the provisioning-coverage check. */
+    fun countForPeriod(period: String): Uni<Long>
 }

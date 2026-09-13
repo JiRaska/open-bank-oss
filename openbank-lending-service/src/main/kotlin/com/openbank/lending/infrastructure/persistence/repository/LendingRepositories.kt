@@ -282,6 +282,13 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
     // written instead of returning the same head every tick (#9901). The ordering is the same
     // deterministic one findActive uses, which keeps the oldest disbursements first.
     @WithSession
+    override fun countActive(): Uni<Long> = sf.withSession { s ->
+        s.createQuery("SELECT COUNT(l) FROM LoanEntity l WHERE l.status = :active", java.lang.Long::class.java)
+            .setParameter("active", com.openbank.lending.domain.model.LoanStatus.ACTIVE)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
     override fun findActiveWithoutProvisioning(period: String, limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
             "FROM LoanEntity l WHERE l.status = :active AND NOT EXISTS (" +
@@ -423,6 +430,16 @@ class ProvisioningRepositoryImpl @Inject constructor(
             .setMaxResults(1)
             .resultList
     }.map { it.firstOrNull()?.let(mapper::toDomain) }
+
+    @WithSession
+    override fun countForPeriod(period: String): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(p) FROM LoanProvisioningEntity p WHERE p.period = :period",
+            java.lang.Long::class.java,
+        )
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
 
     @WithSession override fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>> = sf.withSession { s ->
         s.createQuery(

@@ -39,6 +39,9 @@ class ProvisioningCycleSchedulerTest {
             maxBatches = 40,
             clock = clock,
             domainMetrics = mockk(relaxed = true),
+            loans = mockk(relaxed = true),
+            provisioning = mockk(relaxed = true),
+            registry = null,
         )
 
     @BeforeEach
@@ -136,6 +139,9 @@ class ProvisioningCycleSchedulerTest {
             maxBatches = 3,
             clock = clock,
             domainMetrics = mockk(relaxed = true),
+            loans = mockk(relaxed = true),
+            provisioning = mockk(relaxed = true),
+            registry = null,
         )
         every { cycle.runProvisioningCycle("2026-06", any(), 500) } returns
             Uni.createFrom().item(ProvisioningRunOutcome(period = "2026-06", loansAssessed = 500, journalsPosted = 500))
