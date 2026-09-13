@@ -99,6 +99,24 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-delegation-disclosure",
+      "name": "OpenBank Delegation Disclosure",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-admin-ui",
       "name": "OpenBank Admin UI",
       "enabled": true,
@@ -193,6 +211,14 @@
       "serviceAccountClientId": "openbank-services",
       "realmRoles": [
         "ROLE_OPERATOR",
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-delegation-disclosure",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-delegation-disclosure",
+      "realmRoles": [
         "ROLE_API"
       ]
     }

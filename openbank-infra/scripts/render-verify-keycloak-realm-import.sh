@@ -34,7 +34,7 @@
 #   # openbank realm — every __PLACEHOLDER__ in realm-template.json needs its env var
 #   ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
 #   GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
-#   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+#   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... DELEGATION_DISCLOSURE_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
 #   DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
 #   ADMIN_HOST=admin.openbank.local \
 #     ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank

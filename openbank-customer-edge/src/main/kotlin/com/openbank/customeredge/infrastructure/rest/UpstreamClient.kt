@@ -270,6 +270,27 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /**
+     * M2M POST which preserves binary success bodies. Anonymous edge routes use it where their
+     * upstream endpoint is intentionally service-authenticated but carries no customer party id.
+     */
+    fun postRaw(url: String, body: String, accept: String): Response = try {
+        val request = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header("Content-Type", "application/json")
+            .header("Accept", accept)
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .POST(HttpRequest.BodyPublishers.ofString(body)).build()
+        val r = http.send(request, HttpResponse.BodyHandlers.ofByteArray())
+        val contentType = r.headers().firstValue("content-type").orElse(MediaType.APPLICATION_OCTET_STREAM)
+        Response.status(r.statusCode()).entity(r.body()).type(contentType).build()
+    } catch (e: Exception) {
+        Log.error("upstream raw POST to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** PATCH (no body) with the M2M token + party header — e.g. mark a notification read. */
     fun patch(url: String, partyId: String): Response = try {
         val request = HttpRequest.newBuilder()

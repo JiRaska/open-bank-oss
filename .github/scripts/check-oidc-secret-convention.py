@@ -82,7 +82,11 @@ def entries_in(doc, rel: str) -> list[tuple[str, str]]:
         ref = entry.get("remoteRef") or {}
         if not isinstance(ref, dict):
             continue
-        if SECRET_FIELD not in (ref.get("property"), entry.get("secretKey")):
+        # `remoteRef.property` describes the field name inside a Vault item. A dedicated client
+        # may legitimately use the same field name while projecting it under a different target
+        # key (for example DISCLOSURE_OIDC_CLIENT_SECRET). The shared-client convention applies
+        # only to the target resource-server secret, not to every Vault field called the same.
+        if entry.get("secretKey") != SECRET_FIELD:
             continue
         key = ref.get("key")
         if isinstance(key, str):
@@ -184,9 +188,11 @@ def self_test() -> int:
 
     parse_cases = [
         ("an ExternalSecret projecting the secret is seen", _es("x"), 1),
-        ("property alone is enough (secretKey renamed)",
-         _es("x", secret_key="CLIENT_SECRET"), 1),
+        ("property alone is ignored when the target key is renamed",
+         _es("x", secret_key="CLIENT_SECRET"), 0),
         ("secretKey alone is enough (no property)", _es("x", prop=None), 1),
+        ("a dedicated target key may use the OIDC field name",
+         _es("dedicated-client", secret_key="DISCLOSURE_OIDC_CLIENT_SECRET"), 0),
         ("an unrelated secret in the same file is ignored",
          _es("x", prop="DB_PASSWORD", secret_key="DB_PASSWORD"), 0),
         ("a non-ExternalSecret document mentioning it is not flagged",

@@ -6,6 +6,7 @@ package com.openbank.delegation.application.port.out
 
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.ExternalDisclosure
 import com.openbank.libs.domain.event.DomainEvent
 import io.smallrye.mutiny.Uni
 import java.time.OffsetDateTime
@@ -29,6 +30,37 @@ interface DelegationRepository {
         expiredAt: OffsetDateTime,
         event: DomainEvent,
     ): Uni<Boolean>
+}
+
+/**
+ * The transition is run while the matching row is locked in the database. Calling code supplies
+ * the domain transition so raw link secrets and OTPs never enter the persistence boundary.
+ */
+interface ExternalDisclosureRepository {
+    suspend fun issue(disclosure: ExternalDisclosure): ExternalDisclosure
+    suspend fun findById(id: UUID): ExternalDisclosure?
+    suspend fun findByLinkSecretHash(linkSecretHash: String): ExternalDisclosure?
+    suspend fun mutateByLinkSecretHash(
+        linkSecretHash: String,
+        transition: (ExternalDisclosure) -> ExternalDisclosure,
+    ): ExternalDisclosure?
+
+    suspend fun mutateById(id: UUID, transition: (ExternalDisclosure) -> ExternalDisclosure): ExternalDisclosure?
+}
+
+/**
+ * Narrow internal boundary to document-service. The caller receives only a newly recipient-bound
+ * and institutionally sealed PDF — never the original object-store bytes.
+ */
+data class ExternalDisclosureArtifact(val contentType: String, val bytes: ByteArray)
+
+interface ExternalDisclosureDocumentExporter {
+    suspend fun export(
+        documentId: UUID,
+        disclosureId: UUID,
+        recipientLabel: String,
+        issuedAt: java.time.Instant,
+    ): ExternalDisclosureArtifact
 }
 
 /**

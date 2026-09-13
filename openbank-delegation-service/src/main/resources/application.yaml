@@ -69,6 +69,9 @@ quarkus:
   # so without this block the calls carry no Authorization header and 401 — surfacing as the
   # ownership gate's fail-closed "could not be established", never as an auth problem.
   # Same shape as party-service / document-service / sdd-service.
+  # The default client remains the shared backend identity because the existing SCA, PID and
+  # ownership REST clients depend on its established OPA grants. The disclosure client below is
+  # named and opt-in, so it cannot silently change those callers' subjects.
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     client-id: openbank-services
@@ -76,6 +79,16 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    disclosure:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      # This credential is deliberately not the fleet-wide `openbank-services` client.
+      # document-service authorizes this caller by its exact service-account subject, rather
+      # than accepting every backend sharing the generic client.
+      client-id: openbank-delegation-disclosure
+      credentials:
+        secret: ${DISCLOSURE_OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-reactive-messaging:
     kafka:
@@ -125,6 +138,20 @@ quarkus:
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
       connect-timeout: 2000
       read-timeout: 2000
+    document-service:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 3000
+      # The disclosure exporter presents a private-CA certificate. Keep hostname verification
+      # enabled and trust only the CA projected by GitOps; local HTTP fixtures use the default
+      # URL and never exercise this named TLS configuration.
+      tls-configuration-name: disclosure
+
+  tls:
+    disclosure:
+      trust-store:
+        pem:
+          certs: ${QUARKUS_TLS_DISCLOSURE_TRUST_STORE_PEM_CERTS:}
 
   management:
     enabled: true

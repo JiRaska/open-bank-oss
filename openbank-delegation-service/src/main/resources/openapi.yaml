@@ -7,11 +7,16 @@ info:
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # 1.13.0 -> 1.14.0 (#9286): additive — customer-managed delegated account portfolios.
   #
-  # 1.14.0 -> 1.18.0 (#9522, this branch): additive — organization grant authority. NOT the next
-  # integer: 1.15.0 is held by the open #9215, 1.16.0 by #9481/#9484 and 1.17.0 by #9237. Read off
-  # live origin/main together with the open PRs, because a taken version is textually identical to
-  # a free one and no merge can catch the collision.
-  version: 1.18.0
+  # 1.14.0 -> 1.18.0 (#9522): additive — organization grant authority. Now on main.
+  #
+  # 1.18.0 -> 1.20.0 (#9237, this branch): additive — the external-disclosure verify-otp and
+  # content routes. This number has moved TWICE while the branch sat open, in both directions the
+  # gate can see: it first wrote 1.13.0, which main then took (identical text on both sides, so no
+  # conflict), and 1.17.0 was then OVERTAKEN when #9522 landed 1.18.0 — `api-contract gate` reads
+  # that as `1.18.0 -> 1.17.0`, a bump going backwards. 1.19.0 is held by the open #9417, so
+  # 1.20.0 is the first free number. Re-read it off live origin/main WITH the open PRs after any
+  # rebase; neither direction of this collision produces a merge conflict (ADR-0048).
+  version: 1.20.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -538,12 +543,58 @@ paths:
           description: >-
             The reservation was confirmed. Releasing settled money would re-open a ceiling the
             delegate has already spent through.
+  /api/v1/external-disclosures/{id}/content:
+    post:
+      tags: [External disclosures]
+      summary: Release one sealed external disclosure PDF
+      description: Available only through the public customer edge after OTP verification. The response is a recipient-watermarked, sealed PDF derivative, never the original document.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+      responses:
+        '200':
+          description: Sealed disclosure PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: External disclosure unavailable }
+  /api/v1/external-disclosures/{id}/verify-otp:
+    post:
+      tags: [External disclosures]
+      summary: Verify an external disclosure one-time passcode
+      description: Available only through the public customer edge. Invalid, expired, revoked, locked and unknown links all return 404.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+      responses:
+        '204': { description: OTP accepted }
+        '404': { description: External disclosure unavailable }
 components:
   parameters:
     ApprovalId:
       name: approvalId
       in: path
       required: true
+      schema: { type: string, format: uuid }
+    # Referenced by both /external-disclosures/{id} routes and never defined until now, which is
+    # why `api-contract gate` could not classify the spec at all: oasdiff fails strict resolution
+    # on a dangling $ref rather than reporting a diff, so the whole service's version verdict was
+    # unavailable — not "no change", unavailable.
+    ExternalDisclosureId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        The sealed external-disclosure link id. Invalid, expired, revoked, locked and unknown ids
+        are all answered 404 by design, so this value never distinguishes them to the caller.
       schema: { type: string, format: uuid }
     CustomerPartyId:
       name: X-Customer-Party-Id
@@ -927,3 +978,18 @@ components:
         detail: { type: string }
         code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }
+    ExternalDisclosureLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+    ExternalDisclosureOtpRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, otp, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }

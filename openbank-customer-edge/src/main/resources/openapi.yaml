@@ -13,17 +13,11 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
-  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
-  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
-  # (1.57.0) in the same turn as this edit and confirmed free with
-  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
-  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
-  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
-  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
-  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
-  # takes the next free version (ADR-0048).
-  version: 1.62.0
+  # 1.62.0 -> 1.64.0 (#9237, this branch): additive — the OTP-gated external disclosure routes.
+  # This branch held 1.60.0 and main OVERTOOK it twice while it sat open; 1.63.0 is taken by the
+  # open #9417, so 1.64.0 is the first free number. Re-read off live origin/main WITH the open PRs
+  # after any rebase — a taken version is textually identical to a free one (ADR-0048).
+  version: 1.64.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -59,6 +53,7 @@ tags:
   - name: Cards
   - name: Lending
   - name: Delegation
+  - name: External disclosures
   - name: Pockets
   - name: Fees
   - name: Interest
@@ -105,6 +100,50 @@ paths:
           description: The net-worth tree, possibly partial
         '401':
           description: Missing or invalid bearer token
+  /external-disclosures/{id}/verify-otp:
+    post:
+      tags: [External disclosures]
+      summary: Verify a disclosure magic-link one-time passcode
+      description: Anonymous recipient route. Invalid, expired, revoked, locked and unknown links all return the same response.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+      responses:
+        '204': { description: OTP accepted }
+        '404': { description: External disclosure unavailable }
+        '502': { description: Disclosure service unavailable }
+  /external-disclosures/{id}/content:
+    post:
+      tags: [External disclosures]
+      summary: Download a sealed external disclosure PDF
+      description: Anonymous recipient route after OTP verification. Only a recipient-watermarked, sealed derivative is returned.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+      responses:
+        '200':
+          description: Sealed disclosure PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: External disclosure unavailable }
+        '502': { description: Disclosure service unavailable }
   /products:
     get:
       tags: [Products]
@@ -3988,6 +4027,21 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
 
+    ExternalDisclosureOtpRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, otp, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+    ExternalDisclosureLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, idempotencyKey]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file

@@ -149,6 +149,19 @@ interface SignatureSealPort {
 }
 
 /**
+ * Institutional seal for an immutable external-disclosure copy. It deliberately has no signer or
+ * ceremony: this attests to the bank-produced artifact, never to a recipient's signature.
+ */
+interface ExternalDisclosureSealPort {
+    suspend fun sealExternalDisclosure(pdf: ByteArray, disclosureId: UUID): ByteArray
+}
+
+/** Applies visible disclosure evidence before sealing so it is part of the signed PDF byte range. */
+interface DisclosureWatermarkPort {
+    suspend fun watermark(pdf: ByteArray, recipientLabel: String, disclosureId: UUID): ByteArray
+}
+
+/**
  * SCA-bound strong-authentication check gating a SIGNED decision (ADR-0162 D4, ADR-0021). A
  * signer's decision is only accepted as a legally meaningful signature once the [evidenceRef] —
  * a completed SCA challenge/approval reference for [partyRef] — has been verified. A DECLINED

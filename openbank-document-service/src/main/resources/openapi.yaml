@@ -3,7 +3,12 @@
 openapi: 3.1.0
 info:
   title: Document Service API
-  version: 1.4.0
+  # 1.4.0 -> 1.5.0 (#9237): additive — the OTP-gated external disclosure boundary.
+  # 1.4.0 was NOT free: live origin/main already holds it, and a taken version is textually
+  # identical to a free one, so no merge can catch the collision (ADR-0048). Re-read this off
+  # live main after any rebase — the other open document-service PRs sit at 1.3.0 and will
+  # each need the same check when they land.
+  version: 1.5.0
   description: >-
     Document Management — templates, rendering, storage with lifecycle/retention metadata,
     and e-signature ceremonies. Not on the synchronous money path (emits events, never a
@@ -231,6 +236,37 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/documents/{id}/external-disclosures/export:
+    post:
+      tags: [Documents]
+      summary: Produce a recipient-bound, sealed PDF for a delegated external disclosure
+      description: >-
+        Internal service-to-service endpoint. Authorization permits only the dedicated
+        delegation disclosure service account; external recipients never call this endpoint.
+      operationId: exportExternalDisclosure
+      parameters:
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportExternalDisclosureRequest'
+      responses:
+        '200':
+          description: Recipient-bound and institutionally sealed PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: recipientLabel is blank
+        '403':
+          description: Caller is not the dedicated delegation disclosure service account
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/signature-ceremonies:
     post:
       tags: [Signature Ceremonies]
@@ -369,6 +405,21 @@ components:
           type: string
           format: date
           nullable: true
+
+    ExportExternalDisclosureRequest:
+      type: object
+      required: [disclosureId, recipientLabel, issuedAt]
+      properties:
+        disclosureId:
+          type: string
+          format: uuid
+        recipientLabel:
+          type: string
+          minLength: 1
+          description: Recipient binding rendered into the sealed PDF; delegation-service derives it from the persisted disclosure.
+        issuedAt:
+          type: string
+          format: date-time
 
     OpenCeremonyRequest:
       type: object

@@ -117,6 +117,9 @@ data class OnboardingAgreementResponse(
     val documentStatus: DocumentStatus,
 )
 
+/** Internal-only request from delegation-service; never accepted from an external link caller. */
+data class ExportExternalDisclosureRequest(val disclosureId: UUID, val recipientLabel: String, val issuedAt: Instant)
+
 fun OnboardingAgreement.toResponse() = OnboardingAgreementResponse(
     ceremonyId = ceremonyId,
     documentId = documentId,

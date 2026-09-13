@@ -19,6 +19,9 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ExternalDisclosure` evidence — a short-lived, bounded release of one sealed document to an
+  external recipient. It holds only recipient label, document/delegation ids, state timestamps and
+  domain-separated SHA-256 hashes of the link secret and OTP; it never stores either raw secret.
 
 ## Lifecycle approval execution
 
@@ -53,6 +56,11 @@ and require a human operator plus OPA; client applications do not receive a bank
    principal status/type and live representation mandates. Mutual TLS uses the platform private CA
    with per-service client identity and hostname verification; OIDC authenticates the application
    principal and the network policy admits only the declared namespace/port edge.
+8. External recipient → customer-edge → delegation-service disclosure endpoint. The public edge
+   owns anonymous ingress and its per-IP ingress rate limit; it authenticates upstream using only
+   its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
+   `delegation.disclosure.release` for that identity, never the shared backend client. Every
+   unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
 
 ## Threats and mitigations
 
@@ -82,6 +90,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T24 | A caller forges an entity profile, reuses a revoked mandate, or intercepts the authority lookup | The edge derives the human actor from the authenticated token; it is not accepted from the app. delegation-service re-checks the selected principal and the actor's currently active mandate at issuance time against party-service, before consuming SCA. Unknown, inactive, malformed and unavailable results fail closed. The new east-west call uses party-service's parallel private-CA mTLS listener on 8443: hostname verification authenticates the server, a namespace-local cert identifies delegation-service, and TLS 1.3 is pinned; OIDC and namespace/port NetworkPolicy remain independent controls. An event-only projection was rejected for this admission decision because bootstrap/replay lag and a revocation race would trade authorization freshness for availability. Residual: this establishes statutory/owner representation, not a delegated employee capability such as `delegation.manage`. |
 | T22 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
 | T23 | Product service releases an operation under a weaker policy because the grant event discarded its approval policy | `DelegationOffered`, `DelegationActivated` and `DelegationReinstated` carry `approvalPolicy` and `requiredApprovals`; the account consumer contract proves exact N-of-M projection and legacy-without-fields → SOLO. Non-SOLO offer remains fail-closed until the eligible-member snapshot and atomic decision ledger land. Rollout is consumer-first; producer-first would create a promise the enforcer cannot yet retain. |
+| T28 | A leaked external-link token becomes an unbounded, permanent document download | Each disclosure has a per-record SHA-256 link-secret hash, hard expiry, revocable state and a positive maximum view count. The row and its immutable view timestamps are locked and transitioned in one database transaction, so replicas cannot both consume the last allowed view. Raw secrets never persist. customer-edge maps every 4xx to the same unavailable response and is behind its per-IP ingress limit. |
+| T29 | A link alone releases a confidential document | The model requires a separate OTP hash before any view may be consumed. Invalid attempts are persisted and permanently lock the disclosure at five failures; OTP verification, revocation, expiry and view-limit denial occur before document bytes are requested. The raw OTP is generated only at issuance and never persists. Residual: an out-of-band delivery adapter remains a rollout dependency, not an API fallback. |
+| T30 | A concurrent view and revocation allow a post-revocation release | Issuance, OTP verification, view consumption and revocation are expressed as transitions on one disclosure aggregate. The repository takes `SELECT … FOR UPDATE` on the exact disclosure before executing a transition, records at most one append-only view timestamp and updates the count in that transaction. A request that locks after revocation sees unavailable and cannot issue bytes. The exporter is called before the final CAS so an outage cannot burn a view; only the CAS winner receives a derived sealed artifact, never document-service's internal original `/content`. |
+| T31 | A customer shares a document they are not entitled to disclose, or shares a broad live API | The intended issuer path will re-read the linked grant, require `ACTIVE`, require the authenticated grantor and require `DOCUMENT` + `OBJECT_READ`; D7 is an immutable single-object emission rather than a new product-service authorization path. Residual: this command/API is not yet implemented, so no production control should claim these checks have run. |
+| T32 | Disclosure evidence exposes unnecessary recipient or device data | The storage schema deliberately retains one human recipient label and the event time required for grantor transparency, but not recipient account identity, IP address, user-agent, raw link or raw OTP. View rows are append-only so a later counter update cannot erase earlier access evidence. Residual: retention, data-subject access and audit-envelope routing must be specified with the sealed-export integration before external exposure. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -119,6 +132,10 @@ gap closes only with a consumer pact or a run against a deployed stack.
   audit but are excluded from the authorization decision and shared-document list. This stays the
   rule until delivery creates a transformed artifact and atomically enforces redaction, watermark,
   download policy and view counting; proxying original object bytes would not implement any of them.
+- D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
+  delivery/attempt throttling, recipient-facing rate limit and audit-envelope routing. The
+  disclosure persistence boundary is implemented, but **no external ingress is enabled** until
+  this export path and its controls ship together.
 - EUDI verifiable-credential delivery channel (follow-up ADR on ADR-0094).
 - `AccountAuthorization` migration dual-run window (two grant sources for accounts).
 - ~~**Cumulative daily/monthly ceilings are REFUSED at the API, not silently accepted.**~~
