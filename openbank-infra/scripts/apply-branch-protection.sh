@@ -58,6 +58,15 @@ REQUIRED_CHECKS=(
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
 
+# Live requirements owned outside this script are retained only when they are
+# already present; they are not introduced on a fresh ruleset.
+PRESERVE_LIVE_CHECKS=("OPA policy gate")
+
+# Removing a live requirement must be explicit in the same reviewed change
+# that removes it from REQUIRED_CHECKS. Phase 2 will put "Validate manifests"
+# here; an empty list makes accidental removals fail closed.
+INTENTIONAL_REMOVALS=()
+
 # Checks whose health this ruleset update relies on. Before the update, the
 # exact current default-branch commit must already have emitted every one with
 # a successful conclusion. This proves both claims the migration relies on: the matrix
@@ -129,7 +138,7 @@ existing_id=$(gh api "repos/$REPO/rulesets" --jq \
 # there is no existing ruleset (first-time create). The list endpoint omits
 # bypass_actors, so fetch the individual ruleset.
 bypass_json='[]'
-live_checks_json='[]'
+preserved_checks_json='[]'
 # ADR-0272 rejects strict up-to-date enforcement at the measured merge rate:
 # it moves serialization into rebase loops without closing the merge race.
 # New rulesets follow that current decision; existing rulesets retain their
@@ -161,24 +170,38 @@ if [ -n "$existing_id" ]; then
   fi
   echo "Preserving strict-required-status-checks policy: $strict_json."
 
-  # A PUT replaces the complete required-check list too. Carry every live
-  # context into the payload, including requirements managed outside this
-  # script. This migration may add checks, but can never remove one as a side
-  # effect of desired-state drift.
-  live_checks_json=$(echo "$existing_ruleset" | jq -c '
+  # A PUT replaces the complete required-check list too. Classify every live
+  # context as desired, explicitly preserved, or intentionally removed. Any
+  # unclassified disappearance is desired-state drift and fails closed.
+  live_checks=$(echo "$existing_ruleset" | jq -r '
     [.rules[] | select(.type == "required_status_checks")
-      | .parameters.required_status_checks[].context] | unique')
-  if ! echo "$live_checks_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    echo "ERROR: ruleset #$existing_id required checks could not be read." >&2
+      | .parameters.required_status_checks[].context] | unique[]')
+  preserved_checks_json='[]'
+  while IFS= read -r context; do
+    [ -z "$context" ] && continue
+    if printf '%s\n' "${REQUIRED_CHECKS[@]}" | grep -Fqx -- "$context"; then
+      continue
+    fi
+    if printf '%s\n' "${PRESERVE_LIVE_CHECKS[@]}" | grep -Fqx -- "$context"; then
+      preserved_checks_json=$(echo "$preserved_checks_json" \
+        | jq -c --arg context "$context" '. + [$context] | unique')
+      continue
+    fi
+    if printf '%s\n' "${INTENTIONAL_REMOVALS[@]}" | grep -Fqx -- "$context"; then
+      echo "Intentionally removing live required check: $context"
+      continue
+    fi
+    echo "ERROR: desired ruleset would remove unclassified live check '$context'." >&2
+    echo "       Preserve it or declare its removal explicitly in a reviewed change." >&2
     exit 1
-  fi
-  echo "Preserving $(echo "$live_checks_json" | jq 'length') live required check(s)."
+  done <<< "$live_checks"
+  echo "Preserving $(echo "$preserved_checks_json" | jq 'length') externally managed live check(s)."
 fi
 
 # Build the required_status_checks array as JSON from REQUIRED_CHECKS.
 checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
-  | jq -R . | jq -cs --argjson live "$live_checks_json" \
-    '(. + $live) | unique | map({context: .})')
+  | jq -R . | jq -cs --argjson preserved "$preserved_checks_json" \
+    '(. + $preserved) | unique | map({context: .})')
 
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
