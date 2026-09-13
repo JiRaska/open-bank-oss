@@ -419,3 +419,25 @@ requires the hold and journal calls to work with enforced authorization and requ
 approval; this change grants no exemption and does not prove that approval workflow. General audit
 publisher durability is a separate release requirement. See the rollout note in
 `docs/runbooks/settlement-ledger-projection.md`.
+
+
+## Durable state audit producer
+
+`SettlementRepositoryImpl` locks the aggregate before checking a transition and persists its
+`SettlementAuditWriter` event in the same transaction. An outbox failure rolls back the state;
+suppressed late or repeated writes produce no fictional transition. The row's immutable event ID
+survives dispatcher retries. `SettlementOutboxRepositoryImpl` claims with SKIP LOCKED and recovers
+stale leases; `KafkaSettlementOutboxEventPublisher` waits for broker acknowledgement. Delivery is
+at least once and may reorder across dispatchers. Consumer deduplication remains mandatory.
+
+The new Kafka trust boundary grants settlement-service Write/Describe only on its state topic
+and audit-service Read/Describe. Certificate projection and broker-network access use the existing
+mTLS deployment mechanism. `SettlementAuditBacklogGauge` includes every non-SENT status, including
+exhausted retries; workflow liveness monitors the collector. Broker acceptance does not prove
+that the audit service stored the record. See the settlement audit recovery runbook.
+
+Old writers must drain before relying on full transition coverage. Existing state history cannot
+be reconstructed as contemporaneous evidence. Initiating-person attribution and durable synthetic
+origin are not supplied by this state event; actorType SERVICE must not be interpreted as either.
+Tests use isolated infrastructure and test security, and do not prove production OPA decisions,
+certificate issuance, broker high availability or retention capacity.

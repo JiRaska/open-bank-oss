@@ -2311,13 +2311,29 @@ spec:
             # enough; safe to leave briefly, repair is a no-op once checksums already match).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            # `KAFKA_BOOTSTRAP_SERVERS: …:9092` stood here and was dead (issue #3393):
-            # openbank-settlement-service has no `mp.messaging` config and no Kafka client
-            # anywhere under src/main, so it opened no connection and the value was never read.
-            # It mattered only because it made settlement-service read as a plaintext-listener
-            # client in every audit of who is still on :9092 — including
-            # `gen-network-policies.py`, which derives the broker allow-list from exactly this
-            # kind of env URL and so admitted `payments` on 9092 partly on its account.
+            # Durable settlement audit producer, using the shared mTLS pattern.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -2390,6 +2406,12 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           resources:
@@ -2474,6 +2496,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: kafka-keystore
+          secret:
+            secretName: settlement-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

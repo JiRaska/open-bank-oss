@@ -11,8 +11,8 @@ import org.testcontainers.utility.DockerImageName
 /**
  * CI infra sweep (issue #578). Isolated PostgreSQL per test JVM via Testcontainers,
  * injected as highest-precedence config to override the shared-stack localhost values.
- * settlement-service has no Kafka dependency, so Postgres is the only external dependency:
- * Hibernate Reactive + Flyway need a real Postgres for the migrations to run on boot.
+ * Hibernate Reactive + Flyway use real Postgres. The outbound emitter is in-memory here;
+ * broker delivery is proved separately with a real Kafka test resource.
  */
 class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
@@ -35,6 +35,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.username" to "openbank",
             "quarkus.datasource.password" to "openbank_secret",
             "quarkus.devservices.enabled" to "false",
+            "mp.messaging.outgoing.settlement-events-out.connector" to "smallrye-in-memory",
         )
     }
 

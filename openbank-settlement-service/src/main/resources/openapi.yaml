@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.7.0"
+  version: "1.7.1"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -49,7 +49,9 @@ components:
         id: { type: string, format: uuid }
         payerAccountId: { type: string, format: uuid }
         payeeAccountId: { type: string, format: uuid }
-        amount: { type: string }
+        amount:
+          type: string
+          description: Persisted decimal amount, using the database precision of four fractional digits.
         currency: { type: string }
         status:
           type: string

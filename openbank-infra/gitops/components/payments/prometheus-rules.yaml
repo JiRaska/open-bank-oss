@@ -654,3 +654,30 @@ spec:
               {{ $value | humanizePercentage }} of settlements reaching a terminal state in the last
               hour were REJECTED after their compensations ran — each one debited and credited real
               accounts and then reversed them. Treat as a money-path incident, not a error-rate blip.
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-settlement-audit-alerts
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbank.settlement.audit
+      rules:
+        - alert: SettlementAuditUnsent
+          expr: openbank_settlement_audit_unsent_oldest_age_seconds{service="settlement"} > 300
+          for: 5m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            subject_period: continuous
+            summary: Settlement audit evidence has remained unsent for over five minutes
+            description: >-
+              The settlement outbox contains old records without broker acknowledgement,
+              including exhausted retries or abandoned claims. Check broker connectivity,
+              certificates, topic ACLs and the dispatcher before replaying unchanged event IDs.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/settlement-audit-recovery.md
