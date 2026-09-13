@@ -153,16 +153,37 @@ jobs:
             exit 1
           fi
 
+      # create-pull-request is also the only thing that RETIRES a heal PR: on a tree with no diff it
+      # deletes the branch, which closes the PR. Gating it on `changed` alone meant a heal PR whose
+      # drift some other merge fixed stayed open forever (#9869, #9920). Running it on every clean
+      # push would mint an App token per run against an installation quota that has been the
+      # bottleneck, so ask the cheap question first: `git ls-remote` is a git protocol read, not a
+      # REST call, and only an existing heal branch makes the action worth running on a clean tree.
+      - name: Find a heal branch left over from an earlier drift
+        id: stale
+        if: steps.regen.outputs.changed != 'true'
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin chore/derived-artefact-autoheal >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "main no longer needs chore/derived-artefact-autoheal — running the PR step to retire it."
+          else
+            rc=$?
+            # --exit-code answers 2 for "no such ref"; anything else is a failed probe, not absence.
+            [ "$rc" -eq 2 ] || { echo "::error::git ls-remote failed (exit $rc)"; exit "$rc"; }
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Mint a GitHub App installation token
         id: app_token
-        if: steps.regen.outputs.changed == 'true'
+        if: steps.regen.outputs.changed == 'true' || steps.stale.outputs.exists == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
       - name: Open the heal PR
-        if: steps.regen.outputs.changed == 'true'
+        if: steps.regen.outputs.changed == 'true' || steps.stale.outputs.exists == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           # An App installation token, for two independent reasons: `main-protection` enforces
