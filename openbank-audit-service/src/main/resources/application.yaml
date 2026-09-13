@@ -99,6 +99,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.agent-audit-events-in
+          # Preserve the String payload; JSON serialization would quote the whole event again.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
@@ -140,6 +143,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.audit-events-in
+          # Preserve the String payload; JSON serialization would quote the whole event again.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
         # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160 #996
