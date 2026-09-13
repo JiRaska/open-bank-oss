@@ -41,8 +41,8 @@ export interface RuntimeCaseView {
 }
 
 function stageTone(stage: RuntimeStage): { color: string; bg: string; Icon: typeof CircleDot } {
-  if (stage === 'PUBLISH_FAILED' || stage === 'DENIED') return { color: 'var(--danger)', bg: 'var(--danger-bg)', Icon: TriangleAlert }
-  if (stage === 'PUBLISHED_TO_BROKER') return { color: 'var(--success)', bg: 'var(--success-bg)', Icon: CheckCircle2 }
+  if (stage === 'PUBLISH_FAILED' || stage === 'DENIED') return { color: 'var(--danger-text)', bg: 'var(--danger-bg)', Icon: TriangleAlert }
+  if (stage === 'PUBLISHED_TO_BROKER') return { color: 'var(--success-text)', bg: 'var(--success-bg)', Icon: CheckCircle2 }
   return { color: 'var(--accent-text)', bg: 'var(--accent-bg)', Icon: CircleDot }
 }
 
