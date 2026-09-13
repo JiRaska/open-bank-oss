@@ -43,6 +43,12 @@ on:
       - "openbank-libs/governance/rules.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "prompts/registry.yaml"
+      # A new released component is a `version.txt` appearing anywhere, and the registry pair is
+      # derived from exactly that set (gen-release-registry.py). Without this path the autoheal
+      # cannot repair the failure it exists for: a clean merge dropping a registered component,
+      # which git reports as success and only `release-registration-consistency` sees.
+      - "*/version.txt"
+      - ".github/scripts/gen-release-registry.py"
       - "**/*.rego"
       - ".github/scripts/gen-*.py"
       - "docs/adr/gen-index.sh"
@@ -162,6 +168,7 @@ jobs:
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
       - name: Open the heal PR
+        id: heal_pr
         if: steps.regen.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
@@ -195,3 +202,20 @@ jobs:
             stale inherits the stale file and goes red on a gate unrelated to its own change.
 
             Refs #9755.
+
+      # Auto-merge, not merge: the ruleset still decides, and a required check that fails
+      # still holds the PR. Without this the repair window is unbounded — the heal PR waits
+      # for whoever next looks at the queue — and that window is exactly what the release
+      # registry's PR-lane deferral is traded against. A new service's `version.txt` may now
+      # reach main unregistered (check-release-registration.py --pr-base), so the registry has
+      # to be written by the NEXT CI cycle rather than eventually. Arming is idempotent, and a
+      # failure to arm must never fail the heal itself.
+      - name: Enable auto-merge on the heal PR
+        if: steps.regen.outputs.changed == 'true' && steps.heal_pr.outputs.pull-request-number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR: ${{ steps.heal_pr.outputs.pull-request-number }}
+        run: |
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash --auto
+          echo "auto-merge armed on heal PR #${PR}"
