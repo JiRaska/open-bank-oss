@@ -103,7 +103,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "max by (service) (openbank_outbox_dead_lettered{job=\"observability/openbank-services\"})",
+              "expr": "(max by (service) (openbank_outbox_dead_lettered{job=\"observability/openbank-services\"})) or vector(0)",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -197,7 +197,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * count(openbank_outbox_backlog{job=\"observability/openbank-services\"} == 0) / clamp_min(count(openbank_outbox_backlog{job=\"observability/openbank-services\"}), 1)",
+              "expr": "(100 * count(openbank_outbox_backlog{job=\"observability/openbank-services\"} == 0) / clamp_min(count(openbank_outbox_backlog{job=\"observability/openbank-services\"}), 1)) or vector(0)",
               "legendFormat": "",
               "refId": "A"
             }
@@ -255,7 +255,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "max by (service) (openbank_outbox_backlog{job=\"observability/openbank-services\"})",
+              "expr": "(max by (service) (openbank_outbox_backlog{job=\"observability/openbank-services\"})) or vector(0)",
               "legendFormat": "{{service}}",
               "refId": "A"
             }

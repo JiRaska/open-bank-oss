@@ -92,7 +92,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "openbank:llm_cost_usd_24h:total",
+              "expr": "(openbank:llm_cost_usd_24h:total) or vector(0)",
               "refId": "A"
             }
           ],
@@ -477,19 +477,19 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.5, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
+              "expr": "((histogram_quantile(0.5, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))) >= 0) or vector(0)",
               "legendFormat": "p50",
               "refId": "A"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.95, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
+              "expr": "((histogram_quantile(0.95, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))) >= 0) or vector(0)",
               "legendFormat": "p95",
               "refId": "B"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.99, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))",
+              "expr": "((histogram_quantile(0.99, sum by (le) (increase(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[24h])))) >= 0) or vector(0)",
               "legendFormat": "p99",
               "refId": "C"
             }

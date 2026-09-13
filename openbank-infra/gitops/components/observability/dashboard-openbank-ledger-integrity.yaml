@@ -92,7 +92,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(openbank_outbox_backlog{service=\"ledger\"})",
+              "expr": "(sum(openbank_outbox_backlog{service=\"ledger\"})) or vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -221,7 +221,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * (sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\"}[5m])),0.001)",
+              "expr": "(100 * (sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\"}[5m])),0.001)) or vector(0)",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -551,7 +551,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-ledger-service\"}[5m])))",
+              "expr": "((histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-ledger-service\"}[5m])))) >= 0) or vector(0)",
               "legendFormat": "p95",
               "refId": "A",
               "instant": false,
@@ -562,7 +562,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-ledger-service\"}[5m])))",
+              "expr": "((histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-ledger-service\"}[5m])))) >= 0) or vector(0)",
               "legendFormat": "p99",
               "refId": "B",
               "instant": false,
@@ -677,7 +677,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))",
+              "expr": "(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))) or vector(0)",
               "legendFormat": "API requests",
               "refId": "A",
               "instant": false,

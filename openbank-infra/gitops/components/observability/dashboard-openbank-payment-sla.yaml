@@ -64,19 +64,19 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
+              "expr": "((histogram_quantile(0.50, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))) >= 0) or vector(0)",
               "legendFormat": "P50",
               "refId": "A"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
+              "expr": "((histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))) >= 0) or vector(0)",
               "legendFormat": "P95",
               "refId": "B"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
+              "expr": "((histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))) >= 0) or vector(0)",
               "legendFormat": "P99",
               "refId": "C"
             }
@@ -120,7 +120,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
+              "expr": "((histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))) >= 0) or vector(0)",
               "legendFormat": "",
               "refId": "A"
             }
@@ -244,7 +244,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))",
+              "expr": "(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))) or vector(0)",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -326,7 +326,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (1 - ((sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or (sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])) * 0)) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])), 0.0001)))",
+              "expr": "(100 * (1 - ((sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or (sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])) * 0)) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])), 0.0001)))) or vector(100)",
               "legendFormat": "{{service}}",
               "refId": "A"
             }

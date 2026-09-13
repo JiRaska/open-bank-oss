@@ -3699,12 +3699,15 @@ gates:
     min_subjects: 150   # 235 panel queries across 27 dashboards today (2026-08-19)
     rationale: "A panel over a metric nothing emits renders 'No data', which is indistinguishable from a metric that is merely quiet — so nobody opening the dashboard can tell it is broken."
     review_after: "2027-02-19"
-    selftest_inputs: [".github/scripts/check-dashboard-metric-emitted.py"]
+    selftest_inputs:
+      - ".github/scripts/check-dashboard-metric-emitted.py"
+      - ".github/scripts/check-embedded-dashboard-fallbacks.py"
     selftest: |
       python3 .github/scripts/check-dashboard-metric-emitted.py --selftest
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-dashboard-metric-emitted.py --enforce
+      python3 .github/scripts/check-embedded-dashboard-fallbacks.py
 
   # Scope is DERIVED from litellm-config.yaml's `model_name` keys, never a list in the script.
   # A gate whose subject set is a hand-kept list of the thing it checks reads as PASSING when the
