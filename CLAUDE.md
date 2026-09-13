@@ -852,6 +852,14 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `gh release create --notes` and `-f body=`; for an edit, `-F body=@file`.
   If you did use `--body`, re-read what was published (`gh pr view <n> --json body`) — grep it
   for `()` and for the phrases you meant to include.
+  **And `--body-file` has its own consequence: GitHub applies `.github/PULL_REQUEST_TEMPLATE.md`
+  only when no body is supplied, so a PR opened this way never carries the `## Security checklist`
+  section — which the enforced `security-checklist-money-path` gate requires on any PR touching a
+  money-path service.** The two rules are both right and cannot both be followed without a third
+  step: append that block to the body file yourself. Measured 2026-09-05: 50 of 67 open PRs had no
+  such section at all (#8757). The remediation is now cheap — the gate reads the LIVE body since
+  #8940, so editing the description and re-running is enough, where it previously needed an
+  otherwise-pointless empty commit to re-emit the event.
 - **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
   a git repository`,** which reads like a content or permissions problem rather than a cwd one.
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
