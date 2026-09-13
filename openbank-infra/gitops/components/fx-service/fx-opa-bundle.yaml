@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "ae10df5e022d3c86"
+    openbank.tech/policy-checksum: "ac71439de3c57ab3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1013,6 +1013,22 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: card-dispute-evidence-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:
@@ -1689,7 +1705,6 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
-            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

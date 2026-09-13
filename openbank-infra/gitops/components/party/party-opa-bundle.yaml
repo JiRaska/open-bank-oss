@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "79b422ae36875187"
+    openbank.tech/policy-checksum: "151c0c9854ebc9cb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -967,6 +967,22 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: card-dispute-evidence-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
     - id: finops-agent
       tools:
         allow:
@@ -1643,7 +1659,6 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
-            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

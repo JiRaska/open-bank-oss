@@ -51,6 +51,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import pathlib
 import re
@@ -93,6 +94,67 @@ def claim_cnpg_clusters(root: pathlib.Path) -> dict[str, dict]:
                 "declares_backup": "barmanObjectStore" in doc,
                 "source": str(path.relative_to(root)),
             }
+    return out
+
+
+STAGED_ANNOTATION = "openbank.io/discovery-state: staged"
+
+
+def claim_staged_component_paths(root: pathlib.Path) -> set[str]:
+    """Component paths of ArgoCD Applications marked `discovery-state: staged`.
+
+    A staged Application is desired state that has deliberately NOT been rolled out: it carries no
+    `syncPolicy.automated`, so nothing it declares exists in the cluster yet. Without this, the
+    not-found branch below reports every database such an Application declares, forever, and the
+    only way to clear it is to deploy a service somebody decided not to deploy — the same
+    unactionable-forever failure the exemption route exists to avoid.
+
+    Safe to honour because the pairing is already enforced elsewhere: admin-ui's
+    `service-registry.guard` fails if an automated Application keeps the marker, so `staged` cannot
+    be left on something live. The join is the Application's own `source.path`, so it excuses
+    exactly the component directory that Application renders — not a namespace, which a second
+    Application could share.
+    """
+    out: set[str] = set()
+    for path in sorted(root.glob("openbank-infra/gitops/apps/*.yaml")):
+        text = _read(path)
+        if "kind: Application" not in text or STAGED_ANNOTATION not in text:
+            continue
+        m = re.search(r"^\s+path:\s*(\S+)\s*$", text, re.M)
+        if m:
+            out.add(m.group(1).strip().rstrip("/"))
+    return out
+
+
+def claim_app_backup_exemptions(root: pathlib.Path) -> dict[str, str]:
+    """ArgoCD Application name -> the backup exemption its manifest declares, if any.
+
+    The live annotation is the primary route and stays so. This is the fallback for a cluster
+    whose metadata nobody in this repository controls: `glitchtip-pg` is rendered by a chart
+    whose `postgresql.cluster` passthrough accepts only instances and storage, so the annotation
+    can never reach it, and without a second route the check reports a settled decision forever.
+    A permanently red check is one people learn to skip, which reproduces #9834 one level up.
+
+    It is deliberately NOT a list of cluster names beside the manifests — that is the drift the
+    annotation design exists to prevent. The Application is joined to the cluster by the
+    tracking-id the live object already carries, so the exemption cannot outlive what it excuses,
+    and a cluster nobody manages carries no tracking-id and cannot be excused at all.
+
+    Parsed with the same regex idiom as the rest of the claim side; this script has no YAML
+    dependency on purpose.
+    """
+    out: dict[str, str] = {}
+    for path in sorted(root.glob("openbank-infra/gitops/apps/*.yaml")):
+        text = _read(path)
+        if "kind: Application" not in text:
+            continue
+        name = _field(text, "name")
+        m = re.search(rf"^\s+{re.escape(BACKUP_EXEMPT_ANNOTATION)}:\s*(.+)$", text, re.M)
+        if not (name and m):
+            continue
+        reason = m.group(1).strip().strip("\"'")
+        if reason:
+            out[name] = reason
     return out
 
 
@@ -173,7 +235,18 @@ def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
 
 # ── comparators: claim vs fact. Pure. This is what the self-test drives. ──────────────────
 
-def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
+# The same annotation `check-cnpg-backup-declared.py` honours in the gitops tree. Repeated rather
+# than imported because that script lives under openbank-infra/scripts and this one under
+# .github/scripts; the two must agree, and the self-test below pins the string.
+BACKUP_EXEMPT_ANNOTATION = "openbank.io/backup-exempt-reason"
+
+
+def cmp_backup_recoverability(
+    claims: dict,
+    facts: dict,
+    app_exemptions: dict | None = None,
+    staged_paths: set[str] | None = None,
+) -> list[str]:
     """A cluster that declares a backup must have a recovery point.
 
     `Ready` and `ContinuousArchiving` are deliberately NOT consulted: on 2026-08-07 all three
@@ -186,11 +259,56 @@ def cmp_backup_recoverability(claims: dict, facts: dict) -> list[str]:
             continue
         fact = facts.get(key)
         if fact is None:
+            # A staged Application's declarations are not supposed to be live yet. Only the
+            # not-found branch is waived: if the cluster IS running, every rule below still
+            # applies, so a staged component that got synced anyway cannot slip through.
+            src = (claim.get("source") or "")
+            if any(src.startswith(p + "/") for p in (staged_paths or set())):
+                continue
             findings.append(f"{key}: declares a backup destination but the cluster was not found at runtime")
         elif not fact.get("first_recoverability_point"):
             findings.append(
                 f"{key}: declares a backup destination and has NO firstRecoverabilityPoint "
                 f"(phase={fact.get('phase')!r}) — no restore is possible"
+            )
+
+    # THE SECOND LOOP (#9834). Everything above starts from the CLAIM, so a database that exists in
+    # the cluster and is declared nowhere is unreachable — by this control and, for the same reason,
+    # by both gitops-scoped gates. `pricing/pricing-db` was live with ~10 MB and no backup while all
+    # three reported clean.
+    #
+    # This is the only control with the live snapshot, so it is the only one that CAN make the
+    # comparison. An exemption is honoured, but it must be on the live object: a decision recorded
+    # in a Helm values comment cannot travel with the thing it excuses.
+    for key, fact in sorted(facts.items()):
+        claim = claims.get(key)
+        if claim is not None and claim.get("declares_backup"):
+            continue  # handled above
+        reason = (fact.get("backup_exempt_reason") or "").strip()
+        if reason:
+            continue
+        # Second route to the same decision, for a cluster whose metadata this repository does
+        # not author. Joined by the tracking-id the live object carries, so it excuses exactly
+        # the cluster that Application renders and nothing else.
+        app = (fact.get("argocd_app") or "").strip()
+        if app and app in (app_exemptions or {}):
+            continue
+        where = "is declared nowhere in gitops" if claim is None else "declares no backup destination"
+        findings.append(
+            f"{key}: live cluster {where} and carries no {BACKUP_EXEMPT_ANNOTATION} "
+            f"annotation — it has no recovery point and nobody has said that is intended"
+        )
+
+    # An exemption that excuses nothing is the failure mode this design exists to avoid: one left
+    # behind after the cluster was deleted, or after it was given a real backup, silently becomes
+    # cover for whatever lands under that Application next. Report it, so removing it is someone's
+    # job rather than a later audit's discovery.
+    live_apps = {(f.get("argocd_app") or "").strip() for f in facts.values()}
+    for app, reason in sorted((app_exemptions or {}).items()):
+        if app not in live_apps:
+            findings.append(
+                f"{app}: declares {BACKUP_EXEMPT_ANNOTATION} ({reason!r}) but renders no live "
+                f"CNPG cluster — the exemption excuses nothing and should be removed"
             )
     return findings
 
@@ -328,6 +446,16 @@ def collect() -> dict:
         clusters[f"{meta.get('namespace')}/{meta.get('name')}"] = {
             "first_recoverability_point": status.get("firstRecoverabilityPoint"),
             "phase": status.get("phase"),
+            # Read from the LIVE object, not from gitops: a chart-rendered cluster has no manifest
+            # in this tree, so the only place its exemption can be seen is here (#9834).
+            "backup_exempt_reason": (meta.get("annotations") or {}).get(BACKUP_EXEMPT_ANNOTATION),
+            # Which ArgoCD Application renders this object, read off the object itself. The
+            # annotation above is the right home for an exemption and is not always reachable:
+            # a third-party chart decides its own metadata, and glitchtip's passes through only
+            # instances and storage. This is the join key that lets such a cluster be excused
+            # from its Application instead — without a list of cluster names that could drift.
+            "argocd_app": ((meta.get("annotations") or {}).get(
+                "argocd.argoproj.io/tracking-id") or "").split(":", 1)[0].strip(),
         }
     snap["facts"]["backup_recoverability"] = clusters
 
@@ -429,7 +557,14 @@ def check(root: pathlib.Path, snapshot: dict) -> int:
         if probe not in facts:
             print(f"::warning::{probe}: no facts in the snapshot — NOT CHECKED (this is not a pass)")
             continue
-        for finding in COMPARATORS[probe](claims[probe], facts[probe]):
+        comparator = COMPARATORS[probe]
+        if probe == "backup_recoverability":
+            comparator = functools.partial(
+                comparator,
+                app_exemptions=claim_app_backup_exemptions(root),
+                staged_paths=claim_staged_component_paths(root),
+            )
+        for finding in comparator(claims[probe], facts[probe]):
             print(f"::warning::{probe}: {finding}")
             total += 1
     verb = "divergence(s)" if total != 1 else "divergence"
@@ -448,6 +583,11 @@ def self_test() -> int:
             print(f"  FAIL {name}\n       want {want}\n       got  {got}")
             fails = 1
 
+    def first(findings):
+        # An index into an empty finding list would abort the whole self-test at the first
+        # regression; returning "" keeps every later case reportable.
+        return findings[0] if findings else ""
+
     # backup: declared + no recovery point => flagged; declared + point => clean; undeclared => ignored
     expect(
         "backup: declared, no recovery point is flagged",
@@ -457,9 +597,9 @@ def self_test() -> int:
         1)
     expect(
         "backup: a healthy phase does NOT excuse a missing recovery point",
-        "no restore is possible" in cmp_backup_recoverability(
+        "no restore is possible" in first(cmp_backup_recoverability(
             {"ai/db": {"declares_backup": True}},
-            {"ai/db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})[0],
+            {"ai/db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})),
         True)
     expect(
         "backup: declared with a recovery point is clean",
@@ -468,13 +608,109 @@ def self_test() -> int:
             {"ai/db": {"first_recoverability_point": "2026-08-07T10:00:00Z"}}),
         [])
     expect(
-        "backup: a cluster declaring no backup is not our question",
+        "backup: a cluster declaring no backup and not running is not our question",
         cmp_backup_recoverability({"o/pg": {"declares_backup": False}}, {}),
         [])
     expect(
         "backup: declared but absent at runtime is flagged, not skipped",
         len(cmp_backup_recoverability({"ai/db": {"declares_backup": True}}, {})),
         1)
+
+    # the second loop (#9834): start from the LIVE side. Each of these is empty without it.
+    expect(
+        "backup: a LIVE cluster declared nowhere in gitops is flagged",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"first_recoverability_point": None, "phase": "Cluster in healthy state"}})),
+        1)
+    expect(
+        "backup: ... and the finding names it as undeclared, not as missing a recovery point",
+        "is declared nowhere in gitops" in first(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"first_recoverability_point": None}})),
+        True)
+    expect(
+        "backup: a LIVE cluster whose manifest declares no destination is flagged",
+        len(cmp_backup_recoverability(
+            {"o/pg": {"declares_backup": False}},
+            {"o/pg": {"first_recoverability_point": None}})),
+        1)
+    expect(
+        "backup: ... and that finding says the manifest declared none",
+        "declares no backup destination" in first(cmp_backup_recoverability(
+            {"o/pg": {"declares_backup": False}}, {"o/pg": {}})),
+        True)
+    expect(
+        "backup: the exemption annotation on the LIVE object silences it",
+        cmp_backup_recoverability(
+            {}, {"observability/glitchtip-pg": {
+                "backup_exempt_reason": "rebuildable from the app; no customer data"}}),
+        [])
+    expect(
+        "backup: a BLANK exemption reason does not count as an exemption",
+        len(cmp_backup_recoverability({}, {"observability/glitchtip-pg": {"backup_exempt_reason": "   "}})),
+        1)
+    expect(
+        "backup: a STAGED Application's declared-but-absent cluster is not a finding",
+        cmp_backup_recoverability(
+            {"incentive/incentive-db": {"declares_backup": True,
+                                        "source": "openbank-infra/gitops/components/incentive/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"}),
+        [])
+    expect(
+        "backup: ... but a NON-staged component's absent cluster still is",
+        len(cmp_backup_recoverability(
+            {"party/party-db": {"declares_backup": True,
+                                "source": "openbank-infra/gitops/components/party/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"})),
+        1)
+    expect(
+        "backup: ... and a staged component that IS live is still held to a recovery point",
+        "no restore is possible" in first(cmp_backup_recoverability(
+            {"incentive/incentive-db": {"declares_backup": True,
+                                        "source": "openbank-infra/gitops/components/incentive/db.yaml"}},
+            {"incentive/incentive-db": {"phase": "Cluster in healthy state"}},
+            staged_paths={"openbank-infra/gitops/components/incentive"})),
+        True)
+    expect(
+        "backup: ... and a path PREFIX does not match a sibling component",
+        len(cmp_backup_recoverability(
+            {"incentive2/db": {"declares_backup": True,
+                               "source": "openbank-infra/gitops/components/incentive-legacy/db.yaml"}},
+            {}, staged_paths={"openbank-infra/gitops/components/incentive"})),
+        1)
+    expect(
+        "backup: an exemption on the ARGOCD APPLICATION excuses the cluster it renders",
+        cmp_backup_recoverability(
+            {}, {"observability/glitchtip-pg": {"argocd_app": "glitchtip"}},
+            app_exemptions={"glitchtip": "rebuildable from the app; no customer data"}),
+        [])
+    expect(
+        "backup: ... and it excuses ONLY that Application's cluster, not a neighbour",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {"argocd_app": "pricing"},
+                 "observability/glitchtip-pg": {"argocd_app": "glitchtip"}},
+            app_exemptions={"glitchtip": "rebuildable from the app; no customer data"})),
+        1)
+    expect(
+        "backup: ... and a cluster carrying NO tracking-id cannot be excused by any Application",
+        len(cmp_backup_recoverability(
+            {}, {"pricing/pricing-db": {}},
+            app_exemptions={"": "an empty join key must never match"})),
+        1)
+    expect(
+        "backup: an Application exemption that renders no live cluster is itself a finding",
+        "excuses nothing" in first(cmp_backup_recoverability(
+            {}, {}, app_exemptions={"glitchtip": "rebuildable from the app"})),
+        True)
+    expect(
+        "backup: the annotation key is the one the gitops gate honours",
+        BACKUP_EXEMPT_ANNOTATION,
+        "openbank.io/backup-exempt-reason")
+    expect(
+        "backup: a live cluster that declares AND has a recovery point stays clean under both loops",
+        cmp_backup_recoverability(
+            {"ai/db": {"declares_backup": True}},
+            {"ai/db": {"first_recoverability_point": "2026-08-07T10:00:00Z"}}),
+        [])
 
     # outbox: no writer => flagged even with an empty table; all-DEAD => flagged; healthy => clean
     expect(

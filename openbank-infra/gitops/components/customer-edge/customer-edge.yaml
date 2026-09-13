@@ -65,7 +65,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1e920ac292229e48"
+        openbank.tech/policy-checksum: "d915010f9dd809d4"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -167,6 +167,10 @@ spec:
             # Declared here so gen-network-policies.py opens the edge->lending ingress allow.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # Declared off-platform holdings (ADR-0301 D2): one branch of the net-worth
+            # composition. The edge reads them and never stores them.
+            - name: WEALTH_SERVICE_URL
+              value: http://wealth-service.wealth.svc:8154
             # Delegated access / sharing (ADR-0232): the edge asks delegation-service whether an
             # ACTIVE grant lets the caller read someone else's account, card or document. The URL
             # was already correct as a CODE default, which is exactly why this was invisible: the

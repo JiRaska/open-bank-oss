@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "79b422ae36875187"
+        openbank.tech/policy-checksum: "151c0c9854ebc9cb"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -36,14 +36,30 @@ spec:
           type: RuntimeDefault
       containers:
         - name: party-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-8db73dbb
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-baf65b6b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8111
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Parallel private-CA TLS listener for new east-west clients. HTTP/8111 remains for
+            # existing callers until their independently reviewed migrations complete.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             # TEMPORARY: party-service hadn't been redeployed since 2026-06-20 — well before
             # a repo-wide byte-level pass touched migration file contents without changing
             # their logical SQL (same relicense-class mechanism as #730/#882). V4/V7 checksum
@@ -198,6 +214,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -337,6 +356,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: party-service-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -395,6 +418,9 @@ spec:
     - name: http
       port: 8111
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
 ---
 apiVersion: v1
 kind: Service
@@ -410,3 +436,6 @@ spec:
     - name: http
       port: 8111
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

@@ -222,7 +222,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -484,7 +484,18 @@ jobs:
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
     timeout-minutes: 90
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
