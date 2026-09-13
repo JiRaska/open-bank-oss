@@ -726,7 +726,7 @@ function FinOpsContent() {
                         background: v.isCurrent ? 'var(--accent-bg)' : 'transparent',
                       }}>
                       <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: v.isCurrent ? 800 : 500, color: v.isCurrent ? 'var(--accent-text)' : 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-                        {v.isCurrent && <span style={{ marginRight: '6px', fontSize: '10px', background: 'var(--accent)', color: 'var(--text-inverse)', padding: '1px 5px', borderRadius: '4px', verticalAlign: 'middle' }}>CURRENT</span>}
+                        {v.isCurrent && <span style={{ marginRight: '6px', fontSize: '10px', background: 'var(--accent-strong)', color: 'var(--text-inverse)', padding: '1px 5px', borderRadius: '4px', verticalAlign: 'middle' }}>CURRENT</span>}
                         {v.version}
                       </td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{v.eksRelease}</td>
