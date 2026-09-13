@@ -1350,7 +1350,21 @@ gates:
     selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-release-registration.py
+      # `--pr-base` defers ONE thing: a module whose `version.txt` this PR adds may be
+      # unregistered yet, because the registry is derived from the version.txt set
+      # (gen-release-registry.py) and written on main by derived-artefact-autoheal — so a feature
+      # branch no longer edits the two shared JSON maps. That editing is what made five sibling
+      # PRs conflict on them on 2026-09-13 and what silently dropped a registered component from
+      # two of those branches.
+      #
+      # Everything else stays exactly as strict, and the self-test holds all four: an orphan
+      # still fails, a HALF registration still fails, a module unregistered on the BASE still
+      # fails, and an empty/unreadable base falls back to strict rather than widening.
+      #
+      # On a push to main there is no PR base and none is passed, so main is checked strictly —
+      # which is what closes the deferral: `main-red-watch` escalates this gate going red there.
+      python3 openbank-infra/scripts/check-release-registration.py \
+        ${PR_DIFF_BASE:+--pr-base "$PR_DIFF_BASE"}
 
   # rules.yaml change_requirements.release_scope_mismatch / CLAUDE.md rule 2: release-please
   # attributes a commit to a component by the FILES IT TOUCHES under that component's
