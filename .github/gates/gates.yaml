@@ -4149,6 +4149,26 @@ gates:
       LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
       python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
 
+  # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
+  # `gh pr create --body-file`, which never applies the template — so the section is absent by
+  # construction. append-security-checklist.py is the missing third step; this gate keeps it
+  # honest against the REAL template (a renamed or dropped section reddens here, instead of the
+  # helper silently appending nothing and every money-path PR failing the gate above again).
+  - id: security-checklist-append-helper
+    name: "append-security-checklist copies the template's section, unticked and idempotent (#8757, enforced)"
+    group: security
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It asserts the copy stops at the next
+      heading, leaves boxes unticked, keeps the attribution last, is idempotent, and reads the real
+      PULL_REQUEST_TEMPLATE.md; falsified by removing the idempotency guard (self-test FAIL).
+    budget_seconds: 5   # pure text, one temp file
+    min_subjects: 6
+    rationale: "Following the mandated --body-file flag guaranteed the Security checklist was missing, and 50 of 67 open PRs lacked it on 2026-09-05; a tracked helper tested against the real template removes the manual step that kept failing money-path PRs."
+    review_after: "2027-03-13"
+    run: |
+      python3 .github/scripts/append-security-checklist.py --self-test
+
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
   # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
