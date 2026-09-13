@@ -4,6 +4,7 @@
 
 package com.openbank.audit.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.clients.admin.NewTopic
@@ -15,6 +16,8 @@ class AuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
     private val postgres = PostgresTestResource()
     private var broker: RedpandaContainer? = null
 
+    private var started = false
+
     override fun start(): Map<String, String> {
         val settings = postgres.start()
         try {
@@ -24,6 +27,8 @@ class AuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
             )
             broker = kafka
             kafka.start()
+            started = true
+            TestInfrastructureEvidence.record("kafka", kafka.dockerImageName, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(listOf(NewTopic(INPUT_TOPIC, 1, 1), NewTopic(DLQ_TOPIC, 1, 1)))
                     .all().get(20, TimeUnit.SECONDS)
@@ -44,8 +49,16 @@ class AuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        broker?.stop()
-        postgres.stop()
+        try {
+            broker?.let {
+                it.stop()
+                if (started) TestInfrastructureEvidence.record("kafka", it.dockerImageName, "stopped")
+            }
+            started = false
+            broker = null
+        } finally {
+            postgres.stop()
+        }
     }
 
     companion object {

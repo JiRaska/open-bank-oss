@@ -17,6 +17,7 @@ tests:
         severity: critical
         service: audit-service
       exp_annotations:
+        subject_period: continuous
         summary: Audit ingestion failed
         description: Audit ingestion failed within the observation window. Inspect
           the consumer failure and its configured dead-letter handling; reconcile
@@ -53,6 +54,7 @@ tests:
         severity: critical
         service: audit-service
       exp_annotations:
+        subject_period: continuous
         summary: Audit ingestion failed
         description: Audit ingestion failed within the observation window. Inspect
           the consumer failure and its configured dead-letter handling; reconcile

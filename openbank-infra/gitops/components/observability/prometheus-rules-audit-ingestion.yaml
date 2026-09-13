@@ -25,6 +25,7 @@ spec:
             severity: critical
             service: audit-service
           annotations:
+            subject_period: continuous
             summary: Audit ingestion failed
             description: >-
               Audit ingestion failed within the observation window. Inspect the consumer failure

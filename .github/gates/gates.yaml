@@ -5444,10 +5444,9 @@ gates:
     review_after: "2027-03-13"
     budget_seconds: 45
     min_subjects: 1
-    selftest_expect: pass
     selftest_inputs:
       - ".github/workflows/dr-restore-verify.yml"
       - ".github/scripts/test-dr-restore-workflow.py"
       - "openbank-infra/gitops/dr-restore-templates"
-    selftest: python3 .github/scripts/test-dr-restore-workflow.py
+    selftest_exempt: "is-a-test-suite — executes the restore workflow orchestration harness directly"
     run: python3 .github/scripts/test-dr-restore-workflow.py

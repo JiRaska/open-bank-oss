@@ -23,7 +23,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 ## Dependencies
 
 - **Upstream (this service consumes):** _none declared_
-- **Downstream (depends on this service):** _none declared_
+- **Downstream (depends on this service):** `audit-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `settlement`.
@@ -68,22 +68,3 @@ triaging an incident that starts on `settlement`.
   `settlement.oncall` attestation — until that is live, escalate via the team channel).
 - Break-glass cluster access is audited; use it only for a declared incident and
   record the justification.
-
-## Uncertain balance movement
-
-`BALANCE_STATE_UNKNOWN` means a debit or credit exhausted its attempts without a reliable
-completion result. The movement may already have committed. The workflow preserves this
-non-terminal status (the v1 REST response uses `PENDING` with `recoveryRequired=true` and
-`recoveryReason=BALANCE_STATE_UNKNOWN`) and does not refund, debit the other party, book a journal or reject the
-settlement. `SettlementBalanceStateUnknown` alerts on an outstanding case.
-
-Reconcile the original debit and credit references with the balance movement records, and
-establish that no original activity or HTTP request can still apply before correcting anything.
-Use the existing approved correction process; an absent movement observed during an in-flight
-request is not proof that the request cannot commit later. Record the evidence and reconcile
-balances against the general ledger before resolving the case. Automatic conditional reversal
-requires an atomic cancel-or-reverse protocol in the balance service and is not implemented here.
-
-The workflow change uses a Temporal version marker. Existing histories replay the previous
-command sequence; this guard does not retroactively repair completed settlements. Keep compatible
-workers while old executions remain, and reconcile pre-existing ambiguous cases separately.

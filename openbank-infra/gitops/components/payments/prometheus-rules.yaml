@@ -674,7 +674,6 @@ spec:
             severity: critical
             service: settlement
           annotations:
-            subject_period: continuous
             summary: Settlement audit evidence has remained unsent for over five minutes
             description: >-
               The settlement outbox contains old records without broker acknowledgement,
