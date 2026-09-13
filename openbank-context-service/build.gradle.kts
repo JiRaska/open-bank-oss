@@ -21,8 +21,14 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 kover { reports { verify { rule { bound { minValue = 60 } } } } }

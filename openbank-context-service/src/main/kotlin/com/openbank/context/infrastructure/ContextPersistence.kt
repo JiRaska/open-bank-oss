@@ -233,7 +233,10 @@ class ContextGraphRepository(
 
 @ApplicationScoped
 @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
-class CaseAssignmentRepository(private val sessions: Mutiny.SessionFactory) : CaseAssignmentPort {
+class CaseAssignmentRepository(
+    private val sessions: Mutiny.SessionFactory,
+    @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
+) : CaseAssignmentPort {
     override suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean =
         sessions.withSession { session ->
             session.createQuery(
@@ -244,11 +247,14 @@ class CaseAssignmentRepository(private val sessions: Mutiny.SessionFactory) : Ca
                     "principal",
                     principalId,
                 ).setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("at", at).singleResult
-        }.awaitSuspending() > 0
+        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
 }
 
 @ApplicationScoped
-class ContextReadAuditRepository(private val sessions: Mutiny.SessionFactory) : ContextReadAuditPort {
+class ContextReadAuditRepository(
+    private val sessions: Mutiny.SessionFactory,
+    @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
+) : ContextReadAuditPort {
     override suspend fun record(entry: ContextReadAudit) {
         val entity = ContextReadAuditEntity().apply {
             id = UUID.randomUUID()
@@ -263,6 +269,7 @@ class ContextReadAuditRepository(private val sessions: Mutiny.SessionFactory) : 
             reasonCode = entry.reasonCode
             occurredAt = entry.occurredAt
         }
-        sessions.withTransaction { session, _ -> session.persist(entity) }.awaitSuspending()
+        sessions.withTransaction { session, _ -> session.persist(entity) }
+            .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
     }
 }
