@@ -1,0 +1,155 @@
+# The card money path's SILENT failure modes (ADR-0283, issues #8809 #8810 #8812).
+#
+# WHY THIS FILE EXISTS
+#   ADR-0283 was written because card-issuance held a complete authorisation decision that nothing
+#   called, and card spend never reached the ledger. Nothing anywhere disagreed: the pods were
+#   Ready, the tests were green, and the only symptom was an absence. Every rule below watches a
+#   state where the platform is behaving as if it worked.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#   An error-rate alert on the authorisation endpoint. A decline is a normal outcome and a 5xx on
+#   that path already pages through the tier-1 rules; adding a second opinion here would only make
+#   the two able to disagree. What is missing from the fleet's existing signals is the SUCCESS-
+#   SHAPED failure, which is the whole subject of this file.
+#
+# BOOT SAFETY
+#   Every expression is over a COUNTER with `increase(...)`, never `absent(...)`. A counter series
+#   does not exist until its first increment, so an `absent()` rule here would fire on every fresh
+#   pod and for every quiet hour — the fourth state next to healthy/degraded/absent that #2239
+#   Gap 2 records. Absence of card traffic is watched by the workflow-liveness gauge the hold-expiry
+#   sweep registers, which IS seeded at registration.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-card-money-path
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.card.money.path
+      interval: 5m
+      rules:
+        # 1. THE DEFECT ADR-0283 WAS WRITTEN ABOUT, as a live signal.
+        #
+        # `SKIPPED_DISABLED` is its own outcome value precisely so it can never be counted as a
+        # posting. It means a card cleared, the customer's money moved at the merchant, and nothing
+        # reached the books — with no error anywhere, because the adapter did exactly what its
+        # configuration told it to. One occurrence is enough: this is not a rate to tolerate.
+        - alert: CardClearedButNotPosted
+          expr: increase(openbank_card_processing_ledger_postings_total{outcome="SKIPPED_DISABLED"}[1h]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            domain: payments
+          annotations:
+            # Driven by real card traffic, not by a periodic job: there is no subject period to
+            # compare the window against, and declaring one would invent a cadence the path has not got.
+            subject_period: continuous
+            summary: Card spend cleared without reaching the ledger
+            description: >-
+              card-processing applied a clearing and the ledger posting was SKIPPED_DISABLED, so the
+              books do not carry the spend. The pod is healthy and no request failed — this is the
+              silent shape ADR-0283 exists to make visible. Check
+              `openbank.card-processing.ledger-posting-enabled` and the transaction-service binding.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+        # 2. The loud half of the same failure, kept separate because the remedy differs: FAILED
+        # means transaction-service was reached and refused or timed out, which is an incident to
+        # work now; SKIPPED_DISABLED above means nobody ever intended to post.
+        - alert: CardLedgerPostingFailing
+          expr: increase(openbank_card_processing_ledger_postings_total{outcome="FAILED"}[30m]) > 0
+          for: 15m
+          labels:
+            severity: warning
+            domain: payments
+          annotations:
+            # Driven by real card traffic, not by a periodic job: there is no subject period to
+            # compare the window against, and declaring one would invent a cadence the path has not got.
+            subject_period: continuous
+            summary: Card ledger postings are failing
+            description: >-
+              The clearing is recorded and the books are not. The authorisation row and its outbox
+              event commit together, so the record survives — but the money is unbooked until the
+              posting succeeds, and nothing retries it on its own.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+        # 3. Token reads served from the bank's MIRROR rather than the network.
+        #
+        # The screens keep rendering, which is the point of the fallback and also why nothing else
+        # would report this: a mirror row can say ACTIVE about a token the network suspended an hour
+        # ago. The ratio, not the count — a handful of degraded reads during a network blip is not
+        # the same fact as every read being served from the mirror for half an hour.
+        - alert: CardTokenReadsServedFromMirror
+          expr: >-
+            (
+              sum(increase(openbank_card_token_reads_total{source="LOCAL_MIRROR"}[30m]))
+              /
+              clamp_min(sum(increase(openbank_card_token_reads_total[30m])), 1)
+            ) > 0.5
+          for: 30m
+          labels:
+            severity: warning
+            domain: payments
+          annotations:
+            # Driven by real card traffic, not by a periodic job: there is no subject period to
+            # compare the window against, and declaring one would invent a cadence the path has not got.
+            subject_period: continuous
+            summary: Most network-token reads are being served from the bank's mirror
+            description: >-
+              The tokenisation binding has not answered for half an hour, so operators are seeing the
+              bank's last recorded state rather than the network's. The desk labels every such answer,
+              but a sustained fallback means token states on screen may be stale.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+        # 4. Chargebacks that were attempted and NOT filed.
+        #
+        # card-processing fails closed: when the scheme cannot be reached no case is written, so the
+        # only trace of the attempt is this counter. Without the alert an operator's "open dispute"
+        # click that reached no network leaves nothing behind at all, and the representment window
+        # runs down on a case the network never heard of.
+        - alert: CardDisputesNotReachingTheScheme
+          expr: increase(openbank_card_disputes_opened_total{refusal="SCHEME_UNAVAILABLE"}[6h]) > 0
+          for: 10m
+          labels:
+            severity: warning
+            domain: payments
+          annotations:
+            # Driven by real card traffic, not by a periodic job: there is no subject period to
+            # compare the window against, and declaring one would invent a cadence the path has not got.
+            subject_period: continuous
+            summary: A chargeback could not be opened with the card network
+            description: >-
+              The dispute binding answered NOT_BOUND, UNAVAILABLE or UNAUTHENTICATED, so no case
+              exists at the scheme and none was recorded here. Re-file once the binding answers;
+              the deadline is the network's and it does not pause.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+        # 5. Token provisioning refused for every attempt.
+        #
+        # `refusal="none"` is a provisioned token, so this compares refusals against all attempts
+        # rather than counting failures — a wallet flow that refuses everything looks identical to a
+        # quiet one in any success-only series.
+        - alert: CardTokenProvisioningAlwaysRefused
+          expr: >-
+            (
+              sum(increase(openbank_card_token_provisions_total{refusal!="none"}[1h]))
+              /
+              clamp_min(sum(increase(openbank_card_token_provisions_total[1h])), 1)
+            ) == 1
+            and
+            sum(increase(openbank_card_token_provisions_total[1h])) > 0
+          for: 30m
+          labels:
+            severity: warning
+            domain: payments
+          annotations:
+            # Driven by real card traffic, not by a periodic job: there is no subject period to
+            # compare the window against, and declaring one would invent a cadence the path has not got.
+            subject_period: continuous
+            summary: Every network-token provisioning attempt is being refused
+            description: >-
+              No wallet or merchant token has been minted in the last hour and every attempt was
+              refused. The usual cause is a tokenisation binding configured to a network with no
+              adapter, which answers NOT_BOUND — a deliberate refusal, not an outage.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md

@@ -254,6 +254,36 @@ spec:
               openbank-audit-service is not idempotent: a replay appends a second, permanently
               undeletable audit record per event. Establish whether these were ever delivered
               before requeueing.
+
+        # card-processing's outbox carries the MONEY PATH's own events — card.authorised,
+        # card.declined, card.cleared, card.hold_released, and the phase-3 token and dispute
+        # lifecycle (ADR-0283). A DEAD row here is a movement of a customer's money that the
+        # ledger, the audit trail and every downstream consumer never heard about, and the
+        # authorisation row itself is committed, so nothing else in the platform disagrees.
+        #
+        # NO REQUEUE ENDPOINT EXISTS on this service yet, unlike card-issuance's. That is stated
+        # in the annotation rather than hidden: the operator's action today is to investigate and
+        # requeue at the database, and an alert that implied a one-click remedy it does not have
+        # would waste the responder's first minutes. Adding the endpoint is its own change.
+        #
+        # `for: 15m` for the same reason as the sibling above: it outlives a rollout window, in
+        # which the old and the new pod both publish the gauge.
+        - alert: CardProcessingOutboxDeadLettered
+          expr: openbank_outbox_dead_lettered{service="card-processing"} > 0
+          for: 15m
+          labels:
+            severity: critical
+            service: card-processing
+          annotations:
+            summary: "card-processing outbox has dead-lettered rows"
+            description: >-
+              {{ $value }} card money-path outbox row(s) are parked in terminal DEAD and will never
+              be retried by anything. The authorisation, clearing or release they describe IS
+              committed in card_authorizations, so the customer's money moved and no consumer was
+              told — the ledger posting, the audit trail and the customer's app are all missing it.
+              There is no requeue endpoint on this service yet (unlike card-issuance): establish
+              from card_outbox.last_error why they died, and requeue at the database once the cause
+              is fixed.
 ---
 # Fraud scoring across all four scored rails (#4221). One document rather than one per rail: the
 # series carry `rail=` and `service=` labels, so the rule set is DERIVED from the labels the
