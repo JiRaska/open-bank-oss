@@ -85,7 +85,9 @@ invent one as a decided fact; D2 below proposes one for human approval.
 4. **Qualify at attribution time** when a fact already exists for the referee. This runs on a
    fresh attribution *and* on the idempotent same-referee replay, so a client retrying
    `POST /customer/v1/referrals/attributions` also retries a qualification that failed after the
-   attribution committed. Attribution never fails because qualification did.
+   attribution committed. An *ineligible* fact never fails an attribution (it is audited); an
+   *infrastructure* failure while qualifying surfaces as an error, precisely so that the client's
+   idempotent retry completes the qualification instead of it being lost behind a 200.
 5. **The eligibility rule is identical at both moments** and lives in one pure function: the
    programme is `PUBLISHED`, its `qualifyingEvent` equals the fact's `event_name`, and the fact's
    `occurred_at` lies in `[invite issued, invite expiresAt)`. "Invite issued" is the invite's
