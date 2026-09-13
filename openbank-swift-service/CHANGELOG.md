@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.2...swift-service-v0.11.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **swift:** guard swift_outbox created_at plausibility at INSERT ([#9295](https://github.com/JiRaska/open-bank-oss/issues/9295)) ([8ab87a9](https://github.com/JiRaska/open-bank-oss/commit/8ab87a93d4a29f91e1c14b505c40cadbcc09cc7d))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.1...swift-service-v0.11.2) (2026-09-08)
 
 

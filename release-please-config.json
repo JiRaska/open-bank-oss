@@ -127,11 +127,15 @@
     },
     "openbank-incentive-service": {
       "component": "incentive-service",
-      "exclude-paths": ["openbank-incentive-service/src/test"]
+      "exclude-paths": [
+        "openbank-incentive-service/src/test"
+      ]
     },
     "openbank-referral-service": {
       "component": "referral-service",
-      "exclude-paths": ["openbank-referral-service/src/test"]
+      "exclude-paths": [
+        "openbank-referral-service/src/test"
+      ]
     },
     "openbank-case-coordinator-agent": {
       "component": "case-coordinator-agent",

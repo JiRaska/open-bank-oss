@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.4...product-catalog-v0.18.5) (2026-09-13)
+
+
+### Bug Fixes
+
+* **product-catalog:** guard catalog_outbox created_at plausibility at INSERT ([#9318](https://github.com/JiRaska/open-bank-oss/issues/9318)) ([fab20b4](https://github.com/JiRaska/open-bank-oss/commit/fab20b4e1809a766a524ca3af4e85376665b3a2e))
+
 ## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.3...product-catalog-v0.18.4) (2026-09-08)
 
 

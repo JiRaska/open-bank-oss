@@ -53,9 +53,21 @@ if [ "${1:-}" = "--self-test" ]; then
   # Every fix for this carries a comment naming the key it removed.
   reset; svc openbank-x released 'quarkus:\n  application:\n    # version: never set this here\n    name: x\n'
   expect "the key in a comment is not a hit" 0 "none set"
+  # The other two spellings of the same property (#6253). Each overrides the version.txt stamp
+  # exactly like the block form, and the column-0 walk could see none of them.
+  reset; svc openbank-x released '"%prod":\n  quarkus:\n    application:\n      version: 9.9.9\n'
+  expect "a %prod profile block is FLAGGED" 1 "must NOT be set"
+  reset; svc openbank-x released "'%dev':\n  quarkus:\n    application:\n      version: 9.9.9\n"
+  expect "a single-quoted profile block is FLAGGED" 1 "must NOT be set"
+  reset; svc openbank-x released 'quarkus.application.version: 9.9.9\n'
+  expect "a dotted key at column 0 is FLAGGED" 1 "must NOT be set"
+  reset; svc openbank-x released '"%prod":\n  quarkus.application.version: 9.9.9\n'
+  expect "a dotted key under a profile is FLAGGED" 1 "must NOT be set"
+  reset; svc openbank-x released '"%prod":\n  quarkus.application.name: x\n  quarkus:\n    container-image:\n      version: 1.2.3\n'
+  expect "a sibling dotted key and a nested non-application version under a profile are clean" 0 "none set"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: quarkus.application.version override guard is falsifiable (6 cases)"
+  echo "self-test ok: quarkus.application.version override guard is falsifiable (11 cases)"
   exit 0
 fi
 root="${1:-.}"
@@ -69,11 +81,34 @@ while IFS= read -r f; do
     skipped=$((skipped + 1)); continue
   fi
   checked=$((checked + 1))
-  # Detect a 4-space-indented `version:` directly under quarkus: -> application:.
+  # Resolve every mapping key to its full dotted path with an indentation stack, then drop Quarkus
+  # profile segments (`%prod`, `"%dev"`) and flag the one property. The previous walk matched only
+  # `quarkus:` at column 0 with `application:` at exactly two spaces, so both other spellings of
+  # the SAME property shadowed the version.txt stamp unseen (#6253): a profile block
+  # (`"%prod":` > `quarkus:` > `application:` > `version:`, which overrides it in production only)
+  # and a dotted key (`quarkus.application.version:`, at column 0 or under a profile).
   hit=$(awk '
-    /^[^[:space:]#]/        { in_q = ($0 ~ /^quarkus:/); in_app = 0; next }
-    in_q && /^  [^[:space:]#]/ { in_app = ($0 ~ /^  application:/); next }
-    in_app && /^    version:[[:space:]]/ { print NR": "$0 }
+    /^[[:space:]]*(#|$)/ { next }
+    /^[[:space:]]*-/     { next }
+    {
+      match($0, /^ */); ind = RLENGTH
+      line = substr($0, ind + 1)
+      if (line !~ /^[^:[:space:]#][^:]*:([[:space:]]|$)/) next
+      key = line
+      sub(/:([[:space:]].*)?$/, "", key)
+      gsub(/"/, "", key); gsub(/\047/, "", key)
+      while (depth > 0 && ind <= inds[depth]) depth--
+      depth++; inds[depth] = ind; keys[depth] = key
+      path = ""
+      for (i = 1; i <= depth; i++) {
+        n = split(keys[i], seg, ".")
+        for (j = 1; j <= n; j++) {
+          if (seg[j] ~ /^%/) continue
+          path = (path == "") ? seg[j] : path "." seg[j]
+        }
+      }
+      if (path == "quarkus.application.version") print NR": "$0
+    }
   ' "$f" || true)
   if [ -n "$hit" ]; then
     fail=1
