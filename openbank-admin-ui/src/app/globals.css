@@ -173,6 +173,42 @@
   --agent-body-shadow: 0 6px 12px rgba(15, 23, 42, .11);
   --agent-visor-shadow: inset 0 2px 4px rgba(0, 0, 0, .4);
 
+  /* Public privacy notice: an independent pre-auth brand surface. Keeping its
+   * palette tokenized here preserves its identity without coupling it to the
+   * authenticated console theme. */
+  --privacy-bg: #f6f8fb;
+  --privacy-glow: rgba(29, 151, 154, .1);
+  --privacy-surface: #ffffff;
+  --privacy-surface-soft: rgba(255, 255, 255, .78);
+  --privacy-flow-surface: rgba(255, 255, 255, .72);
+  --privacy-text: #142842;
+  --privacy-heading: #102746;
+  --privacy-heading-soft: #173250;
+  --privacy-muted: #52657c;
+  --privacy-subtle: #61728a;
+  --privacy-control-text: #314761;
+  --privacy-border: #dce4ed;
+  --privacy-control-border: #d8e0eb;
+  --privacy-accent: #167464;
+  --privacy-accent-icon: #176c72;
+  --privacy-accent-bg: #f0f8f8;
+  --privacy-accent-border: #cfe1df;
+  --privacy-note-bg: rgba(239, 248, 247, .82);
+  --privacy-note-text: #3e5b61;
+  --privacy-step: #a3afbd;
+  --privacy-contact-start: #102a4b;
+  --privacy-contact-end: #123d64;
+  --privacy-contact-text: #ffffff;
+  --privacy-contact-accent: #82d9cc;
+  --privacy-contact-muted: #bdcde0;
+  --privacy-contact-border: rgba(255, 255, 255, .13);
+  --privacy-contact-surface: rgba(255, 255, 255, .055);
+  --privacy-footer: #718096;
+  --privacy-link: #255d75;
+  --privacy-focus: rgba(24, 116, 204, .3);
+  --privacy-skip-shadow: 0 8px 30px rgba(10, 27, 58, .18);
+  --privacy-contact-shadow: 0 20px 55px rgba(17, 45, 79, .16);
+
   /* ── Radius ── */
   --r-sm:  6px;
   --r-md:  8px;
@@ -207,6 +243,42 @@
    * colour, not a Tailwind HSL triplet. The triplet silently makes those
    * declarations invalid and leaves cards, fields and tables borderless. */
   --border: #e2e8f0;
+}
+
+/* The public privacy notice is intentionally session- and JavaScript-free. It
+ * follows the operating-system preference directly so pre-auth users get a
+ * coherent dark surface without waiting for hydration. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --privacy-bg: #07111f;
+    --privacy-glow: rgba(45, 212, 191, .12);
+    --privacy-surface: #101c2e;
+    --privacy-surface-soft: rgba(16, 28, 46, .88);
+    --privacy-flow-surface: rgba(16, 28, 46, .78);
+    --privacy-text: #e5edf7;
+    --privacy-heading: #f8fafc;
+    --privacy-heading-soft: #dce7f5;
+    --privacy-muted: #b7c4d4;
+    --privacy-subtle: #94a3b8;
+    --privacy-control-text: #dce7f5;
+    --privacy-border: #2b3c52;
+    --privacy-control-border: #3b4d64;
+    --privacy-accent: #5eead4;
+    --privacy-accent-icon: #5eead4;
+    --privacy-accent-bg: #0f2f31;
+    --privacy-accent-border: #24575a;
+    --privacy-note-bg: rgba(15, 47, 49, .82);
+    --privacy-note-text: #c6dcde;
+    --privacy-step: #8291a5;
+    --privacy-contact-start: #0b2039;
+    --privacy-contact-end: #0d3152;
+    --privacy-contact-muted: #c7d5e5;
+    --privacy-footer: #94a3b8;
+    --privacy-link: #7dd3fc;
+    --privacy-focus: rgba(125, 211, 252, .45);
+    --privacy-skip-shadow: 0 8px 30px rgba(0, 0, 0, .34);
+    --privacy-contact-shadow: 0 20px 55px rgba(0, 0, 0, .3);
+  }
 }
 
 /* Dark theme is token-only by design. Pages that still carry literal colours
