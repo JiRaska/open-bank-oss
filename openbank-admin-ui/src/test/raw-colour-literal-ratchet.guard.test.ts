@@ -31,6 +31,6 @@ describe('admin UI semantic colour migration', () => {
     // Baseline re-measured on main after the theme-contrast migration (#9972). Keep this
     // synchronized with check-raw-colour-literal-ratchet.py so neither gate leaves slack.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(703)
+    expect(rawColourCount()).toBeLessThanOrEqual(698)
   })
 })

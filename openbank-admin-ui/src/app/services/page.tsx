@@ -374,7 +374,7 @@ export default function ServicesDocsOverviewPage() {
                 {t('Aby se služba sem zařadila, přidejte do jejího repa', 'To document a service, add to its repo')}{' '}
                 <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 'var(--r-sm)', fontSize: '11px' }}>docs/README.md</code>
                 {' '}{t('podle vzoru', 'following the pattern of')}{' '}
-                <Link href="/services/libs/docs" style={{ color: 'var(--accent)' }}>openbank-libs/docs/</Link>.
+                <Link href="/services/libs/docs" style={{ color: 'var(--link)' }}>openbank-libs/docs/</Link>.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {withoutDocs.map(s => (

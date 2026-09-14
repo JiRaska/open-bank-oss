@@ -621,9 +621,9 @@ export default function ApiCatalogPage() {
           <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
-              color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${groupFilter === g ? 'var(--accent-border)' : 'var(--border)'}`,
+              background: groupFilter === g ? 'var(--accent-strong)' : 'var(--surface)',
+              color: groupFilter === g ? 'var(--on-accent)' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
         ))}
@@ -694,7 +694,7 @@ export default function ApiCatalogPage() {
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{svc.name}</span>
                     <span style={{
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`, color: groupColor,
+                      background: `${groupColor}15`, color: 'var(--text-primary)',
                       borderRadius: '4px', border: `1px solid ${groupColor}30`,
                     }}>{groupLabel(svc.group)}</span>
                     <span style={{

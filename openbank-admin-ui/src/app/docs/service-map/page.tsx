@@ -659,7 +659,7 @@ export default function ServiceMapPage() {
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
                 background: filter === key ? 'var(--accent-strong)' : 'var(--surface)',
-                color: filter === key ? 'var(--text-inverse)' : 'var(--text-secondary)',
+                color: filter === key ? 'var(--on-accent)' : 'var(--text-secondary)',
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>{label}</button>
           ))}
@@ -676,9 +676,9 @@ export default function ServiceMapPage() {
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
                 borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
-                border: `1px solid ${c.on ? 'var(--accent)' : 'var(--border)'}`,
-                background: c.on ? 'var(--accent)' : 'var(--surface)',
-                color: c.on ? 'var(--text-inverse)' : 'var(--text-secondary)',
+                border: `1px solid ${c.on ? 'var(--accent-strong)' : 'var(--border)'}`,
+                background: c.on ? 'var(--accent-strong)' : 'var(--surface)',
+                color: c.on ? 'var(--on-accent)' : 'var(--text-secondary)',
               }}>
               {c.icon}{c.label}
             </button>
