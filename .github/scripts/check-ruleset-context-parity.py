@@ -233,6 +233,36 @@ def required_contexts(repo: str) -> list[str]:
     return out
 
 
+def static_job_names(job_id: str, job: dict) -> set[str]:
+    """Expand literal include-only matrices; unknown expressions prove no concrete context.
+
+    Do not wildcard-match a template: a removed/renamed slug must still fail parity.
+    Axis products and runtime matrices need their own evaluator before they can be counted.
+    """
+    name = str(job.get("name", job_id))
+    if "${{" not in name:
+        return {name}
+    strategy = job.get("strategy") or {}
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    if not isinstance(matrix, dict) or set(matrix) != {"include"}:
+        return set()
+    rows = matrix["include"]
+    if not isinstance(rows, list):
+        return set()
+    names = set()
+    pattern = re.compile(r"\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        def replace(match):
+            value = row.get(match.group(1))
+            return value if isinstance(value, str) else match.group(0)
+        rendered = pattern.sub(replace, name)
+        if "${{" not in rendered:
+            names.add(rendered)
+    return names
+
+
 def job_names_for_event(root: pathlib.Path, event: str = "pull_request") -> set[str]:
     """Every job `name:` (or job id, if `name:` is absent) from a tracked workflow under
     WORKFLOWS_DIR that triggers on `event`."""
@@ -254,7 +284,7 @@ def job_names_for_event(root: pathlib.Path, event: str = "pull_request") -> set[
         for job_id, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
-            names.add(str(job.get("name", job_id)))
+            names.update(static_job_names(job_id, job))
     return names
 
 
@@ -319,6 +349,29 @@ def self_test() -> int:
         want = {"X job", "z"}
         if got != want:
             fails.append(f"pr_triggered_job_names: want {want}, got {got}")
+
+    # Static include-only matrices emit concrete names, never the expression template.
+    matrix_cases = [
+        ("include names", {"include": [{"slug": "one"}, {"slug": "two"}]},
+         {"gates (one)", "gates (two)"}),
+        ("renamed slug", {"include": [{"slug": "renamed"}]}, {"gates (renamed)"}),
+        ("empty include", {"include": []}, set()),
+        ("missing value", {"include": [{"other": "one"}]}, set()),
+        ("dynamic matrix", "${{ fromJSON(needs.detect.outputs.matrix) }}", set()),
+        ("unresolved value", {"include": [{"slug": "${{ inputs.slug }}"}]}, set()),
+        ("axes require separate expansion", {"slug": ["one"], "include": [{"slug": "two"}]}, set()),
+    ]
+    for label, matrix, expected in matrix_cases:
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            doc = {"on": ["pull_request"], "jobs": {"gates": {
+                "name": "gates (${{ matrix.slug }})", "strategy": {"matrix": matrix},
+            }}}
+            write_workflow(root, "matrix.yml", yaml.safe_dump(doc))
+            ran.append("matrix: " + label)
+            got = pr_triggered_job_names(root)
+            if got != expected:
+                fails.append(f"matrix {label}: want {expected}, got {got}")
 
     # --- merge_group_gaps (ADR-0272) ---------------------------------------------------
     # Both directions. A readiness check that only ever sees the not-ready case cannot tell a
