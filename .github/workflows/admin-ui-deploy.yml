@@ -432,6 +432,10 @@ jobs:
           python3 .github/scripts/find-latest-main-artifacts.py \
             --repo "${REPO}" "${ARTIFACT_NAMES[@]}" > "${LOOKUP_RESULT}"
           mapfile -t ARTIFACT_IDS < "${LOOKUP_RESULT}"
+          if [ "${#ARTIFACT_IDS[@]}" -ne "${#SERVICES[@]}" ]; then
+            echo "::error::artifact lookup returned ${#ARTIFACT_IDS[@]} rows for ${#SERVICES[@]} services"
+            exit 1
+          fi
 
           DOWNLOADED=0
           for index in "${!SERVICES[@]}"; do

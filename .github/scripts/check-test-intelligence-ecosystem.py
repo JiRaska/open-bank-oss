@@ -733,6 +733,7 @@ def check(root: Path) -> list[str]:
         ('workflow_run.get("head_branch") == "main"', "artifact lookup accepts non-main evidence"),
         ("len(artifacts) < PER_PAGE", "artifact lookup blindly scans exhausted result pages"),
         ("raise ArtifactApiError", "artifact lookup conflates API failure with absence"),
+        ("requests={request_count}", "artifact lookup does not report its API cost"),
         ("--self-test", "artifact lookup has no regression harness"),
     ):
         if needle not in artifact_lookup:

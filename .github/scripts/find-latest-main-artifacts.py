@@ -130,16 +130,30 @@ def main() -> int:
     if not args.repo or not token or not args.artifact_names:
         parser.error("--repo, GH_TOKEN and at least one artifact name are required")
 
+    request_count = 0
+    found_count = 0
+
+    def fetch(artifact_name: str, page: int) -> list[dict]:
+        nonlocal request_count
+        request_count += 1
+        return github_page(args.repo, token, artifact_name, page)
+
     try:
         for name in args.artifact_names:
-            artifact_id = latest_main_artifact(
-                name,
-                lambda artifact_name, page: github_page(args.repo, token, artifact_name, page),
-            )
+            artifact_id = latest_main_artifact(name, fetch)
+            found_count += artifact_id is not None
             print(artifact_id or "")
     except ArtifactApiError as exc:
-        print(f"artifact lookup failed closed: {exc}", file=sys.stderr)
+        print(
+            f"artifact lookup failed closed after {request_count} request(s): {exc}",
+            file=sys.stderr,
+        )
         return 2
+    print(
+        f"artifact lookup: names={len(args.artifact_names)} requests={request_count} "
+        f"found={found_count} absent={len(args.artifact_names) - found_count}",
+        file=sys.stderr,
+    )
     return 0
 
 
