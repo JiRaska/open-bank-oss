@@ -3,12 +3,14 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """No provider requests: falsify public-source, execution and approval boundaries."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("runner", Path(__file__).with_name("solo-review-runner.py"))
@@ -32,6 +34,15 @@ def stream(*, content=None, error=False, result=None):
 
 
 class DriverTest(unittest.TestCase):
+    def test_policy_failures_are_classified_without_exposing_details(self):
+        for error in (runner.guard.Undetermined("private fixture"), ImportError("private fixture")):
+            with patch.object(sys, "argv", ["runner", "prepare", "--pr", "12", "--output", "unused"]), \
+                    patch.object(runner, "prepare", side_effect=error), \
+                    patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(runner.main(), 2)
+                self.assertIn("classification policy unavailable", stderr.getvalue())
+                self.assertNotIn("private fixture", stderr.getvalue())
+
     def test_malformed_stream_shapes_raise_controlled_errors(self):
         events = [json.loads(line) for line in stream().splitlines()]
         for value in (None, [], "private-fixture"):
@@ -330,4 +341,7 @@ class SourceAndAcceptanceTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    program = unittest.main(exit=False)
+    if program.result.testsRun == 0:
+        sys.exit("No tests collected; review proof is unverified")
+    sys.exit(0 if program.result.wasSuccessful() else 1)

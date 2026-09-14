@@ -91,8 +91,10 @@ def validate_environment(environment, owner_id):
 
 
 def validate_reports(bundle):
+    require(isinstance(bundle, dict), "malformed review bundle")
     require(bundle.get("schema") == 1, "unsupported review evidence")
     subject = bundle["subject"]
+    require(isinstance(subject, dict), "malformed review subject")
     for field in ("head", "base", "merge_base", "policy_sha"):
         require(isinstance(subject.get(field), str) and SHA.fullmatch(subject[field]), f"invalid {field}")
     files = subject["files"]
@@ -102,6 +104,7 @@ def validate_reports(bundle):
     require(type(subject.get("protected")) is bool, "missing protected-path classification")
     require(re.fullmatch(r"[0-9a-f]{64}", subject.get("input_digest", "")), "missing review input identity")
     reports = bundle["reports"]
+    require(isinstance(reports, list) and all(isinstance(r, dict) for r in reports), "malformed review reports")
     require(len(reports) == 2, "exactly two independent reports required")
     require({r.get("slot") for r in reports} == {"correctness", "security"}, "duplicate or missing reviewer slot")
     require(len({r.get("session_id") for r in reports}) == 2, "review sessions were reused")
@@ -113,6 +116,7 @@ def validate_reports(bundle):
         require(type(report.get("tool_uses")) is int and report["tool_uses"] == 0, "reviewer invoked tools or omitted accounting")
         require(report.get("driver_success") is True, "review driver did not finish")
         response = report["response"]
+        require(isinstance(response, dict), "malformed review response")
         require(response.get("verdict") == "NO_FINDINGS" and response.get("findings") == [],
                 "findings or incomplete verdict require a new review")
         count = report.get("structured_output_uses", 0)
@@ -128,6 +132,7 @@ def validate_reports(bundle):
                     "earlier output contains findings or an unresolved verdict")
             require(not decoded or digest(decoded[-1]) == digest(response), "final output differs from attempt history")
         coverage = response.get("coverage", [])
+        require(isinstance(coverage, list) and all(isinstance(c, dict) for c in coverage), "malformed review coverage")
         require(len(coverage) == len(files) and {c.get("path") for c in coverage} == set(files),
                 "review omitted changed files")
         require(all(isinstance(c.get("analysis"), str) and len(c["analysis"].strip()) >= 40 for c in coverage),

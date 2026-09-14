@@ -289,6 +289,9 @@ def main():
             review(args.input, args.output, args.slot, args.cli)
         else:
             seal(args.input, args.reports, args.output, args.owner_accepted, args.preview)
+    except (guard.Undetermined, ImportError):
+        print("REVIEW UNRESOLVED: classification policy unavailable; no admission produced", file=sys.stderr)
+        return 2
     except subprocess.TimeoutExpired:
         print("REVIEW UNRESOLVED: operation timed out; no admission produced", file=sys.stderr)
         return 2

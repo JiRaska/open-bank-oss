@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 import unittest
+import sys
 from unittest.mock import patch
 import zipfile
 
@@ -29,6 +30,26 @@ def bundle():
 
 
 class ReportsTest(unittest.TestCase):
+    def test_malformed_evidence_containers_are_classified(self):
+        for value in (None, [], "private fixture"):
+            with self.subTest(bundle=value), self.assertRaisesRegex(ValueError, "malformed review bundle"):
+                proof.validate_reports(value)
+        for field in ("subject", "reports", "response", "coverage"):
+            for value in (None, "private fixture", {"unexpected": "shape"}):
+                data = bundle()
+                target = data if field in ("subject", "reports") else data["reports"][0]
+                if field == "coverage":
+                    target = target["response"]
+                target[field] = value
+                with self.subTest(field=field, value=value), self.assertRaises((ValueError, KeyError)):
+                    proof.validate_reports(data)
+        for field in ("reports", "coverage"):
+            data = bundle()
+            target = data if field == "reports" else data["reports"][0]["response"]
+            target[field] = ["private fixture", None]
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "malformed review"):
+                proof.validate_reports(data)
+
     def test_parameter_envelope_preserves_findings_and_raw_history(self):
         for has_findings in (False, True):
             data = bundle()
@@ -320,4 +341,7 @@ class LiveReadSequenceTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    program = unittest.main(exit=False)
+    if program.result.testsRun == 0:
+        sys.exit("No tests collected; review proof is unverified")
+    sys.exit(0 if program.result.wasSuccessful() else 1)
