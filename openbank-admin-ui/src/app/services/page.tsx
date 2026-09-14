@@ -71,12 +71,12 @@ const STATIC_CANDIDATES = [
 ] as const
 
 const GROUP_LABELS: Record<string, { label: string; color: string }> = {
-  'core':         { label: 'Core Banking',     color: '#2563eb' },
-  'identity':     { label: 'Identity',         color: '#059669' },
-  'open-banking': { label: 'Open Banking',     color: '#7c3aed' },
-  'payments':     { label: 'Payments',         color: '#dc2626' },
-  'compliance':   { label: 'Compliance',       color: '#d97706' },
-  'platform':     { label: 'Platform',         color: '#6b7280' },
+  'core':         { label: 'Core Banking',     color: 'var(--map-core)' },
+  'identity':     { label: 'Identity',         color: 'var(--map-identity)' },
+  'open-banking': { label: 'Open Banking',     color: 'var(--map-payment)' },
+  'payments':     { label: 'Payments',         color: 'var(--map-compliance)' },
+  'compliance':   { label: 'Compliance',       color: 'var(--map-psd2)' },
+  'platform':     { label: 'Platform',         color: 'var(--map-platform)' },
 }
 
 interface DocsStatus {

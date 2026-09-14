@@ -31,6 +31,6 @@ describe('admin UI semantic colour migration', () => {
     // Baseline follows the current migrated source. Keep this synchronized with
     // check-raw-colour-literal-ratchet.py so neither gate leaves slack.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(189)
+    expect(rawColourCount()).toBeLessThanOrEqual(183)
   })
 })
