@@ -13,6 +13,40 @@
   --sidebar-text-muted:   #94a3b8;
   --sidebar-border:       rgba(255,255,255,0.04);
   --sidebar-accent:       #6366f1;
+  /* Branded navigation chrome stays dark in both application themes. Keep its
+     complete palette here so Sidebar.module.css only expresses structure. */
+  --sidebar-canvas-glow: #293a70;
+  --sidebar-canvas-top: #0c1220;
+  --sidebar-canvas-mid: #090d17;
+  --sidebar-canvas-bottom: #070b13;
+  --sidebar-divider: rgba(148, 163, 184, 0.12);
+  --sidebar-edge: rgba(148, 163, 184, 0.13);
+  --sidebar-shadow: rgba(15, 23, 42, 0.09);
+  --sidebar-shadow-mobile: rgba(15, 23, 42, 0.24);
+  --sidebar-brand-start: #8489ff;
+  --sidebar-brand-mid: #5658e6;
+  --sidebar-brand-end: #4344b8;
+  --sidebar-brand-border: rgba(255, 255, 255, 0.22);
+  --sidebar-brand-shadow: rgba(91, 92, 226, 0.36);
+  --sidebar-brand-highlight: rgba(255, 255, 255, 0.3);
+  --sidebar-heading: #f8fafc;
+  --sidebar-subtitle: #8fa1bf;
+  --sidebar-section: #64748b;
+  --sidebar-item: #9aacc5;
+  --sidebar-item-hover: #f1f5f9;
+  --sidebar-item-hover-bg: rgba(148, 163, 184, 0.1);
+  --sidebar-item-active: #f7f7ff;
+  --sidebar-item-active-start: rgba(99, 102, 241, 0.34);
+  --sidebar-item-active-end: rgba(99, 102, 241, 0.14);
+  --sidebar-item-active-border: rgba(165, 180, 252, 0.2);
+  --sidebar-item-active-edge: #8b8dff;
+  --sidebar-item-active-hover-start: rgba(99, 102, 241, 0.38);
+  --sidebar-item-active-hover-end: rgba(99, 102, 241, 0.18);
+  --sidebar-item-locked: #506078;
+  --sidebar-footer-bg: rgba(2, 6, 23, 0.34);
+  --sidebar-footer-version: #a8b7cc;
+  --sidebar-footer-scope: #5a6b83;
+  --sidebar-on-accent: #fff;
 
   /* ── Content surface ── */
   --bg:                   #fafafa; /* slightly cleaner off-white */
