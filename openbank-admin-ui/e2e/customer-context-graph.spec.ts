@@ -6,17 +6,25 @@ import { signInWithRoles } from './helpers/auth'
 
 const partyId = '11111111-1111-4111-8111-111111111111'
 
-test('Customer 360 explores only its supplied projection', async ({ page, context, baseURL }, testInfo) => {
+test('Customer 360 combines its supplied projection with one bounded live snapshot', async ({ page, context, baseURL }, testInfo) => {
   await signInWithRoles(context, baseURL!, ['ROLE_COMPLIANCE'])
-  let reads = 0
+  let projectionReads = 0
+  let graphReads = 0
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url())
     if (url.pathname.startsWith('/api/auth/')) return route.continue()
     if (url.pathname.includes('/parties/search')) return route.fulfill({ json: { data: [
       { id: partyId, legalName: 'Synthetic Company — demo', status: 'ACTIVE' },
     ] } })
+    if (/^\/api\/customer-360\/[^/]+\/graph$/.test(url.pathname)) {
+      graphReads++
+      return route.fulfill({ json: {
+        accounts: [], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+        devices: [], documents: [], unavailable: [], truncated: [],
+      } })
+    }
     if (url.pathname.startsWith('/api/customer-360/')) {
-      reads++
+      projectionReads++
       if (url.pathname !== `/api/customer-360/${partyId}`) {
         return route.fulfill({ status: 403, json: { available: false, error: 'forbidden' } })
       }
@@ -43,15 +51,18 @@ test('Customer 360 explores only its supplied projection', async ({ page, contex
   await expect(graph.getByText('Projected state: REVOKED')).toBeVisible()
   await graph.getByRole('button', { name: 'Zoom in graph' }).click()
   await graph.getByRole('button', { name: 'Fit graph' }).click()
-  await expect.poll(() => reads).toBe(1)
+  await expect.poll(() => projectionReads).toBe(1)
+  await expect.poll(() => graphReads).toBe(1)
   await graph.screenshot({ path: testInfo.outputPath('context-graph.png') })
   await graph.getByLabel('Node type').selectOption('account')
   await expect(graph.getByRole('button', { name: 'Consent: demo-consent' })).toHaveCount(0)
   await expect(graph.getByText('Projected state: REVOKED')).toHaveCount(0)
-  expect(reads).toBe(1)
+  expect(projectionReads).toBe(1)
+  expect(graphReads).toBe(1)
   await page.getByRole('textbox', { name: 'Search parties' }).fill('22222222-2222-4222-8222-222222222222')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
-  await expect.poll(() => reads).toBe(2)
+  await expect.poll(() => projectionReads).toBe(2)
+  await expect.poll(() => graphReads).toBe(2)
   await expect(graph).toHaveCount(0)
   await expect(page.getByText('Projected state: REVOKED')).toHaveCount(0)
 })

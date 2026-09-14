@@ -3,9 +3,31 @@
 import { parseLiveCustomerFacts, type LiveCustomerFacts } from '@/lib/context/customerGraph'
 
 const inflight = new Map<string, Promise<LiveCustomerFacts>>()
+let selected: { partyId: string; facts: Promise<LiveCustomerFacts> } | null = null
+
+/** Starts and retains one live snapshot for the party currently selected on Customer 360. */
+export function selectCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> {
+  if (selected?.partyId === partyId) return selected.facts
+  selected = null
+  const facts = requestCustomerGraphFacts(partyId)
+  selected = { partyId, facts }
+  void facts.catch(() => {
+    if (selected?.facts === facts) selected = null
+  })
+  return facts
+}
+
+export function clearSelectedCustomerGraphFacts(partyId: string): void {
+  if (selected?.partyId === partyId) selected = null
+}
 
 /** Shares one bounded BFF read across the graph and sibling Customer 360 panels mounted together. */
 export function loadCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> {
+  if (selected?.partyId === partyId) return selected.facts
+  return requestCustomerGraphFacts(partyId)
+}
+
+function requestCustomerGraphFacts(partyId: string): Promise<LiveCustomerFacts> {
   const existing = inflight.get(partyId)
   if (existing) return existing
   const request = fetch(`/api/customer-360/${encodeURIComponent(partyId)}/graph`, {

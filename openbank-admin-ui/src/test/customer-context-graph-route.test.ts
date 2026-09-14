@@ -105,4 +105,17 @@ describe('Customer graph live overlay route', () => {
     resolveResponse(response({ accounts: [], unavailable: [] }))
     await expect(Promise.all([first, second])).resolves.toHaveLength(2)
   })
+
+  it('retains one settled snapshot for every panel in the current party selection', async () => {
+    const selectedParty = '22222222-2222-4222-8222-222222222222'
+    const fetchMock = vi.fn(async () => response({ accounts: [], unavailable: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { clearSelectedCustomerGraphFacts, loadCustomerGraphFacts, selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    await selectCustomerGraphFacts(selectedParty)
+    await loadCustomerGraphFacts(selectedParty)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    clearSelectedCustomerGraphFacts(selectedParty)
+  })
 })

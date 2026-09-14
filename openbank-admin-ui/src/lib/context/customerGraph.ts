@@ -430,7 +430,7 @@ export function buildCustomerGraph(
     const id = `consent:${consent.consentId}`
     nodes.push({
       id, kind: 'consent', label: consent.consentId, source: 'analytics-sink',
-      facts: observations.slice(0, 10).flatMap(item => [`State: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
+      facts: observations.slice(0, 10).flatMap(item => [`Projected state: ${item.status}`, `Scopes: ${item.scopes.join(', ') || '—'}`]),
     })
     addEdge('customer', id, 'HAS_CONSENT')
   }
