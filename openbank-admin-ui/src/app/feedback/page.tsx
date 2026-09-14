@@ -16,18 +16,17 @@
 // deliberate, separately-authorised act.
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { MessageSquare, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-} from 'recharts'
 import type { ScreenFeedbackBoard } from '@/app/api/feedback/screen-feedback/route'
 
-const C_BUG = '#ef4444'
-const C_IDEA = '#6366f1'
-const C_CONFUSING = '#f59e0b'
+const FeedbackChart = dynamic(
+  () => import('@/components/feedback/FeedbackChart').then(module => module.FeedbackChart),
+  { ssr: false, loading: () => <div className="skeleton" aria-hidden="true" style={{ height: 320, borderRadius: 8 }} /> },
+)
 
 const CATEGORY_LABEL_CS: Record<string, string> = {
   BUG: 'Chyba', IDEA: 'Nápad', CONFUSING: 'Nesrozumitelné',
@@ -85,9 +84,9 @@ export default function ScreenFeedbackPage() {
 
   const chartData = data.screens.slice(0, 12).map((s) => ({
     screen: s.screenId,
-    [cs ? 'Chyba' : 'Bug']: s.bugs,
-    [cs ? 'Nápad' : 'Idea']: s.ideas,
-    [cs ? 'Nesrozumitelné' : 'Confusing']: s.confusing,
+    bug: s.bugs,
+    idea: s.ideas,
+    confusing: s.confusing,
   }))
 
   return (
@@ -110,18 +109,11 @@ export default function ScreenFeedbackPage() {
 
       <section>
         <h2>{cs ? 'Které obrazovky bolí' : 'Which screens hurt'}</h2>
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={chartData} layout="vertical" margin={{ left: 120 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" allowDecimals={false} />
-            <YAxis type="category" dataKey="screen" width={120} />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey={cs ? 'Chyba' : 'Bug'} stackId="a" fill={C_BUG} />
-            <Bar dataKey={cs ? 'Nápad' : 'Idea'} stackId="a" fill={C_IDEA} />
-            <Bar dataKey={cs ? 'Nesrozumitelné' : 'Confusing'} stackId="a" fill={C_CONFUSING} />
-          </BarChart>
-        </ResponsiveContainer>
+        <FeedbackChart data={chartData} labels={{
+          bug: cs ? 'Chyba' : 'Bug',
+          idea: cs ? 'Nápad' : 'Idea',
+          confusing: cs ? 'Nesrozumitelné' : 'Confusing',
+        }} />
       </section>
 
       <section>
