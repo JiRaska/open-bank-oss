@@ -11,14 +11,13 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { Decision, ReasonCount, StageRow, WeeklyOutcome } from './model'
 
-// Theme-agnostic chart palette. recharts writes `fill`/`stroke` as SVG attributes, where CSS
-// variables do not resolve — same constraint as the onboarding funnel page. One colour per
-// outcome, reused everywhere so APPROVE is the same green on every chart on the page.
-export const C_APPROVE = '#22c55e'
-export const C_REFER = '#f59e0b'
-export const C_DECLINE = '#ef4444'
-export const C_STAGE: Record<string, string> = { STAGE_1: '#6366f1', STAGE_2: '#f59e0b', STAGE_3: '#ef4444' }
-const C_BUCKET = ['#6366f1', '#a5b4fc', '#f59e0b', '#fb923c', '#ef4444']
+// SVG presentation attributes resolve custom properties in every supported browser. One semantic
+// outcome palette is reused throughout, so APPROVE/REFER/DECLINE never change meaning with theme.
+export const C_APPROVE = 'var(--success)'
+export const C_REFER = 'var(--warning)'
+export const C_DECLINE = 'var(--danger)'
+export const C_STAGE: Record<string, string> = { STAGE_1: 'var(--accent)', STAGE_2: 'var(--warning)', STAGE_3: 'var(--danger)' }
+const C_BUCKET = ['var(--info)', 'var(--accent)', 'var(--warning)', 'var(--chart-purple)', 'var(--danger)']
 const OUTCOME_COLOUR: Record<string, string> = { APPROVE: C_APPROVE, REFER: C_REFER, DECLINE: C_DECLINE }
 
 const axisTick = { fontSize: 11, fill: 'var(--text-tertiary)' }
@@ -26,7 +25,7 @@ const axisTick = { fontSize: 11, fill: 'var(--text-tertiary)' }
 export function OutcomeTrend({ data }: { data: WeeklyOutcome[] }) {
   const { t } = useLanguage()
   return (
-    <div style={{ height: 240 }}>
+    <div role="group" aria-label={t('Týdenní výsledky enginu: schváleno, k posouzení a zamítnuto', 'Weekly engine outcomes: approve, refer and decline')} style={{ height: 240 }}>
       <ResponsiveContainer>
         <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -44,9 +43,10 @@ export function OutcomeTrend({ data }: { data: WeeklyOutcome[] }) {
 }
 
 export function ReasonPareto({ data }: { data: ReasonCount[] }) {
+  const { t } = useLanguage()
   const rows = data.slice(0, 10).map(r => ({ ...r, label: r.ruleId ? `${r.code} · ${r.ruleId}` : r.code }))
   return (
-    <div style={{ height: Math.max(160, rows.length * 30 + 40) }}>
+    <div role="group" aria-label={t('Seřazené důvody předání k posouzení a zamítnutí', 'Ranked reasons for referral and decline')} style={{ height: Math.max(160, rows.length * 30 + 40) }}>
       <ResponsiveContainer>
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 24, left: 8, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
@@ -87,7 +87,7 @@ export function AffordabilityScatter({ decisions, dstiLimit, dtiLimit, includeEx
     }))
   const series = (['APPROVE', 'REFER', 'DECLINE'] as const).map(o => ({ o, pts: points.filter(p => p.outcome === o) }))
   return (
-    <div style={{ height: 280 }}>
+    <div role="group" aria-label={t('Bonita každé žádosti proti limitům DSTI a DTI z politiky', 'Application affordability against policy DSTI and DTI limits')} style={{ height: 280 }}>
       <ResponsiveContainer>
         <ScatterChart margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -107,9 +107,10 @@ export function AffordabilityScatter({ decisions, dstiLimit, dtiLimit, includeEx
 }
 
 export function StageMixPie({ stages }: { stages: StageRow[] }) {
+  const { t } = useLanguage()
   const data = stages.filter(s => s.outstanding > 0).map(s => ({ name: s.stage.replace('_', ' '), value: s.outstanding, stage: s.stage }))
   return (
-    <div style={{ height: 220 }}>
+    <div role="group" aria-label={t('Rozdělení nesplacené expozice podle IFRS 9 stage', 'Outstanding exposure split by IFRS 9 stage')} style={{ height: 220 }}>
       <ResponsiveContainer>
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
@@ -127,7 +128,7 @@ export function BucketBars({ buckets }: { buckets: { bucket: string; count: numb
   const { t } = useLanguage()
   const rows = buckets.map(b => ({ ...b, label: b.bucket.replace('DPD_', '').replace('_PLUS', '+').replace('_', '–') }))
   return (
-    <div style={{ height: 220 }}>
+    <div role="group" aria-label={t('Počet úvěrů podle pásma dnů po splatnosti', 'Loan count by days-past-due bucket')} style={{ height: 220 }}>
       <ResponsiveContainer>
         <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
