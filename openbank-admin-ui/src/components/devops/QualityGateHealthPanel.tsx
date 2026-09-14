@@ -62,7 +62,7 @@ interface GateHealthResponse {
 function StatCard({ icon, label, value, tone }: {
   icon: React.ReactNode; label: string; value: string; tone?: 'neutral' | 'warn' | 'bad'
 }) {
-  const color = tone === 'bad' ? '#dc2626' : tone === 'warn' ? '#d97706' : 'var(--text-primary)'
+  const color = tone === 'bad' ? 'var(--danger-text)' : tone === 'warn' ? 'var(--warning-text)' : 'var(--text-primary)'
   return (
     <div style={{
       flex: '1 1 140px', padding: '12px 14px', borderRadius: '10px',
@@ -140,7 +140,7 @@ export function QualityGateHealthPanel() {
   const latestShardRun = (data.shardHistory ?? [])[0]
 
   return (
-    <div style={{ marginBottom: '24px' }}>
+    <div data-testid="quality-gate-health" style={{ marginBottom: '24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
         <ShieldCheck size={16} style={{ color: 'var(--text-primary)' }} />
         <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>{title}</span>
@@ -176,8 +176,8 @@ export function QualityGateHealthPanel() {
                 <span key={s.name} style={{
                   fontSize: '11px', fontFamily: 'monospace', padding: '3px 8px', borderRadius: '6px',
                   border: '1px solid var(--border)',
-                  background: s.conclusion === 'success' ? 'var(--surface-2)' : '#fee2e2',
-                  color: s.conclusion === 'success' ? 'var(--text-secondary)' : '#dc2626',
+                  background: s.conclusion === 'success' ? 'var(--surface-2)' : 'var(--danger-bg)',
+                  color: s.conclusion === 'success' ? 'var(--text-secondary)' : 'var(--danger-text)',
                 }}>
                   {s.name.replace('gates (', '').replace(')', '')} · {s.seconds != null ? `${Math.round(s.seconds)}s` : '—'}
                 </span>
@@ -188,12 +188,12 @@ export function QualityGateHealthPanel() {
 
       {flakyGates.length > 0 && (
         <div style={{ marginBottom: '14px', padding: '10px 14px', borderRadius: '10px',
-          border: '1px solid #fca5a5', background: '#fee2e2' }}>
-          <div style={{ fontSize: '12px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
+          border: '1px solid var(--danger-border)', background: 'var(--danger-bg)' }}>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)', marginBottom: '4px' }}>
             {t('Nestabilní brány (PASS i FAIL na různých commitech)', 'Flaky gates (PASS and FAIL seen on distinct commits)')}
           </div>
           {flakyGates.map(g => (
-            <div key={g.id} style={{ fontSize: '12px', fontFamily: 'monospace', color: '#7f1d1d' }}>{g.id}</div>
+            <div key={g.id} style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--danger-text)' }}>{g.id}</div>
           ))}
         </div>
       )}
