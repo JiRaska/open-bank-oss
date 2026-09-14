@@ -37,7 +37,7 @@ export interface CompLifecycle {
 }
 
 // These badges carry TEXT, so `color` has to clear AA 4.5:1 on its own `bg`. The hardcoded pairs
-// this replaced did not: #d97706 on #fffbeb measured 3.07:1 and #059669 on #f0fdf4 3.59:1 (axe,
+// this replaced did not: the previous warning and success pairs measured 3.07:1 and 3.59:1 (axe,
 // /settings and /infrastructure). The `*-text` tokens are the ones tuned against every light
 // surface, and using them also makes dark theme follow — a literal cannot (#9749, ADR-0208 D2).
 const URGENCY: Record<Urgency, { cs: string; en: string; color: string; bg: string }> = {

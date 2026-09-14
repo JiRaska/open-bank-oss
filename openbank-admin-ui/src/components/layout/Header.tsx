@@ -275,7 +275,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
                       <span key={r} style={{
                         fontSize: '10px', fontWeight: 600, padding: '2px 7px',
                         borderRadius: '10px', background: info.bg, color: info.color,
-                        border: `1px solid ${info.color}22`,
+                        border: `1px solid color-mix(in srgb, ${info.color} 13.3%, transparent)`,
                       }}>{info.label}</span>
                     )
                   })}
@@ -300,10 +300,10 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
                   padding: '8px 10px', borderRadius: '6px', border: 'none',
-                  background: 'transparent', color: '#dc2626', fontSize: '13px',
+                  background: 'transparent', color: 'var(--danger-text)', fontSize: '13px',
                   fontWeight: 500, cursor: 'pointer', transition: 'background 0.12s',
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#fef2f2')}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-bg)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 <LogOut size={14} aria-hidden="true" />
