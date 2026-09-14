@@ -50,7 +50,7 @@ def normalize_output_attempt(attempt):
     try:
         decoded = json.loads(attempt["$PARAMETER_VALUE"], object_pairs_hook=unique_object,
                              parse_constant=reject_constant)
-    except (ValueError, RecursionError):
+    except (json.JSONDecodeError, RecursionError):
         raise ValueError("invalid JSON in structured output envelope") from None
     require(isinstance(decoded, dict) and "$PARAMETER_VALUE" not in decoded,
             "nested or non-object structured output envelope")

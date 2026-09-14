@@ -30,6 +30,13 @@ def bundle():
 
 
 class ReportsTest(unittest.TestCase):
+    def test_envelope_rejection_preserves_specific_reason(self):
+        for raw, reason in (('{"x":1,"x":2}', "duplicate key"),
+                            ('{"x":NaN}', "nonfinite value"),
+                            ("not JSON", "invalid JSON")):
+            with self.subTest(reason=reason), self.assertRaisesRegex(ValueError, reason):
+                proof.normalize_output_attempt({"$PARAMETER_VALUE": raw})
+
     def test_malformed_evidence_containers_are_classified(self):
         for value in (None, [], "private fixture"):
             with self.subTest(bundle=value), self.assertRaisesRegex(ValueError, "malformed review bundle"):
