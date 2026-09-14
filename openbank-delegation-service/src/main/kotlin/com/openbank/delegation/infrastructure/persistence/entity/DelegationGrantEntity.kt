@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.persistence.entity
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
@@ -101,6 +102,10 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "allow_download")
     var allowDownload: Boolean? = null
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "recertification_audience", length = 16)
+    var recertificationAudience: DelegationRecertificationAudience? = null
+
     @Column(name = "valid_from", nullable = false)
     lateinit var validFrom: OffsetDateTime
 
@@ -153,6 +158,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
         dailyLimit = toMoney(dailyLimitAmount, dailyLimitCurrency),
         monthlyLimit = toMoney(monthlyLimitAmount, monthlyLimitCurrency),
         exposure = toExposure(),
+        recertificationAudience = recertificationAudience,
         validFrom = validFrom,
         validTo = validTo,
         status = status,
@@ -223,6 +229,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
             maxViews = g.exposure?.maxViews
             watermark = g.exposure?.watermark
             allowDownload = g.exposure?.allowDownload
+            recertificationAudience = g.recertificationAudience
             validFrom = g.validFrom
             validTo = g.validTo
             status = g.status

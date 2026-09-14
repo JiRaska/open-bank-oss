@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.244.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.3...admin-ui-v0.244.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** surface operational evidence ([#9988](https://github.com/JiRaska/open-bank-oss/issues/9988)) ([a3c4ed0](https://github.com/JiRaska/open-bank-oss/commit/a3c4ed08242c1c1d442c4351742c6fa606e0f4b3))
+
 ## [0.243.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.2...admin-ui-v0.243.3) (2026-09-13)
 
 

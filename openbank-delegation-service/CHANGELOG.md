@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.15.0...delegation-service-v0.16.0) (2026-09-13)
+
+
+### Features
+
+* **delegation:** add customer recertification workflow ([#9215](https://github.com/JiRaska/open-bank-oss/issues/9215)) ([eb207f0](https://github.com/JiRaska/open-bank-oss/commit/eb207f06ee2367511d3cf99da284a6b2f62ed392))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.14.0...delegation-service-v0.15.0) (2026-09-13)
 
 
