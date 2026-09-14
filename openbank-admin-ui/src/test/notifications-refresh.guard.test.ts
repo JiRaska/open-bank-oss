@@ -5,7 +5,7 @@ import path from 'node:path'
 
 describe('Notifications refresh contract', () => {
   it('exposes localized busy semantics without changing notification loading', () => {
-    const source = readFileSync(path.resolve(__dirname, '../app/notifications/page.tsx'), 'utf8')
+    const source = readFileSync(path.resolve(__dirname, '../components/notifications/NotificationsPage.tsx'), 'utf8')
 
     expect(source).toContain('type="button"')
     expect(source).toContain('disabled={loading}')

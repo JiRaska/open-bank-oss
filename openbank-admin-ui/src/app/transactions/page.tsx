@@ -191,8 +191,7 @@ export default function TransactionsPage() {
         <ContextualInsights dashboardUid="openbank-sla" panels={PAYMENT_INSIGHTS}
           titleCs="Zdraví plateb" titleEn="Payment health"
           descriptionCs="Úspěšnost, rychlost a SLA napříč platebními cestami."
-          descriptionEn="Success, speed and SLA across payment rails."
-          from={dateFrom || undefined} to={dateTo || undefined} />
+          descriptionEn="Success, speed and SLA across payment rails." />
       </Can>
 
       <div className="card" style={{ marginBottom: '16px' }}>

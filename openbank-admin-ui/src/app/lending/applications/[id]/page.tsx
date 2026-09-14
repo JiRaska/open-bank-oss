@@ -79,7 +79,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
   const [evidenceState, setEvidenceState] = useState<ReadState>('ok')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -172,12 +171,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
           {error}
         </div>
       )}
-      {notice && (
-        <div className="card" data-testid="notice" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--success)', fontSize: 13 }}>
-          {notice}
-        </div>
-      )}
-
       {appState !== 'ok' && (
         <div className="card" data-testid="app-unavailable" style={{ padding: 16, fontSize: 13 }}>
           {appState === 'forbidden'

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.2.1...loyalty-service-v0.3.0) (2026-09-13)
+
+
+### Features
+
+* **loyalty:** list a party's benefit grants ([#9963](https://github.com/JiRaska/open-bank-oss/issues/9963)) ([7559b35](https://github.com/JiRaska/open-bank-oss/commit/7559b35ae1943be2a346f1b9420dc40ef2089888))
+
 ## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.2.0...loyalty-service-v0.2.1) (2026-09-13)
 
 

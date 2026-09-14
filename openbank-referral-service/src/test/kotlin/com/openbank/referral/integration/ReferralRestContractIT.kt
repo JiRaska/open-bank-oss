@@ -128,7 +128,10 @@ class ReferralRestContractIT {
             .header("Idempotency-Key", "invite-$programId")
             .body("""{"referrerPartyId":"$referrer"}""")
             .When { post("/api/v1/referrals/programs/$programId/invites") }
-            .Then { statusCode(409) }
+            .Then {
+                statusCode(409)
+                body("reason", equalTo("IDEMPOTENCY_KEY_REUSED"))
+            }
     }
 
     private fun seedDraft(id: UUID) {

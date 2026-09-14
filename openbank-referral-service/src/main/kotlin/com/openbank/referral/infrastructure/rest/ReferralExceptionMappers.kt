@@ -7,14 +7,16 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 
-private fun status(s: Response.Status, e: Exception) = Response.status(s).entity(
-    mapOf(
-        "error" to (e.message ?: s.reasonPhrase),
-    ),
-).build()
+private fun status(s: Response.Status, e: Exception, extra: Map<String, String> = emptyMap()) =
+    Response.status(s).entity(
+        mapOf(
+            "error" to (e.message ?: s.reasonPhrase),
+        ) + extra,
+    ).build()
 
 @Provider class ReferralConflictMapper : ExceptionMapper<ReferralConflictException> {
-    override fun toResponse(e: ReferralConflictException) = status(Response.Status.CONFLICT, e)
+    override fun toResponse(e: ReferralConflictException) =
+        status(Response.Status.CONFLICT, e, e.reason?.let { mapOf("reason" to it.name) } ?: emptyMap())
 }
 
 @Provider class ReferralNotFoundMapper : ExceptionMapper<ReferralNotFoundException> {

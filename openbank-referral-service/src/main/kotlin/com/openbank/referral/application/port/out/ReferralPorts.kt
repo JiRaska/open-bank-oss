@@ -23,6 +23,9 @@ interface ReferralInviteRepository {
     suspend fun findByToken(tokenHash: String): ReferralInvite?
     suspend fun findByIdempotencyKey(key: String): ReferralInvite?
     suspend fun attribute(id: UUID, refereePartyId: UUID, at: java.time.Instant): ReferralInvite
+
+    /** Every invite [referrerPartyId] issued, any status. */
+    suspend fun listByReferrer(referrerPartyId: UUID): List<ReferralInvite>
 }
 
 /**
@@ -38,6 +41,9 @@ interface ReferralRewardRepository {
     suspend fun findByReference(reference: String): ReferralReward?
     suspend fun create(reward: ReferralReward, outbox: List<OutboxMessage>): ReferralReward
     suspend fun outcome(reference: String, status: String, at: java.time.Instant, outbox: OutboxMessage): ReferralReward
+
+    /** Every reward on any of [inviteIds]; empty input returns empty without a query. */
+    suspend fun listByInviteIds(inviteIds: List<UUID>): List<ReferralReward>
 }
 
 /** Outbound port for draining the transactional referral outbox (read pending, mark sent/failed). */
@@ -47,4 +53,7 @@ interface ReferralOutboxRepository : OutboxRepository {
 
 interface ReferralAuditRepository {
     suspend fun append(type: String, aggregateId: UUID, actor: String, details: String, at: java.time.Instant)
+
+    /** When each of [inviteIds] was issued, from its `INVITE_ISSUED` row; absent ids are omitted. */
+    suspend fun issuedAt(inviteIds: List<UUID>): Map<UUID, java.time.Instant>
 }

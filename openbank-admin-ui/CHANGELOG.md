@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.244.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.3...admin-ui-v0.244.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** surface operational evidence ([#9988](https://github.com/JiRaska/open-bank-oss/issues/9988)) ([a3c4ed0](https://github.com/JiRaska/open-bank-oss/commit/a3c4ed08242c1c1d442c4351742c6fa606e0f4b3))
+
+## [0.243.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.2...admin-ui-v0.243.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **infra:** verify image signature and SBOM in one Kyverno entry, for one verdict ([#9950](https://github.com/JiRaska/open-bank-oss/issues/9950)) ([ed77bae](https://github.com/JiRaska/open-bank-oss/commit/ed77baea9eab65b662a2a0e461bbd2e5e345fb1a))
+
+## [0.243.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.1...admin-ui-v0.243.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead bindings and preserve theme contrast ([#9972](https://github.com/JiRaska/open-bank-oss/issues/9972)) ([25c544d](https://github.com/JiRaska/open-bank-oss/commit/25c544dbe9ec74bba94672a1e18d9afec282876e))
+
+## [0.243.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.0...admin-ui-v0.243.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** review notification decisions ([#9352](https://github.com/JiRaska/open-bank-oss/issues/9352)) ([0f241ae](https://github.com/JiRaska/open-bank-oss/commit/0f241aefb66eca1a85ef3f299829270bd81e18f7))
+* **admin-ui:** stage governance registries in image builds ([#9969](https://github.com/JiRaska/open-bank-oss/issues/9969)) ([9b36367](https://github.com/JiRaska/open-bank-oss/commit/9b363672f5e8c6624b4773a45066634d494b5b5a))
+
+## [0.243.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.242.0...admin-ui-v0.243.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** Card Center — the capability matrix screen (ADR-0283 phase 3) ([#8842](https://github.com/JiRaska/open-bank-oss/issues/8842)) ([0362988](https://github.com/JiRaska/open-bank-oss/commit/0362988c7aecadedb6aa29ddcd9eeef596e9bcd7))
+* **admin-ui:** render rollout-attested browser evidence distinctly from CI evidence ([#9917](https://github.com/JiRaska/open-bank-oss/issues/9917)) ([c7752a4](https://github.com/JiRaska/open-bank-oss/commit/c7752a43615a41cf694358682dc9434e5d32d99d)), closes [#7451](https://github.com/JiRaska/open-bank-oss/issues/7451)
+
+
+### Bug Fixes
+
+* **admin-ui:** keep embedded insights populated ([#9954](https://github.com/JiRaska/open-bank-oss/issues/9954)) ([79f84cd](https://github.com/JiRaska/open-bank-oss/commit/79f84cda1a35d501b349f160771b3b7e60fdf489))
+* **admin-ui:** keep operational insights live ([#9962](https://github.com/JiRaska/open-bank-oss/issues/9962)) ([865829f](https://github.com/JiRaska/open-bank-oss/commit/865829fc7f19929bc6bfd4f1adc966f9f9f86c5b))
+
+
+### Security
+
+* point every security.txt at the public disclosure policy, and check it stays there ([#9922](https://github.com/JiRaska/open-bank-oss/issues/9922)) ([9804804](https://github.com/JiRaska/open-bank-oss/commit/9804804309fd22c2c9c4a5e8d45c76b684f05037)), closes [#9880](https://github.com/JiRaska/open-bank-oss/issues/9880)
+
 ## [0.242.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.241.0...admin-ui-v0.242.0) (2026-09-13)
 
 

@@ -745,8 +745,8 @@ if [ "$FAIL" -gt 0 ]; then
   echo
   echo "FLEET ATTESTATION GATE: FAIL — ${FAIL} of ${#IMAGES[@]} declared image(s) not deployable."
   echo
-  echo "Both image-provenance policies are already Enforce in-cluster"
-  echo "(verify-openbank-image-signatures; verify-openbank-image-sbom-attestation, graduated"
+  echo "Image-provenance admission is already Enforce in-cluster"
+  echo "(verify-openbank-image-sbom-attestation: signature + SBOM, graduated"
   echo "2026-07-12), so this is a LATENT OUTAGE, not a graduation blocker: the affected pods"
   echo "keep running until something reschedules them, and are then denied admission and can"
   echo "never restart. Fix before a reschedule, not after"

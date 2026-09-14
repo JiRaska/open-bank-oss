@@ -29,4 +29,9 @@ class BenefitGrantRepositoryImpl :
     override suspend fun findByIdempotencyKey(partyId: UUID, key: String): BenefitGrant? = Panache.withSession {
         find("partyId = ?1 and idempotencyKey = ?2", partyId, key).firstResult()
     }.map { it?.toDomain() }.awaitSuspending()
+
+    // Served by idx_benefit_grant_party (party_id, reserved_at DESC) from V1.
+    override suspend fun listFor(partyId: UUID): List<BenefitGrant> = Panache.withSession {
+        find("partyId = ?1 order by reservedAt desc", partyId).list()
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 }

@@ -190,6 +190,12 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             e.toDomain(e.tokenHash)
         }
     }.awaitSuspending()
+
+    // The `token` field carries the stored HASH here, as findByToken does; the referrer view
+    // built from this never exposes it.
+    override suspend fun listByReferrer(referrerPartyId: UUID) = Panache.withSession {
+        find("referrerPartyId", referrerPartyId).list<ReferralInviteEntity>()
+    }.awaitSuspending().map { it.toDomain(it.tokenHash) }
 }
 
 @ApplicationScoped class PanacheReferralRewardRepository :
@@ -247,6 +253,13 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
         messages.fold(Uni.createFrom().voidItem() as Uni<Void>) { acc, msg ->
             acc.flatMap { outboxRepo.persistInTransaction(msg).replaceWithVoid() }
         }
+
+    override suspend fun listByInviteIds(inviteIds: List<UUID>): List<ReferralReward> {
+        if (inviteIds.isEmpty()) return emptyList()
+        return Panache.withSession {
+            find("inviteId in ?1", inviteIds).list<ReferralRewardEntity>()
+        }.awaitSuspending().map { it.toDomain() }
+    }
 }
 
 @ApplicationScoped class PanacheReferralAuditRepository :
@@ -266,5 +279,14 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                 },
             )
         }.awaitSuspending()
+    }
+
+    override suspend fun issuedAt(inviteIds: List<UUID>): Map<UUID, Instant> {
+        if (inviteIds.isEmpty()) return emptyMap()
+        return Panache.withSession {
+            find("type = ?1 and aggregateId in ?2", "INVITE_ISSUED", inviteIds).list<ReferralAuditEntity>()
+        }.awaitSuspending()
+            .groupBy { it.aggregateId }
+            .mapValues { (_, rows) -> rows.minOf { it.occurredAt } }
     }
 }

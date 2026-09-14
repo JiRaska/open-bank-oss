@@ -461,7 +461,7 @@ export default function InfraTopologyPage() {
 
               <a href="/infrastructure" style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 12px',
-                background: 'var(--accent-bg)', color: 'var(--accent)', borderRadius: 'var(--r-md)', fontSize: '12px',
+                background: 'var(--accent-bg)', color: 'var(--accent-text)', borderRadius: 'var(--r-md)', fontSize: '12px',
                 fontWeight: 600, textDecoration: 'none', marginTop: '4px', border: '1px solid var(--accent-border, transparent)',
               }}>
                 <Server aria-hidden="true" size={14} /> {t('Otevřít přehled infrastruktury', 'Open infrastructure overview')}
