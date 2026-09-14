@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.245.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.244.0...admin-ui-v0.245.0) (2026-09-14)
+
+
+### Features
+
+* **admin-ui:** redesign loyalty workspace for marketing ([#10053](https://github.com/JiRaska/open-bank-oss/issues/10053)) ([4f44883](https://github.com/JiRaska/open-bank-oss/commit/4f44883c0240e5630cbdc80bee422385fcf3a1db))
+
 ## [0.244.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.3...admin-ui-v0.244.0) (2026-09-13)
 
 
