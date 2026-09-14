@@ -134,6 +134,7 @@ def prepare(pr, output):
 
 def parse_stream(raw, slot, subject):
     events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    require(all(isinstance(e, dict) for e in events), "malformed model stream event")
     init = [e for e in events if e.get("type") == "system" and e.get("subtype") == "init"]
     require(len(init) == 1 and isinstance(init[0].get("tools"), list)
             and all(t == "StructuredOutput" for t in init[0]["tools"]),
@@ -145,6 +146,9 @@ def parse_stream(raw, slot, subject):
     require(not any(e.get("type") in ("assistant", "user", "tool", "tool_result")
                     for e in events[result_index + 1:]), "activity after final model result")
     assistant = [e["message"] for e in events[:result_index] if e.get("type") == "assistant"]
+    require(all(isinstance(m, dict) and isinstance(m.get("content"), list)
+                and all(isinstance(c, dict) for c in m["content"]) for m in assistant),
+            "malformed assistant message or content")
     models = {m.get("model") for m in assistant}
     require(len(models) == 1 and all(isinstance(m, str) and m for m in models), "missing observed model")
     result = results[0]
@@ -230,7 +234,8 @@ def review(input_path, output, slot, cli):
              "--max-turns", "3", "--output-format", "stream-json", "--verbose",
              "--json-schema", json.dumps(RESPONSE_SCHEMA), "--system-prompt", system],
             input=json.dumps(data), text=True, capture_output=True, cwd=directory, env=env, timeout=900)
-    require(proc.returncode == 0, invocation_failure(proc))
+    if proc.returncode != 0:
+        raise ValueError(invocation_failure(proc))
     write(output, parse_stream(proc.stdout, slot, data["subject"]))
 
 

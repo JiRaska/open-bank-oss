@@ -32,6 +32,17 @@ def stream(*, content=None, error=False, result=None):
 
 
 class DriverTest(unittest.TestCase):
+    def test_malformed_stream_shapes_raise_controlled_errors(self):
+        events = [json.loads(line) for line in stream().splitlines()]
+        for value in (None, [], "private-fixture"):
+            with self.subTest(event=value), self.assertRaisesRegex(ValueError, "malformed model stream event"):
+                runner.parse_stream(json.dumps(value), "correctness", {})
+        for message in (None, [], "private-fixture", {"model": "m", "content": "text"},
+                        {"model": "m", "content": [None]}, {"model": "m"}):
+            events[1]["message"] = message
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, "malformed assistant"):
+                runner.parse_stream("\n".join(json.dumps(e) for e in events), "correctness", {})
+
     def test_missing_or_executable_tool_inventory_rejected(self):
         events = [json.loads(line) for line in stream().splitlines()]
         for inventory in (None, ["Bash"], ["StructuredOutput", "WebFetch"]):
@@ -181,7 +192,8 @@ class DriverTest(unittest.TestCase):
                     patch.dict(os.environ, GITHUB_SHA="d" * 40, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
                                ACTIONS_RUNTIME_TOKEN="artifact-secret", FUTURE_JOB_SECRET="unknown-secret",
                                CLAUDE_CODE_OAUTH_TOKEN="provider-fixture"), \
-                    patch.object(runner.subprocess, "run", side_effect=invoke):
+                    patch.object(runner.subprocess, "run", side_effect=invoke), \
+                    patch.object(runner, "invocation_failure", side_effect=AssertionError("success must not classify failure")):
                 runner.review(source, output, "correctness", "/trusted/claude")
             policy_check.assert_called_once_with("example/bank", "main", "d" * 40)
             args, kwargs = observed[0]
