@@ -71,9 +71,10 @@ describe('login experience', () => {
 
   it('rotates between the Prague Explorer scenes', () => {
     vi.useFakeTimers()
-    renderPage()
+    const { container } = renderPage()
 
     const lionessScene = screen.getByRole('button', { name: 'OpenBank Explorer lioness over Prague' })
+    expect(container.querySelector('img[src*="explorer-prague-lioness"]')).toHaveAttribute('loading', 'eager')
     expect(lionessScene).toHaveAttribute('aria-pressed', 'false')
     act(() => vi.advanceTimersByTime(8_000))
     expect(lionessScene).toHaveAttribute('aria-pressed', 'true')

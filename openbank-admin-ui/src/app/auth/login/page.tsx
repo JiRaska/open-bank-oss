@@ -102,6 +102,7 @@ function LoginContent() {
             src="/brand/explorer-prague-lioness.webp"
             alt=""
             fill
+            loading="eager"
             sizes="(max-width: 860px) 100vw, 46vw"
             className={`${styles.scene} ${scene === 1 ? styles.sceneActive : ""}`}
           />
