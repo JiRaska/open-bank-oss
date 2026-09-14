@@ -50,7 +50,11 @@ describe('lifecycle upgrade proposal feedback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     resolveRequest?.(new Response(JSON.stringify({ result: { content: [] } }), { status: 200 }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Queued' })).toBeDisabled())
+    const queued = await screen.findByRole('button', { name: 'Queued' })
+    expect(queued).toBeDisabled()
+    expect(queued).toHaveStyle({ color: 'var(--success-text)' })
+    expect(queued.getAttribute('style')).toContain('var(--success-bg)')
+    expect(queued.getAttribute('style')).toContain('var(--success-border)')
     expect(screen.getByRole('status')).toHaveTextContent('queued for independent review')
   })
 
@@ -65,6 +69,7 @@ describe('lifecycle upgrade proposal feedback', () => {
     await user.click(screen.getByRole('button', { name: 'Plan upgrade' }))
     const retry = await screen.findByRole('button', { name: 'Try again' })
     expect(retry).toBeEnabled()
+    expect(retry).toHaveStyle({ color: 'var(--danger-text)' })
     expect(screen.getByRole('status')).toHaveTextContent('could not be queued')
 
     await user.click(retry)

@@ -36,10 +36,9 @@ export interface CompLifecycle {
   urgency: Urgency
 }
 
-// These badges carry TEXT, so `color` has to clear AA 4.5:1 on its own `bg`. The hardcoded pairs
-// this replaced did not: #d97706 on #fffbeb measured 3.07:1 and #059669 on #f0fdf4 3.59:1 (axe,
-// /settings and /infrastructure). The `*-text` tokens are the ones tuned against every light
-// surface, and using them also makes dark theme follow — a literal cannot (#9749, ADR-0208 D2).
+// These badges carry text, so `color` has to clear AA 4.5:1 on its own background. The former
+// hardcoded warning and success pairs measured only 3.07:1 and 3.59:1. The `*-text` tokens are
+// tuned against every light surface and adapt with dark theme (#9749, ADR-0208 D2).
 const URGENCY: Record<Urgency, { cs: string; en: string; color: string; bg: string }> = {
   current:           { cs: 'Aktuální',          en: 'Up to date',     color: 'var(--success-text)', bg: 'var(--success-bg)' },
   'patch-available': { cs: 'Dostupná záplata',  en: 'Patch available',color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
@@ -133,7 +132,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             </span>
           )}
           {'eol' in lc && lc.eol ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: lc.eolPassed || (lc.eolDaysLeft != null && lc.eolDaysLeft <= 90) ? '#dc2626' : 'var(--text-secondary)' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: lc.eolPassed || (lc.eolDaysLeft != null && lc.eolDaysLeft <= 90) ? 'var(--danger-text)' : 'var(--text-secondary)' }}>
               <Clock size={12} />
               {lc.eolPassed
                 ? t('Po EoL', 'Past EoL')
@@ -163,7 +162,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <ShieldCheck size={12} /> {t('Žádné známé CVE', 'No known CVEs')}
           </span>
         ) : (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: data.cve.critical + data.cve.high > 0 ? '#dc2626' : 'var(--text-secondary)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: data.cve.critical + data.cve.high > 0 ? 'var(--danger-text)' : 'var(--text-secondary)' }}>
             <ShieldAlert size={12} />
             {data.cve.critical > 0 && <b>{data.cve.critical} CRIT</b>}
             {data.cve.high > 0 && <b>{data.cve.high} HIGH</b>}
@@ -185,7 +184,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <>
               <button type="button" onClick={planUpgrade} disabled={draft === 'busy' || draft === 'done'} aria-busy={draft === 'busy'}
                 style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, cursor: draft === 'done' ? 'default' : 'pointer',
-                  border: `1px solid ${draft === 'done' ? '#6ee7b7' : 'var(--border)'}`, background: draft === 'done' ? '#ecfdf5' : 'var(--surface)', color: draft === 'done' ? '#059669' : draft === 'err' ? '#dc2626' : 'var(--text-primary)' }}>
+                  border: `1px solid ${draft === 'done' ? 'var(--success-border)' : 'var(--border)'}`, background: draft === 'done' ? 'var(--success-bg)' : 'var(--surface)', color: draft === 'done' ? 'var(--success-text)' : draft === 'err' ? 'var(--danger-text)' : 'var(--text-primary)' }}>
                 {draft === 'busy' ? <Loader2 aria-hidden="true" size={12} className="animate-spin" /> : draft === 'done' ? <Check aria-hidden="true" size={12} /> : <ClipboardPlus aria-hidden="true" size={12} />}
                 {draft === 'busy' ? t('Připravuji…', 'Drafting…') : draft === 'done' ? t('Návrh ve frontě', 'Queued') : draft === 'err' ? t('Zkusit znovu', 'Try again') : <><ArrowUpCircle aria-hidden="true" size={12} style={{ display: 'none' }} />{t('Naplánovat upgrade', 'Plan upgrade')}</>}
               </button>
