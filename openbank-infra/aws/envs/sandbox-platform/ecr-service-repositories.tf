@@ -72,11 +72,12 @@ locals {
   # network edge, or live service. Remove this entry in the same PR that adds the
   # first exact GitOps image pin. The resource precondition below prevents this exception from
   # silently becoming permanent after that pin exists.
-  # Empty since 2026-09-03: gitops/components/incentive/incentive-service.yaml now
-  # carries the first exact image pin (sandbox-bd090160), so the bootstrap entry
-  # graduated to the pinned set as its own precondition required. Keep the local +
-  # precondition: the next bounded bootstrap exception lands here the same way.
-  bootstrap_service_ecr_repositories = toset([])
+  # Context is staged with zero replicas and a non-ECR placeholder in PR #9959. The
+  # bootstrap-only deploy workflow proved that its build role cannot create this
+  # repository (run 34844988335), so the platform apply must create the empty namespace
+  # first. Remove this entry in the separately reviewed activation PR that pins the first
+  # signed sandbox image; the precondition below makes that removal mandatory.
+  bootstrap_service_ecr_repositories = toset(["openbank-context-service"])
 
   service_ecr_repositories = setunion(
     local.gitops_image_repositories,

@@ -1,5 +1,7 @@
-# Staged at zero until auto-deploy publishes and pins the first attested image. The activation
-# change only raises replicas; all data, identity and policy dependencies are provisioned here.
+# Staged at zero while the platform apply creates the empty ECR repository. Then the artifact-only
+# auto-deploy builds, scans, signs and attests the first image. A separate reviewed activation
+# change replaces the placeholder with that immutable sandbox tag, removes the temporary ECR
+# bootstrap entry and raises replicas; all data, identity and policy dependencies land here first.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
