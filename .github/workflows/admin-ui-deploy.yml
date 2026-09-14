@@ -421,30 +421,26 @@ jobs:
             } | sort -u
           )
 
-          latest_main_artifact() {
-            local artifact_name="$1" page artifact
-            # Artifact results are newest-first for this exact name.  Five pages
-            # cap this best-effort collector at 295 read calls for 59 components;
-            # a hit normally arrives on page one.
-            for page in 1 2 3 4 5; do
-              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
-                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
-                2>/dev/null || true)"
-              if [ -n "${artifact}" ]; then
-                printf '%s\n' "${artifact}"
-                return 0
-              fi
-            done
-            return 1
-          }
+          ARTIFACT_NAMES=()
+          for svc in "${SERVICES[@]}"; do
+            ARTIFACT_NAMES+=("test-intelligence-${svc}")
+          done
+          LOOKUP_RESULT="$(mktemp)"
+          # Resolve the inventory before downloading anything. API and malformed-
+          # JSON failures are not absence: abort rather than baking an incomplete
+          # Test Intelligence snapshot and stop amplifying an exhausted quota.
+          python3 .github/scripts/find-latest-main-artifacts.py \
+            --repo "${REPO}" "${ARTIFACT_NAMES[@]}" > "${LOOKUP_RESULT}"
+          mapfile -t ARTIFACT_IDS < "${LOOKUP_RESULT}"
 
           DOWNLOADED=0
-          for svc in "${SERVICES[@]}"; do
+          for index in "${!SERVICES[@]}"; do
+            svc="${SERVICES[$index]}"
             art_name="test-intelligence-${svc}"
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="$(latest_main_artifact "${art_name}" || true)"
+            art_id="${ARTIFACT_IDS[$index]:-}"
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
