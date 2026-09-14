@@ -48,6 +48,21 @@
   --sidebar-footer-scope: #5a6b83;
   --sidebar-on-accent: #fff;
   --overlay-scrim: rgba(15, 23, 42, 0.68);
+  /* Explorer is branded education, not a status surface; its fixed palette is
+     shared so every learning entry point remains visually identical. */
+  --explorer-guide-start: #071b43;
+  --explorer-guide-mid: #0a3d91;
+  --explorer-guide-end: #1262b7;
+  --explorer-guide-accent: #63e7ff;
+  --explorer-guide-portrait: #06152f;
+  --explorer-guide-on-brand: #fff;
+  --explorer-guide-mask: #000;
+  --explorer-guide-glow: rgba(0, 209, 255, 0.2);
+  --explorer-guide-border: rgba(0, 209, 255, 0.24);
+  --explorer-guide-pattern: rgba(255, 255, 255, 0.18);
+  --explorer-guide-body: rgba(255, 255, 255, 0.8);
+  --explorer-guide-shadow: rgba(10, 61, 145, 0.14);
+  --explorer-guide-portrait-shadow: rgba(0, 0, 0, 0.16);
 
   /* ── Content surface ── */
   --bg:                   #fafafa; /* slightly cleaner off-white */
