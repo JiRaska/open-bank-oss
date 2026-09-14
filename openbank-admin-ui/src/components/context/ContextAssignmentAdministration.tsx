@@ -21,6 +21,7 @@ export function ContextAssignmentAdministration() {
   const [hours, setHours] = useState(8)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [decisionIntent, setDecisionIntent] = useState<{ id: string; approve: boolean } | null>(null)
   const [revokeIntent, setRevokeIntent] = useState<string | null>(null)
   const isAdmin = session?.user?.roles?.includes('ROLE_ADMIN') ?? false
 
@@ -66,7 +67,7 @@ export function ContextAssignmentAdministration() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }),
       })
       if (!response.ok) throw new Error('decision rejected')
-      setMessage(t('Rozhodnutí bylo auditně zaznamenáno.', 'The decision was recorded in the audit trail.')); await load()
+      setDecisionIntent(null); setMessage(t('Rozhodnutí bylo auditně zaznamenáno.', 'The decision was recorded in the audit trail.')); await load()
     } catch { setMessage(t('Rozhodnutí nebylo přijato; maker nesmí schválit vlastní návrh.', 'The decision was rejected; a maker cannot approve their own proposal.')) }
     finally { setBusy(null) }
   }
@@ -92,7 +93,9 @@ export function ContextAssignmentAdministration() {
       <button className="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'propose'}>{busy === 'propose' ? t('Ukládám…', 'Saving…') : t('Navrhnout', 'Propose')}</button>
     </form>
     {message && <p role="status">{message}</p>}
-    {pending.length > 0 && <div><h3>{t('Čeká na checker', 'Awaiting checker')}</h3>{pending.map(item => <div key={item.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose}</span><button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} aria-busy={busy === `decision:${item.id}`} onClick={() => void decide(item.id, true)}>{t('Schválit', 'Approve')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void decide(item.id, false)}>{t('Zamítnout', 'Reject')}</button></div>)}</div>}
+    {pending.length > 0 && <div><h3>{t('Čeká na checker', 'Awaiting checker')}</h3>{pending.map(item => <div key={item.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose}</span><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('Navrhl', 'Proposed by')}: {item.makerId} · {t('Platí do', 'Valid until')}: {new Date(item.validTo).toLocaleString()}</span>{decisionIntent?.id === item.id
+      ? <span role="group" aria-label={decisionIntent.approve ? t('Potvrdit schválení přístupu', 'Confirm access approval') : t('Potvrdit zamítnutí přístupu', 'Confirm access rejection')} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 8 }}><button type="button" className={decisionIntent.approve ? 'btn btn-primary btn-sm' : 'btn btn-danger btn-sm'} disabled={busy !== null} aria-busy={busy === `decision:${item.id}`} onClick={() => void decide(item.id, decisionIntent.approve)}>{busy === `decision:${item.id}` ? t('Ukládám…', 'Saving…') : decisionIntent.approve ? t('Potvrdit schválení', 'Confirm approve') : t('Potvrdit zamítnutí', 'Confirm reject')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setDecisionIntent(null)}>{t('Zrušit', 'Cancel')}</button></span>
+      : <><button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => setDecisionIntent({ id: item.id, approve: true })}>{t('Schválit', 'Approve')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setDecisionIntent({ id: item.id, approve: false })}>{t('Zamítnout', 'Reject')}</button></>}</div>)}</div>}
     {active.length > 0 && <div><h3>{t('Aktivní přístupy', 'Active access')}</h3>{active.map(item => <div key={item.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose} · {new Date(item.validTo).toLocaleString()}</span>{revokeIntent === item.id
       ? <span role="group" aria-label={t('Potvrdit odvolání přístupu', 'Confirm access revocation')} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 8 }}><button type="button" className="btn btn-danger btn-sm" disabled={busy !== null} aria-busy={busy === `revoke:${item.id}`} onClick={() => void revoke(item.id)}>{busy === `revoke:${item.id}` ? t('Odvolávám…', 'Revoking…') : t('Potvrdit odvolání', 'Confirm revoke')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setRevokeIntent(null)}>{t('Zrušit', 'Cancel')}</button></span>
       : <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setRevokeIntent(item.id)}>{t('Odvolat', 'Revoke')}</button>}</div>)}</div>}
