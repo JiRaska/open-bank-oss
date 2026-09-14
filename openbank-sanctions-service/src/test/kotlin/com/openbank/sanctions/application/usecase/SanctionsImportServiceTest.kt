@@ -65,6 +65,78 @@ class SanctionsImportServiceTest {
         return "http://127.0.0.1:${httpServer.address.port}/feed"
     }
 
+    @Test
+    fun `unchanged CSV is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce("id,schema,name\nfixture-1,Person,Example Person\n", "text/csv")
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("fixture-1")) } returns 0
+
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `unchanged OFAC is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce(
+            "<sdnList><sdnEntry><uid>1</uid><lastName>Example</lastName></sdnEntry></sdnList>",
+            "application/xml",
+        )
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `unchanged FSF is a successful nonempty import`(): Unit = runBlocking {
+        val url = serveOnce(
+            """
+                <export xmlns="http://eu.europa.ec/fpi/fsd/export">
+                    <sanctionEntity logicalId="42">
+                        <subjectType code="person"/>
+                        <nameAlias wholeName="Example Person" strong="true" logicalId="1"/>
+                    </sanctionEntity>
+                </export>
+            """.trimIndent(),
+            "application/xml",
+        )
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, setOf("eu-fsf-42")) } returns 0
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(1)
+    }
+
+    @Test
+    fun `empty CSV never deactivates the existing list`(): Unit = runBlocking {
+        val url = serveOnce("id,schema,name\n", "text/csv")
+        coEvery { entryRepo.deactivateMissing(any(), any()) } returns 7
+
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    @Test
+    fun `empty FSF never deactivates the existing list`(): Unit = runBlocking {
+        val url = serveOnce("<export xmlns=\"http://eu.europa.ec/fpi/fsd/export\"/>", "application/xml")
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+        coEvery { entryRepo.deactivateMissing(any(), any()) } returns 7
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
     // ──── normalizeForSearch ─────────────────────────────────────────────────
 
     @Test
@@ -226,9 +298,7 @@ class SanctionsImportServiceTest {
             "os-3,Person,,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        // Both rows are skipped (blank line, blank name) — the reconciliation sweep at the end
-        // still runs (the stream completed without error), just with an empty present set.
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns 0
+        // A feed with no usable rows must preserve the previously stored list.
 
         val result = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
 
