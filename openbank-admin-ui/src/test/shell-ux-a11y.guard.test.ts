@@ -25,4 +25,11 @@ describe('shared shell interaction and icon accessibility contract', () => {
     expect(sidebar).toMatch(/<Icon aria-hidden="true" size=\{16\}/)
     expect(sidebar).toMatch(/<Lock aria-hidden="true"/)
   })
+
+  it('keeps command search immediate while deferring its closed dialog implementation', () => {
+    expect(header).toContain("import('@/components/search/CommandPalette')")
+    expect(header).toContain('{paletteOpen && <CommandPalette open')
+    expect(header).toContain("e.key.toLowerCase() === 'k'")
+    expect(header).not.toContain("import { CommandPalette } from '@/components/search/CommandPalette'")
+  })
 })

@@ -5,14 +5,22 @@
 'use client'
 
 import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X, Moon, Sun } from 'lucide-react'
+import dynamic from 'next/dynamic'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useTheme } from '@/lib/theme/useTheme'
-import { CommandPalette } from '@/components/search/CommandPalette'
 import styles from './Header.module.css'
+
+// The palette is closed on first paint and Radix Dialog is otherwise part of every
+// operator route's initial shell. Load that interaction only when the operator asks
+// for it; the trigger and global shortcut remain immediately available.
+const CommandPalette = dynamic(
+  () => import('@/components/search/CommandPalette').then(module => module.CommandPalette),
+  { ssr: false },
+)
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
@@ -123,7 +131,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
           borderRadius: '4px', color: 'var(--text-secondary)', fontFamily: 'inherit',
         }}>⌘K</kbd>
       </button>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      {paletteOpen && <CommandPalette open onClose={() => setPaletteOpen(false)} />}
 
       {/* Actions */}
       <div className={styles.actions}>
