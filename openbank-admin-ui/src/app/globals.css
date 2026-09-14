@@ -165,6 +165,35 @@
   --chart-series-6: #ef4444;
   --chart-series-7: #94a3b8;
 
+  /* Test Intelligence is an intentionally dark, theme-stable evidence canvas.
+   * Keep its categorical stages and contrast surfaces owned here so the
+   * educational flow cannot drift into a page-local theme system. */
+  --ti-canvas-start: #07111e;
+  --ti-canvas-middle: #0b1626;
+  --ti-canvas-end: #101426;
+  --ti-stage-surface: #0f1d2f;
+  --ti-stage-surface-deep: #0a1423;
+  --ti-ink: #dceeff;
+  --ti-copy: #91a4ba;
+  --ti-copy-muted: #71849a;
+  --ti-grid: #7dd3fc;
+  --ti-mask: #000000;
+  --ti-beam: #ffffff;
+  --ti-stage-change: #38bdf8;
+  --ti-stage-prove: #22c55e;
+  --ti-stage-runtime: #a78bfa;
+  --ti-stage-challenge: #fb923c;
+  --ti-stage-observe: #2dd4bf;
+  --ti-stage-reason: #f472b6;
+  --ti-stage-decide: #60a5fa;
+  --ti-success-copy: #86efac;
+  --ti-warning-copy: #fdba74;
+  --ti-boundary: #fbbf24;
+  --ti-state-passed: #4ade80;
+  --ti-state-failed: #f87171;
+  --ti-state-unresolved: #94a3b8;
+  --ti-shadow: #020817;
+
   /* Authentication is a branded trust boundary. Its story panel remains visually
    * stable across themes, while the access panel consumes the shared semantic
    * surfaces below. Keeping this compact palette here prevents the login module
