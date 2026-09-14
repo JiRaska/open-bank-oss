@@ -110,6 +110,16 @@ class DriverTest(unittest.TestCase):
             with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "after final"):
                 runner.parse_stream(stream() + "\n" + json.dumps(event), "correctness", {})
 
+    def test_wrapped_last_attempt_correlates_without_rewriting_evidence(self):
+        response = dict(verdict="NO_FINDINGS", findings=[], coverage=[])
+        wrapped = {"$PARAMETER_VALUE": json.dumps(response)}
+        block = dict(type="tool_use", name="StructuredOutput", input=wrapped)
+        report = runner.parse_stream(stream(content=[block], result=response), "correctness", {})
+        self.assertEqual(report["structured_output_attempts"], [wrapped])
+        wrong = dict(response, verdict="FINDINGS")
+        with self.assertRaisesRegex(ValueError, "last structured output"):
+            runner.parse_stream(stream(content=[block], result=wrong), "correctness", {})
+
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"

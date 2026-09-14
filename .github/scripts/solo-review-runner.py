@@ -160,7 +160,8 @@ def parse_stream(raw, slot, subject):
     require(tools == 0, "review used execution tools")
     attempts = [c.get("input") for c in output_calls]
     require(all(isinstance(a, dict) for a in attempts), "malformed structured output attempt")
-    require(not attempts or proof.digest(attempts[-1]) == proof.digest(response),
+    normalized = [proof.normalize_output_attempt(a) for a in attempts]
+    require(not normalized or proof.digest(normalized[-1]) == proof.digest(response),
             "last structured output disagrees with final result")
     # Preserve every draft: the independent verifier rejects any earlier finding,
     # even if the final answer claims NO_FINDINGS. Native results may have no carrier.

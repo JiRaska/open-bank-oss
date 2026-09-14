@@ -126,7 +126,7 @@ def validate_reports(bundle):
             require(all(set(a) == {"verdict", "findings", "coverage"}
                         and a.get("verdict") == "NO_FINDINGS" and a.get("findings") == [] for a in decoded),
                     "earlier output contains findings or an unresolved verdict")
-            require(not attempts or digest(attempts[-1]) == digest(response), "final output differs from attempt history")
+            require(not decoded or digest(decoded[-1]) == digest(response), "final output differs from attempt history")
         coverage = response.get("coverage", [])
         require(len(coverage) == len(files) and {c.get("path") for c in coverage} == set(files),
                 "review omitted changed files")
