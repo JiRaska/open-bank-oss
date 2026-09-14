@@ -27,28 +27,28 @@ export function ServerlessLegend() {
 
   const rows: Row[] = [
     {
-      tier: 'T0', color: '#6b7280',
+      tier: 'T0', color: 'var(--text-secondary)',
       name: () => t('Vždy běží', 'Always-on'),
       tech: () => t('bez škálování na nulu — money-path / regulatorně nepřetržité',
                     'no scale-to-zero — money-path / regulator-continuous'),
       idle: () => t('plný', 'full'),
     },
     {
-      tier: 'T1', color: '#d97706',
+      tier: 'T1', color: 'var(--warning-text)',
       name: () => t('HTTP → 0', 'HTTP → 0'),
       tech: () => t('KEDA HTTP add-on + Quarkus native image (alternativa: Knative Serving)',
                     'KEDA HTTP add-on + Quarkus native image (alternative: Knative Serving)'),
       idle: () => t('≈ nula', '≈ zero'),
     },
     {
-      tier: 'T2', color: '#059669',
+      tier: 'T2', color: 'var(--success-text)',
       name: () => t('Event → 0', 'Event → 0'),
       tech: () => t('KEDA ScaledObject na Kafka consumer-group lag',
                     'KEDA ScaledObject on Kafka consumer-group lag'),
       idle: () => t('≈ nula', '≈ zero'),
     },
     {
-      tier: 'T3', color: '#2563eb',
+      tier: 'T3', color: 'var(--info-text)',
       name: () => t('Cron / Job', 'Cron / Job'),
       tech: () => t('Kubernetes CronJob — bez rezidentního podu',
                     'Kubernetes CronJob — no resident pod'),
@@ -69,7 +69,7 @@ export function ServerlessLegend() {
           color: 'var(--text-primary)', textAlign: 'left',
         }}
       >
-        <Zap aria-hidden="true" size={15} style={{ color: '#059669' }} />
+        <Zap aria-hidden="true" size={15} style={{ color: 'var(--success-text)' }} />
         <span style={{ fontSize: '13px', fontWeight: 600 }}>
           {t('Serverless tiery a plán (škálování na nulu)', 'Serverless tiers & plan (scale-to-zero)')}
         </span>
@@ -89,7 +89,7 @@ export function ServerlessLegend() {
               <div key={r.tier} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '12px' }}>
                 <span style={{
                   flexShrink: 0, fontWeight: 700, color: r.color,
-                  border: `1px solid ${r.color}55`, borderRadius: '6px',
+                  border: `1px solid color-mix(in srgb, ${r.color} 33.3%, transparent)`, borderRadius: '6px',
                   padding: '1px 7px', minWidth: '30px', textAlign: 'center',
                 }}>{r.tier}</span>
                 <div style={{ flex: 1 }}>
