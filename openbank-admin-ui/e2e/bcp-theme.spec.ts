@@ -46,11 +46,13 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`keeps degraded compliance evidence readable and accessible in ${theme} theme`, async ({ page }) => {
-    await page.goto('/docs/bcp')
     if (theme === 'dark') {
-      await page.locator('html').evaluate(element => element.classList.add('dark'))
-      await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
+      // Set the operator preference before hydration. Mutating the class after navigation races
+      // useTheme(), which correctly reapplies the stored preference on mount.
+      await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'dark'))
     }
+    await page.goto('/docs/bcp')
+    if (theme === 'dark') await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
 
     await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
     await expect(page.getByText(/Compliance gate failed — payment processing BLOCKED|Compliance gate selhala — platební zpracování BLOKOVÁNO/)).toBeVisible()

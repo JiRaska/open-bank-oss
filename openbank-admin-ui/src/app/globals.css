@@ -360,7 +360,10 @@ main {
 /* ── Spin animation ── */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
-@keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+/* Entry motion must not fade foreground text through low-contrast intermediate states.
+   A short translation retains spatial continuity without making freshly rendered controls
+   temporarily fail the same WCAG contrast contract they satisfy at rest. */
+@keyframes fadeIn { from { transform:translateY(8px); } to { transform:translateY(0); } }
 @keyframes slideIn { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }
 @keyframes slideInRight { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:translateX(0); } }
 

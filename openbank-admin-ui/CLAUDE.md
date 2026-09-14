@@ -193,10 +193,10 @@ independent review gate.
   `context.addCookies()`. No production auth/middleware code is touched. Every new e2e spec needs
   this same sign-in. The `NEXTAUTH_SECRET` used to sign the cookie (`e2e-test-secret` by
   default, overridable via env) is **test-only** — it signs a session on the ephemeral
-  `next dev` server this test run spawns, never a deployed environment; `authOptions.ts`'s
+  Next.js server this test run spawns, never a deployed environment; `authOptions.ts`'s
   `requiredSecret()` already refuses any dev fallback once `NODE_ENV=production`.
-- **Locators must not collide with Next.js dev-mode's own DOM.** `playwright.config.ts`'s
-  `webServer` runs `next dev`, and a hidden error/warning overlay can inject elements that match a
+- **Locators must not collide with Next.js dev-mode's own DOM.** Local Playwright runs use
+  `next dev` (CI builds first and uses `next start`), and a hidden error/warning overlay can inject elements that match a
   naive text regex (e.g. `/\d+\/\d+/` also matches the overlay's own pagination badge). Scope
   assertions to `main` (page content) or a specific landmark rather than a bare `page.getByText`.
 - The `E2E tests (Playwright)` CI step is enforced inside the ui-build job (#653) and, since
