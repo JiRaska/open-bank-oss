@@ -43,6 +43,8 @@ data class ClearingItem(
     val amount: BigDecimal,
     val currency: String = "EUR",
     val status: ClearingStatus = ClearingStatus.PENDING,
+    /** Monotonic aggregate revision used by outbox consumers for replay-safe evidence. */
+    val revision: Long = 0,
     val valueDate: LocalDate? = null,
     val endToEndId: String? = null,
     val remittanceInfo: String? = null,

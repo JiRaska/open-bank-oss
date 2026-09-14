@@ -34,6 +34,8 @@ class ClearingOutboxDispatcher(
     private val publisher: OutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
+    @ConfigProperty(name = "openbank.outbox.batch-size", defaultValue = "250")
+    override val dispatchBatchSize: Int,
     metrics: DomainMetrics,
 ) : AbstractOutboxDispatcher(metrics) {
     override val outboxRepository: OutboxRepository get() = repo
