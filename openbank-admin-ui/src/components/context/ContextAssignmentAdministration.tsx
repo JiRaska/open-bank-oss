@@ -20,6 +20,8 @@ export function ContextAssignmentAdministration() {
   const [purpose, setPurpose] = useState('PAYMENT_COMPLAINT')
   const [hours, setHours] = useState(8)
   const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [revokeIntent, setRevokeIntent] = useState<string | null>(null)
   const isAdmin = session?.user?.roles?.includes('ROLE_ADMIN') ?? false
 
   const load = useCallback(async () => {
@@ -44,7 +46,7 @@ export function ContextAssignmentAdministration() {
   if (!isAdmin) return null
 
   async function propose(event: FormEvent) {
-    event.preventDefault(); setMessage(null)
+    event.preventDefault(); setMessage(null); setBusy('propose')
     try {
       const validTo = new Date(Date.now() + Math.min(Math.max(hours, 1), 24 * 31) * 3_600_000).toISOString()
       const response = await fetch('/api/context/assignments', {
@@ -54,9 +56,11 @@ export function ContextAssignmentAdministration() {
       if (!response.ok) throw new Error('proposal rejected')
       setPrincipalId(''); setCaseId(''); setMessage(t('Návrh čeká na nezávislé schválení.', 'The proposal awaits independent approval.')); await load()
     } catch { setMessage(t('Návrh přístupu se nepodařilo uložit.', 'The access proposal could not be saved.')) }
+    finally { setBusy(null) }
   }
 
   async function decide(id: string, approve: boolean) {
+    setBusy(`decision:${id}`)
     try {
       const response = await fetch(`/api/context/assignments/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }),
@@ -64,14 +68,17 @@ export function ContextAssignmentAdministration() {
       if (!response.ok) throw new Error('decision rejected')
       setMessage(t('Rozhodnutí bylo auditně zaznamenáno.', 'The decision was recorded in the audit trail.')); await load()
     } catch { setMessage(t('Rozhodnutí nebylo přijato; maker nesmí schválit vlastní návrh.', 'The decision was rejected; a maker cannot approve their own proposal.')) }
+    finally { setBusy(null) }
   }
 
   async function revoke(id: string) {
+    setBusy(`revoke:${id}`)
     try {
       const response = await fetch(`/api/context/assignments/${id}`, { method: 'DELETE' })
       if (!response.ok) throw new Error('revocation rejected')
-      setMessage(t('Přístup byl okamžitě odvolán.', 'Access was revoked immediately.')); await load()
+      setRevokeIntent(null); setMessage(t('Přístup byl okamžitě odvolán.', 'Access was revoked immediately.')); await load()
     } catch { setMessage(t('Odvolání přístupu selhalo.', 'Access revocation failed.')) }
+    finally { setBusy(null) }
   }
 
   return <details className="card" style={{ padding: 18, marginBottom: 24 }}>
@@ -82,11 +89,13 @@ export function ContextAssignmentAdministration() {
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
       <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option></select>
       <input className="input" type="number" min={1} max={744} value={hours} onChange={e => setHours(Number(e.target.value))} aria-label={t('Platnost v hodinách', 'Validity in hours')} />
-      <button className="btn btn-primary">{t('Navrhnout', 'Propose')}</button>
+      <button className="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'propose'}>{busy === 'propose' ? t('Ukládám…', 'Saving…') : t('Navrhnout', 'Propose')}</button>
     </form>
     {message && <p role="status">{message}</p>}
-    {pending.length > 0 && <div><h3>{t('Čeká na checker', 'Awaiting checker')}</h3>{pending.map(item => <div key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose}</span><button className="btn btn-primary btn-sm" onClick={() => void decide(item.id, true)}>{t('Schválit', 'Approve')}</button><button className="btn btn-secondary btn-sm" onClick={() => void decide(item.id, false)}>{t('Zamítnout', 'Reject')}</button></div>)}</div>}
-    {active.length > 0 && <div><h3>{t('Aktivní přístupy', 'Active access')}</h3>{active.map(item => <div key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose} · {new Date(item.validTo).toLocaleString()}</span><button className="btn btn-secondary btn-sm" onClick={() => void revoke(item.id)}>{t('Odvolat', 'Revoke')}</button></div>)}</div>}
+    {pending.length > 0 && <div><h3>{t('Čeká na checker', 'Awaiting checker')}</h3>{pending.map(item => <div key={item.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose}</span><button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} aria-busy={busy === `decision:${item.id}`} onClick={() => void decide(item.id, true)}>{t('Schválit', 'Approve')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void decide(item.id, false)}>{t('Zamítnout', 'Reject')}</button></div>)}</div>}
+    {active.length > 0 && <div><h3>{t('Aktivní přístupy', 'Active access')}</h3>{active.map(item => <div key={item.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}><code>{item.caseId}</code><span>{item.principalId} · {item.purpose} · {new Date(item.validTo).toLocaleString()}</span>{revokeIntent === item.id
+      ? <span role="group" aria-label={t('Potvrdit odvolání přístupu', 'Confirm access revocation')} style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 8 }}><button type="button" className="btn btn-danger btn-sm" disabled={busy !== null} aria-busy={busy === `revoke:${item.id}`} onClick={() => void revoke(item.id)}>{busy === `revoke:${item.id}` ? t('Odvolávám…', 'Revoking…') : t('Potvrdit odvolání', 'Confirm revoke')}</button><button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setRevokeIntent(null)}>{t('Zrušit', 'Cancel')}</button></span>
+      : <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => setRevokeIntent(item.id)}>{t('Odvolat', 'Revoke')}</button>}</div>)}</div>}
   </details>
 }
 
