@@ -3,11 +3,20 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Browser-side GlitchTip init (Next.js App Router runs this before hydration).
-// No-op when the DSN is unset (ADR-0075 inv. 2). See lib/telemetry/glitchtip.ts.
-import * as Sentry from '@sentry/nextjs'
+// Keep the sizeable SDK out of Next's root bundle: starting the import immediately still
+// installs monitoring during bootstrap, while hydration can parse and execute the product UI
+// without first paying the SDK's cost. The shared promise also preserves ordering when a route
+// transition starts before the import has settled.
 import { buildSentryOptions } from '@/lib/telemetry/glitchtip'
 
-Sentry.init(buildSentryOptions('browser'))
+type RouterTransitionStart = typeof import('@sentry/nextjs').captureRouterTransitionStart
+
+const sentryReady = import('@sentry/nextjs').then((Sentry) => {
+  Sentry.init(buildSentryOptions('browser'))
+  return Sentry
+})
 
 // Links client-side App-Router navigations to their pageload/transaction (Next 15.3+/16).
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart
+export const onRouterTransitionStart: RouterTransitionStart = (...args) => {
+  void sentryReady.then((Sentry) => Sentry.captureRouterTransitionStart(...args))
+}
