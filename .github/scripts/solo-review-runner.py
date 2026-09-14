@@ -135,13 +135,23 @@ def parse_stream(raw, slot, subject):
     assistant = [e["message"] for e in events if e.get("type") == "assistant"]
     models = {m.get("model") for m in assistant}
     require(len(models) == 1 and all(isinstance(m, str) and m for m in models), "missing observed model")
-    tools = sum(c.get("type") == "tool_use" for m in assistant for c in m.get("content", []))
-    require(tools == 0, "review used tools")
     result = results[0]
     response = result.get("structured_output")
     require(isinstance(response, dict), "model returned no structured review; no admission produced")
+    calls = [c for m in assistant for c in m.get("content", [])
+             if c.get("type") in ("tool_use", "server_tool_use")]
+    # Claude CLI --json-schema emits a StructuredOutput tool_use to deliver the answer.
+    # It has no repository/network side effect. Require exact identity and agreement with
+    # the final structured result; never exempt an arbitrary tool or trust its name alone.
+    output_calls = [c for c in calls if c.get("type") == "tool_use" and c.get("name") == "StructuredOutput"]
+    tools = len(calls) - len(output_calls)
+    require(tools == 0, "review used execution tools")
+    require(len(output_calls) <= 1, "ambiguous structured output calls")
+    require(all(isinstance(c.get("input"), dict) and proof.digest(c["input"]) == proof.digest(response)
+                for c in output_calls), "structured output disagrees with final result")
     return dict(slot=slot, session_id=result.get("session_id"), model=next(iter(models)),
-                tool_uses=tools, driver_success=True, subject_digest=proof.digest(subject),
+                tool_uses=tools, structured_output_uses=len(output_calls),
+                driver_success=True, subject_digest=proof.digest(subject),
                 response=response)
 
 

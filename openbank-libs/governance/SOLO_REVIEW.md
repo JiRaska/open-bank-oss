@@ -12,7 +12,7 @@ offline-tested component, not evidence that hosted reviews or acceptance have ru
 An author prepares the change; two separate AI sessions review the same immutable
 PR head using different observed models. Each receives the complete changed-file
 manifest and must explain its checks for every file. A failed invocation, omitted
-file, truncated input, tool invocation or unresolved finding blocks admission.
+file, truncated input, execution-tool invocation or unresolved finding blocks admission.
 Reviewer sessions cannot share conversation history or write repository state.
 
 Changes classified as protected by the existing agent guard additionally require
@@ -100,3 +100,21 @@ changed PR heads and diff bases, incomplete API enumeration, environment drift,
 skipped jobs and state changes during the complete API read sequence. They perform
 no network requests or model calls. Hosted producer and rollout validation remain
 required before activation.
+
+## Structured result transport
+
+Claude CLI can deliver `--json-schema` output through its internal `StructuredOutput`
+call ([upstream transport example](https://github.com/anthropics/claude-agent-sdk-python/issues/1013)).
+The reader distinguishes that output carrier from execution tools: at most one exact
+`StructuredOutput` call is accepted, only when its input matches the final
+`structured_output` object. Both execution calls and server-side tool calls still block;
+an output carrier cannot excuse a sibling tool call. Evidence separately records
+`structured_output_uses`, while `tool_uses` counts execution calls. Findings and coverage
+validation are unchanged. No free-form JSON recovery or fallback verdict is introduced.
+
+The hosted pilot at policy `a5ae994db25543099305322d6657945a2529979f` failed both
+review slots with `review used tools`; its raw output was not retained, so this transport
+fix still requires a fresh hosted run to establish that it resolves that particular failure.
+The local provider smoke test could not authenticate; offline regressions are not hosted
+proof. Re-anchor only after owner acceptance of the new policy revision; this change does
+not update the external anchor, submit owner acceptance, or grant merge admission.

@@ -42,6 +42,23 @@ class DriverTest(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises((ValueError, KeyError)):
                 runner.parse_stream(raw, "correctness", {})
 
+    def test_structured_output_transport_is_not_an_execution_tool(self):
+        response = dict(verdict="NO_FINDINGS", findings=[], coverage=[])
+        report = runner.parse_stream(stream(content=[dict(type="tool_use", name="StructuredOutput",
+                                     input=response)], result=response), "correctness", {})
+        self.assertEqual(report["tool_uses"], 0)
+        self.assertEqual(report["structured_output_uses"], 1)
+        self.assertEqual(report["response"], response)
+
+    def test_output_transport_cannot_hide_tools_or_replace_final_result(self):
+        response = dict(verdict="NO_FINDINGS", findings=[], coverage=[])
+        output = dict(type="tool_use", name="StructuredOutput", input=response)
+        for blocks in ([output, dict(type="tool_use", name="Bash", input={})],
+                       [dict(output, input={})], [dict(output, name="mcp__StructuredOutput")],
+                       [output, output], [dict(type="server_tool_use", name="web_search", input={})]):
+            with self.subTest(blocks=blocks), self.assertRaises(ValueError):
+                runner.parse_stream(stream(content=blocks, result=response), "security", {})
+
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"
