@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.1...domestic-payment-v0.21.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.0...domestic-payment-v0.20.1) (2026-09-13)
 
 
