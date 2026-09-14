@@ -28,8 +28,8 @@ function rawColourCount(): number {
 
 describe('admin UI semantic colour migration', () => {
   it('does not add raw hexadecimal colours outside the token stylesheet', () => {
-    // Baseline captured after migrating service-domain and PID feedback colours to shared tokens.
+    // Baseline captured after migrating service-domain, PID and Temporal colours to shared tokens.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(711)
+    expect(rawColourCount()).toBeLessThanOrEqual(704)
   })
 })

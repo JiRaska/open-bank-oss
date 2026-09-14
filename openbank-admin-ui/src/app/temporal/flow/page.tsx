@@ -88,7 +88,7 @@ export default function TemporalFlowPage() {
             display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
             borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
             border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
-            background: flow ? 'var(--accent-strong)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
+            background: flow ? 'var(--accent-strong)' : 'var(--surface)', color: flow ? 'var(--text-inverse)' : 'var(--text-secondary)',
           }}>
           {flow ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}{t('Tok', 'Flow')}
         </button>
@@ -138,7 +138,7 @@ export default function TemporalFlowPage() {
           return (
             <div key={wi} className="card" style={{ padding: '14px 16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                <div style={{ width: '26px', height: '26px', borderRadius: '7px', background: `${w.color}1a`, color: w.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ width: '26px', height: '26px', borderRadius: '7px', background: `color-mix(in srgb, ${w.color} 10%, transparent)`, color: w.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Icon size={15} />
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(w.serviceCs, w.serviceEn)}</div>
@@ -148,13 +148,13 @@ export default function TemporalFlowPage() {
               <svg viewBox={`0 0 ${WIDTH} ${SVG_H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
                 <defs>
                   <ArrowMarker id={`tf-arrow-${wi}`} color={w.color} />
-                  <ArrowMarker id={`tf-arrow-comp-${wi}`} color="#dc2626" />
+                  <ArrowMarker id={`tf-arrow-comp-${wi}`} color="var(--danger)" />
                 </defs>
                 {/* segments between consecutive steps */}
                 {steps.slice(0, -1).map((_, i) => {
                   const isCompEdge = i === n - 2 // edge into the last (compensation) step
                   const x1 = cx(i) + boxW / 2, x2 = cx(i + 1) - boxW / 2, y = ROW_Y
-                  const color = isCompEdge ? '#dc2626' : w.color
+                  const color = isCompEdge ? 'var(--danger)' : w.color
                   const pid = `tf-${wi}-${i}`
                   const showComp = isCompEdge ? failing : true
                   return (
@@ -170,7 +170,7 @@ export default function TemporalFlowPage() {
                 {/* step boxes */}
                 {steps.map((label, i) => {
                   const isComp = i === n - 1
-                  const color = isComp ? '#dc2626' : w.color
+                  const color = isComp ? 'var(--danger)' : w.color
                   const x = cx(i) - boxW / 2
                   const short = label.length > 30 ? label.slice(0, 29) + '…' : label
                   return (
@@ -179,7 +179,7 @@ export default function TemporalFlowPage() {
                       <rect x={x} y={ROW_Y - BOX_H / 2} width={boxW} height={BOX_H} rx={8}
                         fill="var(--surface)" stroke={color} strokeWidth={1.4} strokeDasharray={isComp ? '4,3' : undefined} />
                       <circle cx={x + 13} cy={ROW_Y - BOX_H / 2 + 13} r={8} fill={color} />
-                      <text x={x + 13} y={ROW_Y - BOX_H / 2 + 16} fontSize="9" fill="#fff" textAnchor="middle" fontWeight="700">{isComp ? 'C' : i + 1}</text>
+                      <text x={x + 13} y={ROW_Y - BOX_H / 2 + 16} fontSize="9" fill="var(--text-inverse)" textAnchor="middle" fontWeight="700">{isComp ? 'C' : i + 1}</text>
                       <text x={x + 26} y={ROW_Y + 4} fontSize="9.5" fill="var(--text-primary)" fontWeight="500">{short}</text>
                     </g>
                   )
@@ -193,11 +193,11 @@ export default function TemporalFlowPage() {
       {/* Legend */}
       <div style={{ marginTop: '14px', display: 'flex', gap: '18px', flexWrap: 'wrap', fontSize: '11px', color: 'var(--text-tertiary)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#6366f1" strokeWidth="1.6" /></svg>
+          <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="var(--accent)" strokeWidth="1.6" /></svg>
           {t('Šťastná cesta ságy', 'Saga happy path')}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#dc2626" strokeWidth="1.6" strokeDasharray="5,3" /></svg>
+          <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="var(--danger)" strokeWidth="1.6" strokeDasharray="5,3" /></svg>
           {t('Kompenzace (jen při selhání)', 'Compensation (only on failure)')}
         </div>
         <div>{t('Krok „C" = kompenzační aktivita', 'Step “C” = compensation activity')}</div>
