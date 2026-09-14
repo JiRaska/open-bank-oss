@@ -30,6 +30,6 @@ describe('admin UI semantic colour migration', () => {
   it('does not add raw hexadecimal colours outside the token stylesheet', () => {
     // Baseline captured after migrating service-domain, PID, Temporal and identity-case colours.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(681)
+    expect(rawColourCount()).toBeLessThanOrEqual(674)
   })
 })
