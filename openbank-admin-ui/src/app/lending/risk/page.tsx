@@ -22,6 +22,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { RefreshCw, ShieldAlert, Activity, Scale, AlertTriangle, Layers, FileText } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -36,7 +37,32 @@ import {
   priceBandTotals, reasonPareto, ruleHits, threshold, vintage, weeklyOutcomes,
 } from '@/components/lending/risk/model'
 import { PolicyTables } from '@/components/lending/risk/PolicyTables'
-import { AffordabilityScatter, BucketBars, C_STAGE, OutcomeTrend, ReasonPareto, StageMixPie } from '@/components/lending/risk/charts'
+
+const ChartPlaceholder = ({ height }: { height: number }) => (
+  <div aria-hidden="true" className="skeleton" style={{ height, width: '100%', borderRadius: 8 }} />
+)
+const OutcomeTrend = dynamic(
+  () => import('@/components/lending/risk/charts').then(module => module.OutcomeTrend),
+  { ssr: false, loading: () => <ChartPlaceholder height={240} /> },
+)
+const ReasonPareto = dynamic(
+  () => import('@/components/lending/risk/charts').then(module => module.ReasonPareto),
+  { ssr: false, loading: () => <ChartPlaceholder height={240} /> },
+)
+const AffordabilityScatter = dynamic(
+  () => import('@/components/lending/risk/charts').then(module => module.AffordabilityScatter),
+  { ssr: false, loading: () => <ChartPlaceholder height={280} /> },
+)
+const StageMixPie = dynamic(
+  () => import('@/components/lending/risk/charts').then(module => module.StageMixPie),
+  { ssr: false, loading: () => <ChartPlaceholder height={220} /> },
+)
+const BucketBars = dynamic(
+  () => import('@/components/lending/risk/charts').then(module => module.BucketBars),
+  { ssr: false, loading: () => <ChartPlaceholder height={220} /> },
+)
+
+const C_STAGE: Record<string, string> = { STAGE_1: '#6366f1', STAGE_2: '#f59e0b', STAGE_3: '#ef4444' }
 
 const UNKNOWN = '—'
 /** The server clamps to 1000; ask for it so the cap is a known number on the labels. */
