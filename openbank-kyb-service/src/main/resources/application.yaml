@@ -167,6 +167,13 @@ openbank:
     # Temporal timers-worker switch (rules.yaml: temporal_worker_switch_naming).
     worker:
       enabled: ${KYB_WORKER_ENABLED:true}
+    # Sandbox-only fictitious company — IČO 00000001, "OpenBank Demo s.r.o." — so business onboarding can
+    # be demonstrated end to end. OFF by default and it must stay so: a register that answers for a
+    # company that does not exist is an onboarding bypass anywhere but a sandbox. Only the sandbox
+    # deployment turns it on (gitops/components/kyb/kyb-service.yaml).
+    demo-entity:
+      enabled: ${OPENBANK_KYB_DEMO_ENTITY_ENABLED:false}
+      representative-name: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE:Oldřich Vaněk}
   temporal:
     # ⚠ BUILD-TIME PROPERTY (lending #6085): TemporalBusinessOnboardingWorkflowAdapter is selected
     # with @IfBuildProperty, resolved during augmentation and frozen into the image — a container

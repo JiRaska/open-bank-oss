@@ -32,6 +32,7 @@ fun SepaPayment.toEntity() = SepaPaymentEntity().also {
     it.transactionId = transactionId
     it.createdAt = createdAt
     it.updatedAt = updatedAt
+    it.revision = revision
 }
 
 fun SepaPaymentEntity.toDomain() = SepaPayment(
@@ -56,4 +57,5 @@ fun SepaPaymentEntity.toDomain() = SepaPayment(
     transactionId = transactionId,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    revision = revision,
 )

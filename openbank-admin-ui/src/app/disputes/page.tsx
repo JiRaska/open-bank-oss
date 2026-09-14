@@ -18,6 +18,8 @@ import {
   parseDisputeList,
   type DisputeRecord,
 } from '@/lib/disputes/disputePortfolio'
+import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
+import { ContextAssignmentAdministration } from '@/components/context/ContextAssignmentAdministration'
 
 export default function DisputesPage() {
   const { t, language } = useLanguage()
@@ -83,6 +85,9 @@ export default function DisputesPage() {
             {t('Zobrazen je poslední úspěšný snapshot; spory i SLA se od té doby mohly změnit.', 'Showing the last successful snapshot; disputes and SLA status may have changed since then.')}
           </p>
         </div>}
+
+        <ContextAssignmentAdministration />
+        <ComplaintContextInvestigation />
 
         {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {t('Aktualizuji spory; poslední snapshot zůstává dostupný.', 'Refreshing disputes; the last snapshot remains available.')}

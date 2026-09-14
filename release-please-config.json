@@ -439,6 +439,12 @@
       "exclude-paths": [
         "openbank-wealth-service/src/test"
       ]
+    },
+    "openbank-context-service": {
+      "component": "context-service",
+      "exclude-paths": [
+        "openbank-context-service/src/test"
+      ]
     }
   }
 }

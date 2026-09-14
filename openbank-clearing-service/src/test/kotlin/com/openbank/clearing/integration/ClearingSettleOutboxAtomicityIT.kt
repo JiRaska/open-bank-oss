@@ -27,10 +27,12 @@ import javax.sql.DataSource
  * each row version — so "same transaction" is read from the database, never inferred from row
  * presence: a three-transaction implementation satisfies every "the outbox row landed"
  * assertion the fleet already had, while still being able to lose
- * `openbank.clearing.batch.settled` on a crash between commits.
+ * `openbank.clearing.batch.settled` on a crash between commits. The repository also takes
+ * pessimistic locks on the batch and each item and validates the next aggregate revision before
+ * writing, so two concurrent settlement attempts cannot both publish evidence for one transition.
  *
  * Measured against the pre-fix three-call composition: batch xmin = 750, outbox xmin = 752 —
- * three distinct transactions. After the fix (`ClearingBatchRepository.settleWithEvent`, one
+ * three distinct transactions. After the fix (`ClearingBatchRepository.settleWithEvents`, one
  * `@WithTransaction` boundary owned by the repository) all THREE row kinds carry the same xmin.
  *
  * The item rows are asserted too, and that is not belt-and-braces. Measured: with the items
@@ -186,6 +188,16 @@ class ClearingSettleOutboxAtomicityIT {
                     netSettlementXmin,
                 )
                 .isEqualTo(batchXmin)
+
+            val itemEvidenceXmins = xmins(
+                conn,
+                "SELECT xmin FROM clearing_outbox WHERE event_type = 'openbank.clearing.item.cleared' " +
+                    "AND aggregate_id IN (SELECT id FROM clearing_items WHERE batch_id = '$batchId')",
+            )
+            assertThat(itemEvidenceXmins)
+                .describedAs("one item-cleared evidence row must commit with every settled item")
+                .hasSameSizeAs(itemXmins)
+                .containsOnly(batchXmin)
         }
     }
 

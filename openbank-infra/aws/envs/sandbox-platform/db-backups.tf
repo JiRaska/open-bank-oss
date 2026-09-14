@@ -276,6 +276,7 @@ locals {
     # The future Cluster uses barmanObjectStore under incentive-db; declaring its service account
     # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
     incentive = { namespace = "incentive", sa = "incentive-db" }
+    context   = { namespace = "context", sa = "context-db" }
   }
 }
 

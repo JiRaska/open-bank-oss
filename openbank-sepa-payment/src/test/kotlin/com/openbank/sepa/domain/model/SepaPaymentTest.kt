@@ -32,6 +32,7 @@ class SepaPaymentTest {
         assertThat(transitioned.status).isEqualTo(SepaPaymentStatus.COMPLETED)
         assertThat(transitioned.submittedAt).isEqualTo(now)
         assertThat(transitioned.completedAt).isEqualTo(now)
+        assertThat(transitioned.revision).isEqualTo(1)
     }
 
     private fun payment(status: SepaPaymentStatus = SepaPaymentStatus.RECEIVED) = SepaPayment(

@@ -114,7 +114,10 @@ openbank:
     enabled: true
     max-concurrent-requests: 500
   outbox:
-    poll-interval: 5s
+    # A full clearing cycle emits at most 1,000 item acknowledgements. Four bounded claims drain
+    # that burst without changing the per-item event contract or claiming unbounded rows.
+    batch-size: 250
+    poll-interval: 2s
     initial-delay: 5s
     dispatch-enabled: true
 

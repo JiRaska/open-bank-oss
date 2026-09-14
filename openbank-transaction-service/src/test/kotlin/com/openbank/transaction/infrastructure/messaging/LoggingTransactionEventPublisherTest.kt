@@ -45,7 +45,7 @@ class LoggingTransactionEventPublisherTest {
 
     private val publisher = LoggingTransactionEventPublisher(objectMapper, clock)
 
-    private fun transaction() = Transaction(
+    private fun transaction(originatingPaymentId: UUID? = null) = Transaction(
         id = UUID.randomUUID(),
         referenceNumber = "REF-1",
         type = TransactionType.TRANSFER,
@@ -64,14 +64,17 @@ class LoggingTransactionEventPublisherTest {
         failureReason = null,
         idempotencyKey = "idem-1",
         version = 1L,
+        originatingPaymentId = originatingPaymentId,
     )
 
     @Test
     fun `initiatedPayload carries eventType and sourceService for AuditConsumer attribution`() {
-        val node = objectMapper.readTree(publisher.initiatedPayload(transaction()))
+        val paymentId = UUID.randomUUID()
+        val node = objectMapper.readTree(publisher.initiatedPayload(transaction(paymentId)))
 
         assertThat(node.get("eventType").asText()).isEqualTo("TransactionInitiated")
         assertThat(node.get("sourceService").asText()).isEqualTo("transaction-service")
+        assertThat(node.get("originatingPaymentId").asText()).isEqualTo(paymentId.toString())
     }
 
     @Test

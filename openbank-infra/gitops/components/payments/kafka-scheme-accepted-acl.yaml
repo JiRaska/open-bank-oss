@@ -520,6 +520,8 @@ rules:
       # Without this the keystore ExternalSecret sits at SecretSyncedError, ArgoCD never
       # advances past sync-wave -1, and no pod is ever created — the #2749 failure class.
       - wealth-service
+      # ADR-0303: complaint and ICT-incident projection consumer, ns context.
+      - context-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

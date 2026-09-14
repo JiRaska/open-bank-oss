@@ -116,6 +116,7 @@ class KafkaDomesticPaymentEventPublisherTest {
         // event_type="UNKNOWN", source_service="unknown".
         assertThat(node.get("eventType").asText()).isEqualTo("DOMESTIC_PAYMENT_CREATED")
         assertThat(node.get("sourceService").asText()).isEqualTo("domestic-payment")
+        assertThat(node.get("aggregateRevision").asLong()).isEqualTo(payment.aggregateRevision)
     }
 
     @Test
@@ -149,6 +150,7 @@ class KafkaDomesticPaymentEventPublisherTest {
 
         assertThat(node.get("eventType").asText()).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
         assertThat(node.get("sourceService").asText()).isEqualTo("domestic-payment")
+        assertThat(node.get("aggregateRevision").asLong()).isEqualTo(current.aggregateRevision)
     }
 
     @Test
