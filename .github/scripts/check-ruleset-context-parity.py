@@ -254,7 +254,11 @@ def _matrix_combos(matrix: object) -> list[dict] | None:
     axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
     if any(not isinstance(v, list) for v in axes.values()):
         return None
-    combos = [dict(zip(axes, values)) for values in itertools.product(*axes.values())] if axes else []
+    combos = (
+        [dict(zip(axes, values, strict=True)) for values in itertools.product(*axes.values())]
+        if axes
+        else []
+    )
     for ex in matrix.get("exclude") or []:
         if isinstance(ex, dict):
             combos = [c for c in combos if not all(c.get(k) == v for k, v in ex.items())]
@@ -288,7 +292,7 @@ def _job_context_names(job_id: str, job: dict) -> set[str]:
     for combo in combos:
         if "name" in job:
             rendered = _MATRIX_REF.sub(
-                lambda m: _matrix_value(combo[m.group(1)]) if m.group(1) in combo else m.group(0),
+                lambda m, c=combo: _matrix_value(c[m.group(1)]) if m.group(1) in c else m.group(0),
                 literal,
             )
             names.add(rendered)
