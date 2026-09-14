@@ -46,7 +46,7 @@ function installSources(failed = '') {
       amlCases: [{ id: 'case-alpha', screeningType: 'TRANSACTION_MONITORING', riskLevel: 'MEDIUM', status: 'CLEARED', alertCode: 'TM01', screenedAt: '2026-07-22T10:00:00Z' }],
       devices: [{ id: 'device-alpha', platform: 'IOS', status: 'ACTIVE', registeredAt: '2026-07-23T10:00:00Z' }],
       documents: [{ id: 'document-alpha', templateCode: 'ACCOUNT_AGREEMENT', templateVersion: '1', status: 'GENERATED', productRef: 'product-current', createdAt: '2026-07-20T10:00:00Z' }],
-      unavailable: failed ? [failed] : [],
+      unavailable: failed ? [failed] : [], truncated: [],
     })
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -107,7 +107,7 @@ describe('Customer context graph', () => {
 
   it('bounds notification nodes and reports truncation', () => {
     const result = buildCustomerGraph(evidence, {
-      accounts: [], cards: [], lendingApplications: [], amlCases: [], devices: [], documents: [], unavailable: [],
+      accounts: [], cards: [], lendingApplications: [], amlCases: [], devices: [], documents: [], unavailable: [], truncated: [],
       notifications: Array.from({ length: 101 }, (_, index) => ({
         id: `notification-${index}`, channel: 'PUSH', template: 'NOTICE', status: 'SENT',
         createdAt: '2026-09-13T10:00:00Z',

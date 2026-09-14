@@ -59,18 +59,26 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
   const accounts = bySource.get('accounts')!
   const cards = bySource.get('cards')!
   const notifications = bySource.get('notifications')!
+  const parsed = {
+    accounts: accounts.available ? parseAccounts(accounts.body) : [],
+    cards: cards.available ? parseCards(cards.body) : [],
+    notifications: notifications.available ? parseNotifications(notifications.body) : [],
+    lending: bySource.get('lending')!.available ? parseLendingApplications(bySource.get('lending')!.body) : [],
+    aml: bySource.get('aml')!.available ? parseAmlCases(bySource.get('aml')!.body) : [],
+    devices: bySource.get('devices')!.available ? parseDevices(bySource.get('devices')!.body) : [],
+    documents: bySource.get('documents')!.available ? parseDocuments(bySource.get('documents')!.body) : [],
+  }
 
   return NextResponse.json({
-    accounts: accounts.available ? parseAccounts(accounts.body).slice(0, LIMITS.accounts) : [],
-    cards: cards.available ? parseCards(cards.body).slice(0, LIMITS.cards) : [],
-    notifications: notifications.available ? parseNotifications(notifications.body).slice(0, LIMITS.notifications) : [],
-    lendingApplications: bySource.get('lending')!.available
-      ? parseLendingApplications(bySource.get('lending')!.body).slice(0, LIMITS.lending) : [],
-    amlCases: bySource.get('aml')!.available ? parseAmlCases(bySource.get('aml')!.body).slice(0, LIMITS.aml) : [],
-    devices: bySource.get('devices')!.available ? parseDevices(bySource.get('devices')!.body).slice(0, LIMITS.devices) : [],
-    documents: bySource.get('documents')!.available
-      ? parseDocuments(bySource.get('documents')!.body).slice(0, LIMITS.documents) : [],
+    accounts: parsed.accounts.slice(0, LIMITS.accounts),
+    cards: parsed.cards.slice(0, LIMITS.cards),
+    notifications: parsed.notifications.slice(0, LIMITS.notifications),
+    lendingApplications: parsed.lending.slice(0, LIMITS.lending),
+    amlCases: parsed.aml.slice(0, LIMITS.aml),
+    devices: parsed.devices.slice(0, LIMITS.devices),
+    documents: parsed.documents.slice(0, LIMITS.documents),
     unavailable: results.filter(result => !result.available).map(result => result.source),
+    truncated: (Object.keys(parsed) as Source[]).filter(source => parsed[source].length > LIMITS[source]),
     fetchedAt: new Date().toISOString(),
   }, { headers: { 'cache-control': 'private, no-store' } })
 }

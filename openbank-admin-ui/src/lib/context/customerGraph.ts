@@ -112,12 +112,16 @@ export interface LiveCustomerFacts {
   devices: DeviceFact[]
   documents: DocumentFact[]
   unavailable: string[]
+  truncated: string[]
 }
 
 export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
   if (!isRecord(value)) return emptyLiveCustomerFacts(['graph'])
   const unavailable = Array.isArray(value.unavailable)
     ? value.unavailable.filter((item): item is string => typeof item === 'string')
+    : []
+  const truncated = Array.isArray(value.truncated)
+    ? value.truncated.filter((item): item is string => typeof item === 'string')
     : []
   return {
     accounts: parseAccounts({ data: value.accounts }),
@@ -128,13 +132,14 @@ export function parseLiveCustomerFacts(value: unknown): LiveCustomerFacts {
     devices: parseDevices({ items: value.devices }),
     documents: parseDocuments(value.documents),
     unavailable,
+    truncated,
   }
 }
 
 export function emptyLiveCustomerFacts(unavailable: string[] = []): LiveCustomerFacts {
   return {
     accounts: [], cards: [], notifications: [], lendingApplications: [], amlCases: [],
-    devices: [], documents: [], unavailable,
+    devices: [], documents: [], unavailable, truncated: [],
   }
 }
 
@@ -433,7 +438,7 @@ export function buildCustomerGraph(
   return {
     nodes,
     edges,
-    truncated: live.accounts.length > 50 || live.cards.length > 50 || live.notifications.length > 30
+    truncated: live.truncated.length > 0 || live.accounts.length > 50 || live.cards.length > 50 || live.notifications.length > 30
       || live.lendingApplications.length > 30 || live.amlCases.length > 30 || live.devices.length > 20
       || live.documents.length > 30,
   }

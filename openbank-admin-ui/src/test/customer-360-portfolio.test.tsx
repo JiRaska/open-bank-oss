@@ -43,7 +43,7 @@ describe('Customer 360 authoritative portfolio', () => {
       accounts: Array.from({ length: 50 }, (_, index) => ({ id: `a${index}`, status: 'ACTIVE' })),
       lendingApplications: [{ id: 'l1', status: 'ASSESSMENT' }],
       amlCases: Array.from({ length: 30 }, (_, index) => ({ id: `c${index}`, status: 'OPEN' })),
-      unavailable: [],
+      unavailable: [], truncated: ['accounts', 'aml'],
     })))
     render(<LanguageProvider><CustomerPortfolioPanel partyId={PARTY} /></LanguageProvider>)
 

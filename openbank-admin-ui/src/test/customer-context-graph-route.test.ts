@@ -48,6 +48,7 @@ describe('Customer graph live overlay route', () => {
     expect(result.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(7)
     expect(body.unavailable).toEqual([])
+    expect(body.truncated).toEqual([])
     expect(body.accounts).toHaveLength(1)
     expect(body.cards).toHaveLength(1)
     expect(body.notifications).toEqual([expect.objectContaining({ id: 'notification-1', template: 'SCA_APPROVAL' })])

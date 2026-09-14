@@ -34,7 +34,7 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
           : {
               kind: 'ok', count: values[source].length,
               statuses: Array.from(new Set(values[source].map(item => item.status).filter(Boolean))),
-              lowerBound: values[source].length === (source === 'accounts' ? 50 : 30),
+              lowerBound: facts.truncated.includes(source),
             },
       ])) as State)
     }).catch(() => {
