@@ -232,7 +232,8 @@ class SourceAndAcceptanceTest(unittest.TestCase):
                 if args[0] == "fetch":
                     return b""  # Both fixture commits already exist locally.
                 return subprocess.run(["git", *args], cwd=root, check=True,
-                                      capture_output=True).stdout
+                                      capture_output=True,
+                                      env=dict(os.environ, GIT_INDEX_FILE=str(root / ".git" / "index"))).stdout
 
             git("init", "-q")
             names = ("a[b].kt", "x*.kt", "q?.kt")
