@@ -250,7 +250,7 @@ function AgentDetailContent() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {persona.talents.map(talent => (
                   <span key={talent} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 10px', borderRadius: '9px',
-                    background: `${persona.accent}0d`, border: `1px solid ${persona.accent}25`, color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
+                    background: `color-mix(in srgb, ${persona.accent} 5%, transparent)`, border: `1px solid color-mix(in srgb, ${persona.accent} 15%, transparent)`, color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
                     <Sparkles size={11} style={{ color: persona.accent }} /> {talent}
                   </span>
                 ))}

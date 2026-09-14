@@ -2,9 +2,9 @@
 /* Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0. */
 
 .portrait {
-  --agent-accent: #6366f1;
-  --agent-glow: #c7d2fe;
-  --agent-shell: #eef2ff;
+  --agent-accent: var(--accent-text);
+  --agent-glow: var(--accent-border);
+  --agent-shell: var(--accent-bg);
   position: relative;
   display: grid;
   place-items: center;
@@ -46,7 +46,7 @@
   width: 3px;
   height: 15px;
   border-radius: 4px;
-  background: #64748b;
+  background: var(--text-tertiary);
   transform: translateX(-50%) rotate(var(--antenna-angle, 0deg));
   transform-origin: bottom;
 }
@@ -70,10 +70,10 @@
   left: 8px;
   width: 54px;
   height: 37px;
-  border: 2px solid color-mix(in srgb, var(--agent-accent) 30%, #94a3b8);
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 30%, var(--border-strong));
   border-radius: var(--head-radius, 16px 16px 13px 13px);
-  background: linear-gradient(155deg, #ffffff, var(--agent-shell));
-  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.12);
+  background: linear-gradient(155deg, var(--surface), var(--agent-shell));
+  box-shadow: var(--shadow-md);
 }
 
 .visor {
@@ -84,8 +84,8 @@
   justify-content: center;
   gap: 9px;
   border-radius: 9px;
-  background: #172033;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+  background: var(--text-primary);
+  box-shadow: inset 0 2px 4px color-mix(in srgb, var(--bg) 40%, transparent);
 }
 
 .eye {
@@ -102,10 +102,10 @@
   left: 13px;
   width: 44px;
   height: 36px;
-  border: 2px solid color-mix(in srgb, var(--agent-accent) 25%, #94a3b8);
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 25%, var(--border-strong));
   border-radius: var(--body-radius, 10px 10px 16px 16px);
-  background: linear-gradient(145deg, #ffffff, var(--agent-shell));
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.11);
+  background: linear-gradient(145deg, var(--surface), var(--agent-shell));
+  box-shadow: var(--shadow-md);
 }
 
 .chest {
@@ -117,7 +117,7 @@
   width: 24px;
   height: 21px;
   border-radius: 7px;
-  color: white;
+  color: var(--on-accent);
   background: var(--agent-accent);
   transform: translateX(-50%);
   box-shadow: 0 4px 10px color-mix(in srgb, var(--agent-accent) 40%, transparent);
@@ -128,7 +128,7 @@
   top: 53px;
   width: 9px;
   height: 25px;
-  border: 2px solid color-mix(in srgb, var(--agent-accent) 22%, #94a3b8);
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 22%, var(--border-strong));
   border-radius: 8px;
   background: var(--agent-shell);
 }
@@ -142,9 +142,9 @@
   left: 18px;
   width: 34px;
   height: 11px;
-  border: 2px solid color-mix(in srgb, var(--agent-accent) 26%, #64748b);
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 26%, var(--text-tertiary));
   border-radius: 5px 5px 10px 10px;
-  background: #dbe3ee;
+  background: var(--surface-4);
 }
 
 .variantLens { --eye-width: 12px; --head-radius: 50% 50% 13px 13px; --antenna-angle: 12deg; }
