@@ -82,9 +82,9 @@ class ReportsTest(unittest.TestCase):
         for value in ('{"verdict":"NO_FINDINGS","findings":["defect"],"findings":[],"coverage":[]}',
                       'not JSON', '[]', '{"$PARAMETER_VALUE":"{}"}', None):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                proof.attempt_response({"$PARAMETER_VALUE": value})
+                proof.normalize_output_attempt({"$PARAMETER_VALUE": value})
         with self.assertRaises(ValueError):
-            proof.attempt_response({"$PARAMETER_VALUE": "{}", "verdict": "NO_FINDINGS"})
+            proof.normalize_output_attempt({"$PARAMETER_VALUE": "{}", "verdict": "NO_FINDINGS"})
 
     def test_complete_independent_reports(self):
         proof.validate_reports(bundle())
