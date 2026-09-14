@@ -45,7 +45,7 @@ export function Mermaid({ chart }: { chart: string }) {
   if (error) {
     return (
       <div style={{
-        padding: '10px', border: '1px solid var(--danger-border, #fecaca)',
+        padding: '10px', border: '1px solid var(--danger-border)',
         background: 'var(--danger-bg)', color: 'var(--danger-text)',
         borderRadius: '6px', fontFamily: 'JetBrains Mono, monospace', fontSize: '12px',
         whiteSpace: 'pre-wrap',
