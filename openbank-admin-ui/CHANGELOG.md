@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.244.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.3...admin-ui-v0.244.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** surface operational evidence ([#9988](https://github.com/JiRaska/open-bank-oss/issues/9988)) ([a3c4ed0](https://github.com/JiRaska/open-bank-oss/commit/a3c4ed08242c1c1d442c4351742c6fa606e0f4b3))
+
+## [0.243.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.2...admin-ui-v0.243.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **infra:** verify image signature and SBOM in one Kyverno entry, for one verdict ([#9950](https://github.com/JiRaska/open-bank-oss/issues/9950)) ([ed77bae](https://github.com/JiRaska/open-bank-oss/commit/ed77baea9eab65b662a2a0e461bbd2e5e345fb1a))
+
+## [0.243.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.1...admin-ui-v0.243.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead bindings and preserve theme contrast ([#9972](https://github.com/JiRaska/open-bank-oss/issues/9972)) ([25c544d](https://github.com/JiRaska/open-bank-oss/commit/25c544dbe9ec74bba94672a1e18d9afec282876e))
+
 ## [0.243.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.0...admin-ui-v0.243.1) (2026-09-13)
 
 

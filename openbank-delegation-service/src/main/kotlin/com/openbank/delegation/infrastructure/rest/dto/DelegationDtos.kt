@@ -8,6 +8,9 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
+import com.openbank.delegation.domain.model.DelegationRecertificationCycle
+import com.openbank.delegation.domain.model.DelegationRecertificationStatus
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
@@ -49,6 +52,7 @@ data class OfferDelegationRequest(
     val dailyLimit: MoneyDto? = null,
     val monthlyLimit: MoneyDto? = null,
     val exposure: ExposureDto? = null,
+    val recertificationAudience: DelegationRecertificationAudience? = null,
     val validTo: OffsetDateTime? = null,
     val grantScaSessionId: UUID,
     val note: String? = null,
@@ -66,6 +70,7 @@ data class PreviewDelegationRequest(
     val dailyLimit: MoneyDto? = null,
     val monthlyLimit: MoneyDto? = null,
     val exposure: ExposureDto? = null,
+    val recertificationAudience: DelegationRecertificationAudience? = null,
     val validTo: OffsetDateTime? = null,
 )
 
@@ -108,6 +113,7 @@ data class DelegationResponse(
     val dailyLimit: MoneyDto?,
     val monthlyLimit: MoneyDto?,
     val exposure: ExposureDto?,
+    val recertificationAudience: DelegationRecertificationAudience?,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime?,
     val status: DelegationStatus,
@@ -133,6 +139,7 @@ data class DelegationResponse(
             dailyLimit = g.dailyLimit?.let { MoneyDto.from(it) },
             monthlyLimit = g.monthlyLimit?.let { MoneyDto.from(it) },
             exposure = g.exposure?.let { ExposureDto.from(it) },
+            recertificationAudience = g.recertificationAudience,
             validFrom = g.validFrom,
             validTo = g.validTo,
             status = g.status,
@@ -156,5 +163,29 @@ data class DelegationCheckResponse(val granted: Boolean, val reason: String? = n
                 code = result.code,
             )
         }
+    }
+}
+
+data class DelegationRecertificationResponse(
+    val id: UUID,
+    val delegationId: UUID,
+    val expectedLifecycleRevision: Long,
+    val audience: DelegationRecertificationAudience,
+    val sequence: Int,
+    val dueAt: OffsetDateTime,
+    val status: DelegationRecertificationStatus,
+    val confirmedAt: OffsetDateTime?,
+) {
+    companion object {
+        fun from(cycle: DelegationRecertificationCycle) = DelegationRecertificationResponse(
+            id = cycle.id,
+            delegationId = cycle.delegationId,
+            expectedLifecycleRevision = cycle.expectedLifecycleRevision,
+            audience = cycle.audience,
+            sequence = cycle.sequence,
+            dueAt = cycle.dueAt,
+            status = cycle.status,
+            confirmedAt = cycle.confirmedAt,
+        )
     }
 }

@@ -1,5 +1,96 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/v0.39.0...v0.40.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/v0.38.0...v0.39.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/v0.37.0...v0.38.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/v0.36.0...v0.37.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/v0.35.0...v0.36.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/v0.34.0...v0.35.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/v0.33.0...v0.34.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/v0.32.0...v0.33.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/v0.31.0...v0.32.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/v0.30.0...v0.31.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/v0.29.0...v0.30.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/v0.28.0...v0.29.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/v0.27.0...v0.28.0) (2026-09-13)
+
+
+### Features
+
+* **communication:** ADR-0285 phase 2 skeleton — style layer, lint, four-eyes publish ([#9150](https://github.com/JiRaska/open-bank-oss/issues/9150)) ([5f63522](https://github.com/JiRaska/open-bank-oss/commit/5f63522880be268f3f61bd809871fb6f51c5535a))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/v0.26.0...v0.27.0) (2026-09-13)
 
 
