@@ -67,7 +67,7 @@ export function MermaidEnhancer({ children, contentKey }: { children: React.Reac
             const wrap = document.createElement('div')
             wrap.className = 'mermaid-error'
             wrap.setAttribute('style',
-              'padding:10px;border:1px solid #ef4444;background:#fef2f2;color:#991b1b;border-radius:6px;font-family:JetBrains Mono,monospace;font-size:12px;white-space:pre-wrap;')
+              'padding:10px;border:1px solid var(--danger-border);background:var(--danger-bg);color:var(--danger-text);border-radius:6px;font-family:JetBrains Mono,monospace;font-size:12px;white-space:pre-wrap;')
             wrap.innerHTML = `Mermaid render failed: ${escapeHtml(msg)}<br/><br/>${escapeHtml(src)}`
             block.replaceWith(wrap)
           }
