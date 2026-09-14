@@ -275,11 +275,11 @@ jobs:
   #
   # `Validate manifests` (below) remains during phase 1 of the required-context migration.
   # main-protection first gains the three direct shard contexts while this old context
-  # overlaps those shards. `Admin UI` is an always-run aggregator over its path-aware build;
-  # it is added separately after the migration PR proves both cases: `Admin UI build` is
-  # skipped for this non-UI governance diff while the `Admin UI` aggregator succeeds, and
-  # the same aggregator succeeds on the exact default-branch SHA. A follow-up may remove `Validate manifests`
-  # only after all four new contexts are required and green on a real PR. This order keeps
+# overlaps those shards. `Admin UI` remains a separate follow-up because this updater cannot
+# itself prove the PR-only skipped-build path. This non-UI governance PR supplies reviewable
+# evidence (`Admin UI build` skipped while `Admin UI` succeeded), but does not require that
+# context yet. A later follow-up may add it, and another may remove `Validate manifests`
+# only after the three direct shard contexts are required and green on a real PR. This order keeps
   # shard coverage intact across the GitHub-side ruleset and workflow changes.
   #
   # Shards are WALL-TIME buckets, not a taxonomy — rebalance `group:` in the manifest when

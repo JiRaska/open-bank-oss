@@ -38,8 +38,9 @@ RULESET_NAME="main-protection"
 # shards. That adds one serial hosted-runner allocation after all substantive
 # work is complete; in #9986 the no-op aggregator waited almost seven minutes
 # and then ran for seconds. Require those shards directly while retaining the
-# aggregator during the transition. `Admin UI` joins the required set only
-# after its separate exact-SHA preflight succeeds. A follow-up may remove
+# aggregator during the transition. `Admin UI` remains a separate follow-up:
+# this script cannot itself prove its PR-only skipped-build path. A later change
+# may add it after reviewing that evidence. Another follow-up may remove
 # `Validate manifests` from both this list and ci.yml after the new contexts
 # are observed live; the overlap intentionally preserves shard coverage.
 #
@@ -53,7 +54,6 @@ REQUIRED_CHECKS=(
   "gates (gitops-api)"                       # CI — direct governance shard
   "gates (lint-supplychain-security)"        # CI — direct governance shard
   "gates (registry-kotlin-data)"             # CI — direct governance shard
-  "Admin UI"                                 # CI — always-run aggregator over the path-aware build + Playwright gate
   "Gitleaks"                                 # Secret scan
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
@@ -61,16 +61,15 @@ REQUIRED_CHECKS=(
 # Checks whose health this ruleset update relies on. Before the update, the
 # exact current default-branch commit must already have emitted every one with
 # a successful conclusion. This proves that the names match GitHub's real check
-# names and that the jobs are healthy on that commit. The separate phase-1 PR
-# review must also verify `Admin UI` succeeds when its path-aware build is
-# skipped; a single default-branch push cannot prove that pull-request path.
+# names and that the jobs are healthy on that commit. `Admin UI` is deliberately
+# excluded: a single default-branch push cannot prove its PR-only skipped-build
+# path, so adding that required context needs its own reviewed follow-up.
 # A renamed shard, missing job, queued run or real build failure therefore stops
 # this script before it can deadlock main.
 PREFLIGHT_CHECKS=(
   "gates (gitops-api)"
   "gates (lint-supplychain-security)"
   "gates (registry-kotlin-data)"
-  "Admin UI"
 )
 
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
