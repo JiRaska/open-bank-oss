@@ -119,7 +119,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }} title={data.running.source}>
           {running ?? t('neznámá', 'unknown')}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid ${u.color}33`, padding: '2px 8px', borderRadius: 20 }}>
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid color-mix(in srgb, ${u.color} 20%, transparent)`, padding: '2px 8px', borderRadius: 20 }}>
           {t(u.cs, u.en)}
         </span>
       </div>
@@ -133,7 +133,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             </span>
           )}
           {'eol' in lc && lc.eol ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: lc.eolPassed || (lc.eolDaysLeft != null && lc.eolDaysLeft <= 90) ? '#dc2626' : 'var(--text-secondary)' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: lc.eolPassed || (lc.eolDaysLeft != null && lc.eolDaysLeft <= 90) ? 'var(--danger-text)' : 'var(--text-secondary)' }}>
               <Clock size={12} />
               {lc.eolPassed
                 ? t('Po EoL', 'Past EoL')
@@ -163,7 +163,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <ShieldCheck size={12} /> {t('Žádné známé CVE', 'No known CVEs')}
           </span>
         ) : (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: data.cve.critical + data.cve.high > 0 ? '#dc2626' : 'var(--text-secondary)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: data.cve.critical + data.cve.high > 0 ? 'var(--danger-text)' : 'var(--text-secondary)' }}>
             <ShieldAlert size={12} />
             {data.cve.critical > 0 && <b>{data.cve.critical} CRIT</b>}
             {data.cve.high > 0 && <b>{data.cve.high} HIGH</b>}
@@ -185,7 +185,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             <>
               <button type="button" onClick={planUpgrade} disabled={draft === 'busy' || draft === 'done'} aria-busy={draft === 'busy'}
                 style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6, cursor: draft === 'done' ? 'default' : 'pointer',
-                  border: `1px solid ${draft === 'done' ? '#6ee7b7' : 'var(--border)'}`, background: draft === 'done' ? '#ecfdf5' : 'var(--surface)', color: draft === 'done' ? '#059669' : draft === 'err' ? '#dc2626' : 'var(--text-primary)' }}>
+                  border: `1px solid ${draft === 'done' ? 'var(--success-border)' : 'var(--border)'}`, background: draft === 'done' ? 'var(--success-bg)' : 'var(--surface)', color: draft === 'done' ? 'var(--success-text)' : draft === 'err' ? 'var(--danger-text)' : 'var(--text-primary)' }}>
                 {draft === 'busy' ? <Loader2 aria-hidden="true" size={12} className="animate-spin" /> : draft === 'done' ? <Check aria-hidden="true" size={12} /> : <ClipboardPlus aria-hidden="true" size={12} />}
                 {draft === 'busy' ? t('Připravuji…', 'Drafting…') : draft === 'done' ? t('Návrh ve frontě', 'Queued') : draft === 'err' ? t('Zkusit znovu', 'Try again') : <><ArrowUpCircle aria-hidden="true" size={12} style={{ display: 'none' }} />{t('Naplánovat upgrade', 'Plan upgrade')}</>}
               </button>
