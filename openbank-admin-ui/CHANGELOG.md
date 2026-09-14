@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.246.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.0...admin-ui-v0.246.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** populate customer graph from domain owners ([#10081](https://github.com/JiRaska/open-bank-oss/issues/10081)) ([81e8c12](https://github.com/JiRaska/open-bank-oss/commit/81e8c12712d631f952e623b3a601e22a7a25a7fe))
+* **admin-ui:** resolve card feed in payments namespace ([#10084](https://github.com/JiRaska/open-bank-oss/issues/10084)) ([0933f6e](https://github.com/JiRaska/open-bank-oss/commit/0933f6eeea003b15dd51502eeda3b8960fe0ab03))
+
 ## [0.246.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.245.0...admin-ui-v0.246.0) (2026-09-14)
 
 
