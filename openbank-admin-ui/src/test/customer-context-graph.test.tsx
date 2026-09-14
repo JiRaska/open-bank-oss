@@ -73,6 +73,10 @@ describe('Customer context graph', () => {
     expect(screen.getByRole('button', { name: 'Device: IOS' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Document: ACCOUNT_AGREEMENT' })).toBeInTheDocument()
     expect(screen.getByText('7/7 domain feeds')).toBeInTheDocument()
+    expect(document.querySelectorAll('animateMotion').length).toBeLessThanOrEqual(16)
+    fireEvent.click(screen.getByRole('button', { name: 'Pause flow' }))
+    expect(document.querySelectorAll('animateMotion')).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Resume flow' })).toHaveAttribute('aria-pressed', 'false')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
