@@ -29,9 +29,9 @@ type LifecycleApproval = {
 }
 
 const STATUS = {
-  PROPOSED: { color: '#b45309', bg: '#fffbeb', border: '#fcd34d', Icon: Clock3, cs: 'Čeká', en: 'Pending' },
-  REJECTED: { color: '#b91c1c', bg: '#fef2f2', border: '#fecaca', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
-  EXECUTED: { color: '#047857', bg: '#ecfdf5', border: '#a7f3d0', Icon: CheckCircle2, cs: 'Provedeno', en: 'Executed' },
+  PROPOSED: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: Clock3, cs: 'Čeká', en: 'Pending' },
+  REJECTED: { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', Icon: XCircle, cs: 'Zamítnuto', en: 'Rejected' },
+  EXECUTED: { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2, cs: 'Provedeno', en: 'Executed' },
 } as const
 
 export default function DelegationApprovalDetailPage() {
