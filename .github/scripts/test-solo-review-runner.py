@@ -81,6 +81,43 @@ class DriverTest(unittest.TestCase):
 
 
 class SourceAndAcceptanceTest(unittest.TestCase):
+    def test_prepare_distinguishes_binary_header_from_source_literal(self):
+        text = b'check = b"GIT binary patch"\n'
+        for binary in (False, True):
+            diff = (b"diff --git a/check.py b/check.py\nGIT binary patch\nliteral 1\n" if binary else
+                    b"diff --git a/check.py b/check.py\n@@ -0,0 +1 @@\n+" + text)
+
+            def git(*args, diff=diff):
+                if args[0] == "fetch":
+                    return b""
+                if args[0] == "merge-base":
+                    return b"c" * 40
+                if args[0] == "diff":
+                    return b"M\0check.py\0" if "--name-status" in args else diff
+                if args[0] == "ls-tree":
+                    return b"100644 blob " + b"a" * 40 + b"\tcheck.py\0"
+                if args[0] == "cat-file":
+                    return str(len(text)).encode()
+                if args[0] == "show":
+                    return text
+                self.fail(f"unexpected git call: {args}")
+
+            with self.subTest(binary=binary), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner, "public_subject", return_value=pull()), \
+                    patch.object(runner, "git", side_effect=git), \
+                    patch.object(runner.guard, "protected_reasons", return_value=[]), \
+                    patch.dict(os.environ, GITHUB_OUTPUT=str(Path(directory) / "outputs"),
+                               GITHUB_STEP_SUMMARY=str(Path(directory) / "summary")):
+                output = Path(directory) / "input.json"
+                if binary:
+                    with self.assertRaisesRegex(ValueError, "binary change"):
+                        runner.prepare(12, output)
+                    self.assertFalse(output.exists())
+                else:
+                    runner.prepare(12, output)
+                    self.assertEqual(json.loads(output.read_text())["payload"]["files"][0]["after"], text.decode())
+
     def test_workflow_enforces_readonly_models_and_acceptance_order(self):
         import yaml
         workflow = Path(__file__).resolve().parents[1] / "workflows" / "agent-review.yml"

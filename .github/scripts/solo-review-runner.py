@@ -77,7 +77,8 @@ def prepare(pr, output):
     files, added = guard.parse_name_status_z(raw)
     require(files, "empty change cannot establish review")
     diff = git("diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", merge_base, head)
-    require(len(diff) <= MAX_INPUT and b"GIT binary patch" not in diff, "oversized or binary change needs separate review")
+    require(len(diff) <= MAX_INPUT and b"GIT binary patch" not in diff.splitlines(),
+            "oversized or binary change needs separate review")
     context, budget = [], len(diff)
     for path in files:
         entry = {"path": path}
