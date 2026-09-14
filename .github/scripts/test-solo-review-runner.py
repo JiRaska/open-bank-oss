@@ -273,6 +273,8 @@ class SourceAndAcceptanceTest(unittest.TestCase):
                     b"diff --git a/check.py b/check.py\n@@ -0,0 +1 @@\n+" + text)
 
             def git(*args, diff=diff):
+                if args[0] == "--literal-pathspecs":
+                    args = args[1:]
                 if args[0] == "fetch":
                     return b""
                 if args[0] == "merge-base":
@@ -348,6 +350,8 @@ class SourceAndAcceptanceTest(unittest.TestCase):
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip()
 
         def git(*args):
+            if args[0] == "--literal-pathspecs":
+                args = args[1:]
             if args[0] == "fetch":
                 return b""
             if args[0] == "merge-base":

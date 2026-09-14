@@ -100,7 +100,7 @@ def prepare(pr, output):
     for path in files:
         entry = {"path": path}
         for label, sha in (("before", merge_base), ("after", head)):
-            exists = git("ls-tree", "-z", sha, "--", path)
+            exists = git("--literal-pathspecs", "ls-tree", "-z", sha, "--", path)
             if not exists:
                 entry[label] = None
                 continue
