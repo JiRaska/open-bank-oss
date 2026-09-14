@@ -29,6 +29,7 @@ import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
@@ -284,6 +285,8 @@ class BusinessOnboardingServiceTest {
             coEvery { parties.grantMandate(capture(mandates)) } returns Unit
 
             val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+            coEvery { parties.initiatorIdentity(any()) } returns
+                InitiatorIdentity("Jana Nováková", null, verified = true)
             service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Nováková", null))
             val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1)))
             val token = invited.signers.first { !it.isInitiator }.invitationToken!!
@@ -323,10 +326,13 @@ class BusinessOnboardingServiceTest {
         val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
         assertThatThrownBy {
             runBlocking {
+                coEvery { parties.initiatorIdentity(any()) } returns
+                    InitiatorIdentity("Jan Novák", null, verified = true)
                 service.matchInitiator(MatchInitiatorCommand(started.id, UUID.randomUUID(), 0, "Jan Novák", null))
             }
         }
             .isInstanceOf(CaseCallerMismatchException::class.java)
+        coEvery { parties.initiatorIdentity(any()) } returns InitiatorIdentity("Jan Novák", null, verified = true)
         val ready = service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jan Novák", null))
         assertThat(ready.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         service.sign(SignCommand(started.id, initiator, "cer-1"))
@@ -357,6 +363,7 @@ class BusinessOnboardingServiceTest {
         coEvery { parties.grantMandate(capture(mandates)) } returns Unit
 
         val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns InitiatorIdentity("Jana Chairová", null, verified = true)
         service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Chairová", null))
         val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1, 2)))
         // Everyone identifies, so the offices ARE covered and signing opens.

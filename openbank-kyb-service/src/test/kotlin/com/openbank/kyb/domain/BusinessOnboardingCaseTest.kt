@@ -10,6 +10,8 @@ import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.InitiatorIdentity
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegisteredAddress
@@ -56,6 +58,10 @@ class BusinessOnboardingCaseTest {
         fetchedAt = now,
     )
 
+    /** The initiator's identity as party-service verified it — matching is against THIS, never a claimed name. */
+    private fun me(name: String, address: RegisteredAddress? = null, verified: Boolean = true) =
+        InitiatorIdentity(name, address, verified)
+
     private fun rep(name: String) =
         Representative(name, LocalDate.of(1980, 5, 5), "jednatelé", "jednatel", LocalDate.of(2015, 1, 1))
 
@@ -94,7 +100,7 @@ class BusinessOnboardingCaseTest {
                 extract(LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf(rep("Jan Novák"))),
             )
             .entityPartyCreated(UUID.randomUUID(), now)
-            .initiatorMatched(0, "Jan Novák", null, now)
+            .initiatorMatched(0, me("Jan Novák"), now)
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         assertThat(case.requiredSignatures).isEqualTo(1)
         val signed = case.signed(initiator, "ceremony-1", now)
@@ -107,7 +113,7 @@ class BusinessOnboardingCaseTest {
         val rule = RepresentationRule(RepresentationMode.JOINT_N, 2, "dva jednatelé společně")
         var case = started().registryVerifiedAttested(extract(rule = rule)).entityPartyCreated(UUID.randomUUID(), now)
         assertThat(case.requiredSignatures).isEqualTo(2)
-        case = case.initiatorMatched(0, "Jana Nováková", null, now)
+        case = case.initiatorMatched(0, me("Jana Nováková"), now)
         assertThat(case.status).isEqualTo(CaseStatus.INITIATOR_MATCHED)
 
         assertThatThrownBy { case.cosignersInvited(emptyList(), emptyList(), now) }
@@ -138,16 +144,55 @@ class BusinessOnboardingCaseTest {
     }
 
     @Test
-    fun `an initiator who is not a listed representative goes to manual review with the claim recorded`() {
-        val case = started().registryVerifiedAttested(
-            extract(),
-        ).initiatorMatched(null, "Karel Cizí", LocalDate.of(1990, 2, 2), now)
-        assertThat(case.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
-        assertThat(case.reviewReason).contains("power of attorney")
-        assertThat(case.initiator?.partyId).isEqualTo(initiator)
+    fun `an initiator who is not a listed representative is refused, not sent to review`() {
+        // Before identity binding this went to MANUAL_REVIEW as "power of attorney" and the claimed
+        // name was recorded as a signer. Onboarding a company one cannot represent is now not allowed.
+        val verified = started().registryVerifiedAttested(extract())
+        assertThatThrownBy { verified.initiatorMatched(null, me("Karel Cizí"), now) }
+            .isInstanceOf(InitiatorIdentityMismatchException::class.java)
+            .hasMessageContaining("does not match a listed representative")
+    }
 
-        val resolved = case.reviewResolved(1, now)
-        assertThat(resolved.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+    @Test
+    fun `picking another listed person is refused — the verified name decides, not the chosen index`() {
+        // The chosen index alone must never decide the signer's identity: index 1 is Petr Svoboda, and a
+        // caller verified as Jana Nováková is not him.
+        val verified = started().registryVerifiedAttested(extract())
+        assertThatThrownBy { verified.initiatorMatched(1, me("Jana Nováková"), now) }
+            .isInstanceOf(InitiatorIdentityMismatchException::class.java)
+    }
+
+    @Test
+    fun `a matching name on an unverified identity is still refused`() {
+        val verified = started().registryVerifiedAttested(extract())
+        assertThatThrownBy { verified.initiatorMatched(0, me("Jana Nováková", verified = false), now) }
+            .isInstanceOf(InitiatorIdentityMismatchException::class.java)
+            .hasMessageContaining("identity verification")
+    }
+
+    @Test
+    fun `the right person with a different registered address goes to review, not refusal`() {
+        val listed = Representative(
+            "Jana Nováková",
+            LocalDate.of(1980, 5, 5),
+            "jednatelé",
+            "jednatel",
+            LocalDate.of(2015, 1, 1),
+            address = RegisteredAddress("Hlavní 1", "Praha", "11000", "CZ"),
+        )
+        val case = started().registryVerifiedAttested(extract(reps = listOf(listed)))
+            .initiatorMatched(0, me("Ing. Jana Nováková", RegisteredAddress("Nádražní 9", "Brno", "60200", "CZ")), now)
+        assertThat(case.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(case.reviewReason).contains("address")
+        assertThat(case.initiator?.fullName).isEqualTo("Jana Nováková")
+        assertThat(case.initiator?.partyId).isEqualTo(initiator)
+    }
+
+    @Test
+    fun `the right person with no address on one side is not held up — absence is not mismatch`() {
+        val case = started().registryVerifiedAttested(extract(reps = listOf(rep("Jana Nováková"))))
+            .initiatorMatched(0, me("Jana Nováková", RegisteredAddress("Nádražní 9", "Brno", "60200", "CZ")), now)
+        assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
     }
 
     @Test
@@ -170,7 +215,7 @@ class BusinessOnboardingCaseTest {
             extract(LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf(rep("Jan Novák"))),
         )
             .entityPartyCreated(UUID.randomUUID(), now)
-            .initiatorMatched(0, "Jan Novák", null, now)
+            .initiatorMatched(0, me("Jan Novák"), now)
             .entityPartyActivated(now)
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         assertThat(case.entityPartyActive).isTrue()
@@ -182,7 +227,7 @@ class BusinessOnboardingCaseTest {
         val case = started().registryVerifiedAttested(
             extract(LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf(rep("Jan Novák"))),
         )
-            .initiatorMatched(0, "Jan Novák", null, now)
+            .initiatorMatched(0, me("Jan Novák"), now)
         assertThatThrownBy {
             case.signed(UUID.randomUUID(), "x", now)
         }.isInstanceOf(CaseTransitionException::class.java)
@@ -280,13 +325,13 @@ class BusinessOnboardingCaseTest {
         assertThat(case.requiredSignerRoles).containsExactly("predseda", "clen")
 
         // The two ordinary members are the right NUMBER and the wrong PEOPLE.
-        val twoMembers = case.initiatorMatched(1, "Petr Svoboda", null, now)
+        val twoMembers = case.initiatorMatched(1, me("Petr Svoboda"), now)
         assertThatThrownBy { twoMembers.cosignersInvited(listOf(2), listOf("tok-1"), now) }
             .isInstanceOf(CaseTransitionException::class.java)
             .hasMessageContaining("predseda")
 
         // The chair plus one member is accepted.
-        case = case.initiatorMatched(0, "Jana Nováková", null, now)
+        case = case.initiatorMatched(0, me("Jana Nováková"), now)
         val ok = case.cosignersInvited(listOf(1), listOf("tok-1"), now)
         assertThat(ok.status).isEqualTo(CaseStatus.AWAITING_COSIGNERS)
         assertThat(ok.signers).hasSize(2)
@@ -314,7 +359,7 @@ class BusinessOnboardingCaseTest {
         )
         val case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "clen")), now)
-            .initiatorMatched(0, "Jan Dvojrole", null, now)
+            .initiatorMatched(0, me("Jan Dvojrole"), now)
 
         assertThatThrownBy { case.cosignersInvited(listOf(1), listOf("tok-1"), now) }
             .describedAs("two people signed, and nobody holds the second office — a title is not a second signature")
@@ -338,10 +383,10 @@ class BusinessOnboardingCaseTest {
         )
         val verified = started().registryVerified(ex, attested(ex, signers = 1, roles = listOf("predseda")), now)
 
-        assertThat(verified.initiatorMatched(0, "Jana Nováková", null, now).status)
+        assertThat(verified.initiatorMatched(0, me("Jana Nováková"), now).status)
             .isEqualTo(CaseStatus.READY_TO_SIGN)
 
-        val wrongPerson = verified.initiatorMatched(1, "Petr Svoboda", null, now)
+        val wrongPerson = verified.initiatorMatched(1, me("Petr Svoboda"), now)
         assertThat(wrongPerson.status)
             .describedAs("a jednatel is not the chair the rule names")
             .isEqualTo(CaseStatus.MANUAL_REVIEW)
@@ -371,7 +416,7 @@ class BusinessOnboardingCaseTest {
         var case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
             .entityPartyCreated(UUID.randomUUID(), now)
-            .initiatorMatched(0, "Jana Chairová", null, now)
+            .initiatorMatched(0, me("Jana Chairová"), now)
 
         // Inviting both the vice and the member passes: the invited SET covers the offices.
         case = case.cosignersInvited(listOf(1, 2), listOf("tok-vice", "tok-member"), now)
@@ -418,7 +463,7 @@ class BusinessOnboardingCaseTest {
         )
         val case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
-            .initiatorMatched(0, "Viktor Vice", null, now)
+            .initiatorMatched(0, me("Viktor Vice"), now)
 
         assertThatThrownBy { case.cosignersInvited(listOf(1), listOf("tok-1"), now) }
             .isInstanceOf(CaseTransitionException::class.java)
@@ -445,7 +490,7 @@ class BusinessOnboardingCaseTest {
         )
         val case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
-            .initiatorMatched(0, "Viktor Vice", null, now)
+            .initiatorMatched(0, me("Viktor Vice"), now)
 
         assertThat(case.cosignersInvited(listOf(1), listOf("tok-1"), now).status)
             .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
@@ -466,7 +511,7 @@ class BusinessOnboardingCaseTest {
         )
         val inReview = started()
             .registryVerified(ex, attested(ex, signers = 1, roles = listOf("predseda")), now)
-            .initiatorMatched(0, "Milan Member", null, now)
+            .initiatorMatched(0, me("Milan Member"), now)
         assertThat(inReview.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
 
         // The operator re-supplies the office. An ordinary member must still not become ready.
@@ -504,7 +549,7 @@ class BusinessOnboardingCaseTest {
 
         val case = started()
             .registryVerified(ex, attested(ex, signers = 1, roles = listOf("Předseda")), now)
-            .initiatorMatched(0, "Jana Chairová", null, now)
+            .initiatorMatched(0, me("Jana Chairová"), now)
 
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
     }
@@ -535,7 +580,7 @@ class BusinessOnboardingCaseTest {
         var case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
             .entityPartyCreated(UUID.randomUUID(), now)
-            .initiatorMatched(0, "Jana Chairová", null, now)
+            .initiatorMatched(0, me("Jana Chairová"), now)
             .cosignersInvited(listOf(1, 2), listOf("tok-vice", "tok-member"), now)
         case = case.signerIdentified("tok-member", UUID.randomUUID(), now)
         val member = case.signers.first { it.fullName == "Milan Member" }.partyId!!
@@ -559,7 +604,7 @@ class BusinessOnboardingCaseTest {
         val ex = chairViceRule(chairViceMember())
         var case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
-            .initiatorMatched(2, "Milan Member", null, now)
+            .initiatorMatched(2, me("Milan Member"), now)
             .cosignersInvited(listOf(1, 0), listOf("tok-vice", "tok-chair"), now)
 
         // Only the other ordinary-office holder verifies; the count is met, the offices are not.
@@ -584,7 +629,7 @@ class BusinessOnboardingCaseTest {
 
         val case = started()
             .registryVerified(ex, attested(ex, signers = 2, roles = listOf("predseda", "mistopredseda")), now)
-            .initiatorMatched(0, "Jana Chairová", null, now)
+            .initiatorMatched(0, me("Jana Chairová"), now)
 
         assertThat(case.cosignersInvited(listOf(1), listOf("tok-1"), now).status)
             .isEqualTo(CaseStatus.AWAITING_COSIGNERS)
