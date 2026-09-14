@@ -12,15 +12,9 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 **GitOps deliberately declares zero replicas for this workload.** This is not a live
 service and does not authorize a replica increase, restart, log inspection, traffic claim,
-or metrics/health assertion. The first sandbox rollout has two reviewed stages:
-
-1. Merge this staged manifest, run `Platform OpenTofu` on `main`, and verify that the empty
-   `openbank-context-service` ECR repository exists with scanning enabled.
-2. Run `Auto deploy` with `bootstrap_image_only=true`; only after build, vulnerability scan,
-   signature and SBOM/SLSA attestation pass may an activation PR pin its immutable
-   `sandbox-<sha>` image, remove the temporary Terraform bootstrap entry, and set one replica.
-
-After the activation PR syncs, health must be checked on the management endpoint `:8085`;
+or metrics/health assertion. Activation remains the separately reviewed step after the
+pinned image, GitOps sync, and live cluster-health evidence are available. After that
+step, health must be checked on the management endpoint `:8085`;
 the public HTTP port is not a health-evidence substitute.
 
 ## Service identity
