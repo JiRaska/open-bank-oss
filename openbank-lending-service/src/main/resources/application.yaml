@@ -256,6 +256,11 @@ lending:
     cycle:
       every: ${LENDING_PROVISIONING_EVERY:720h} # ~30 days; a monthly-cadence batch, not calendar-month aware
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
+      # Batches per TICK, not loans per period: one tick drains the period batch by batch and stops
+      # when a batch comes back short. The cap only bounds a runaway book (40 x 500 = 20,000 loans).
+      # At the 720h interval above, a cap that truncates means the remainder waits ~30 days, so the
+      # pass warns loudly when it stops here rather than on a short batch (#9901).
+      max-batches: ${LENDING_PROVISIONING_MAX_BATCHES:40}
 
 # Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`
 # profile active, so these — not the offline defaults above — are what ArC bakes in. Kept as a

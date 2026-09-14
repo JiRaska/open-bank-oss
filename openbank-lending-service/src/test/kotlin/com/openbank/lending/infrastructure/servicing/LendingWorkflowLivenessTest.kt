@@ -153,8 +153,22 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                loans =
+                mockk(relaxed = true) {
+                    every { countActive() } returns Uni.createFrom().item(5L)
+                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
+                },
+                provisioning =
+                mockk(relaxed = true) {
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
+                registry = null,
             )
 
         scheduler.onStart(StartupEvent())
@@ -193,8 +207,22 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
+                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
+                // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
+                // Uni that never emits, so the coverage read after the drain hung the test forever
+                // (CI cancelled the lending build at 45 min).
+                loans =
+                mockk(relaxed = true) {
+                    every { countActive() } returns Uni.createFrom().item(5L)
+                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
+                },
+                provisioning =
+                mockk(relaxed = true) {
+                    every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
+                },
+                registry = null,
             )
         scheduler.onStart(StartupEvent())
 
