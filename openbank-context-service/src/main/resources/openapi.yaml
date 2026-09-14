@@ -76,6 +76,7 @@ paths:
         - $ref: '#/components/parameters/asOf'
       responses:
         '200': { description: Authorized bounded neighborhood }
+        '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
         '404': { description: Root not projected }
         '503': { description: Authorization decision unavailable }
@@ -90,6 +91,7 @@ paths:
         - $ref: '#/components/parameters/asOf'
       responses:
         '200': { description: Authorized aggregate impact }
+        '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
         '503': { description: Authorization decision unavailable }
 components:

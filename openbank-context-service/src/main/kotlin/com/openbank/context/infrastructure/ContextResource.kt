@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.time.Clock
 import java.time.Instant
+import java.time.format.DateTimeParseException
 
 @Path("/api/v1/context")
 @Produces(MediaType.APPLICATION_JSON)
@@ -61,8 +62,15 @@ class ContextResource(
         requireNotNull(purpose?.takeIf { it.isNotBlank() && it.length <= MAX_PURPOSE_LENGTH }) {
             "X-Investigation-Purpose is required and must not exceed $MAX_PURPOSE_LENGTH characters"
         },
-        asOf?.let(Instant::parse) ?: clock.instant(),
+        asOf?.let(::parseAsOf) ?: clock.instant(),
     )
+
+    private fun parseAsOf(value: String): Instant = try {
+        Instant.parse(value)
+    } catch (exception: DateTimeParseException) {
+        throw IllegalArgumentException("asOf must be an RFC 3339 timestamp", exception)
+    }
+
     private suspend fun respond(block: suspend () -> Response): Response = try {
         block()
     } catch (_: ContextAccessDenied) {

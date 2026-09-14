@@ -254,6 +254,17 @@ class ContextApiIT {
     }
 
     @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    fun `invalid as of timestamp is rejected as a bad request`() {
+        given()
+            .header("X-Investigation-Case-Id", CASE)
+            .header("X-Investigation-Purpose", PURPOSE)
+            .queryParam("asOf", "not-a-timestamp")
+            .`when`().get("/api/v1/context/complaints/${UUID.randomUUID()}")
+            .then().statusCode(400)
+    }
+
+    @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_VIEWER"])
     fun `an unprivileged role cannot reach the lens`() {
         given()
