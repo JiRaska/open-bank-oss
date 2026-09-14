@@ -100,6 +100,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** The grantor's delegated authority was used for a confirmed payment for the first time. */
     DELEGATION_FIRST_USE(emptySet()),
+
+    /** A customer must explicitly review an active delegation; no access is changed by this reminder. */
+    DELEGATION_RECERTIFICATION_DUE(setOf("audience")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -143,6 +146,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_REINSTATED,
             DELEGATION_RENOUNCED,
             DELEGATION_EXPIRED,
+            DELEGATION_RECERTIFICATION_DUE,
             -> null
         }
 
@@ -159,6 +163,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
             DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
+            DELEGATION_RECERTIFICATION_DUE,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT

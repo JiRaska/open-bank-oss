@@ -35,8 +35,8 @@ class NotificationModelTest {
         // kyc-service had no transition into DOCUMENTS_REQUIRED and no concept of a document type.
         // 21 since #8568 removed PASSWORD_RESET: no password flow exists (passkeys/biometrics only;
         // Keycloak has resetPasswordAllowed=false and no SMTP), so nothing could produce it either.
-        // +1 for DELEGATION_FIRST_USE (this branch) = 22.
-        assertThat(NotificationTemplate.values()).hasSize(22)
+        // +1 for DELEGATION_FIRST_USE and +1 for the reminder-only recertification task = 23.
+        assertThat(NotificationTemplate.values()).hasSize(23)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -52,6 +52,7 @@ class NotificationModelTest {
             NotificationTemplate.DELEGATION_RENOUNCED,
             NotificationTemplate.DELEGATION_EXPIRED,
             NotificationTemplate.DELEGATION_FIRST_USE,
+            NotificationTemplate.DELEGATION_RECERTIFICATION_DUE,
         )
         // SCA_APPROVAL is SECURITY so the #2 push-preference gate never suppresses it.
         assertThat(NotificationTemplate.SCA_APPROVAL.category).isEqualTo(NotificationCategory.SECURITY)
@@ -70,6 +71,7 @@ class NotificationModelTest {
                 NotificationTemplate.DELEGATION_RENOUNCED,
                 NotificationTemplate.DELEGATION_EXPIRED,
                 NotificationTemplate.DELEGATION_FIRST_USE,
+                NotificationTemplate.DELEGATION_RECERTIFICATION_DUE,
             ),
         ).allSatisfy { assertThat(it.category).isEqualTo(NotificationCategory.SECURITY) }
     }
