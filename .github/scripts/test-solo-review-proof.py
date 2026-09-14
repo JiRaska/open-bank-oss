@@ -44,6 +44,18 @@ class ReportsTest(unittest.TestCase):
                 proof.validate_reports(data)
             self.assertEqual(report, original)
 
+    def test_final_parameter_envelope_correlates_without_mutating_history(self):
+        data = bundle()
+        report = data["reports"][0]
+        report.update(structured_output_uses=1, structured_output_attempts=[
+            {"$PARAMETER_VALUE": json.dumps(report["response"])}])
+        original = copy.deepcopy(data)
+        proof.validate_reports(data)
+        self.assertEqual(data, original)
+        report["response"]["coverage"][0]["analysis"] = "Different substantive reasoning that still meets the minimum."
+        with self.assertRaisesRegex(ValueError, "final output differs"):
+            proof.validate_reports(data)
+
     def test_ambiguous_parameter_envelopes_rejected(self):
         for attempt in ({"$PARAMETER_VALUE": "{}", "verdict": "NO_FINDINGS"},
                         {"$PARAMETER_VALUE": {}}, {"$PARAMETER_VALUE": "[]"},
