@@ -119,6 +119,8 @@
   --success-bg:           #ecfdf5;
   --success-border:       #6ee7b7;
   --success-text:         #037454;
+  --success-strong:       #047857;
+  --on-success:           #ffffff;
   --warning:              #f59e0b;
   --warning-bg:           #fffbeb;
   --warning-border:       #fcd34d;
@@ -289,6 +291,8 @@
   --success-bg: #064e3b;
   --success-border: #047857;
   --success-text: #6ee7b7;
+  --success-strong: #047857;
+  --on-success: #ffffff;
   --warning: #fbbf24;
   --warning-bg: #451a03;
   --warning-border: #b45309;
