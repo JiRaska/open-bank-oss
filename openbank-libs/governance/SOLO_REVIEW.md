@@ -105,9 +105,11 @@ required before activation.
 
 Claude CLI can deliver `--json-schema` output through its internal `StructuredOutput`
 call ([upstream transport example](https://github.com/anthropics/claude-agent-sdk-python/issues/1013)).
-The reader distinguishes that output carrier from execution tools: at most one exact
-`StructuredOutput` call is accepted, only when its input matches the final
-`structured_output` object. Both execution calls and server-side tool calls still block;
+The reader distinguishes that output carrier from execution tools. Every exact
+`StructuredOutput` attempt is retained in the report, and the last attempt must match
+the final `structured_output` object. A native structured result may have no carrier.
+The verifier rejects any earlier finding or unresolved verdict, even if the final
+answer claims NO_FINDINGS; missing attempt history also blocks multiple outputs. Both execution calls and server-side tool calls still block;
 an output carrier cannot excuse a sibling tool call. Evidence separately records
 `structured_output_uses`, while `tool_uses` counts execution calls. Findings and coverage
 validation are unchanged. No free-form JSON recovery or fallback verdict is introduced.
@@ -124,7 +126,7 @@ not update the external anchor, submit owner acceptance, or grant merge admissio
 The pilot at `99df055d80701135e5e3e93ddd32bf0d7e329fe5` did not produce
 admission evidence. Correctness stopped on multiple StructuredOutput carriers;
 security produced a report with findings. A successful report job is not a clean
-review. Multiple carriers remain rejected. Count-only diagnostics now distinguish
+review. That controller rejected multiple carriers. Count-only diagnostics now distinguish
 repeated call identities and agreement with the final result without logging model
 content, tool arguments or credentials. Their actual hosted shape remains unproven.
 
@@ -139,8 +141,22 @@ The installed CLI version matching the pinned dependency, 2.1.233, documents
 Help output establishes the documented contract, not runtime isolation proof.
 The producer now checks the CLI initialization tool inventory, supplies unchanged
 classifier and gate-runner source, and compares classifier/rules blob identities
-against the current base before preparation, review and sealing. The external reader
+against the live base-branch tip resolved through the branches API before
+preparation, review and sealing. This deliberately does not use the PR record as
+the authority for the current branch tip; the verifier rereads that tip before success. The external reader
 independently performs the same policy comparison. Any policy drift requires reviewed
 re-anchoring; unrelated base advances remain allowed when these files are unchanged.
 These new checks still require a hosted pilot run.
 No finding is waived by these changes, and no external anchor is updated implicitly.
+
+## Limits of model independence
+
+Different observed models and isolated sessions establish separate invocations, not
+statistical independence or resistance to prompt injection. Both reviewers read the
+same untrusted source; an embedded instruction can steer both to a false clean verdict.
+The system instruction, tool isolation, complete coverage metadata and two model names
+do not prove that this did not happen. A prompt digest or a second framing would not
+by itself prove it either. Review evidence is supplementary to deterministic checks
+and the owner's acceptance for protected changes; it must never be described as a
+security certification. Ordinary changes retain this residual risk in the accepted
+model. No merge-admission cutover is authorized by this pilot.

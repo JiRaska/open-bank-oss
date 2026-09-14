@@ -29,6 +29,15 @@ def bundle():
 
 
 class ReportsTest(unittest.TestCase):
+    def test_output_history_cannot_be_omitted_or_disagree(self):
+        for attempts in (None, [], [dict(verdict="UNKNOWN", findings=[])],
+                         [dict(verdict="NO_FINDINGS", findings=[], coverage=[])]):
+            data = bundle()
+            data["reports"][0].update(structured_output_uses=2 if attempts is None else 1,
+                                      structured_output_attempts=attempts)
+            with self.subTest(attempts=attempts), self.assertRaises(ValueError):
+                proof.validate_reports(data)
+
     def test_complete_independent_reports(self):
         proof.validate_reports(bundle())
 
@@ -142,6 +151,7 @@ class LiveReadSequenceTest(unittest.TestCase):
                     base=dict(ref="main", sha="b" * 40), changed_files=1)
         replies = {
             "repos/example/bank": {"owner": {"id": 42}},
+            "repos/example/bank/branches/main": {"commit": {"sha": "b" * 40}},
             "repos/example/bank/actions/variables/SOLO_REVIEW_POLICY_SHA": {"value": "d" * 40},
             "repos/example/bank/actions/runs/99": ProvenanceTest.run_fixture,
             "repos/example/bank/actions/workflows/agent-review.yml": ProvenanceTest.workflow,
@@ -159,9 +169,9 @@ class LiveReadSequenceTest(unittest.TestCase):
                                                                 environments=[dict(id=7)])],
         }
         for policy_path in proof.POLICY_INPUTS:
-            for revision in ("b" * 40, "d" * 40):
+            for revision in ("b" * 40, "d" * 40, "f" * 40):
                 replies[f"repos/example/bank/contents/{policy_path}?ref={revision}"] = {
-                    "type": "file", "sha": "e" * 40}
+                    "type": "file", "sha": ("9" if revision == "f" * 40 else "e") * 40}
         counts = {}
 
         def fake(path, *, binary=False):
@@ -180,6 +190,22 @@ class LiveReadSequenceTest(unittest.TestCase):
             with self.subTest(path=target), patch.object(proof, "gh", self.fixture(change)):
                 with self.assertRaisesRegex(ValueError, "classification policy changed"):
                     proof.verify("example/bank", 12, 99, protected=False)
+
+    def test_stale_pr_base_cannot_mask_new_live_policy(self):
+        def change(path, count, data):
+            if path.endswith("/branches/main"):
+                data["commit"]["sha"] = "f" * 40
+            return data
+        with patch.object(proof, "gh", self.fixture(change)), self.assertRaisesRegex(ValueError, "classification policy changed"):
+            proof.verify("example/bank", 12, 99, protected=False)
+
+    def test_live_branch_drift_after_snapshot_rejected(self):
+        def change(path, count, data):
+            if path.endswith("/branches/main") and count == 2:
+                data["commit"]["sha"] = "f" * 40
+            return data
+        with patch.object(proof, "gh", self.fixture(change)), self.assertRaisesRegex(ValueError, "live base changed"):
+            proof.verify("example/bank", 12, 99, protected=True)
 
     def test_complete_read_sequence(self):
         with patch.object(proof, "gh", self.fixture()):

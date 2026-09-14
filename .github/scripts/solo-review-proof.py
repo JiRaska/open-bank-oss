@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import zipfile
+from urllib.parse import quote
 
 CONTEXT = "solo-review-admission"
 WORKFLOW = ".github/workflows/agent-review.yml"
@@ -86,6 +87,17 @@ def validate_reports(bundle):
         response = report["response"]
         require(response.get("verdict") == "NO_FINDINGS" and response.get("findings") == [],
                 "findings or incomplete verdict require a new review")
+        count = report.get("structured_output_uses", 0)
+        require(type(count) is int and count >= 0, "invalid output attempt count")
+        attempts = report.get("structured_output_attempts")
+        if attempts is None:
+            require(count <= 1, "multiple outputs omitted their attempt history")
+        else:
+            require(isinstance(attempts, list) and len(attempts) == count, "incomplete output attempt history")
+            require(all(isinstance(a, dict) and a.get("verdict") == "NO_FINDINGS"
+                        and a.get("findings") == [] for a in attempts),
+                    "earlier output contains findings or an unresolved verdict")
+            require(not attempts or digest(attempts[-1]) == digest(response), "final output differs from attempt history")
         coverage = response.get("coverage", [])
         require(len(coverage) == len(files) and {c.get("path") for c in coverage} == set(files),
                 "review omitted changed files")
@@ -114,9 +126,18 @@ def validate_subject(subject, pull, repo, anchor):
 POLICY_INPUTS = (".github/scripts/check-agent-pr-guard.py", "openbank-libs/governance/rules.yaml")
 
 
-def validate_policy_snapshot(repo, base, anchor):
+def live_base_sha(repo, base_ref):
+    require(isinstance(base_ref, str) and base_ref, "missing base branch")
+    branch = gh(f"repos/{repo}/branches/{quote(base_ref, safe='')}")
+    sha = (branch.get("commit") or {}).get("sha") if isinstance(branch, dict) else None
+    require(isinstance(sha, str) and SHA.fullmatch(sha), "missing live base commit")
+    return sha
+
+
+def validate_policy_snapshot(repo, base_ref, anchor):
     """A pinned classifier must not silently lag changes to the base policy."""
-    require(SHA.fullmatch(base or "") and SHA.fullmatch(anchor or ""), "invalid policy snapshot")
+    base = live_base_sha(repo, base_ref)
+    require(SHA.fullmatch(anchor or ""), "invalid policy snapshot")
     for path in POLICY_INPUTS:
         identities = []
         for revision in (base, anchor):
@@ -126,6 +147,7 @@ def validate_policy_snapshot(repo, base, anchor):
             identities.append(entry["sha"])
         require(identities[0] == identities[1],
                 f"classification policy changed on base: {path}; reviewed re-anchor required")
+    return base
 
 
 def read_bundle(archive):
@@ -150,7 +172,7 @@ def verify(repo, pr, run_id, *, protected):
     validate_reports(bundle)
     pull = gh(f"{prefix}/pulls/{pr}")
     validate_subject(bundle["subject"], pull, repo, anchor)
-    validate_policy_snapshot(repo, pull["base"]["sha"], anchor)
+    policy_base = validate_policy_snapshot(repo, pull["base"]["ref"], anchor)
     files = pages(f"{prefix}/pulls/{pr}/files")
     require(len(files) == pull.get("changed_files"), "GitHub file list incomplete")
     # The producer disables rename detection and includes both sides of a rename.
@@ -179,6 +201,7 @@ def verify(repo, pr, run_id, *, protected):
     final_pull = gh(f"{prefix}/pulls/{pr}")
     validate_subject(bundle["subject"], final_pull, repo, anchor)
     require(final_pull["base"]["sha"] == pull["base"]["sha"], "base changed during verification; retry the snapshot")
+    require(live_base_sha(repo, final_pull["base"]["ref"]) == policy_base, "live base changed during verification")
     validate_run(gh(f"{prefix}/actions/runs/{run_id}"), workflow, anchor, repo)
     if protected or bundle["subject"]["protected"]:
         require(gh(f"{prefix}/environments/{ENVIRONMENT}") == environment,

@@ -83,17 +83,26 @@ class DriverTest(unittest.TestCase):
         output = dict(type="tool_use", name="StructuredOutput", input=response)
         for blocks in ([output, dict(type="tool_use", name="Bash", input={})],
                        [dict(output, input={})], [dict(output, name="mcp__StructuredOutput")],
-                       [output, output], [dict(type="server_tool_use", name="web_search", input={})]):
+                       [dict(type="server_tool_use", name="web_search", input={})]):
             with self.subTest(blocks=blocks), self.assertRaises(ValueError):
                 runner.parse_stream(stream(content=blocks, result=response), "security", {})
 
-    def test_ambiguous_output_diagnostics_disclose_only_counts(self):
-        response = dict(verdict="FINDINGS", findings=["untrusted-private-text"], coverage=[])
-        output = dict(type="tool_use", name="StructuredOutput", id="untrusted-id", input=response)
-        with self.assertRaises(ValueError) as caught:
-            runner.parse_stream(stream(content=[output, output], result=response), "correctness", {})
-        self.assertEqual(str(caught.exception),
-                         "ambiguous structured output calls: count=2, distinct_ids=1, matching_final=2")
+    def test_repeated_output_keeps_every_attempt_and_never_erases_findings(self):
+        for finding in (False, True):
+            data = fixtures.bundle()
+            response = data["reports"][0]["response"]
+            earlier = dict(response, verdict="FINDINGS" if finding else "NO_FINDINGS",
+                           findings=[dict(path="src/a.py", line=1, severity="high", explanation="Defect")] if finding else [])
+            blocks = [dict(type="tool_use", name="StructuredOutput", id="first", input=earlier),
+                      dict(type="tool_use", name="StructuredOutput", id="last", input=response)]
+            report = runner.parse_stream(stream(content=blocks, result=response), "correctness", data["subject"])
+            self.assertEqual(report["structured_output_attempts"], [earlier, response])
+            data["reports"][0] = report
+            if finding:
+                with self.assertRaisesRegex(ValueError, "earlier output"):
+                    runner.proof.validate_reports(data)
+            else:
+                runner.proof.validate_reports(data)
 
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -158,6 +167,7 @@ class DriverTest(unittest.TestCase):
                                CLAUDE_CODE_OAUTH_TOKEN="provider-fixture"), \
                     patch.object(runner.subprocess, "run", side_effect=invoke):
                 runner.review(source, output, "correctness", "/trusted/claude")
+            policy_check.assert_called_once_with("example/bank", "main", "d" * 40)
             args, kwargs = observed[0]
             self.assertEqual(args[args.index("--tools") + 1], "")
             self.assertIn("--strict-mcp-config", args)
