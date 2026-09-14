@@ -112,6 +112,10 @@ spec:
             # delegated access silently never works.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
               value: "true"
+            # Sandbox demo company (IČO 00000001, "OpenBank Demo s.r.o."). This cluster is the sandbox;
+            # never set this where real customers are onboarded.
+            - name: OPENBANK_KYB_DEMO_ENTITY_ENABLED
+              value: "true"
             # Entity party + representation mandates (ADR-0284 D3).
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
