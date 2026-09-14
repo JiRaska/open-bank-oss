@@ -9,9 +9,9 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 
-const C_VIEWED = '#6366f1'
-const C_DONE = '#22c55e'
-const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#ef4444', '#94a3b8']
+const C_VIEWED = 'var(--chart-series-1)'
+const C_DONE = 'var(--chart-series-2)'
+const PIE_COLORS = Array.from({ length: 7 }, (_, index) => `var(--chart-series-${index + 1})`)
 const tooltipStyle = {
   background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
   fontSize: 12, color: 'var(--text-secondary)',

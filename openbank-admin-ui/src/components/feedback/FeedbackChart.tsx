@@ -25,9 +25,9 @@ export function FeedbackChart({ data, labels }: {
         <YAxis type="category" dataKey="screen" width={120} />
         <Tooltip />
         <Legend />
-        <Bar dataKey="bug" name={labels.bug} stackId="a" fill="#ef4444" />
-        <Bar dataKey="idea" name={labels.idea} stackId="a" fill="#6366f1" />
-        <Bar dataKey="confusing" name={labels.confusing} stackId="a" fill="#f59e0b" />
+        <Bar dataKey="bug" name={labels.bug} stackId="a" fill="var(--danger)" />
+        <Bar dataKey="idea" name={labels.idea} stackId="a" fill="var(--chart-series-1)" />
+        <Bar dataKey="confusing" name={labels.confusing} stackId="a" fill="var(--warning)" />
       </BarChart>
     </ResponsiveContainer>
   )

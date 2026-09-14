@@ -62,7 +62,11 @@ const BucketBars = dynamic(
   { ssr: false, loading: () => <ChartPlaceholder height={220} /> },
 )
 
-const C_STAGE: Record<string, string> = { STAGE_1: '#6366f1', STAGE_2: '#f59e0b', STAGE_3: '#ef4444' }
+const C_STAGE: Record<string, string> = {
+  STAGE_1: 'var(--chart-series-1)',
+  STAGE_2: 'var(--warning)',
+  STAGE_3: 'var(--danger)',
+}
 
 const UNKNOWN = '—'
 /** The server clamps to 1000; ask for it so the cap is a known number on the labels. */
@@ -253,7 +257,7 @@ function CreditRiskConsole() {
         {(['decisions', 'policy', 'portfolio'] as const).map(id => (
           <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id}
             aria-label={id === 'decisions' ? t('Zobrazit rozhodnutí', 'Show decisions') : id === 'policy' ? t('Zobrazit politiku', 'Show policy') : t('Zobrazit portfolio', 'Show portfolio')}
-            style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === id ? 'var(--accent-strong)' : 'var(--surface-3)', color: tab === id ? '#fff' : 'var(--text-secondary)' }}>
+            style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === id ? 'var(--accent-strong)' : 'var(--surface-3)', color: tab === id ? 'var(--on-accent)' : 'var(--text-secondary)' }}>
             {id === 'decisions' ? t('Rozhodnutí', 'Decisions') : id === 'policy' ? t('Politika', 'Policy') : t('Portfolio IFRS 9', 'IFRS 9 portfolio')}
           </button>
         ))}
