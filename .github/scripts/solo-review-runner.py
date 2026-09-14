@@ -176,12 +176,14 @@ def invocation_failure(proc):
         except ValueError:
             continue
         if isinstance(event, dict) and event.get("type") == "result" and event.get("is_error") is True:
+            if event.get("api_error_status") == 429:
+                return f"model invocation failed: category=RATE_OR_USAGE_LIMIT, exit_code={proc.returncode}; no admission produced"
             errors.append(json.dumps(event.get("errors", [])))
             errors.append(json.dumps(event.get("result", "")))
     raw = "\n".join(errors)
     categories = (
         ("AUTHENTICATION", r"(?i)invalid[_ -]?(?:api[_ -]?)?key|authentication[_ -]error|oauth.{0,40}expired|unauthorized|not logged in"),
-        ("RATE_OR_USAGE_LIMIT", r"(?i)rate[_ -]?limit|usage limit|overloaded|too many requests|quota"),
+        ("RATE_OR_USAGE_LIMIT", r"(?i)rate[_ -]?limit|usage limit|hit your (?:weekly |daily )?limit|overloaded|too many requests|quota"),
         ("CONTEXT_LIMIT", r"(?i)prompt is too long|context.{0,25}(?:exceed|limit)|too many tokens"),
         ("PROVIDER_UNAVAILABLE", r"(?i)connection (?:refused|reset)|ENOTFOUND|ETIMEDOUT|service unavailable"),
     )

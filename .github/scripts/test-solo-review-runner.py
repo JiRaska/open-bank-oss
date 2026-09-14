@@ -53,6 +53,12 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(runner.invocation_failure(proc),
                                  f"model invocation failed: category={category}, exit_code=1; no admission produced")
 
+    def test_provider_quota_status_survives_changed_error_wording(self):
+        proc = subprocess.CompletedProcess([], 1, stdout=json.dumps(dict(
+            type="result", is_error=True, api_error_status=429, result="provider-specific-private-message")), stderr="")
+        self.assertEqual(runner.invocation_failure(proc),
+                         "model invocation failed: category=RATE_OR_USAGE_LIMIT, exit_code=1; no admission produced")
+
     def test_finished_stream_observes_model_and_session(self):
         report = runner.parse_stream(stream(), "correctness", fixtures.bundle()["subject"])
         self.assertEqual(report["model"], "claude-sonnet-test")
