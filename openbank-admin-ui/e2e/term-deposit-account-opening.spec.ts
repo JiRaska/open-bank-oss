@@ -68,7 +68,9 @@ test.describe('term-deposit account opening', () => {
       accountForm.requestSubmit()
     })
 
-    await expect(page).toHaveURL(`/accounts/${accountId}`)
+    // A successful POST is followed by a cold Next route transition. Under the full parallel
+    // CI suite that compilation can exceed the global 5 s UI-feedback budget.
+    await expect(page).toHaveURL(`/accounts/${accountId}`, { timeout: 15_000 })
     expect(accountOpeningPosts).toHaveLength(1)
     expect(accountOpeningPosts[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
     expect(accountOpeningPosts[0].body).toMatchObject({
