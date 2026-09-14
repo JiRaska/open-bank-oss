@@ -7,10 +7,10 @@
   border: 1px solid var(--border);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 18% 0%, rgba(34, 211, 238, .09), transparent 34%),
-    radial-gradient(circle at 82% 100%, rgba(99, 102, 241, .08), transparent 34%),
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 34%),
+    radial-gradient(circle at 82% 100%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 34%),
     var(--surface);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, .05);
+  box-shadow: var(--shadow-lg);
 }
 
 .legacyAnchor { display: block; height: 0; scroll-margin-top: 16px; }
@@ -27,7 +27,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #0f766e;
+  color: var(--success-text);
   font-size: 10px;
   font-weight: 850;
   letter-spacing: .08em;
@@ -56,8 +56,8 @@
   gap: 6px;
   padding: 5px 9px;
   border-radius: 999px;
-  color: #92400e;
-  background: #fef3c7;
+  color: var(--warning-text);
+  background: var(--warning-bg);
   font-size: 10px;
   font-weight: 750;
 }
@@ -77,7 +77,7 @@
   flex-direction: column;
   min-height: 142px;
   padding: 14px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-strong);
   border-radius: 15px;
   color: var(--text-secondary);
   background: var(--surface);
@@ -90,7 +90,7 @@
   position: absolute;
   top: 50%;
   right: -29px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 22px;
   transform: translateY(-50%);
 }
@@ -99,13 +99,13 @@
   position: absolute;
   top: 11px;
   right: 10px;
-  color: #0f766e;
+  color: var(--success-text);
   font-size: 9px;
   font-weight: 850;
 }
 
-.icon { color: #0f766e; }
-.step:last-child .icon { color: #a16207; }
+.icon { color: var(--success-text); }
+.step:last-child .icon { color: var(--warning-text); }
 .step strong { margin: 10px 0 5px; color: var(--text-primary); font-size: 12px; }
 .stepLink { display: inline-flex; align-items: center; gap: 4px; margin-top: auto; padding-top: 10px; color: var(--accent-text); font-size: 10px; font-weight: 800; text-decoration: none; }
 .stepLink:hover { text-decoration: underline; }
@@ -121,7 +121,7 @@
 }
 
 .truth { display: flex; align-items: flex-start; gap: 8px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
-.truth svg { flex-shrink: 0; color: #0f766e; }
+.truth svg { flex-shrink: 0; color: var(--success-text); }
 .link { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; color: var(--accent-text); font-size: 10px; font-weight: 800; text-decoration: none; }
 
 @media (max-width: 1200px) {
