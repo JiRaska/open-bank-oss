@@ -33,13 +33,15 @@ const STEP_LABEL_EN: Record<string, string> = {
   AGREEMENT: 'Agreements', PASSKEY: 'Passkey', SIGN: 'Signature',
 }
 
-// Theme-agnostic chart palette. recharts writes `fill`/`stroke` as SVG attributes, where CSS
-// variables don't resolve — so charts use explicit hex; surrounding chrome uses CSS vars.
-const C_VIEWED = '#6366f1'
-const C_DONE = '#22c55e'
-const C_FAIL = '#ef4444'
-const C_RATE = '#22c55e'
-const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#ef4444', '#94a3b8']
+// SVG presentation attributes resolve CSS custom properties in every supported browser. Keeping
+// the chart palette semantic makes the same evidence legible in light and dark mode.
+const C_VIEWED = 'var(--accent)'
+const C_DONE = 'var(--success)'
+const C_FAIL = 'var(--danger)'
+const C_RATE = 'var(--success)'
+const C_DONE_TEXT = 'var(--success-text)'
+const C_FAIL_TEXT = 'var(--danger-text)'
+const PIE_COLORS = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--chart-purple)', 'var(--chart-cyan)', 'var(--danger)', 'var(--text-tertiary)']
 
 function isoDay(d: Date) { return d.toISOString().slice(0, 10) }
 function fmtSeconds(s: number | null): string {
@@ -260,15 +262,15 @@ export default function OnboardingAnalyticsPage() {
             </div>
           )}
           {/* KPI stat row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+          <div className="onboarding-analytics-kpis">
             <StatTile label={t('Celková konverze', 'Overall conversion')} value={`${overallPct.toFixed(1)} %`}
-              hint={t('Podpis / Úvod', 'Signature / Welcome')} color={C_DONE} />
+              hint={t('Podpis / Úvod', 'Signature / Welcome')} color={C_DONE_TEXT} />
             <StatTile label={t('Zahájilo (Úvod)', 'Started (Welcome)')} value={String(welcome)}
               hint={t('Zobrazení', 'sessions viewed')} color={C_VIEWED} />
             <StatTile label={t('Dokončilo podpis', 'Completed signature')} value={String(signed)}
-              hint={t('Podepsané smlouvy', 'signed agreements')} color={C_DONE} />
+              hint={t('Podepsané smlouvy', 'signed agreements')} color={C_DONE_TEXT} />
             <StatTile label={t('Úspěšnost podpisu', 'Signature success')} value={`${signRate.toFixed(1)} %`}
-              hint={t('Úspěchy / pokusy', 'successes / attempts')} color={signRate >= 80 ? C_DONE : C_FAIL} />
+              hint={t('Úspěchy / pokusy', 'successes / attempts')} color={signRate >= 80 ? C_DONE_TEXT : C_FAIL_TEXT} />
           </div>
 
           {/* Funnel: viewed vs completed per step */}
@@ -280,7 +282,7 @@ export default function OnboardingAnalyticsPage() {
               {t('Zobrazeno vs. dokončeno; % je odchod na daném kroku',
                  'Viewed vs. completed; % is drop-off at that step')}
             </p>
-            <div style={{ width: '100%', height: 300 }}>
+            <div role="img" aria-label={t('Graf zobrazených a dokončených relací v každém kroku funnelu', 'Chart of viewed and completed sessions at every funnel step')} style={{ width: '100%', height: 300 }}>
               <ResponsiveContainer>
                 <BarChart data={funnelChart} margin={{ top: 20, right: 16, left: 0, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -298,7 +300,7 @@ export default function OnboardingAnalyticsPage() {
             </div>
 
             {/* Median dwell per step */}
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${funnelChart.length}, 1fr)`, gap: '8px', marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+            <div className="onboarding-analytics-dwell">
               {funnelChart.map(s => (
                 <div key={s.step} style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -311,7 +313,7 @@ export default function OnboardingAnalyticsPage() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px', marginBottom: '20px' }}>
+          <div className="onboarding-analytics-comparison">
             {/* Daily signature conversion rate */}
             <div className="card" style={{ padding: '16px 20px' }}>
               <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 600 }}>
@@ -320,7 +322,7 @@ export default function OnboardingAnalyticsPage() {
               <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
                 {t('Úspěchy / pokusy v %', 'Successes / attempts, %')}
               </p>
-              <div style={{ width: '100%', height: 240 }}>
+              <div role="img" aria-label={t('Graf denní úspěšnosti podpisu smlouvy', 'Chart of daily agreement-signature success rate')} style={{ width: '100%', height: 240 }}>
                 {rateChart.length === 0 ? (
                   <DataUnavailable kind="no_data" feature={t('Podpis smlouvy', 'Signature')} lang={language} dense />
                 ) : (
@@ -345,7 +347,7 @@ export default function OnboardingAnalyticsPage() {
               <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
                 {t('Rozdělení podle zvolené KYC metody', 'Split by chosen KYC method')}
               </p>
-              <div style={{ width: '100%', height: 240 }}>
+              <div role="img" aria-label={t('Graf rozdělení relací podle KYC metody', 'Chart of sessions split by KYC method')} style={{ width: '100%', height: 240 }}>
                 {kycChart.length === 0 ? (
                   <DataUnavailable kind="no_data" feature={t('Metoda ověření', 'Verification method')} lang={language} dense />
                 ) : (
@@ -377,7 +379,7 @@ export default function OnboardingAnalyticsPage() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {visibleData.failReasons.map(r => (
-                  <div key={r.reason} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 48px', gap: '10px', alignItems: 'center' }}>
+                  <div key={r.reason} className="onboarding-analytics-failure-row">
                     <span style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.reason}>
                       {r.reason}
                     </span>

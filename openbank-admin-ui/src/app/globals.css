@@ -130,6 +130,8 @@
   --info-bg:              #eff6ff;
   --info-border:          #93c5fd;
   --info-text:            #1d4ed8;
+  --chart-purple:         #a855f7;
+  --chart-cyan:           #0891b2;
 
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
@@ -399,7 +401,9 @@
   --info: #60a5fa;
   --info-bg: #172554;
   --info-border: #1d4ed8;
-  --info-text: #bfdbfe;
+    --info-text: #bfdbfe;
+    --chart-purple: #d8b4fe;
+    --chart-cyan: #67e8f9;
   --agent-shell-strength: 18%;
   --agent-glow-strength: 22%;
   --agent-frame: #64748b;
@@ -1160,6 +1164,23 @@ main {
 .tone-text-info    { color: var(--info-text); }
 .tone-text-neutral { color: var(--text-secondary); }
 .tone-text-accent  { color: var(--ob-accent-text); }
+
+.onboarding-analytics-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+.onboarding-analytics-comparison { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; margin-bottom: 20px; }
+.onboarding-analytics-dwell { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.onboarding-analytics-failure-row { display: grid; grid-template-columns: minmax(0, 180px) minmax(100px, 1fr) 48px; gap: 10px; align-items: center; }
+
+@media (max-width: 900px) {
+  .onboarding-analytics-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .onboarding-analytics-comparison { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .onboarding-analytics-kpis { grid-template-columns: 1fr; }
+  .onboarding-analytics-dwell { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .onboarding-analytics-failure-row { grid-template-columns: minmax(0, 1fr) 48px; }
+  .onboarding-analytics-failure-row > :first-child { grid-column: 1 / -1; }
+}
 
 /* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
    a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
