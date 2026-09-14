@@ -224,6 +224,47 @@ class DriverTest(unittest.TestCase):
 
 
 class SourceAndAcceptanceTest(unittest.TestCase):
+    def test_prepare_preserves_literal_metacharacter_filenames_with_real_git(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                if args[0] == "fetch":
+                    return b""  # Both fixture commits already exist locally.
+                return subprocess.run(["git", *args], cwd=root, check=True,
+                                      capture_output=True).stdout
+
+            git("init", "-q")
+            names = ("a[b].kt", "x*.kt", "q?.kt")
+            for name in (*names, "ab.kt", "xyz.kt", "qa.kt"):
+                (root / name).write_text("before " + name)
+                git("--literal-pathspecs", "add", "--", name)
+            tree = git("write-tree").decode().strip()
+            identity = dict(GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                            GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+            with patch.dict(os.environ, identity):
+                base = git("commit-tree", tree, "-m", "fixture base").decode().strip()
+                for name in names:
+                    (root / name).write_text("after " + name)
+                    git("--literal-pathspecs", "add", "--", name)
+                tree = git("write-tree").decode().strip()
+                head = git("commit-tree", tree, "-p", base, "-m", "fixture head").decode().strip()
+            subject = pull()
+            subject["base"]["sha"], subject["head"]["sha"] = base, head
+            with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner, "public_subject", return_value=subject), \
+                    patch.object(runner.proof, "validate_policy_snapshot"), \
+                    patch.object(runner, "git", side_effect=git), \
+                    patch.object(runner.guard, "protected_reasons", return_value=[]), \
+                    patch.dict(os.environ, GITHUB_OUTPUT=str(root / "outputs"),
+                               GITHUB_STEP_SUMMARY=str(root / "summary")):
+                runner.prepare(12, root / "input.json")
+            data = json.loads((root / "input.json").read_text())
+            self.assertEqual(set(data["subject"]["files"]), set(names))
+            self.assertEqual({entry["path"]: (entry["before"], entry["after"])
+                              for entry in data["payload"]["files"]},
+                             {name: ("before " + name, "after " + name) for name in names})
+
     @patch.object(runner.proof, "validate_policy_snapshot")
     def test_prepare_distinguishes_binary_header_from_source_literal(self, policy_check):
         text = b'check = b"GIT binary patch"\n'
