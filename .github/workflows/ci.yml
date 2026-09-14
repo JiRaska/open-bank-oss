@@ -153,11 +153,17 @@ jobs:
   # failure. Keep browser proof independent and let the stable `Admin UI` context
   # aggregate both jobs; this shortens the critical path without weakening a gate.
   ui-e2e:
-    name: Admin UI E2E
+    name: Admin UI E2E (${{ matrix.shard }}/3)
     needs: changes-ui
     if: needs.changes-ui.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Keep each browser run short enough to finish and publish its evidence even
+    # when hosted runner lifetimes are constrained. Every shard remains required.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     defaults:
       run:
         working-directory: openbank-admin-ui
@@ -178,7 +184,7 @@ jobs:
 
       - name: E2E tests (Playwright)
         id: browser_e2e
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
         env:
           CI: "true"
           NEXTAUTH_URL: "http://localhost:3001"
@@ -202,7 +208,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-intelligence-run-openbank-admin-ui-e2e-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: test-intelligence-run-openbank-admin-ui-e2e-${{ github.run_id }}-a${{ github.run_attempt }}-s${{ matrix.shard }}
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
             openbank-admin-ui/build/test-results/e2e/playwright.xml
@@ -212,7 +218,7 @@ jobs:
         if: always() && steps.browser_e2e.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}-s${{ matrix.shard }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
 
