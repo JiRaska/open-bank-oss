@@ -109,9 +109,9 @@ export function AgentDock() {
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
           width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: 'var(--accent-strong)', color: '#fff',
+          background: 'var(--accent-strong)', color: 'var(--on-accent)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
+          boxShadow: 'var(--floating-action-shadow)',
         }}
       >
         {open ? <X size={22} aria-hidden="true" /> : <Bot size={22} aria-hidden="true" />}
@@ -127,7 +127,7 @@ export function AgentDock() {
             width: 400, maxWidth: 'calc(100vw - 48px)', height: 540, maxHeight: 'calc(100vh - 120px)',
             display: 'flex', flexDirection: 'column',
             background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 'var(--r-lg)', boxShadow: '0 12px 40px rgba(0,0,0,0.22)', overflow: 'hidden',
+            borderRadius: 'var(--r-lg)', boxShadow: 'var(--floating-panel-shadow)', overflow: 'hidden',
           }}
         >
           {/* Header */}
@@ -166,8 +166,8 @@ export function AgentDock() {
                 {m.isProposal && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 5,
-                    fontSize: 10.5, fontWeight: 600, color: 'var(--warning, #b45309)',
-                    background: 'var(--warning-bg, #fffbeb)', border: '1px solid var(--warning-border, #fcd34d)',
+                    fontSize: 10.5, fontWeight: 600, color: 'var(--warning-text)',
+                    background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
                     borderRadius: '10px 10px 0 0', padding: '4px 8px',
                   }}>
                     <AlertTriangle size={11} />
@@ -177,9 +177,9 @@ export function AgentDock() {
                 <div style={{
                   fontSize: 12.5, lineHeight: 1.5, padding: '8px 11px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                   background: m.role === 'user' ? 'var(--accent)' : 'var(--surface-2)',
-                  color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
+                  color: m.role === 'user' ? 'var(--on-accent)' : 'var(--text-primary)',
                   border: m.isProposal
-                    ? '1px solid var(--warning-border, #fcd34d)'
+                    ? '1px solid var(--warning-border)'
                     : m.role === 'user' ? 'none' : '1px solid var(--border)',
                   borderRadius: m.isProposal ? '0 0 10px 10px' : 10,
                   borderTop: m.isProposal ? 'none' : undefined,
@@ -227,7 +227,7 @@ export function AgentDock() {
               disabled={busy || !input.trim()}
               style={{
                 width: 38, borderRadius: 8, border: 'none', cursor: busy ? 'default' : 'pointer',
-                background: 'var(--accent-strong)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--accent-strong)', color: 'var(--on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 opacity: busy || !input.trim() ? 0.5 : 1,
               }}
             >
