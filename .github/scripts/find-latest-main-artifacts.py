@@ -32,7 +32,7 @@ def github_page(repo: str, token: str, artifact_name: str, page: int) -> list[di
         },
     )
     try:
-        with urlopen(request, timeout=20) as response:  # noqa: S310 - fixed GitHub API origin
+        with urlopen(request, timeout=20) as response:
             payload = json.load(response)
     except HTTPError as exc:
         remaining = exc.headers.get("x-ratelimit-remaining", "unknown")
