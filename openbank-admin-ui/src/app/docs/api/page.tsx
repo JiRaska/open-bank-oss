@@ -149,12 +149,12 @@ const GROUP_COLORS: Record<string, string> = {
 }
 
 const METHOD_COLORS: Record<string, { bg: string, text: string, border: string }> = {
-  get: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
-  post: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-  put: { bg: '#fffbeb', text: '#d97706', border: '#fef08a' },
-  patch: { bg: '#fffbeb', text: '#d97706', border: '#fef08a' },
-  delete: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' },
-  default: { bg: '#f3f4f6', text: '#4b5563', border: '#e5e7eb' },
+  get: { bg: 'var(--info-bg)', text: 'var(--info-text)', border: 'var(--info-border)' },
+  post: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
+  put: { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
+  patch: { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
+  delete: { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' },
+  default: { bg: 'var(--surface-3)', text: 'var(--text-secondary)', border: 'var(--border)' },
 }
 
 
@@ -335,7 +335,7 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
   }
 
   return (
-    <div style={{ marginTop: '8px', padding: '16px', background: '#fff', border: `1px solid ${methodColor.border}`, borderRadius: '6px' }}>
+    <div style={{ marginTop: '8px', padding: '16px', background: 'var(--surface)', border: `1px solid ${methodColor.border}`, borderRadius: '6px' }}>
       <div style={{ marginBottom: '12px' }}>
         <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
           {desc}
@@ -400,8 +400,8 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
             const isClientErr = code.startsWith('4')
             const isServerErr = code.startsWith('5')
             const color = isSuccess ? 'var(--success)' : isClientErr ? 'var(--warning)' : isServerErr ? 'var(--danger)' : 'var(--text-secondary)'
-            const bg = isSuccess ? '#f0fdf4' : isClientErr ? '#fffbeb' : isServerErr ? '#fef2f2' : 'var(--surface)'
-            const border = isSuccess ? '#bbf7d0' : isClientErr ? '#fef08a' : isServerErr ? '#fecaca' : 'var(--border)'
+            const bg = isSuccess ? 'var(--success-bg)' : isClientErr ? 'var(--warning-bg)' : isServerErr ? 'var(--danger-bg)' : 'var(--surface)'
+            const border = isSuccess ? 'var(--success-border)' : isClientErr ? 'var(--warning-border)' : isServerErr ? 'var(--danger-border)' : 'var(--border)'
             return (
               <div key={code} style={{
                 padding: '4px 8px', borderRadius: '4px', border: `1px solid ${border}`,
@@ -587,8 +587,8 @@ export default function ApiCatalogPage() {
           <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600,
             background: 'transparent', border: 'none',
-            borderBottom: activeTab === tab ? '2px solid #6366f1' : '2px solid transparent',
-            color: activeTab === tab ? '#6366f1' : 'var(--text-secondary)',
+            borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === tab ? 'var(--accent-text)' : 'var(--text-secondary)',
             cursor: 'pointer', fontFamily: 'inherit', marginBottom: '-1px',
           }}>
             <span aria-hidden="true">{tab === 'rest' ? '⚡' : '📨'}</span>{tab === 'rest' ? ' REST APIs' : ' AsyncAPI / Kafka'}
@@ -710,15 +710,15 @@ export default function ApiCatalogPage() {
                     {cat?.moneyPath && (
                       <span style={{
                         fontSize: '10px', fontWeight: 700, padding: '2px 6px',
-                        background: '#ede9fe', color: '#6d28d9',
-                        borderRadius: '4px', border: '1px solid #ddd6fe',
+                        background: 'var(--accent-bg)', color: 'var(--accent-text)',
+                        borderRadius: '4px', border: '1px solid var(--accent-border)',
                       }} title={t('Money-path služba (rules.yaml)', 'Money-path service (rules.yaml)')}>money-path</span>
                     )}
                     {cat && cat.gaps.length > 0 && (
                       <span style={{
                         fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                        background: 'var(--warning-bg, #fef9c3)', color: 'var(--warning-text, #92400e)',
-                        borderRadius: '4px', border: '1px solid var(--warning-border, #fde047)',
+                        background: 'var(--warning-bg)', color: 'var(--warning-text)',
+                        borderRadius: '4px', border: '1px solid var(--warning-border)',
                       }} title={cat.gaps.join('; ')}>⚠ {cat.gaps.length} {t('mezera', 'gap')}{cat.gaps.length > 1 ? (t('y', 's')) : ''}</span>
                     )}
                     {!loading && status?.health === 'not_deployed' && (
@@ -742,8 +742,8 @@ export default function ApiCatalogPage() {
                   style={{
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
-                    background: '#eff6ff', border: '1px solid #bfdbfe',
-                    borderRadius: '6px', color: '#2563eb', textDecoration: 'none',
+                    background: 'var(--info-bg)', border: '1px solid var(--info-border)',
+                    borderRadius: '6px', color: 'var(--info-text)', textDecoration: 'underline', textUnderlineOffset: '2px',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />
@@ -754,8 +754,8 @@ export default function ApiCatalogPage() {
                   style={{
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
-                    background: '#fdf4ff', border: '1px solid #fbcfe8',
-                    borderRadius: '6px', color: '#d02571', textDecoration: 'none',
+                    background: 'var(--accent-bg)', border: '1px solid var(--accent-border)',
+                    borderRadius: '6px', color: 'var(--accent-text)', textDecoration: 'underline', textUnderlineOffset: '2px',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />
@@ -766,8 +766,8 @@ export default function ApiCatalogPage() {
                   style={{
                     display: 'flex', alignItems: 'center', gap: '4px',
                     padding: '5px 10px', fontSize: '11px', fontWeight: 600,
-                    background: '#fef9c3', border: '1px solid #fde047',
-                    borderRadius: '6px', color: '#a16207', textDecoration: 'none',
+                    background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+                    borderRadius: '6px', color: 'var(--warning-text)', textDecoration: 'underline', textUnderlineOffset: '2px',
                     flexShrink: 0,
                   }}>
                   <FileCode size={11} />
@@ -893,14 +893,14 @@ export default function ApiCatalogPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-              <Zap size={16} style={{ color: '#7c3aed' }} />
+              <Zap size={16} style={{ color: 'var(--accent-text)' }} />
               <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('AsyncAPI 3.0 — Kafka event streamy', 'AsyncAPI 3.0 — Kafka Event Streams')}</span>
               <a href={`${SPEC_BASE_URL}/docs/asyncapi/openbank-events.yaml`} target="_blank" rel="noreferrer"
                 style={{
                   marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px',
                   padding: '5px 12px', fontSize: '11px', fontWeight: 600,
-                  background: '#fef9c3', border: '1px solid #fde047',
-                  borderRadius: '6px', color: '#a16207', textDecoration: 'none',
+                  background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+                  borderRadius: '6px', color: 'var(--warning-text)', textDecoration: 'underline', textUnderlineOffset: '2px',
                 }}>
                 <FileCode size={11} />
                 AsyncAPI YAML
@@ -931,7 +931,7 @@ export default function ApiCatalogPage() {
                   {item.publishers.length === 0 ? (
                     <span style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                      background: '#6b728015', color: '#6b7280', border: '1px solid #6b728030',
+                      background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)',
                       fontWeight: 600,
                     }}>↑ {t('neznámý publisher', 'unknown publisher')}</span>
                   ) : item.publishers.map(p => (
@@ -944,7 +944,7 @@ export default function ApiCatalogPage() {
                   {item.consumers.map(c => (
                     <span key={c} style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                      background: '#f3f4f6', color: '#4b5563', border: '1px solid #e5e7eb',
+                      background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)',
                     }}>↓ {c}</span>
                   ))}
                 </div>
