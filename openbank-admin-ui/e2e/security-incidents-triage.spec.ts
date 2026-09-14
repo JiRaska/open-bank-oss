@@ -29,11 +29,19 @@ const incidents = [
 
 test('triages verified DORA incidents and preserves the snapshot after malformed refresh', async ({ page, context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'en'))
   let malformed = false
+  let impactMalformed = false
   await page.route('**/api/security/incidents', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ available: true, incidents: malformed ? [{ ...incidents[0], detectedAt: 'not-a-date' }] : incidents }),
+  }))
+  await page.route('**/api/context/incidents/*/impact?*', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(impactMalformed
+      ? { affectedByType: { PAYMENT: 3 }, total: 4, drilldownAvailable: false }
+      : { affectedByType: { PAYMENT: 3, ACCOUNT: 1 }, total: 4, drilldownAvailable: false }),
   }))
 
   await page.goto('/security/incidents')
@@ -42,6 +50,22 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   await expect(page.getByText('3', { exact: true }).first()).toBeVisible()
   await expect(register.getByText('P1 · Critical')).toBeVisible()
   await expect(page.getByText('No report ID').first()).toBeVisible()
+
+  const impactForm = page.getByRole('button', { name: 'Evaluate impact' }).locator('xpath=ancestor::form')
+  await expect.poll(async () => impactForm.evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    return bounds.left >= 0 && bounds.right <= document.documentElement.clientWidth
+  })).toBe(true)
+  await impactForm.getByLabel('Incident', { exact: true }).selectOption(incidents[0].id)
+  await impactForm.getByLabel('Case ID', { exact: true }).fill('case-7')
+  await page.getByRole('button', { name: 'Evaluate impact' }).click()
+  await expect(page.getByText('Total 4')).toBeVisible()
+  await expect(page.getByText('PAYMENT: 3')).toBeVisible()
+
+  impactMalformed = true
+  await page.getByRole('button', { name: 'Evaluate impact' }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Impact could not be verified safely.' })).toBeVisible()
+  await expect(page.getByText('Total 4')).toHaveCount(0)
 
   await page.getByLabel('Filter by severity').selectOption('P3_MEDIUM')
   await expect(page.getByRole('status')).toContainText('1 of 3 incidents')
