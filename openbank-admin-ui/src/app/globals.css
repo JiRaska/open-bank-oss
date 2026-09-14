@@ -47,6 +47,7 @@
   --sidebar-footer-version: #a8b7cc;
   --sidebar-footer-scope: #5a6b83;
   --sidebar-on-accent: #fff;
+  --overlay-scrim: rgba(15, 23, 42, 0.68);
 
   /* ── Content surface ── */
   --bg:                   #fafafa; /* slightly cleaner off-white */

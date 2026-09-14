@@ -20,8 +20,8 @@ import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
 
 const SEVERITY_LABEL: Record<DevOpsFinding['severity'], { cs: string; en: string; color: string }> = {
-  WARNING: { cs: 'Varování', en: 'Warning', color: '#d97706' },
-  CRITICAL: { cs: 'Kritické', en: 'Critical', color: '#dc2626' },
+  WARNING: { cs: 'Varování', en: 'Warning', color: 'var(--warning-text)' },
+  CRITICAL: { cs: 'Kritické', en: 'Critical', color: 'var(--danger-text)' },
 }
 
 const REMEDIATION_KIND_LABEL: Record<DevOpsFinding['remediationKind'], { cs: string; en: string }> = {
@@ -54,7 +54,7 @@ export function RemediationReviewDialog({
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
       <Dialog.Portal>
-        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'var(--overlay-scrim)' }} />
         <Dialog.Content
           role="alertdialog"
           aria-busy={busy}
@@ -105,7 +105,7 @@ export function RemediationReviewDialog({
           {finding.proposalPrUrl && (
             <div>
               <strong>{t('Návrh', 'Proposal')}:</strong>{' '}
-              <a href={finding.proposalPrUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>
+              <a href={finding.proposalPrUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--link)' }}>
                 {t('Zobrazit návrh →', 'View proposal →')}
               </a>
             </div>
