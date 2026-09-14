@@ -270,8 +270,10 @@ jobs:
           # The one run that succeeded used 3 tools and simply had headroom, so "it worked"
           # was luck, not restriction. This is also what makes the header's no-tools claim
           # true, on the second attempt: an empty string reads as "no restriction specified".
-          claude -p "$(cat /tmp/prompt.txt)" --max-turns 12 --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings \
-            --output-format stream-json --verbose > /tmp/review.raw 2>&1
+          # Even a line-bounded diff can exceed the OS limit for a single argument.
+          # Stream the complete prompt; tool restrictions and verdict checks still apply.
+          claude -p --max-turns 12 --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings \
+            --output-format stream-json --verbose < /tmp/prompt.txt > /tmp/review.raw 2>&1
           echo "cli_rc=$?"
           # Recover the assistant text from the stream; fall back to the raw file so a
           # parse failure cannot masquerade as an empty review.
