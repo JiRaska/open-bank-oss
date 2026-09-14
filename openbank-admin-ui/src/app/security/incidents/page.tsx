@@ -10,6 +10,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { IncidentImpactInvestigation } from '@/components/context/IncidentImpactInvestigation'
 import type { Tone } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
@@ -128,6 +129,8 @@ export default function IncidentsPage() {
       <StatCard label={t('P1 + P2 aktivní', 'Active P1 + P2')} value={urgent.length} tone={urgent.length ? 'danger' : 'success'} hint={t('vyžaduje prioritní triáž', 'requires priority triage')} />
       <StatCard label={t('Bez regulatorního ID', 'Without regulator ID')} value={unreported.length} tone={unreported.length ? 'warning' : 'success'} icon={<CheckCircle2 size={16} aria-hidden="true" />} />
     </div>
+
+    <IncidentImpactInvestigation incidents={incidents} />
 
     {failure && <div className="card" role="alert" style={{ padding: '14px 16px', marginBottom: 16, borderLeft: '4px solid var(--warning)' }}>
       <strong>{t('Registr se nepodařilo ověřit', 'The register could not be verified')}</strong>

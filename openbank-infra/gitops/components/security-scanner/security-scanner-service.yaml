@@ -2,9 +2,8 @@
 # Scans all deployed banking services every 30 minutes via their /q/health
 # endpoints and serves the latest report from GET /api/v1/security/report.
 # ICT incidents (DORA-grade critical findings) go to openbank.security.ict.incident.
-# Backed by a single-owner CNPG Postgres holding Flyway history only — scan results and
-# incidents are in-memory. The outbox and openbank.security.scan.event went in #4709: both
-# had existed since the service was written with nothing ever writing to them.
+# Backed by a single-owner CNPG Postgres for the durable ICT incident register and its
+# transactional outbox. Scan results remain in-memory.
 # OIDC is disabled — the scanner probes internal ClusterIPs only.
 apiVersion: apps/v1
 kind: Deployment
@@ -19,8 +18,8 @@ spec:
   # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
   # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
   # resources - on a full cluster the rollout never completes and reports 1/1 READY.
-  # This workload is single-replica BY CONSTRAINT: it holds per-pod in-memory state, so
-  # scaling it past 1 needs the #3467-class fix first, not a replica bump.
+  # Scan results are per-pod in-memory state, so scaling past one replica needs a shared
+  # scan-result projection even though the ICT incident register itself is durable.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -88,6 +87,10 @@ spec:
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_SECURITY_PROTOCOL
               value: SSL
+            # Migration safety: V6/V7 and broker ACL evidence must be present before enabling the relay.
+            # Incident writes remain durable in ict_incident_outbox while this is false.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "false"
             - name: KAFKA_SSL_KEYSTORE_LOCATION
               value: /mnt/kafka-keystore/user.p12
             - name: KAFKA_SSL_KEYSTORE_TYPE

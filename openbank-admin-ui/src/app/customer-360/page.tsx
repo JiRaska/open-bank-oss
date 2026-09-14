@@ -16,6 +16,7 @@ import { LipaPanel } from '@/components/party/LipaPanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
 import { DocumentsPanel } from '@/components/party/DocumentsPanel'
 import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
+import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 
 const CUSTOMER_360_TIMEOUT_MS = 10_000
@@ -71,6 +72,7 @@ export default function Customer360Page() {
         return
       }
       const raw = await res.json()
+      if (gen !== generation.current) return
       const body = parseCustomer360Evidence(raw, party.id)
       if (!body) {
         setFailure('error')
@@ -117,6 +119,10 @@ export default function Customer360Page() {
       )}
 
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
+
+      {!loading && !failure && data && selected && (
+        <CustomerContextGraph key={selected.id} evidence={data} partyName={partyDisplayName(selected)} />
+      )}
 
       {/* Issue #4265. Deliberately OUTSIDE every `data`/`loading`/`failure` branch below: this panel
           reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no

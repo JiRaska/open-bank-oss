@@ -71,6 +71,9 @@ spec:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: context
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
