@@ -58,20 +58,6 @@ REQUIRED_CHECKS=(
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
 
-# Checks whose health this ruleset update relies on. Before the update, the
-# exact current default-branch commit must already have emitted every one with
-# a successful conclusion. This proves that the names match GitHub's real check
-# names and that the jobs are healthy on that commit. `Admin UI` is deliberately
-# excluded: a single default-branch push cannot prove its PR-only skipped-build
-# path, so adding that required context needs its own reviewed follow-up.
-# A renamed shard, missing job, queued run or real build failure therefore stops
-# this script before it can deadlock main.
-PREFLIGHT_CHECKS=(
-  "gates (gitops-api)"
-  "gates (lint-supplychain-security)"
-  "gates (registry-kotlin-data)"
-)
-
 # Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
 # >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
 # a second maintainer.
@@ -92,16 +78,58 @@ if [ -z "$REPO" ]; then
 fi
 echo "Target repository: $REPO"
 
-# A ruleset PUT is all-or-nothing and takes effect immediately. Validate new
-# contexts against one immutable SHA rather than a branch name that can move
-# between API calls. `--paginate --slurp` also handles repositories whose HEAD
-# emits more than GitHub's default page of check runs.
+# A failed list read is not evidence that the ruleset is absent. Resolve one
+# unambiguous resource or abort before constructing any write.
+rulesets=$(gh api "repos/$REPO/rulesets" --paginate --slurp)
+existing_id=$(echo "$rulesets" | jq -er --arg name "$RULESET_NAME" '
+  if type != "array" or any(.[]; type != "array") then error("invalid ruleset listing")
+  else [ .[][] | select(.name == $name) | .id ] as $ids
+    | if ($ids | length) > 1 then error("ambiguous ruleset name")
+      elif ($ids | length) == 1 then $ids[0] | tostring else "" end
+  end')
+
+live_json=''
+live_checks_json='[]'
+if [ -n "$existing_id" ]; then
+  live_json=$(gh api "repos/$REPO/rulesets/$existing_id")
+  echo "$live_json" | jq -e --arg name "$RULESET_NAME" '
+    .name == $name and .target == "branch" and .enforcement == "active" and
+    (.rules | type == "array") and (.conditions | type == "object") and
+    (.bypass_actors | type == "array") and
+    ([.rules[] | select(.type == "required_status_checks")] | length == 1) and
+    all(.rules[] | select(.type == "required_status_checks");
+      (.parameters.required_status_checks | type == "array") and
+      all(.parameters.required_status_checks[]; (.context | type == "string")))
+  ' >/dev/null || {
+    echo "ERROR: incomplete or ambiguous live ruleset; refusing update." >&2
+    exit 1
+  }
+  live_checks_json=$(echo "$live_json" | jq '
+    .rules[] | select(.type == "required_status_checks")
+    | .parameters.required_status_checks')
+fi
+
+# Build the required_status_checks array as JSON from REQUIRED_CHECKS.
+checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
+  | jq -R '{context: .}' | jq -cs .)
+
+# Derive the preflight set instead of maintaining a second context list. Every
+# desired context absent from the live ruleset must already report SUCCESS on
+# one immutable default-branch SHA before it can become required. On a fresh
+# bootstrap this checks the complete desired set. A future REQUIRED_CHECKS edit
+# therefore cannot bypass this guard by forgetting to update another array.
+preflight_checks=$(jq -n \
+  --argjson desired "$checks_json" \
+  --argjson live "$live_checks_json" '
+  [$desired[] | select(.context as $context |
+    all($live[]; .context != $context)) | .context]')
+
 default_branch=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
 default_sha=$(gh api "repos/$REPO/commits/$default_branch" --jq '.sha')
 check_runs=$(gh api "repos/$REPO/commits/$default_sha/check-runs?per_page=100" \
   --paginate --slurp | jq '[.[].check_runs[]]')
 
-for context in "${PREFLIGHT_CHECKS[@]}"; do
+while IFS= read -r context; do
   conclusion=$(echo "$check_runs" | jq -r --arg context "$context" '
     map(select(.name == $context)) | sort_by(.id) | last | .conclusion // "missing"')
   case "$conclusion" in
@@ -116,38 +144,7 @@ for context in "${PREFLIGHT_CHECKS[@]}"; do
       exit 1
       ;;
   esac
-done
-
-# A failed list read is not evidence that the ruleset is absent. Resolve one
-# unambiguous resource or abort before constructing any write.
-rulesets=$(gh api "repos/$REPO/rulesets" --paginate --slurp)
-existing_id=$(echo "$rulesets" | jq -er --arg name "$RULESET_NAME" '
-  if type != "array" or any(.[]; type != "array") then error("invalid ruleset listing")
-  else [ .[][] | select(.name == $name) | .id ] as $ids
-    | if ($ids | length) > 1 then error("ambiguous ruleset name")
-      elif ($ids | length) == 1 then $ids[0] | tostring else "" end
-  end')
-
-live_json=''
-if [ -n "$existing_id" ]; then
-  live_json=$(gh api "repos/$REPO/rulesets/$existing_id")
-  echo "$live_json" | jq -e --arg name "$RULESET_NAME" '
-    .name == $name and .target == "branch" and
-    (.rules | type == "array") and (.conditions | type == "object") and
-    (.bypass_actors | type == "array") and
-    ([.rules[] | select(.type == "required_status_checks")] | length == 1) and
-    all(.rules[] | select(.type == "required_status_checks");
-      (.parameters.required_status_checks | type == "array") and
-      all(.parameters.required_status_checks[]; (.context | type == "string")))
-  ' >/dev/null || {
-    echo "ERROR: incomplete or ambiguous live ruleset; refusing update." >&2
-    exit 1
-  }
-fi
-
-# Build the required_status_checks array as JSON from REQUIRED_CHECKS.
-checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
-  | jq -R '{context: .}' | jq -cs .)
+done < <(echo "$preflight_checks" | jq -r '.[]')
 
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
