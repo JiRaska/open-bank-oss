@@ -29,10 +29,12 @@ info:
   # #9417/#9237 against this file (and 1.59.0 by #9215). The 503 LOYALTY_UNAVAILABLE on the
   # /loyalty routes is part of the same unreleased additive bump (main is still 1.62.0).
   # 1.65.0 -> 1.66.0 (#9215): additive — recertification review and evidence routes.
-  # 1.66.0 -> 1.67.0 (#10016): additive — GET /capabilities (ADR-0310 D5). This branch held 1.66.0,
-  # which #9215 took while it sat open. Read off live origin/main (1.66.0) and confirmed free with
-  # `git log -S 'version: 1.67.0' --all -- <this file>` (no hits) and no open PR claiming it.
-  version: 1.67.0
+  # 1.66.0 -> 1.67.0 (#10059): additive — 422 INITIATOR_IDENTITY_MISMATCH on the KYB initiator route.
+  # 1.67.0 -> 1.68.0 (#10016): additive — GET /capabilities (ADR-0310 D5). This branch held 1.66.0 and
+  # then 1.67.0, taken by #9215 and #10059 while it sat open. Read off live origin/main (1.67.0) and
+  # confirmed free with `git log -S 'version: 1.68.0' --all -- <this file>` (no hits) and no open PR
+  # claiming it.
+  version: 1.68.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3743,6 +3745,7 @@ paths:
                 dateOfBirth: { type: string, format: date, nullable: true }
       responses:
         '200': {description: Case}
+        '422': {description: 'Refused — the verified identity does not match a listed representative (INITIATOR_IDENTITY_MISMATCH)'}
 
   /business/onboarding/{id}/cosigners:
     post:

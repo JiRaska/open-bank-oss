@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.integration
 
+import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubPartyGateway
@@ -110,6 +111,17 @@ class KybCaseApiIT {
             ).extract().path<String>("id")
         assertThat(parties.created).anyMatch { it.registrationNumber == "45274649" && it.partyType == "COMPANY" }
 
+        // 4a. a customer whose VERIFIED identity is not the chosen representative is refused, whatever the
+        //     body claims: the claimed name no longer decides who the initiator is.
+        parties.identity = InitiatorIdentity("Karel Cizí", null, verified = true)
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", initiator.toString())
+            body("""{"representativeIndex":0,"claimedName":"Jana Nováková"}""")
+        } When { post("/api/v1/kyb/cases/$caseId/initiator") } Then {
+            statusCode(422)
+        }
+        parties.identity = InitiatorIdentity("Jana Nováková", null, verified = true)
         // 4. initiator = Jana (index 0)
         Given {
             contentType("application/json")
