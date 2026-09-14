@@ -58,10 +58,10 @@ REQUIRED_CHECKS=(
   "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
 
-# Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
-# >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
-# a second maintainer.
-REQUIRED_APPROVALS=0
+# Fresh-bootstrap default only. Existing rulesets preserve their complete live
+# pull_request rule during this context-only migration. GitHub forbids approving
+# your own PR, so a new single-maintainer ruleset starts at zero approvals.
+BOOTSTRAP_APPROVALS=0
 
 DRY_RUN=0
 REPO=""
@@ -148,7 +148,7 @@ done < <(echo "$preflight_checks" | jq -r '.[]')
 
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
-  --argjson approvals "$REQUIRED_APPROVALS" \
+  --argjson approvals "$BOOTSTRAP_APPROVALS" \
   --argjson checks "$checks_json" \
   '{
     name: $name,
@@ -179,8 +179,10 @@ payload=$(jq -n \
     bypass_actors: []
   }')
 
-# Phase 1 is additive only. Preserve every live field and integration binding,
-# changing solely the required-check array by appending missing contexts.
+# Phase 1 is additive only. An existing ruleset has already been validated as
+# active above; preserve every live field (including approvals, conditions and
+# bypass actors) and integration binding, changing solely the required-check
+# array by appending missing contexts. Bootstrap defaults never overwrite it.
 if [ -n "$existing_id" ]; then
   payload=$(echo "$live_json" | jq --argjson checks "$checks_json" '
     {name, target, enforcement, conditions, rules, bypass_actors}
@@ -198,7 +200,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# Idempotent upsert: $existing_id was resolved up front (see bypass preservation).
+# Apply the prepared additive update, or create the bootstrap resource when the
+# unambiguous listing above proved that no matching ruleset exists.
 if [ -n "$existing_id" ]; then
   # Refuse an observed concurrent edit instead of overwriting another operator.
   latest_json=$(gh api "repos/$REPO/rulesets/$existing_id")
