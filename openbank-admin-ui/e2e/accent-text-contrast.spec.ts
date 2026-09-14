@@ -18,6 +18,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('html')).toHaveCSS('--surface', theme === 'dark' ? '#111827' : '#fff')
     const scan = await new AxeBuilder({ page })
       .include('#settings-tab-profile')
+      .include('#settings-panel-profile')
       .withRules(['color-contrast'])
       .analyze()
     expect(scan.violations).toEqual([])

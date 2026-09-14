@@ -162,7 +162,11 @@ export default function ClusterDossierPage() {
     setLoading(true)
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
-      const d = await r.json()
+      if (!r.ok) throw new Error(`cluster topology fetch failed: ${r.status}`)
+      const d = await r.json() as Topology
+      if (!Array.isArray(d.securityLayers) || !Array.isArray(d.namespaces) ||
+          !Array.isArray(d.groups) || !Array.isArray(d.imageAnatomy?.steps) ||
+          !Array.isArray(d.planVsReality)) throw new Error('cluster topology shape is invalid')
       setTopo(d)
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)
     } catch { setTopo(null) } finally { setLoading(false) }
@@ -198,6 +202,13 @@ export default function ClusterDossierPage() {
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
+
+      {!loading && !topo && (
+        <div role="status" className="card" style={{ marginBottom: 18, padding: 14, display: 'flex', gap: 10, alignItems: 'flex-start', color: 'var(--warning-text)', background: 'var(--warning-bg)', borderColor: 'var(--warning-border)' }}>
+          <AlertTriangle aria-hidden="true" size={17} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div><strong>{t('Topologie clusteru není dostupná', 'Cluster topology is unavailable')}</strong><div style={{ marginTop: 3, fontSize: 12, color: 'var(--text-secondary)' }}>{t('Hodnoty nejsou nahrazeny nulami. Obnovte stránku, až bude zdroj znovu dostupný.', 'Values are not replaced with zeroes. Refresh when the evidence source is available again.')}</div></div>
+        </div>
+      )}
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
