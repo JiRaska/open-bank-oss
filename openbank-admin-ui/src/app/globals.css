@@ -238,6 +238,13 @@
   --login-action-shadow: 0 13px 28px rgba(12, 91, 104, .2);
   --login-action-shadow-hover: 0 17px 34px rgba(12, 91, 104, .27);
   --login-key-shadow: 0 10px 30px rgba(23, 52, 87, .08);
+  --recovery-warning-bg: #fff7ed;
+  --recovery-warning-border: #f0cfb4;
+  --recovery-warning-text: #b45309;
+  --recovery-info-bg: #eef6ff;
+  --recovery-info-border: #c6d9ed;
+  --recovery-info-text: #225f99;
+  --recovery-card-shadow: 0 24px 75px rgba(24, 47, 78, .12);
 
   /* ── Radius ── */
   --r-sm:  6px;
@@ -312,6 +319,13 @@
     --login-error-border: #8b3a43;
     --login-error-text: #fecaca;
     --login-key-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+    --recovery-warning-bg: #3b220c;
+    --recovery-warning-border: #8a4b18;
+    --recovery-warning-text: #fcd34d;
+    --recovery-info-bg: #102a44;
+    --recovery-info-border: #244f72;
+    --recovery-info-text: #93c5fd;
+    --recovery-card-shadow: 0 24px 75px rgba(0, 0, 0, .28);
   }
 }
 
