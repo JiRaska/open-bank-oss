@@ -9,6 +9,7 @@
 // classified as documented vs undocumented. All service HTTP calls are
 // intercepted via page.route() — no live services required.
 
+import AxeBuilder from '@axe-core/playwright'
 import { test, expect } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
@@ -33,6 +34,35 @@ const DOCS_INDEX = {
 }
 
 test.describe('/services — Service Documentation page', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${theme} theme explains serverless tiers accessibly`, async ({ page }) => {
+      await page.route('**/api/services/health', route =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      )
+      await page.route('**/api/services/*/docs', route =>
+        route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found', service: 'x' }) })
+      )
+
+      await page.addInitScript(selectedTheme => {
+        window.localStorage.setItem('openbank-theme', selectedTheme)
+      }, theme)
+      await page.goto('/services')
+
+      const disclosure = page.getByRole('button', { name: /Serverless tiers.*scale-to-zero|Serverless tiery.*škálování na nulu/i })
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+      await disclosure.click()
+      await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+      await expect(page.getByText(/Every service falls into one tier|Každá služba spadá do jednoho tieru/i)).toBeVisible()
+      await expect(page.getByText('T0', { exact: true })).toBeVisible()
+      await expect(page.getByText('T3', { exact: true })).toBeVisible()
+
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+      expect(results.violations).toEqual([])
+    })
+  }
+
   test('shows correct coverage count when all services have docs', async ({ page }) => {
     // Mock health (static, empty — page uses STATIC_CANDIDATES as the list)
     await page.route('**/api/services/health', route =>
