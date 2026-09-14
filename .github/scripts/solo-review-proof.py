@@ -111,6 +111,23 @@ def validate_subject(subject, pull, repo, anchor):
     require(subject.get("policy_sha") == anchor, "review policy changed")
 
 
+POLICY_INPUTS = (".github/scripts/check-agent-pr-guard.py", "openbank-libs/governance/rules.yaml")
+
+
+def validate_policy_snapshot(repo, base, anchor):
+    """A pinned classifier must not silently lag changes to the base policy."""
+    require(SHA.fullmatch(base or "") and SHA.fullmatch(anchor or ""), "invalid policy snapshot")
+    for path in POLICY_INPUTS:
+        identities = []
+        for revision in (base, anchor):
+            entry = gh(f"repos/{repo}/contents/{path}?ref={revision}")
+            require(isinstance(entry, dict) and entry.get("type") == "file" and SHA.fullmatch(entry.get("sha", "")),
+                    "missing classification policy file")
+            identities.append(entry["sha"])
+        require(identities[0] == identities[1],
+                f"classification policy changed on base: {path}; reviewed re-anchor required")
+
+
 def read_bundle(archive):
     require(len(archive) <= MAX_EVIDENCE_BYTES, "oversized evidence archive")
     with zipfile.ZipFile(io.BytesIO(archive)) as z:
@@ -133,6 +150,7 @@ def verify(repo, pr, run_id, *, protected):
     validate_reports(bundle)
     pull = gh(f"{prefix}/pulls/{pr}")
     validate_subject(bundle["subject"], pull, repo, anchor)
+    validate_policy_snapshot(repo, pull["base"]["sha"], anchor)
     files = pages(f"{prefix}/pulls/{pr}/files")
     require(len(files) == pull.get("changed_files"), "GitHub file list incomplete")
     # The producer disables rename detection and includes both sides of a rename.

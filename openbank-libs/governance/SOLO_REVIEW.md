@@ -137,6 +137,10 @@ The installed CLI version matching the pinned dependency, 2.1.233, documents
 `--tools ""` as disabling all built-in tools. This is a different option from
 `--allowed-tools`; the latter's historical behavior is not evidence about the former.
 Help output establishes the documented contract, not runtime isolation proof.
-Hosted tool-inventory verification, current-base protected-policy drift handling and
-supplying unchanged guard dependencies to reviewers remain open pilot requirements.
+The producer now checks the CLI initialization tool inventory, supplies unchanged
+classifier and gate-runner source, and compares classifier/rules blob identities
+against the current base before preparation, review and sealing. The external reader
+independently performs the same policy comparison. Any policy drift requires reviewed
+re-anchoring; unrelated base advances remain allowed when these files are unchanged.
+These new checks still require a hosted pilot run.
 No finding is waived by these changes, and no external anchor is updated implicitly.

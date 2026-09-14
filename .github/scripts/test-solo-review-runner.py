@@ -24,6 +24,7 @@ def pull():
 
 def stream(*, content=None, error=False, result=None):
     return "\n".join(json.dumps(e) for e in [
+        dict(type="system", subtype="init", tools=[]),
         dict(type="assistant", message=dict(model="claude-sonnet-test", content=content or [])),
         dict(type="result", subtype="success", is_error=error, session_id="fresh-session",
              result="", structured_output=result or dict(verdict="NO_FINDINGS", findings=[], coverage=[])),
@@ -31,6 +32,15 @@ def stream(*, content=None, error=False, result=None):
 
 
 class DriverTest(unittest.TestCase):
+    def test_missing_or_executable_tool_inventory_rejected(self):
+        events = [json.loads(line) for line in stream().splitlines()]
+        for inventory in (None, ["Bash"], ["StructuredOutput", "WebFetch"]):
+            events[0]["tools"] = inventory
+            with self.subTest(inventory=inventory), self.assertRaisesRegex(ValueError, "tool inventory"):
+                runner.parse_stream("\n".join(json.dumps(e) for e in events), "correctness", {})
+        with self.assertRaisesRegex(ValueError, "tool inventory"):
+            runner.parse_stream("\n".join(json.dumps(e) for e in events[1:]), "correctness", {})
+
     def test_finished_stream_observes_model_and_session(self):
         report = runner.parse_stream(stream(), "correctness", fixtures.bundle()["subject"])
         self.assertEqual(report["model"], "claude-sonnet-test")
@@ -91,7 +101,8 @@ class DriverTest(unittest.TestCase):
                         explanation="Concrete regression")], coverage=[])
         self.assertEqual(runner.parse_stream(stream(result=response), "security", {})["response"], response)
 
-    def test_cli_isolated_and_has_no_repository_token(self):
+    @patch.object(runner.proof, "validate_policy_snapshot")
+    def test_cli_isolated_and_has_no_repository_token(self, policy_check):
         data = fixtures.bundle()
         data["payload"] = {"diff": "public fixture", "files": []}
         data["subject"]["input_digest"] = runner.proof.digest(data["payload"])
@@ -127,7 +138,8 @@ class DriverTest(unittest.TestCase):
 
 
 class SourceAndAcceptanceTest(unittest.TestCase):
-    def test_prepare_distinguishes_binary_header_from_source_literal(self):
+    @patch.object(runner.proof, "validate_policy_snapshot")
+    def test_prepare_distinguishes_binary_header_from_source_literal(self, policy_check):
         text = b'check = b"GIT binary patch"\n'
         for binary in (False, True):
             diff = (b"diff --git a/check.py b/check.py\nGIT binary patch\nliteral 1\n" if binary else
@@ -204,7 +216,8 @@ class SourceAndAcceptanceTest(unittest.TestCase):
                 with self.subTest(key=key), patch.dict(os.environ, {key: value}), self.assertRaises(ValueError):
                     runner.anchored()
 
-    def test_gitlink_to_existing_commit_rejected(self):
+    @patch.object(runner.proof, "validate_policy_snapshot")
+    def test_gitlink_to_existing_commit_rejected(self, policy_check):
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip()
 
         def git(*args):
@@ -223,7 +236,8 @@ class SourceAndAcceptanceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "non-blob"):
                 runner.prepare(12, "/must-not-write")
 
-    def test_seal_requires_real_approval_not_boolean(self):
+    @patch.object(runner.proof, "validate_policy_snapshot")
+    def test_seal_requires_real_approval_not_boolean(self, policy_check):
         bundle = fixtures.bundle()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

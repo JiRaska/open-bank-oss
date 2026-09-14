@@ -158,6 +158,10 @@ class LiveReadSequenceTest(unittest.TestCase):
             "repos/example/bank/actions/runs/99/approvals": [dict(state="approved", user=dict(id=42),
                                                                 environments=[dict(id=7)])],
         }
+        for policy_path in proof.POLICY_INPUTS:
+            for revision in ("b" * 40, "d" * 40):
+                replies[f"repos/example/bank/contents/{policy_path}?ref={revision}"] = {
+                    "type": "file", "sha": "e" * 40}
         counts = {}
 
         def fake(path, *, binary=False):
@@ -166,6 +170,16 @@ class LiveReadSequenceTest(unittest.TestCase):
             return change(path, counts[path], response) if change else response
 
         return fake
+
+    def test_base_policy_drift_is_unresolved(self):
+        for target in proof.POLICY_INPUTS:
+            def change(path, count, data, target=target):
+                if f"/contents/{target}?ref={'b' * 40}" in path:
+                    data["sha"] = "f" * 40
+                return data
+            with self.subTest(path=target), patch.object(proof, "gh", self.fixture(change)):
+                with self.assertRaisesRegex(ValueError, "classification policy changed"):
+                    proof.verify("example/bank", 12, 99, protected=False)
 
     def test_complete_read_sequence(self):
         with patch.object(proof, "gh", self.fixture()):
