@@ -1,7 +1,5 @@
-# Staged at zero while the platform apply creates the empty ECR repository. Then the artifact-only
-# auto-deploy builds, scans, signs and attests the first image. A separate reviewed activation
-# change replaces the placeholder with that immutable sandbox tag, removes the temporary ECR
-# bootstrap entry and raises replicas; all data, identity and policy dependencies land here first.
+# The first image was built, scanned, signed and attested before activation. Keep the exact
+# sandbox tag pinned so GitOps and Kyverno verify the same immutable artifact.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +7,10 @@ metadata:
   namespace: context
   labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
 spec:
-  replicas: 0
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
@@ -24,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: openbank-context-service:bootstrap
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-7116b115
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }

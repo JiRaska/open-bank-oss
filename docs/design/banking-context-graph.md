@@ -211,11 +211,16 @@ exact referenci (počáteční cíl ≥ 0,95), nikoli jen latency benchmark výr
 
 ## Dodání po krocích
 
-1. **Viditelné ASAP:** komponenta v Customer 360 z téhož validovaného BFF response,
-   bez nových fetchů, databáze, embeddingů či závislostí. Filtr, výběr uzlu, podklad,
-   zoom a stránkování po 12 uzlech. BFF nadále před čtením ověřuje `compliance:view`.
-   Graf zobrazuje pouze projekční souvislosti jednoho klienta a výslovně ukazuje jejich
-   omezení. Nedodává nový auditní ani případový autorizační model.
+1. **Viditelné ASAP:** Customer 360 skládá uloženou analytickou projekci se sedmi omezenými
+   živými vstupy: účty, karty, notifikační interakce, úvěrové žádosti, AML případy,
+   zařízení a dokumenty. Jeden
+   BFF endpoint po ověření `compliance:view` provede sedm paralelních pětisekundových dotazů
+   pod bearerem operátora; každá služba znovu vynutí vlastní RBAC/OPA. Obsah, předmět
+   ani příjemce notifikace se do grafu nedostane. Selhání jednoho zdroje označí výsledek
+   jako částečný. Prohlížeč sdílí jednu odpověď mezi grafem a detailními panely,
+   vykreslí nejvýše 48 uzlů a BFF ořízne každou doménu na pevný limit; výsledek přizná
+   omezení. Tato vrstva řeší bootstrap historie starší než
+   Kafka retention, nenahrazuje trvalý context-service ani případový audit.
 2. **Bezpečná investigativní beta:** schválit model dat, OPA policy, hrozby a výkonové
    rozpočty; dodat izolovanou projekci, API kontrakt, audit a jednu trasu
    klient → účet → platba. Ověřit cross-role/cross-case/cross-tenant IDOR, skryté hrany,
