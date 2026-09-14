@@ -70,7 +70,7 @@ def public_subject(repo, pr):
     pull = proof.gh(f"repos/{repo}/pulls/{pr}")
     require(pull.get("state") == "open", "target PR is not open")
     for side in ("base", "head"):
-        require(pull[side].get("repo", {}).get("private") is False, "PR source repository is not public")
+        require((pull[side].get("repo") or {}).get("private") is False, "PR source repository is not public")
         require(proof.SHA.fullmatch(pull[side]["sha"]), "invalid public commit identity")
     return pull
 
@@ -146,7 +146,10 @@ def parse_stream(raw, slot, subject):
     output_calls = [c for c in calls if c.get("type") == "tool_use" and c.get("name") == "StructuredOutput"]
     tools = len(calls) - len(output_calls)
     require(tools == 0, "review used execution tools")
-    require(len(output_calls) <= 1, "ambiguous structured output calls")
+    require(len(output_calls) <= 1,
+            f"ambiguous structured output calls: count={len(output_calls)}, "
+            f"distinct_ids={len({c.get('id') for c in output_calls if isinstance(c.get('id'), str)})}, "
+            f"matching_final={sum(isinstance(c.get('input'), dict) and proof.digest(c['input']) == proof.digest(response) for c in output_calls)}")
     require(all(isinstance(c.get("input"), dict) and proof.digest(c["input"]) == proof.digest(response)
                 for c in output_calls), "structured output disagrees with final result")
     return dict(slot=slot, session_id=result.get("session_id"), model=next(iter(models)),
@@ -174,9 +177,11 @@ def review(input_path, output, slot, cli):
         "preventing review is FINDINGS. Never claim tests ran. Check failure modes, money correctness, "
         "authorization, skipped controls and injection. NO_FINDINGS requires findings=[]."
     )
-    env = dict(os.environ)
-    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
-        env.pop(key, None)
+    # The provider credential is required by the CLI, but repository, artifact and
+    # future workflow credentials must never be inherited by the model process.
+    allowed_env = ("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+                   "CLAUDE_CODE_OAUTH_TOKEN")
+    env = {key: os.environ[key] for key in allowed_env if key in os.environ}
     with tempfile.TemporaryDirectory(prefix="solo-review-") as directory:
         proc = subprocess.run(
             [str(Path(cli).resolve()), "--safe-mode", "-p", "--model", model, "--tools", "", "--strict-mcp-config",

@@ -118,3 +118,25 @@ fix still requires a fresh hosted run to establish that it resolves that particu
 The local provider smoke test could not authenticate; offline regressions are not hosted
 proof. Re-anchor only after owner acceptance of the new policy revision; this change does
 not update the external anchor, submit owner acceptance, or grant merge admission.
+
+## Hosted pilot findings under remediation
+
+The pilot at `99df055d80701135e5e3e93ddd32bf0d7e329fe5` did not produce
+admission evidence. Correctness stopped on multiple StructuredOutput carriers;
+security produced a report with findings. A successful report job is not a clean
+review. Multiple carriers remain rejected. Count-only diagnostics now distinguish
+repeated call identities and agreement with the final result without logging model
+content, tool arguments or credentials. Their actual hosted shape remains unproven.
+
+The CLI child now receives an explicit environment allow-list, retaining only basic
+process settings and the required provider credential. Repository, Actions runtime
+and future workflow secrets are excluded. A deleted fork is classified as unresolved
+public provenance rather than raising an unhandled AttributeError.
+
+The installed CLI version matching the pinned dependency, 2.1.233, documents
+`--tools ""` as disabling all built-in tools. This is a different option from
+`--allowed-tools`; the latter's historical behavior is not evidence about the former.
+Help output establishes the documented contract, not runtime isolation proof.
+Hosted tool-inventory verification, current-base protected-policy drift handling and
+supplying unchanged guard dependencies to reviewers remain open pilot requirements.
+No finding is waived by these changes, and no external anchor is updated implicitly.

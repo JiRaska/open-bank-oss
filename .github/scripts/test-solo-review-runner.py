@@ -59,6 +59,14 @@ class DriverTest(unittest.TestCase):
             with self.subTest(blocks=blocks), self.assertRaises(ValueError):
                 runner.parse_stream(stream(content=blocks, result=response), "security", {})
 
+    def test_ambiguous_output_diagnostics_disclose_only_counts(self):
+        response = dict(verdict="FINDINGS", findings=["untrusted-private-text"], coverage=[])
+        output = dict(type="tool_use", name="StructuredOutput", id="untrusted-id", input=response)
+        with self.assertRaises(ValueError) as caught:
+            runner.parse_stream(stream(content=[output, output], result=response), "correctness", {})
+        self.assertEqual(str(caught.exception),
+                         "ambiguous structured output calls: count=2, distinct_ids=1, matching_final=2")
+
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"
@@ -97,7 +105,9 @@ class DriverTest(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, stdout=stream(), stderr="")
 
             with patch.object(runner, "anchored"), patch.object(runner, "public_subject", return_value=pull()), \
-                    patch.dict(os.environ, GITHUB_SHA="d" * 40, GH_TOKEN="fixture", GITHUB_TOKEN="fixture"), \
+                    patch.dict(os.environ, GITHUB_SHA="d" * 40, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
+                               ACTIONS_RUNTIME_TOKEN="artifact-secret", FUTURE_JOB_SECRET="unknown-secret",
+                               CLAUDE_CODE_OAUTH_TOKEN="provider-fixture"), \
                     patch.object(runner.subprocess, "run", side_effect=invoke):
                 runner.review(source, output, "correctness", "/trusted/claude")
             args, kwargs = observed[0]
@@ -108,6 +118,9 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(args[args.index("--setting-sources") + 1], "")
             self.assertNotIn("GH_TOKEN", kwargs["env"])
             self.assertNotIn("GITHUB_TOKEN", kwargs["env"])
+            self.assertNotIn("ACTIONS_RUNTIME_TOKEN", kwargs["env"])
+            self.assertNotIn("FUTURE_JOB_SECRET", kwargs["env"])
+            self.assertEqual(kwargs["env"]["CLAUDE_CODE_OAUTH_TOKEN"], "provider-fixture")
             self.assertNotEqual(kwargs["cwd"], str(source.parent))
             self.assertEqual(json.loads(kwargs["input"]), data)
             self.assertTrue(output.exists())
@@ -172,6 +185,13 @@ class SourceAndAcceptanceTest(unittest.TestCase):
         data = pull()
         data["head"]["repo"]["private"] = True
         with patch.object(runner.proof, "gh", side_effect=[{"private": False}, data]), self.assertRaisesRegex(ValueError, "public"):
+            runner.public_subject("example/bank", 12)
+
+    def test_deleted_fork_fails_with_classified_public_source_error(self):
+        data = pull()
+        data["head"]["repo"] = None
+        with patch.object(runner.proof, "gh", side_effect=[{"private": False}, data]), \
+                self.assertRaisesRegex(ValueError, "PR source repository is not public"):
             runner.public_subject("example/bank", 12)
 
     def test_missing_anchor_wrong_source_and_rerun(self):
