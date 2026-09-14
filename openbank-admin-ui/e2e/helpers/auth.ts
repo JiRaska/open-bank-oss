@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // E2E sign-in helper. There is no Keycloak instance in the Playwright environment
-// (webServer.env in playwright.config.ts only sets NEXTAUTH_URL/NEXTAUTH_SECRET, not
-// KEYCLOAK_*), so a real OIDC login is impossible here. src/proxy.ts gates every
+// (webServer.env points Keycloak at a non-routable test issuer), so a real OIDC login is
+// impossible here. src/proxy.ts gates every
 // non-auth route on a valid Auth.js session cookie with no test bypass in the
 // middleware/authOptions themselves (by design — auth bypasses don't belong in
 // production code paths, ADR-0080). Instead, mint a session-token cookie the same way
@@ -18,7 +18,7 @@ import type { BrowserContext } from '@playwright/test'
 // Reads the same env var playwright.config.ts injects into the dev server
 // (webServer.env.NEXTAUTH_SECRET), falling back to its default — one literal instead of
 // two copies that can silently drift apart. This secret only ever signs cookies for the
-// ephemeral `next dev` server Playwright spawns for this test run; it is never a
+// ephemeral Next.js server Playwright spawns for this test run; it is never a
 // production value and authOptions.ts refuses this exact fallback outside NODE_ENV=production
 // (requiredSecret()), so there is no fail-fast to add here — a missing env var here just
 // means "use the same harmless test default", not a misconfigured deployment.

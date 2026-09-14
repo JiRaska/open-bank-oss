@@ -118,6 +118,14 @@ jobs:
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
+      - name: Build
+        # Playwright exercises the same production server shape that is shipped. Running
+        # `next dev` here previously introduced unrelated Turbopack navigation aborts and
+        # timeouts under four workers, while the deployable build was checked only later.
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
       - name: Install Playwright browsers
         # Download the Chromium binary (always works, no root required).
         run: npx playwright install chromium
@@ -200,11 +208,6 @@ jobs:
           name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
-
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
 
   # Gate job — always runs, maps to the "Admin UI" required check name.
   # Passes when ui-build succeeded or was skipped (no UI changes); fails when

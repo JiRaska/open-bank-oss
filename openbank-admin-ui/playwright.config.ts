@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against the Next.js dev server (auto-started before tests, torn down after).
+// Runs against an auto-started Next.js server that is torn down after the suite.
+// CI exercises the production build; local runs retain the fast development server.
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
@@ -9,6 +10,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
 const e2eBaseUrl = `http://localhost:${e2ePort}`
+const e2eServerCommand = process.env.CI
+  ? `npx next start -p ${e2ePort}`
+  : `npx next dev -p ${e2ePort}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -51,7 +55,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run dev -- -p ${e2ePort}`,
+    command: e2eServerCommand,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
@@ -62,6 +66,10 @@ export default defineConfig({
       // same secret (falls back to the same default) — keep the two in sync.
       NEXTAUTH_URL: e2eBaseUrl,
       NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret',
+      KEYCLOAK_PUBLIC_URL: 'https://keycloak.e2e.invalid',
+      KEYCLOAK_CLIENT_SECRET: 'e2e-keycloak-client-secret',
+      // Production URL validation permits HTTP only for this loopback test server.
+      ALLOW_INSECURE_STUDIO_URLS: 'true',
     },
   },
 })

@@ -82,9 +82,10 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
 
     await page.goto('/dashboard')
 
-    await expect(page.getByText('Healthy services', { exact: true })).toBeVisible()
-    await expect(page.getByText('1/2', { exact: true })).toBeVisible()
-    await expect(page.getByText('Average check latency', { exact: true })).toBeVisible()
+    const main = page.getByRole('main')
+    await expect(main.getByText('Healthy services', { exact: true })).toBeVisible()
+    await expect(main.getByText('1/2', { exact: true })).toBeVisible()
+    await expect(main.getByText('Average check latency', { exact: true })).toBeVisible()
     // Health discovery does not measure any of these. Rendering a proxy as a fact is unsafe.
     await expect(page.getByText('Security Grade', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Error Rate', { exact: true })).toHaveCount(0)
@@ -174,7 +175,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // substring match, so it also selects the "NO-GO" card and the locator resolves to two
     // elements under strict mode.
     const colourOf = (label: string) =>
-      page
+      page.getByRole('main')
         .locator('.stat-card')
         .filter({ has: page.locator('.stat-label', { hasText: new RegExp(`^${label}$`) }) })
         .locator('.stat-value')
