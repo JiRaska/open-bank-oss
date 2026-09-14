@@ -28,7 +28,15 @@ const detail = {
     charteredParticipantIds: ['rca-investigator'], declaredCaseClasses: ['cost-anomaly'], totalAgents: 8,
     synthesisEnabled: true, humanGateEnabled: true, state: 'chartered',
   },
-  proposals: { available: false, items: [], pendingCount: 0 },
+  proposals: {
+    available: true,
+    pendingCount: 1,
+    items: [
+      { id: 'proposal-1', title: 'Reduce idle capacity', state: 'PROPOSED', proposedAt: '2026-09-14T08:00:00Z', decidedAt: null },
+      { id: 'proposal-2', title: 'Right-size reporting', state: 'APPROVED', proposedAt: '2026-09-07T08:00:00Z', decidedAt: '2026-09-07T09:00:00Z' },
+      { id: 'proposal-3', title: 'Disable payment control', state: 'REJECTED', proposedAt: '2026-09-01T08:00:00Z', decidedAt: '2026-09-01T08:30:00Z' },
+    ],
+  },
 }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -53,10 +61,12 @@ test.describe('agent diagnostic education', () => {
       await expect(analysis.getByRole('progressbar')).toHaveCount(6)
       await expect(mesh.getByText(/Actual runtime admission|Skutečné runtime přijetí/i)).toBeVisible()
       await expect(mesh.getByText(/Human decides|Člověk rozhodne/i)).toBeVisible()
+      await expect(page.getByText(/1 pending approval|1 čeká na schválení/i)).toBeVisible()
+      await expect(page.getByText('PROPOSED', { exact: true })).toBeVisible()
+      await expect(page.getByText('APPROVED', { exact: true })).toBeVisible()
+      await expect(page.getByText('REJECTED', { exact: true })).toBeVisible()
 
       const results = await new AxeBuilder({ page })
-        .include('section[aria-labelledby="agent-body-analysis-title"]')
-        .include('section[aria-labelledby="agent-mesh-title"]')
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
         .analyze()
       expect(results.violations).toEqual([])

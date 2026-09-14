@@ -95,7 +95,7 @@ function NarrativeSections({ body }: { body: string }) {
       {sections.map((s, si) => (
         <div key={s.heading || si}>
           {s.heading && (
-            <div style={{ fontSize: '12px', fontWeight: 700, color: '#6366f1', marginBottom: '6px' }}>{s.heading}</div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)', marginBottom: '6px' }}>{s.heading}</div>
           )}
           {s.blocks.map((b, bi) => b.type === 'ul' ? (
             <ul key={bi} style={{ margin: '0 0 8px', paddingLeft: '16px' }}>
@@ -118,8 +118,8 @@ function NarrativeSections({ body }: { body: string }) {
 
 function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neutral' }) {
   const map = {
-    allow:   { color: '#16a34a', bg: '#dcfce7' },
-    deny:    { color: '#dc2626', bg: '#fee2e2' },
+    allow:   { color: 'var(--success-text)', bg: 'var(--success-bg)' },
+    deny:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
     neutral: { color: 'var(--text-secondary)', bg: 'var(--surface-2)' },
   }[tone]
   if (!items.length) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
@@ -142,9 +142,9 @@ function Card({ children }: { children: React.ReactNode }) {
   )
 }
 const STATE_PILL: Record<string, { color: string; bg: string }> = {
-  PROPOSED: { color: '#d97706', bg: '#fef9c3' },
-  APPROVED: { color: '#16a34a', bg: '#dcfce7' },
-  REJECTED: { color: '#dc2626', bg: '#fee2e2' },
+  PROPOSED: { color: 'var(--warning-text)', bg: 'var(--warning-bg)' },
+  APPROVED: { color: 'var(--success-text)', bg: 'var(--success-bg)' },
+  REJECTED: { color: 'var(--danger-text)', bg: 'var(--danger-bg)' },
 }
 
 function AgentDetailContent() {
@@ -209,7 +209,7 @@ function AgentDetailContent() {
             </div>
             {data.proposals.pendingCount > 0 && (
               <span style={{ fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '10px',
-                background: '#fef9c3', color: '#92400e' }}>
+                background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
                 {t(`${data.proposals.pendingCount} čeká na schválení`, `${data.proposals.pendingCount} pending approval`)}
               </span>
             )}
@@ -263,7 +263,7 @@ function AgentDetailContent() {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', justifyContent: 'space-between', flexWrap: 'wrap' }}>
                 <div style={{ minWidth: '240px', flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                    <ShieldCheck size={15} style={{ color: '#0f766e' }} />
+                    <ShieldCheck size={15} style={{ color: 'var(--success-text)' }} />
                     <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Omezená operátorská kontrola', 'Bounded operator check')}</span>
                   </div>
                   <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>
@@ -292,7 +292,7 @@ function AgentDetailContent() {
           {data.charter && (
             <Card>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <Lock size={14} style={{ color: '#6366f1' }} />
+                <Lock size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Nástroje a provoz (agents.yaml)', 'Tools and operation (agents.yaml)')}</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '11px' }}>
@@ -334,7 +334,7 @@ function AgentDetailContent() {
           {data.narrative && (
             <Card>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                <FileText size={14} style={{ color: '#6366f1' }} />
+                <FileText size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Charter — role a chování', 'Charter — role and behaviour')}</span>
               </div>
               <NarrativeSections body={data.narrative.body} />
@@ -344,7 +344,7 @@ function AgentDetailContent() {
           {data.charter && (data.charter.dataRead.length > 0 || data.charter.requiresHuman.length > 0) && (
             <Card>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <Users size={14} style={{ color: '#6366f1' }} />
+                <Users size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Datový přístup a dohled', 'Data access and oversight')}</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
@@ -356,7 +356,7 @@ function AgentDetailContent() {
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{t('Vyžaduje člověka', 'Requires human')}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                     {data.charter.requiresHuman.map(r => (
-                      <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: '#fef9c3', color: '#92400e' }}>{r}</span>
+                      <span key={r} style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '6px', background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>{r}</span>
                     ))}
                   </div>
                 </div>
@@ -370,12 +370,12 @@ function AgentDetailContent() {
           {/* Proposal history */}
           <Card>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <Clock size={14} style={{ color: '#6366f1' }} />
+              <Clock size={14} style={{ color: 'var(--accent-text)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Historie návrhů', 'Proposal history')}</span>
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 14px' }}>
               {t('HITL fronta tohoto agenta (ADR-0031 D4). Rozhodni v ', 'This agent\'s HITL queue (ADR-0031 D4). Decide in ')}
-              <Link href="/approvals" style={{ color: '#6366f1' }}>{t('Schvalování', 'Approvals')}</Link>.
+              <Link href="/approvals" style={{ color: 'var(--accent-text)', textDecoration: 'underline', textUnderlineOffset: '2px' }}>{t('Schvalování', 'Approvals')}</Link>.
             </p>
             {!data.proposals.available ? (
               <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '10px 0' }}>

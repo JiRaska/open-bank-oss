@@ -79,7 +79,7 @@ export function OutcomeMetricsCard({ items }: { items: ProposalOutcomeInput[] })
   return (
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-        <Sparkles size={14} style={{ color: '#6366f1' }} />
+        <Sparkles size={14} style={{ color: 'var(--accent-text)' }} />
         <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Výsledky návrhů', 'Proposal outcomes')}</span>
       </div>
       <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 14px' }}>
@@ -140,7 +140,7 @@ export function OutcomeMetricsCard({ items }: { items: ProposalOutcomeInput[] })
               </div>
             )}
             {m.truncated && (
-              <div style={{ color: '#d97706' }}>
+              <div style={{ color: 'var(--warning-text)' }}>
                 {t(
                   `Seznam dosáhl stropu ${PROPOSAL_PAGE_CAP} položek — čísla platí pro toto okno, ne pro celou historii.`,
                   `The list hit the ${PROPOSAL_PAGE_CAP}-row page cap — these figures describe that window, not the full history.`,
