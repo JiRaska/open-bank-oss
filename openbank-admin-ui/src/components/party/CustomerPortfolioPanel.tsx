@@ -6,14 +6,13 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Landmark, ShieldAlert, WalletCards } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
-import { parseAccountPortfolio, parseAmlPortfolio, parseLendingPortfolio, type PortfolioSummary } from '@/lib/party/portfolioContract'
+import type { BffFailure } from '@/lib/services/bff'
+import type { PortfolioSummary } from '@/lib/party/portfolioContract'
+import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
 
 type Source = 'accounts' | 'lending' | 'aml'
 type SourceState = { kind: 'loading' } | ({ kind: 'ok' } & PortfolioSummary) | { kind: 'unknown'; why: BffFailure }
 type State = Record<Source, SourceState>
-const AML_LIMIT = 100
-
 const initial = (): State => ({ accounts: { kind: 'loading' }, lending: { kind: 'loading' }, aml: { kind: 'loading' } })
 
 export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
@@ -22,28 +21,29 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
 
   useEffect(() => {
     let live = true
-    const sources: { source: Source; url: string }[] = [
-      { source: 'accounts', url: svcUrl('account-service', '/api/v1/accounts', { partyId, limit: '100' }) },
-      { source: 'lending', url: svcUrl('lending-service', '/api/v1/lending/applications', { partyId }) },
-      { source: 'aml', url: svcUrl('aml-service', '/api/v1/aml/cases', { partyId, limit: String(AML_LIMIT), offset: '0' }) },
-    ]
-    void Promise.all(sources.map(async ({ source, url }) => {
-      try {
-        const res = await fetch(url, { cache: 'no-store' })
-        if (!res.ok) {
-          const why = await classifyBffFailure(res)
-          if (live) setState(s => ({ ...s, [source]: { kind: 'unknown', why } }))
-          return
-        }
-        const body = await res.json() as unknown
-        const summary = source === 'accounts'
-          ? parseAccountPortfolio(body)
-          : source === 'aml' ? parseAmlPortfolio(body, AML_LIMIT) : parseLendingPortfolio(body)
-        if (live) setState(s => ({ ...s, [source]: { kind: 'ok', ...summary } }))
-      } catch {
-        if (live) setState(s => ({ ...s, [source]: { kind: 'unknown', why: 'unreachable' } }))
+    void loadCustomerGraphFacts(partyId).then(facts => {
+      if (!live) return
+      const values = {
+        accounts: facts.accounts,
+        lending: facts.lendingApplications,
+        aml: facts.amlCases,
       }
-    }))
+      setState(Object.fromEntries((Object.keys(values) as Source[]).map(source => [source,
+        facts.unavailable.includes(source)
+          ? { kind: 'unknown', why: 'unreachable' }
+          : {
+              kind: 'ok', count: values[source].length,
+              statuses: Array.from(new Set(values[source].map(item => item.status).filter(Boolean))),
+              lowerBound: values[source].length === (source === 'accounts' ? 50 : 30),
+            },
+      ])) as State)
+    }).catch(() => {
+      if (live) setState({
+        accounts: { kind: 'unknown', why: 'unreachable' },
+        lending: { kind: 'unknown', why: 'unreachable' },
+        aml: { kind: 'unknown', why: 'unreachable' },
+      })
+    })
     return () => { live = false }
   }, [partyId])
 

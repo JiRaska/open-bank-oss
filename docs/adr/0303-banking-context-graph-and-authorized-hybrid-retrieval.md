@@ -70,16 +70,29 @@ Customer 360, fraud/AML, corporate KYC, payment tracing, lending exposure, inter
 controls and incident impact are the initial scenarios described in the
 [product and technical design](../design/banking-context-graph.md).
 
-The first slice renders the existing Customer 360 response only: domain summaries,
-account associations and consent observations. It does not infer account ownership,
-merge customer identities, traverse other customers or introduce a second data fetch.
-The canvas is limited to twelve nodes per page, with filtering, keyboard selection,
-zoom and an evidence panel. Repeated consent observations form one node and do not
-become an invented current status or a union of currently granted scopes.
+The Customer 360 slice combines the stored event projection with seven bounded live feeds:
+accounts, cards, notification interactions, credit applications, AML cases, registered devices
+and documents. The admin BFF fans those reads out in parallel under the human bearer, with a
+five-second timeout per source, requests at most one bounded page where pagination exists, and
+returns a data-minimised graph contract capped per domain. A source failure
+marks the graph partial and does not erase successful domains. Notification recipients, subjects
+and bodies, device tokens and app-instance identifiers, document storage keys and hashes, and AML
+free text never enter the graph response. Nodes retain their owning source; edges are created only
+from authoritative IDs present in those responses.
 
-This slice inherits the existing server-side `compliance:view` check. It does not claim
-to deliver the case-scoped authorization or durable investigative audit in D4. The
-`partial` status records implementation in this change, not production deployment.
+The live overlay closes the bootstrap gap when Kafka retention cannot reconstruct activity
+that predates a new projector. It is confined to the operator read path and is not a payment
+dependency. Persistent history and multi-hop investigation remain owned by context-service;
+the overlay does not become a second event store and does not authorize cross-customer
+traversal. The browser shares one in-flight BFF response between the graph and the portfolio,
+device and document panels, avoiding duplicate source reads. The canvas bounds rendering to
+48 nodes, supports fact search, keyboard selection and zoom, and reports truncation rather than
+presenting a bounded result as complete.
+
+The BFF enforces `compliance:view` before any source request and each source independently
+re-authorizes the relayed user. It does not claim to deliver the case-scoped authorization
+or durable investigative audit in D4. The `partial` status records implementation in this
+change, not production deployment.
 
 ### D2 — Isolated event-fed PostgreSQL relationship projection
 
