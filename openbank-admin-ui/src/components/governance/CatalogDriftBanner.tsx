@@ -50,7 +50,7 @@ export function CatalogDriftBanner({ present, kinds = DEFAULT_KINDS }: { present
       style={{
         display: 'flex', alignItems: 'flex-start', gap: 8,
         padding: '10px 14px', margin: '12px 0', borderRadius: 8,
-        background: '#fef3c7', border: '1px solid #f59e0b', color: '#92400e', fontSize: 13,
+        background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', color: 'var(--warning-text)', fontSize: 13,
       }}
     >
       <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />

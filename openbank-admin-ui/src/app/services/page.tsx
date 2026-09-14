@@ -374,14 +374,14 @@ export default function ServicesDocsOverviewPage() {
                 {t('Aby se služba sem zařadila, přidejte do jejího repa', 'To document a service, add to its repo')}{' '}
                 <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 'var(--r-sm)', fontSize: '11px' }}>docs/README.md</code>
                 {' '}{t('podle vzoru', 'following the pattern of')}{' '}
-                <Link href="/services/libs/docs" style={{ color: 'var(--accent)' }}>openbank-libs/docs/</Link>.
+                <Link href="/services/libs/docs" style={{ color: 'var(--accent-text)', textDecoration: 'underline', textUnderlineOffset: '2px' }}>openbank-libs/docs/</Link>.
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {withoutDocs.map(s => (
                   <span key={s.id} style={{
                     display: 'inline-flex', alignItems: 'center', gap: '6px',
                     fontSize: '11px', padding: '2px 8px', borderRadius: '12px',
-                    background: 'var(--surface-2)', color: 'var(--text-tertiary)',
+                    background: 'var(--surface-2)', color: 'var(--text-secondary)',
                   }}>
                     {s.label}
                     <ServerlessTierBadge serviceId={s.id} dense />

@@ -10,10 +10,10 @@ import { serverlessTierFor, TIER_MECHANISM, type Tier, type TierStatus } from '@
 // Visual treatment per status. "planned" is the "to be serverless" state — dashed,
 // amber — to read as a roadmap target rather than a live capability.
 const STATUS_STYLE: Record<TierStatus, { fg: string; bg: string; border: string; dashed?: boolean }> = {
-  live:      { fg: '#059669', bg: 'rgba(5,150,105,0.10)',  border: 'rgba(5,150,105,0.35)' },
-  planned:   { fg: '#d97706', bg: 'rgba(217,119,6,0.10)',  border: 'rgba(217,119,6,0.40)', dashed: true },
-  candidate: { fg: '#6b7280', bg: 'rgba(107,114,128,0.10)', border: 'rgba(107,114,128,0.30)', dashed: true },
-  always_on: { fg: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.25)' },
+  live:      { fg: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
+  planned:   { fg: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', dashed: true },
+  candidate: { fg: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)', dashed: true },
+  always_on: { fg: 'var(--text-secondary)', bg: 'var(--surface-2)', border: 'var(--border)' },
 }
 
 function tierLabel(tier: Tier, t: (cs: string, en: string) => string): string {
@@ -78,7 +78,7 @@ export function ServerlessTierBadge({ serviceId, dense = false }: { serviceId: s
         {info.status === 'always_on' ? '●' : info.status === 'live' ? '⚡' : '◌'}
       </span>
       {statusLabel(info.status, t)}
-      <span style={{ opacity: 0.6, fontWeight: 500 }}>· {tierLabel(info.tier, t)}</span>
+      <span style={{ fontWeight: 500 }}>· {tierLabel(info.tier, t)}</span>
     </span>
   )
 }

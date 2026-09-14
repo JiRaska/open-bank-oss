@@ -63,6 +63,34 @@ test.describe('/services — Service Documentation page', () => {
     })
   }
 
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${theme} theme exposes catalog drift without hiding the page`, async ({ page }) => {
+      await page.route('**/api/services/health', route =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      )
+      await page.route('**/api/services/*/docs', route =>
+        route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found', service: 'x' }) })
+      )
+      await page.route('**/api/catalog/services', route =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [{ short: 'future-bank-service', kind: 'service' }] }) })
+      )
+      await page.addInitScript(selectedTheme => {
+        window.localStorage.setItem('openbank-theme', selectedTheme)
+      }, theme)
+
+      await page.goto('/services')
+
+      const warning = page.getByRole('status').filter({ hasText: 'future-bank-service' })
+      await expect(warning).toBeVisible()
+      await expect(page.getByRole('heading', { level: 1, name: /Service Documentation|Dokumentace služeb/i })).toBeVisible()
+
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+      expect(results.violations).toEqual([])
+    })
+  }
+
   test('shows correct coverage count when all services have docs', async ({ page }) => {
     // Mock health (static, empty — page uses STATIC_CANDIDATES as the list)
     await page.route('**/api/services/health', route =>
@@ -139,7 +167,7 @@ test.describe('/services — Service Documentation page', () => {
     // App shell rule (ADR-0076 / graceful-state guard): sidebar must be visible.
     // The Sidebar component renders <aside><nav>…, so match the outer landmark only —
     // matching both would be a strict-mode violation (2 elements for 1 locator).
-    await expect(page.locator('aside')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('aside:visible')).toBeVisible({ timeout: 10_000 })
   })
 
   test('gracefully handles health endpoint failure (falls back to static candidates)', async ({ page }) => {
