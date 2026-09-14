@@ -227,7 +227,7 @@ export function AgentPortrait({ agentId, compact = false }: { agentId: string; c
   }[p.variant]
 
   return (
-    <div className={`${styles.portrait} ${compact ? styles.compact : ''}`} style={cssVars} aria-hidden="true">
+    <div className={`${styles.portrait} ${compact ? styles.compact : ''}`} style={cssVars} aria-hidden="true" data-testid="agent-portrait">
       <div className={`${styles.robot} ${variantClass}`}>
         <span className={styles.antenna} />
         <span className={styles.head}>

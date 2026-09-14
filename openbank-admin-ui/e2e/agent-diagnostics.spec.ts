@@ -50,7 +50,7 @@ test.describe('agent diagnostic education', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme explains limits and human control accessibly`, async ({ page }) => {
       await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('openbank-theme', selectedTheme)
+        window.localStorage.setItem('ob-admin-theme', selectedTheme)
       }, theme)
       await page.goto('/iaops/agents/finops-agent')
 
@@ -65,6 +65,16 @@ test.describe('agent diagnostic education', () => {
       await expect(page.getByText('PROPOSED', { exact: true })).toBeVisible()
       await expect(page.getByText('APPROVED', { exact: true })).toBeVisible()
       await expect(page.getByText('REJECTED', { exact: true })).toBeVisible()
+
+      const portraitTheme = await page.getByTestId('agent-portrait').first().evaluate(element => {
+        const style = getComputedStyle(element)
+        return {
+          shellStrength: style.getPropertyValue('--agent-shell-strength').trim(),
+          highlight: style.getPropertyValue('--agent-highlight').trim(),
+        }
+      })
+      expect(portraitTheme.shellStrength).toBe(theme === 'dark' ? '18%' : '82%')
+      expect(portraitTheme.highlight).toBe(theme === 'dark' ? '#334155' : '#fff')
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

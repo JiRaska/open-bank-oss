@@ -16,6 +16,19 @@ const registry = parse(readFileSync(
 )) as Registry
 
 describe('AIOps agent identities', () => {
+  it('keeps the portrait chassis theme-driven instead of embedding a light palette', () => {
+    const css = readFileSync(
+      path.resolve(process.cwd(), 'src/components/agent/AgentIdentity.module.css'),
+      'utf8',
+    )
+
+    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu)
+    expect(css).not.toMatch(/rgba?\(/u)
+    expect(css).toContain('var(--agent-shell-strength)')
+    expect(css).toContain('var(--agent-highlight)')
+    expect(css).toContain('var(--agent-chassis)')
+  })
+
   it('gives every governed agent a named bilingual business persona', () => {
     const csNames = registry.agents.map(({ id }) => getAgentPersona(id, 'cs').name)
     const enNames = registry.agents.map(({ id }) => getAgentPersona(id, 'en').name)
