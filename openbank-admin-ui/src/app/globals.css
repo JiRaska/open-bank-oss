@@ -131,6 +131,30 @@
   --info-border:          #93c5fd;
   --info-text:            #1d4ed8;
 
+  /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
+   * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
+  --dashboard-hero-start: #111a35;
+  --dashboard-hero-mid: #172657;
+  --dashboard-hero-end: #30338f;
+  --dashboard-hero-border: rgba(129, 140, 248, .42);
+  --dashboard-hero-shadow: 0 18px 42px rgba(31, 41, 105, .17);
+  --dashboard-hero-glow: rgba(165, 180, 252, .28);
+  --dashboard-hero-heading: #ffffff;
+  --dashboard-hero-text: #cbd5e1;
+  --dashboard-hero-accent: #a5b4fc;
+  --dashboard-workspace-shadow: 0 12px 28px rgba(30, 41, 59, .06);
+  --dashboard-link-shadow: 0 8px 18px rgba(79, 70, 229, .14);
+  --dashboard-metric-shadow: 0 10px 22px rgba(15, 23, 42, .045);
+  --dashboard-health-start: #121c36;
+  --dashboard-health-end: #1c2b55;
+  --dashboard-health-border: #273966;
+  --dashboard-health-border-hover: #3f568d;
+  --dashboard-health-heading: #c7d2fe;
+  --dashboard-health-text: #f8fafc;
+  --dashboard-health-muted: #cbd5e1;
+  --dashboard-health-track: rgba(148, 163, 184, .2);
+  --dashboard-health-shadow: 0 14px 30px rgba(15, 23, 42, .13);
+
   /* Service topology palette. Domain meaning lives here so the SVG remains
    * readable in both themes without embedding presentation colours in data. */
   --map-core: #2563eb;
