@@ -109,6 +109,9 @@ The reader distinguishes that output carrier from execution tools. Every exact
 `StructuredOutput` attempt is retained in the report, and the last attempt must match
 the final `structured_output` object. A native structured result may have no carrier.
 The verifier rejects any earlier finding or unresolved verdict, even if the final
+answer is clean. The CLI's exact single-key `$PARAMETER_VALUE` envelope is decoded
+once with duplicate-key rejection; malformed, nested or ambiguous envelopes block.
+Raw attempts remain in the evidence, and every decoded attempt is checked before the final
 answer claims NO_FINDINGS; missing attempt history also blocks multiple outputs. Both execution calls and server-side tool calls still block;
 an output carrier cannot excuse a sibling tool call. Evidence separately records
 `structured_output_uses`, while `tool_uses` counts execution calls. Findings and coverage
@@ -160,3 +163,15 @@ by itself prove it either. Review evidence is supplementary to deterministic che
 and the owner's acceptance for protected changes; it must never be described as a
 security certification. Ordinary changes retain this residual risk in the accepted
 model. No merge-admission cutover is authorized by this pilot.
+
+## Observed legacy output argument wrapper
+
+The hosted CLI also emitted earlier StructuredOutput arguments as a single-key
+object `{"$PARAMETER_VALUE": "<JSON review object>"}` before returning a direct
+review object. The verifier decodes only this exact wrapper when inspecting history,
+retains its original representation, and applies the same no-findings requirement.
+Unknown shapes, malformed JSON and duplicate JSON keys are rejected. This is not
+recovery from arbitrary model text, and never substitutes for the final structured
+result. The last carrier must still match that result exactly. The regression was
+reproduced and corrected against both unchanged hosted reports from the pilot;
+a fresh complete hosted run is still required for admission.

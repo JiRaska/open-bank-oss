@@ -29,6 +29,34 @@ def require(condition, reason):
         raise ValueError(reason)
 
 
+def normalize_output_attempt(attempt):
+    """Decode only the observed CLI parameter envelope; retain raw evidence elsewhere."""
+    require(isinstance(attempt, dict), "malformed structured output attempt")
+    if "$PARAMETER_VALUE" not in attempt:
+        return attempt
+    require(set(attempt) == {"$PARAMETER_VALUE"} and isinstance(attempt["$PARAMETER_VALUE"], str),
+            "invalid structured output envelope")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "duplicate key in structured output envelope")
+            result[key] = value
+        return result
+
+    def reject_constant(_):
+        raise ValueError("nonfinite value in structured output envelope")
+
+    try:
+        decoded = json.loads(attempt["$PARAMETER_VALUE"], object_pairs_hook=unique_object,
+                             parse_constant=reject_constant)
+    except (ValueError, RecursionError):
+        raise ValueError("invalid JSON in structured output envelope") from None
+    require(isinstance(decoded, dict) and "$PARAMETER_VALUE" not in decoded,
+            "nested or non-object structured output envelope")
+    return decoded
+
+
 def gh(path, *, binary=False):
     result = subprocess.run(["gh", "api", path], capture_output=True, timeout=45)
     require(result.returncode == 0, f"GitHub read failed: {path}")
@@ -60,6 +88,25 @@ def validate_environment(environment, owner_id):
     require(len(reviewers) == 1 and reviewers[0].get("type") == "User"
             and reviewers[0].get("reviewer", {}).get("id") == owner_id,
             "environment must require the repository owner")
+
+
+def unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, "duplicate key in structured output history")
+        result[key] = value
+    return result
+
+
+def attempt_response(attempt):
+    # Observed in the pinned CLI: an earlier StructuredOutput argument can wrap
+    # the JSON object in this exact single key. Keep raw history; decode only here.
+    if isinstance(attempt, dict) and set(attempt) == {"$PARAMETER_VALUE"}:
+        require(isinstance(attempt["$PARAMETER_VALUE"], str), "invalid output wrapper")
+        attempt = json.loads(attempt["$PARAMETER_VALUE"], object_pairs_hook=unique_json_object)
+    require(isinstance(attempt, dict) and set(attempt) == {"verdict", "findings", "coverage"},
+            "unrecognized structured output history")
+    return attempt
 
 
 def validate_reports(bundle):
@@ -94,8 +141,9 @@ def validate_reports(bundle):
             require(count <= 1, "multiple outputs omitted their attempt history")
         else:
             require(isinstance(attempts, list) and len(attempts) == count, "incomplete output attempt history")
-            require(all(isinstance(a, dict) and a.get("verdict") == "NO_FINDINGS"
-                        and a.get("findings") == [] for a in attempts),
+            attempts = [normalize_output_attempt(a) for a in attempts]
+            decoded = [attempt_response(a) for a in attempts]
+            require(all(a.get("verdict") == "NO_FINDINGS" and a.get("findings") == [] for a in decoded),
                     "earlier output contains findings or an unresolved verdict")
             require(not attempts or digest(attempts[-1]) == digest(response), "final output differs from attempt history")
         coverage = response.get("coverage", [])

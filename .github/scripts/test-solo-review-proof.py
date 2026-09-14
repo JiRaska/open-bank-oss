@@ -29,6 +29,32 @@ def bundle():
 
 
 class ReportsTest(unittest.TestCase):
+    def test_parameter_envelope_preserves_findings_and_raw_history(self):
+        for has_findings in (False, True):
+            data = bundle()
+            report = data["reports"][0]
+            earlier = dict(report["response"], findings=[{"explanation": "Defect"}] if has_findings else [])
+            wrapped = {"$PARAMETER_VALUE": json.dumps(earlier)}
+            report.update(structured_output_uses=2, structured_output_attempts=[wrapped, report["response"]])
+            original = copy.deepcopy(report)
+            if has_findings:
+                with self.assertRaisesRegex(ValueError, "earlier output"):
+                    proof.validate_reports(data)
+            else:
+                proof.validate_reports(data)
+            self.assertEqual(report, original)
+
+    def test_ambiguous_parameter_envelopes_rejected(self):
+        for attempt in ({"$PARAMETER_VALUE": "{}", "verdict": "NO_FINDINGS"},
+                        {"$PARAMETER_VALUE": {}}, {"$PARAMETER_VALUE": "[]"},
+                        {"$PARAMETER_VALUE": "not-json"},
+                        {"$PARAMETER_VALUE": '{"$PARAMETER_VALUE":"{}"}'},
+                        {"$PARAMETER_VALUE": '{"verdict":"FINDINGS","verdict":"NO_FINDINGS"}'},
+                        {"$PARAMETER_VALUE": '{"coverage":[{"x":1,"x":2}]}'},
+                        {"$PARAMETER_VALUE": '{"x":NaN}'}):
+            with self.subTest(attempt=attempt), self.assertRaises(ValueError):
+                proof.normalize_output_attempt(attempt)
+
     def test_output_history_cannot_be_omitted_or_disagree(self):
         for attempts in (None, [], [dict(verdict="UNKNOWN", findings=[])],
                          [dict(verdict="NO_FINDINGS", findings=[], coverage=[])]):
@@ -37,6 +63,28 @@ class ReportsTest(unittest.TestCase):
                                       structured_output_attempts=attempts)
             with self.subTest(attempts=attempts), self.assertRaises(ValueError):
                 proof.validate_reports(data)
+
+    def test_observed_output_wrapper_preserves_clean_and_finding_verdicts(self):
+        for finding in (False, True):
+            data = bundle()
+            response = data["reports"][0]["response"]
+            earlier = dict(response, verdict="FINDINGS" if finding else "NO_FINDINGS",
+                           findings=[{"explanation": "must not disappear"}] if finding else [])
+            data["reports"][0].update(structured_output_uses=2, structured_output_attempts=[
+                {"$PARAMETER_VALUE": json.dumps(earlier)}, response])
+            if finding:
+                with self.assertRaisesRegex(ValueError, "earlier output"):
+                    proof.validate_reports(data)
+            else:
+                proof.validate_reports(data)
+
+    def test_output_wrapper_cannot_hide_duplicate_keys_or_unknown_shapes(self):
+        for value in ('{"verdict":"NO_FINDINGS","findings":["defect"],"findings":[],"coverage":[]}',
+                      'not JSON', '[]', '{"$PARAMETER_VALUE":"{}"}', None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                proof.attempt_response({"$PARAMETER_VALUE": value})
+        with self.assertRaises(ValueError):
+            proof.attempt_response({"$PARAMETER_VALUE": "{}", "verdict": "NO_FINDINGS"})
 
     def test_complete_independent_reports(self):
         proof.validate_reports(bundle())
