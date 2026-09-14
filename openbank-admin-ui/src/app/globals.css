@@ -110,6 +110,8 @@
      --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
      deliberately not --accent-hover, whose name promises an interaction state (#9749). */
   --accent-strong:        #4f46e5;
+  /* Paired with --text-inverse for selected controls in both themes. */
+  --selection-bg:         var(--accent-strong);
 
   /* ── Semantic ── */
   --success:              #10b981;
@@ -232,6 +234,7 @@
   --accent-bg: #1e1b4b;
   --accent-border: #4338ca;
   --accent-text: #c7d2fe;
+  --selection-bg: var(--accent);
   --ob-accent: var(--accent);
   --ob-accent-hover: var(--accent-hover);
   --ob-accent-light: var(--accent-light);

@@ -27,15 +27,15 @@ import { StatusBadge } from '@/components/ui'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const LANE_BG: Record<string, string> = {
-  compliance: '#fef2f2', core: '#eff6ff', psd2: '#fffbeb', payment: '#faf5ff',
-  kyc: '#fef2f2', identity: '#f0fdf4', platform: '#f8fafc', cards: '#f5f3ff', aml: '#fef2f2',
+  compliance: 'var(--danger-bg)', core: 'var(--info-bg)', psd2: 'var(--warning-bg)', payment: 'var(--accent-bg)',
+  kyc: 'var(--danger-bg)', identity: 'var(--success-bg)', platform: 'var(--surface-2)', cards: 'var(--accent-bg)', aml: 'var(--danger-bg)',
 }
 const LANE_BORDER: Record<string, string> = {
-  compliance: '#fca5a5', core: '#93c5fd', psd2: '#fde68a', payment: '#c4b5fd',
-  kyc: '#fca5a5', identity: '#86efac', platform: '#e2e8f0', cards: '#c4b5fd', aml: '#fca5a5',
+  compliance: 'var(--danger-border)', core: 'var(--info-border)', psd2: 'var(--warning-border)', payment: 'var(--accent-border)',
+  kyc: 'var(--danger-border)', identity: 'var(--success-border)', platform: 'var(--border)', cards: 'var(--accent-border)', aml: 'var(--danger-border)',
 }
 
-const ASYNC_COLOR = '#8b5cf6'
+const ASYNC_COLOR = 'var(--map-edge-async-active)'
 
 function BpmnDiagram({ process }: { process: BpmnProcess }) {
   const stepMap = Object.fromEntries(process.steps.map((s) => [s.id, s]))
@@ -44,33 +44,33 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
     const { x, y, type, label } = step
     if (type === 'start') return (
       <g key={step.id}>
-        <circle cx={x} cy={y} r={18} fill="#22c55e" stroke="#16a34a" strokeWidth="2" />
+        <circle cx={x} cy={y} r={18} fill="var(--success)" stroke="var(--success-text)" strokeWidth="2" />
         <text x={x} y={y + 32} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">{label}</text>
       </g>
     )
     if (type === 'end') return (
       <g key={step.id}>
-        <circle cx={x} cy={y} r={18} fill="#1e40af" stroke="#1e3a8a" strokeWidth="3" />
+        <circle cx={x} cy={y} r={18} fill="var(--info)" stroke="var(--info-text)" strokeWidth="3" />
         <text x={x} y={y + 32} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">{label}</text>
       </g>
     )
     if (type === 'end-err') return (
       <g key={step.id}>
-        <circle cx={x} cy={y} r={18} fill="#dc2626" stroke="#991b1b" strokeWidth="3" />
+        <circle cx={x} cy={y} r={18} fill="var(--danger)" stroke="var(--danger-text)" strokeWidth="3" />
         <text x={x} y={y + 32} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">{label}</text>
       </g>
     )
     if (type === 'gateway') return (
       <g key={step.id}>
         <polygon points={`${x},${y - 20} ${x + 20},${y} ${x},${y + 20} ${x - 20},${y}`}
-          fill="#fef3c7" stroke="#d97706" strokeWidth="2" />
+          fill="var(--warning-bg)" stroke="var(--warning-text)" strokeWidth="2" />
         <text x={x} y={y + 34} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">{label}</text>
       </g>
     )
     // event — intermediate message event (catch/throw): double ring + envelope
     if (type === 'event') return (
       <g key={step.id}>
-        <circle cx={x} cy={y} r={18} fill="#faf5ff" stroke={ASYNC_COLOR} strokeWidth="2" strokeDasharray="4,2" />
+        <circle cx={x} cy={y} r={18} fill="var(--accent-bg)" stroke={ASYNC_COLOR} strokeWidth="2" strokeDasharray="4,2" />
         <circle cx={x} cy={y} r={13} fill="none" stroke={ASYNC_COLOR} strokeWidth="1" />
         <path d={`M${x - 7},${y - 4} h14 v8 h-14 z M${x - 7},${y - 4} l7,5 l7,-5`}
           fill="none" stroke={ASYNC_COLOR} strokeWidth="1" />
@@ -78,8 +78,8 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
       </g>
     )
     // task
-    const bg = step.lane ? LANE_BG[step.lane] || '#f8fafc' : '#f8fafc'
-    const border = step.lane ? LANE_BORDER[step.lane] || '#e2e8f0' : '#e2e8f0'
+    const bg = step.lane ? LANE_BG[step.lane] || 'var(--surface-2)' : 'var(--surface-2)'
+    const border = step.lane ? LANE_BORDER[step.lane] || 'var(--border)' : 'var(--border)'
     const words = label.split(' ')
     const eventMarker = step.emits?.length || step.consumes?.length
     return (
@@ -87,12 +87,12 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
         <rect x={x - 50} y={y - 22} width={100} height={44} rx="6"
           fill={bg} stroke={border} strokeWidth="1.5" />
         {words.map((w, i) => (
-          <text key={i} x={x} y={y - 4 + i * 13} textAnchor="middle" fontSize="9" fontWeight="600" fill="#374151">{w}</text>
+          <text key={i} x={x} y={y - 4 + i * 13} textAnchor="middle" fontSize="9" fontWeight="600" fill="var(--text-primary)">{w}</text>
         ))}
         {eventMarker ? (
           // small envelope badge: this activity publishes/consumes domain events
           <g>
-            <rect x={x + 38} y={y - 30} width={16} height={12} rx="2" fill="#faf5ff" stroke={ASYNC_COLOR} strokeWidth="1" />
+            <rect x={x + 38} y={y - 30} width={16} height={12} rx="2" fill="var(--accent-bg)" stroke={ASYNC_COLOR} strokeWidth="1" />
             <path d={`M${x + 39},${y - 29} l7,5 l7,-5`} fill="none" stroke={ASYNC_COLOR} strokeWidth="1" />
           </g>
         ) : null}
@@ -101,10 +101,10 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
   }
 
   return (
-    <svg viewBox="0 0 1120 300" style={{ width: '100%', height: 'auto', display: 'block' }}>
+    <svg data-testid="bpmn-diagram" viewBox="0 0 1120 300" style={{ width: '100%', height: 'auto', display: 'block' }}>
       <defs>
         <marker id="bpmn-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L8,3 z" fill="#6b7280" />
+          <path d="M0,0 L0,6 L8,3 z" fill="var(--text-tertiary)" />
         </marker>
         <marker id="bpmn-arrow-async" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0,0 L0,6 L8,3 z" fill={ASYNC_COLOR} />
@@ -124,7 +124,7 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
         return (
           <g key={i}>
             <line x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-              stroke={isAsync ? ASYNC_COLOR : '#9ca3af'}
+              stroke={isAsync ? ASYNC_COLOR : 'var(--map-edge-sync-active)'}
               strokeWidth="1.5"
               strokeDasharray={isAsync ? '5,3' : undefined}
               markerEnd={isAsync ? 'url(#bpmn-arrow-async)' : 'url(#bpmn-arrow)'} />
@@ -132,7 +132,7 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
               <text x={mx} y={my - 5} textAnchor="middle"
                 fontSize={isAsync ? 7 : 8}
                 fontFamily={isAsync ? 'JetBrains Mono, monospace' : undefined}
-                fill={isAsync ? ASYNC_COLOR : '#6b7280'}>{caption}</text>
+                fill={isAsync ? ASYNC_COLOR : 'var(--text-secondary)'}>{caption}</text>
             )}
           </g>
         )
@@ -254,7 +254,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
                 {events.map((e) => (
                   <div key={e.dir + e.topic} style={{
                     fontSize: '11px', fontFamily: 'JetBrains Mono, monospace',
-                    color: ASYNC_COLOR, background: '#faf5ff', border: `1px solid ${ASYNC_COLOR}33`,
+                    color: ASYNC_COLOR, background: 'var(--accent-bg)', border: `1px solid color-mix(in srgb, ${ASYNC_COLOR} 25%, var(--border))`,
                     padding: '4px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px',
                   }}>
                     <span style={{ fontWeight: 700 }}>{e.dir === 'emit' ? '▲ emit' : '▼ consume'}</span>
@@ -315,8 +315,8 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             style={{
               padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
               border: `1px solid ${active === p.slug ? 'var(--accent)' : 'var(--border)'}`,
-              background: active === p.slug ? 'var(--accent-strong)' : 'var(--surface)',
-              color: active === p.slug ? '#fff' : 'var(--text-secondary)',
+              background: active === p.slug ? 'var(--selection-bg)' : 'var(--surface)',
+              color: active === p.slug ? 'var(--text-inverse)' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{p.name}</button>
         ))}
@@ -330,8 +330,8 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{process.desc}</div>
           </div>
           <div style={{
-            // The regulation chip carries 11px TEXT, so it needs AA on its own tint: #dc2626 on
-            // #fef2f2 measured 4.41:1. The tokens are tuned for this and follow dark theme (#9749).
+            // The regulation chip carries 11px text, so it uses the tuned semantic danger pair
+            // rather than presentation literals and follows the active theme.
             padding: '6px 12px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
             borderRadius: '6px', fontSize: '11px', fontWeight: 600, color: 'var(--danger-text)',
           }}>
@@ -364,13 +364,13 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
         <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '10px' }}>LEGENDA</div>
         <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
           {[
-            { shape: 'circle', color: '#22c55e', label: 'Start event' },
-            { shape: 'circle', color: '#1e40af', label: 'End event' },
-            { shape: 'circle', color: '#dc2626', label: 'Error end' },
-            { shape: 'diamond', color: '#d97706', label: 'Gateway (rozhodnutí)' },
-            { shape: 'rect', color: '#93c5fd', label: 'Task (Core Banking)' },
-            { shape: 'rect', color: '#fca5a5', label: 'Task (Compliance)' },
-            { shape: 'rect', color: '#fde68a', label: 'Task (PSD2)' },
+            { shape: 'circle', color: 'var(--success)', label: 'Start event' },
+            { shape: 'circle', color: 'var(--info)', label: 'End event' },
+            { shape: 'circle', color: 'var(--danger)', label: 'Error end' },
+            { shape: 'diamond', color: 'var(--warning-text)', label: 'Gateway (rozhodnutí)' },
+            { shape: 'rect', color: 'var(--info-border)', label: 'Task (Core Banking)' },
+            { shape: 'rect', color: 'var(--danger-border)', label: 'Task (Compliance)' },
+            { shape: 'rect', color: 'var(--warning-border)', label: 'Task (PSD2)' },
             { shape: 'event', color: ASYNC_COLOR, label: 'Message event (catch/throw)' },
             { shape: 'async', color: ASYNC_COLOR, label: 'Async event / outbox (Kafka)' },
             { shape: 'status-up', color: 'var(--success-text)', label: 'Service UP' },
