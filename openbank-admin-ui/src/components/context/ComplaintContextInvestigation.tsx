@@ -25,7 +25,10 @@ export function ComplaintContextInvestigation() {
   const byKey = new Map(positions.map(node => [node.key, node]))
   const selectedNode = graph?.nodes.find(node => node.key === selected)
   const timeline = useMemo(() => (graph?.nodes ?? [])
-    .filter(node => ['PAYMENT_STAGE', 'RAIL_EVIDENCE', 'TRANSACTION_BOOKING', 'LEDGER_BOOKING'].includes(node.type))
+    .filter(node => [
+      'PAYMENT_STAGE', 'RAIL_EVIDENCE', 'TRANSACTION_BOOKING', 'LEDGER_BOOKING',
+      'CLEARING_ITEM', 'CLEARING_EVIDENCE', 'RETURN_EVIDENCE',
+    ].includes(node.type))
     .map(node => ({
       ...node,
       relation: graph?.edges.find(edge => edge.to === node.key)?.relation ?? node.type,

@@ -16,6 +16,9 @@ const graph = {
     node('payment-stage:domestic:payment:2', 'RAIL_EVIDENCE', 2, '2026-09-13T10:01:00Z'),
     node('booking-transaction:tx-1', 'TRANSACTION_BOOKING', 0, '2026-09-13T10:02:00Z', 'transaction-service'),
     node('ledger-booking:journal-1', 'LEDGER_BOOKING', 0, '2026-09-13T10:03:00Z', 'ledger-service'),
+    node('clearing-item:item-1', 'CLEARING_ITEM', 2, '2026-09-13T10:04:00Z', 'clearing-service'),
+    node('clearing-evidence:item-1:2', 'CLEARING_EVIDENCE', 2, '2026-09-13T10:05:00Z', 'clearing-service'),
+    node('return-evidence:sepa:payment:4', 'RETURN_EVIDENCE', 4, '2026-09-13T10:06:00Z', 'sepa-payment'),
   ],
   edges: [
     edge('complaint-payment', graphRoot(), payment, 'CONCERNS_TRANSACTION', 1),
@@ -23,6 +26,9 @@ const graph = {
     edge('submitted', payment, 'payment-stage:domestic:payment:2', 'SUBMITTED_TO', 2),
     edge('booking', payment, 'booking-transaction:tx-1', 'BOOKING_REQUESTED', 0),
     edge('posted', 'booking-transaction:tx-1', 'ledger-booking:journal-1', 'BOOKED_AS', 0),
+    edge('clearing-item', payment, 'clearing-item:item-1', 'SUBMITTED_TO', 2),
+    edge('cleared', 'clearing-item:item-1', 'clearing-evidence:item-1:2', 'SETTLED', 2),
+    edge('returned', payment, 'return-evidence:sepa:payment:4', 'RETURNED_BY', 4),
   ],
 }
 
@@ -60,11 +66,14 @@ describe('complaint context investigation', () => {
 
     const timeline = await screen.findByRole('heading', { name: 'Payment timeline' })
     const items = timeline.parentElement?.querySelectorAll('li') ?? []
-    expect(items).toHaveLength(4)
+    expect(items).toHaveLength(7)
     expect(items[0]).toHaveTextContent('CREATED')
     expect(items[1]).toHaveTextContent('SUBMITTED TO')
     expect(items[2]).toHaveTextContent('BOOKING REQUESTED')
     expect(items[3]).toHaveTextContent('BOOKED AS')
+    expect(items[4]).toHaveTextContent('SUBMITTED TO')
+    expect(items[5]).toHaveTextContent('SETTLED')
+    expect(items[6]).toHaveTextContent('RETURNED BY')
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/context/complaints/CMP-42?caseId=case-7&purpose=PAYMENT_COMPLAINT',
     )
