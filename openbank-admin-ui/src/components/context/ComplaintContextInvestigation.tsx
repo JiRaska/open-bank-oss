@@ -25,12 +25,14 @@ export function ComplaintContextInvestigation() {
   const byKey = new Map(positions.map(node => [node.key, node]))
   const selectedNode = graph?.nodes.find(node => node.key === selected)
   const timeline = useMemo(() => (graph?.nodes ?? [])
-    .filter(node => node.type === 'PAYMENT_STAGE' || node.type === 'RAIL_EVIDENCE')
+    .filter(node => ['PAYMENT_STAGE', 'RAIL_EVIDENCE', 'TRANSACTION_BOOKING', 'LEDGER_BOOKING'].includes(node.type))
     .map(node => ({
       ...node,
       relation: graph?.edges.find(edge => edge.to === node.key)?.relation ?? node.type,
     }))
-    .sort((left, right) => left.sourceVersion - right.sourceVersion), [graph])
+    .sort((left, right) => Date.parse(left.validFrom) - Date.parse(right.validFrom)
+      || left.sourceSystem.localeCompare(right.sourceSystem)
+      || left.sourceVersion - right.sourceVersion), [graph])
 
   async function investigate(event: FormEvent) {
     event.preventDefault(); setState('loading'); setGraph(null); setSelected(null)

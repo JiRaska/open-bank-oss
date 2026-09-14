@@ -50,7 +50,7 @@ export function parseContextNeighborhood(value: unknown): ContextNeighborhood {
     && typeof node.label === 'string' && typeof node.sourceSystem === 'string'
     && typeof node.sourceRef === 'string' && namespaces.has(node.namespace)
     && classifications.has(node.classification) && isTimestamp(node.validFrom)
-    && isTimestamp(node.recordedAt) && Number.isSafeInteger(node.sourceVersion) && node.sourceVersion > 0
+    && isTimestamp(node.recordedAt) && Number.isSafeInteger(node.sourceVersion) && node.sourceVersion >= 0
     && (node.validTo === null || isTimestamp(node.validTo)))) throw new Error('invalid context nodes')
   const keys = new Set(graph.nodes.map(node => node.key))
   const rootNode = graph.nodes.find(node => node.key === graph.root)
@@ -60,7 +60,7 @@ export function parseContextNeighborhood(value: unknown): ContextNeighborhood {
   if (!graph.edges.every(edge => edge && typeof edge.id === 'string' && typeof edge.relation === 'string'
     && typeof edge.evidenceRef === 'string' && edge.namespace === rootNode.namespace
     && keys.has(edge.from) && keys.has(edge.to) && isTimestamp(edge.validFrom)
-    && isTimestamp(edge.recordedAt) && Number.isSafeInteger(edge.sourceVersion) && edge.sourceVersion > 0
+    && isTimestamp(edge.recordedAt) && Number.isSafeInteger(edge.sourceVersion) && edge.sourceVersion >= 0
     && (edge.validTo === null || isTimestamp(edge.validTo)))) throw new Error('invalid context edges')
   return graph as ContextNeighborhood
 }

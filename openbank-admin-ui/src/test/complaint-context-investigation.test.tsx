@@ -14,19 +14,23 @@ const graph = {
     node(payment, 'TRANSACTION', 1),
     node('payment-stage:domestic:payment:1', 'PAYMENT_STAGE', 1, '2026-09-13T10:00:00Z'),
     node('payment-stage:domestic:payment:2', 'RAIL_EVIDENCE', 2, '2026-09-13T10:01:00Z'),
+    node('booking-transaction:tx-1', 'TRANSACTION_BOOKING', 0, '2026-09-13T10:02:00Z', 'transaction-service'),
+    node('ledger-booking:journal-1', 'LEDGER_BOOKING', 0, '2026-09-13T10:03:00Z', 'ledger-service'),
   ],
   edges: [
     edge('complaint-payment', graphRoot(), payment, 'CONCERNS_TRANSACTION', 1),
     edge('created', payment, 'payment-stage:domestic:payment:1', 'CREATED', 1),
     edge('submitted', payment, 'payment-stage:domestic:payment:2', 'SUBMITTED_TO', 2),
+    edge('booking', payment, 'booking-transaction:tx-1', 'BOOKING_REQUESTED', 0),
+    edge('posted', 'booking-transaction:tx-1', 'ledger-booking:journal-1', 'BOOKED_AS', 0),
   ],
 }
 
 function graphRoot() { return 'complaint:CMP-42' }
 
-function node(key: string, type: string, sourceVersion: number, validFrom = '2026-09-13T09:59:00Z') {
+function node(key: string, type: string, sourceVersion: number, validFrom = '2026-09-13T09:59:00Z', sourceSystem = 'domestic-payment') {
   return {
-    key, namespace: 'COMPLAINT', type, sourceSystem: 'domestic-payment', sourceRef: key,
+    key, namespace: 'COMPLAINT', type, sourceSystem, sourceRef: key,
     label: type, classification: 'RESTRICTED', validFrom, validTo: null,
     recordedAt: '2026-09-13T10:02:00Z', sourceVersion,
   }
@@ -56,9 +60,11 @@ describe('complaint context investigation', () => {
 
     const timeline = await screen.findByRole('heading', { name: 'Payment timeline' })
     const items = timeline.parentElement?.querySelectorAll('li') ?? []
-    expect(items).toHaveLength(2)
+    expect(items).toHaveLength(4)
     expect(items[0]).toHaveTextContent('CREATED')
     expect(items[1]).toHaveTextContent('SUBMITTED TO')
+    expect(items[2]).toHaveTextContent('BOOKING REQUESTED')
+    expect(items[3]).toHaveTextContent('BOOKED AS')
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/context/complaints/CMP-42?caseId=case-7&purpose=PAYMENT_COMPLAINT',
     )
