@@ -5,13 +5,21 @@
 'use client'
 
 import { useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { usePathname, useRouter } from 'next/navigation'
 import { Toaster } from 'sonner'
-import { AgentDock } from '@/components/agent/AgentDock'
 import { SessionProvider } from '@/components/auth/SessionProvider'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { LanguageProvider, type Language } from '@/lib/i18n/LanguageContext'
+
+// The assistant is authenticated-only and closed on initial paint. Keeping its
+// chat implementation out of the shared provider chunk also guarantees public
+// login and policy surfaces do not download privileged interaction code.
+const AgentDock = dynamic(
+  () => import('@/components/agent/AgentDock').then(module => module.AgentDock),
+  { ssr: false },
+)
 
 /**
  * Keeps authenticated-only infrastructure off public entry and policy surfaces.

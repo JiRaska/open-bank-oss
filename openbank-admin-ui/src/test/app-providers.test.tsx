@@ -3,6 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import React from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePathname } from 'next/navigation'
@@ -54,12 +56,18 @@ describe('AppProviders', () => {
     expect(screen.queryByTestId('agent-dock')).not.toBeInTheDocument()
   })
 
-  it('retains authenticated infrastructure on protected operator routes', () => {
+  it('retains authenticated infrastructure on protected operator routes', async () => {
     render(<AppProviders><main>Operator content</main></AppProviders>)
 
     expect(screen.getByTestId('session-provider')).toBeVisible()
-    expect(screen.getByTestId('agent-dock')).toBeVisible()
+    expect(await screen.findByTestId('agent-dock')).toBeVisible()
     expect(screen.getByText('Operator content')).toBeVisible()
+  })
+
+  it('defers the authenticated assistant implementation from the shared provider chunk', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src/components/layout/AppProviders.tsx'), 'utf8')
+    expect(source).toContain("import('@/components/agent/AgentDock')")
+    expect(source).not.toContain("import { AgentDock } from '@/components/agent/AgentDock'")
   })
 
   it('keeps one RUM observer owner mounted across protected and public surfaces', () => {
