@@ -42,7 +42,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
   const bearer = `Bearer ${session.user.accessToken}`
   const results = await Promise.all([
     read('accounts', serverSvcUrl('account-service', 'accounts', 8100, '/api/v1/accounts', { partyId, limit: String(LIMITS.accounts + 1) }), bearer),
-    read('cards', serverSvcUrl('card-issuance-service', 'card-issuance', 8118, `/api/v1/cards/party/${partyId}`), bearer),
+    read('cards', serverSvcUrl('card-issuance-service', 'payments', 8118, `/api/v1/cards/party/${partyId}`), bearer),
     read('notifications', serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/notifications', {
       partyId, page: '0', size: String(LIMITS.notifications + 1),
     }), bearer),
