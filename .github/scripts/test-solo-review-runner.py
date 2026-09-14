@@ -81,10 +81,28 @@ class DriverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"
             source.write_text(json.dumps(dict(payload={}, subject=dict(input_digest="wrong"))))
-            with patch.object(runner, "anchored"), patch.object(runner.subprocess, "run") as invoke:
+            with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner.subprocess, "run") as invoke:
                 with self.assertRaisesRegex(ValueError, "digest"):
                     runner.review(source, Path(directory) / "out.json", "correctness", "/never/call")
                 invoke.assert_not_called()
+
+    def test_other_repository_rejected_before_api_or_provider_call(self):
+        data = fixtures.bundle()
+        data["payload"] = {"diff": "public fixture", "files": []}
+        data["subject"]["input_digest"] = runner.proof.digest(data["payload"])
+        data["subject"]["repo"] = "other/public-bank"
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / "input.json", Path(directory) / "out.json"
+            source.write_text(json.dumps(data))
+            with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner, "public_subject") as api, \
+                    patch.object(runner.subprocess, "run") as invoke:
+                with self.assertRaisesRegex(ValueError, "repository differs"):
+                    runner.review(source, output, "correctness", "/never/call")
+                api.assert_not_called()
+                invoke.assert_not_called()
+                self.assertFalse(output.exists())
 
     def test_unstructured_text_cannot_substitute_for_validated_output(self):
         events = [json.loads(line) for line in stream().splitlines()]
@@ -115,7 +133,8 @@ class DriverTest(unittest.TestCase):
                 observed.append((args, kwargs))
                 return subprocess.CompletedProcess(args, 0, stdout=stream(), stderr="")
 
-            with patch.object(runner, "anchored"), patch.object(runner, "public_subject", return_value=pull()), \
+            with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner, "public_subject", return_value=pull()), \
                     patch.dict(os.environ, GITHUB_SHA="d" * 40, GH_TOKEN="fixture", GITHUB_TOKEN="fixture",
                                ACTIONS_RUNTIME_TOKEN="artifact-secret", FUTURE_JOB_SECRET="unknown-secret",
                                CLAUDE_CODE_OAUTH_TOKEN="provider-fixture"), \
