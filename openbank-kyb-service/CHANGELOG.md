@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.3.0...kyb-service-v0.4.0) (2026-09-14)
+
+
+### Features
+
+* **kyb:** bind the initiator to their verified identity, and add a sandbox demo company ([#10059](https://github.com/JiRaska/open-bank-oss/issues/10059)) ([545c744](https://github.com/JiRaska/open-bank-oss/commit/545c744be77662f22be40a6e7c392e2f9a2529d9))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.2.0...kyb-service-v0.3.0) (2026-09-13)
 
 
