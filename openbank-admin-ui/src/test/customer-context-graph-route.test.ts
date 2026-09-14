@@ -13,10 +13,12 @@ const response = (body: unknown, status = 200) => new Response(JSON.stringify(bo
 describe('Customer graph live overlay route', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
     authMock.mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_ADMIN'] } })
   })
 
   it('fans out in parallel with the human bearer and strips notification content', async () => {
+    vi.stubEnv('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get('authorization')).toBe('Bearer operator-token')
       const url = String(input)
@@ -47,6 +49,9 @@ describe('Customer graph live overlay route', () => {
 
     expect(result.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}`,
+    )
     expect(body.unavailable).toEqual([])
     expect(body.truncated).toEqual([])
     expect(body.accounts).toHaveLength(1)
