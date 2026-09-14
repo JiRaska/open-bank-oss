@@ -37,7 +37,7 @@ import java.util.UUID
 
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-balance-service", pactVersion = PactSpecVersion.V3)
-class SettlementCoverPactTest {
+class SettlementCoverPactConsumerTest {
     private val id = UUID.fromString("55555555-5555-5555-5555-555555555520")
     private val payer = UUID.fromString("a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1")
     private val payee = UUID.fromString("77777777-7777-7777-7777-777777777720")
