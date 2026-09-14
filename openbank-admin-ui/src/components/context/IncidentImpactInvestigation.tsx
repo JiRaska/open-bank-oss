@@ -8,6 +8,21 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { IctIncident } from '@/lib/security/incidentEvidence'
 
 type Impact = { affectedByType: Record<string, number>; total: number; drilldownAvailable: boolean }
+const MAX_IMPACT_TYPES = 50
+const MAX_IMPACT_TYPE_LENGTH = 80
+
+function isImpact(value: unknown): value is Impact {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  if (!Number.isSafeInteger(candidate.total) || (candidate.total as number) < 0 ||
+      candidate.drilldownAvailable !== false || !candidate.affectedByType ||
+      typeof candidate.affectedByType !== 'object' || Array.isArray(candidate.affectedByType)) return false
+  const entries = Object.entries(candidate.affectedByType as Record<string, unknown>)
+  return entries.length <= MAX_IMPACT_TYPES &&
+    entries.every(([type, count]) => type.trim().length > 0 && type.length <= MAX_IMPACT_TYPE_LENGTH &&
+      Number.isSafeInteger(count) && (count as number) >= 0) &&
+    entries.reduce((sum, [, count]) => sum + (count as number), 0) === candidate.total
+}
 
 export function IncidentImpactInvestigation({ incidents }: { incidents: IctIncident[] }) {
   const { t } = useLanguage()
@@ -23,14 +38,16 @@ export function IncidentImpactInvestigation({ incidents }: { incidents: IctIncid
       const response = await fetch(`/api/context/incidents/${encodeURIComponent(reference)}/impact?${query}`)
       if (response.status === 403) { setState('denied'); return }
       if (!response.ok) { setState('error'); return }
-      setImpact(await response.json() as Impact); setState('idle')
+      const body: unknown = await response.json()
+      if (!isImpact(body)) { setState('error'); return }
+      setImpact(body); setState('idle')
     } catch { setState('error') }
   }
 
   return <section className="card" style={{ padding: 18, marginBottom: 20 }} aria-labelledby="incident-impact-title">
     <h2 id="incident-impact-title" style={{ marginTop: 0, fontSize: 16 }}><Network size={17} aria-hidden="true" /> {t('Mapa obchodního dopadu', 'Business impact map')}</h2>
     <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('Ukazuje pouze agregované typy zásahu; identifikátory klientů se v tomto pohledu nevracejí.', 'Shows aggregate impact types only; customer identifiers are never returned by this view.')}</p>
-    <form onSubmit={load} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr auto', gap: 8 }}>
+    <form onSubmit={load} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 8 }}>
       <select required className="input" value={reference} onChange={e => setReference(e.target.value)} aria-label={t('Incident', 'Incident')}><option value="">{t('Vyberte incident', 'Select incident')}</option>{incidents.map(item => <option key={item.id} value={item.id}>{item.severity} · {item.title}</option>)}</select>
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID přiděleného případu', 'Assigned case ID')} aria-label={t('ID případu', 'Case ID')} />
       <button className="btn btn-primary" disabled={state === 'loading'}>{t('Vyhodnotit dopad', 'Evaluate impact')}</button>

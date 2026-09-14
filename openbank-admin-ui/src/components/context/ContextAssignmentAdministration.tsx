@@ -77,7 +77,7 @@ export function ContextAssignmentAdministration() {
   return <details className="card" style={{ padding: 18, marginBottom: 24 }}>
     <summary style={{ cursor: 'pointer', fontWeight: 700 }}><KeyRound size={16} aria-hidden="true" /> {t('Správa přístupů ke grafu', 'Graph access administration')}</summary>
     <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Časově omezené přidělení vyžaduje jiného schvalovatele. Odvolání platí okamžitě.', 'Time-bound assignment requires a different approver. Revocation takes effect immediately.')}</p>
-    <form onSubmit={propose} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1.5fr 1fr auto', gap: 8 }}>
+    <form onSubmit={propose} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 8 }}>
       <input required className="input" value={principalId} onChange={e => setPrincipalId(e.target.value)} placeholder={t('Uživatel', 'Principal')} aria-label={t('Uživatel', 'Principal')} />
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
       <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option></select>

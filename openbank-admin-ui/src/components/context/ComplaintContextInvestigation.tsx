@@ -59,7 +59,7 @@ export function ComplaintContextInvestigation() {
       {t('Graf se načte pouze pro aktivně přidělený případ a účel. Každé čtení se audituje.',
         'The graph loads only for an actively assigned case and purpose. Every read is audited.')}
     </p>
-    <form onSubmit={investigate} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(160px, 1fr)) auto', gap: 10 }}>
+    <form onSubmit={investigate} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 10 }}>
       <input className="input" required maxLength={200} value={reference} onChange={e => setReference(e.target.value)} placeholder={t('Reference reklamace', 'Complaint reference')} aria-label={t('Reference reklamace', 'Complaint reference')} />
       <input className="input" required maxLength={200} value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
       <input className="input" required maxLength={80} value={purpose} onChange={e => setPurpose(e.target.value.toUpperCase())} placeholder={t('Účel', 'Purpose')} aria-label={t('Účel vyšetřování', 'Investigation purpose')} />
@@ -73,7 +73,10 @@ export function ComplaintContextInvestigation() {
         <svg viewBox="0 0 800 440" style={{ display: 'block', minWidth: 620 }} role="group" aria-label={t('Graf souvislostí reklamace', 'Complaint relationship graph')}>
           {graph.edges.map(edge => { const from = byKey.get(edge.from); const to = byKey.get(edge.to); return from && to
             ? <line key={edge.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="var(--accent)" strokeWidth="2"><title>{edge.relation}</title></line> : null })}
-          {positions.map(node => <g key={node.key} role="button" tabIndex={0} onClick={() => setSelected(node.key)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(node.key) }} style={{ cursor: 'pointer' }}>
+          {positions.map(node => <g key={node.key} role="button" tabIndex={0} aria-pressed={selected === node.key}
+            aria-label={`${node.type}: ${node.label}`} onClick={() => setSelected(node.key)} onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(node.key) }
+            }} style={{ cursor: 'pointer' }}>
             <circle cx={node.x} cy={node.y} r={node.key === graph.root ? 42 : 31} fill="var(--surface)" stroke={node.classification === 'RESTRICTED' ? 'var(--danger)' : 'var(--accent)'} strokeWidth={selected === node.key ? 4 : 2} />
             <text x={node.x} y={node.y + 4} textAnchor="middle" fill="var(--text-primary)" fontSize="13">{node.type}</text>
           </g>)}
