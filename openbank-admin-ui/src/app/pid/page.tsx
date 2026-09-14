@@ -307,7 +307,7 @@ export default function PidPage() {
         {showNewForm && (
           <div className="card" style={{ padding: '20px', marginBottom: '24px', border: '1px solid var(--accent)' }}>
             <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>{t('Nový záznam (Party)', 'New Record (Party)')}</h3>
-            <div style={{ padding: '12px', marginBottom: '16px', background: 'var(--warning-bg, #fff3cd)', color: 'var(--warning-text, #664d03)', border: '1px solid var(--warning-border, #ffecb5)', borderRadius: '6px', fontSize: '13px' }}>
+            <div style={{ padding: '12px', marginBottom: '16px', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)', borderRadius: '6px', fontSize: '13px' }}>
               <AlertTriangle size={14} style={{ display: 'inline-block', verticalAlign: 'text-bottom', marginRight: '6px' }} />
               <strong>{t('Rychlé vytvoření je pouze předvyplnění. Právně závazná AML identifikace vyžaduje plný onboarding a ověření.', 'Quick create is only pre-filling. Legally binding AML identification requires full onboarding and verification.')}</strong>
             </div>
@@ -519,7 +519,7 @@ export default function PidPage() {
         )}
 
         {successMsg && (
-          <div className="card" style={{ padding: '16px', color: 'var(--success-text, #0f5132)', background: 'var(--success-bg, #d1e7dd)', border: '1px solid var(--success-border, #badbcc)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="card" style={{ padding: '16px', color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckCircle2 size={16} /> {successMsg}
           </div>
         )}
