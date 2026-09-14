@@ -28,6 +28,21 @@ proof = load("proof", "solo-review-proof.py")
 guard = load("guard", "check-agent-pr-guard.py")
 require = proof.require
 MAX_INPUT = 4_000_000
+RESPONSE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["verdict", "findings", "coverage"],
+    "properties": {
+        "verdict": {"type": "string", "enum": ["NO_FINDINGS", "FINDINGS"]},
+        "findings": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["path", "line", "severity", "explanation"],
+            "properties": {"path": {"type": "string"}, "line": {"type": "integer"},
+                           "severity": {"type": "string"}, "explanation": {"type": "string"}}}},
+        "coverage": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["path", "analysis"],
+            "properties": {"path": {"type": "string"}, "analysis": {"type": "string"}}}},
+    },
+}
 
 
 def git(*args):
@@ -123,9 +138,11 @@ def parse_stream(raw, slot, subject):
     tools = sum(c.get("type") == "tool_use" for m in assistant for c in m.get("content", []))
     require(tools == 0, "review used tools")
     result = results[0]
+    response = result.get("structured_output")
+    require(isinstance(response, dict), "model returned no structured review; no admission produced")
     return dict(slot=slot, session_id=result.get("session_id"), model=next(iter(models)),
                 tool_uses=tools, driver_success=True, subject_digest=proof.digest(subject),
-                response=json.loads(result["result"]))
+                response=response)
 
 
 def review(input_path, output, slot, cli):
@@ -154,7 +171,8 @@ def review(input_path, output, slot, cli):
         proc = subprocess.run(
             [str(Path(cli).resolve()), "--safe-mode", "-p", "--model", model, "--tools", "", "--strict-mcp-config",
              "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--no-session-persistence",
-             "--max-turns", "3", "--output-format", "stream-json", "--verbose", "--system-prompt", system],
+             "--max-turns", "3", "--output-format", "stream-json", "--verbose",
+             "--json-schema", json.dumps(RESPONSE_SCHEMA), "--system-prompt", system],
             input=json.dumps(data), text=True, capture_output=True, cwd=directory, env=env, timeout=900)
     require(proc.returncode == 0, "model invocation failed; no admission produced")
     write(output, parse_stream(proc.stdout, slot, data["subject"]))

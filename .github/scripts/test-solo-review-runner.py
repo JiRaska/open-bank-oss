@@ -26,7 +26,7 @@ def stream(*, content=None, error=False, result=None):
     return "\n".join(json.dumps(e) for e in [
         dict(type="assistant", message=dict(model="claude-sonnet-test", content=content or [])),
         dict(type="result", subtype="success", is_error=error, session_id="fresh-session",
-             result=json.dumps(result or dict(verdict="NO_FINDINGS", findings=[], coverage=[]))),
+             result="", structured_output=result or dict(verdict="NO_FINDINGS", findings=[], coverage=[])),
     ])
 
 
@@ -51,6 +51,21 @@ class DriverTest(unittest.TestCase):
                     runner.review(source, Path(directory) / "out.json", "correctness", "/never/call")
                 invoke.assert_not_called()
 
+    def test_unstructured_text_cannot_substitute_for_validated_output(self):
+        events = [json.loads(line) for line in stream().splitlines()]
+        result = events[-1]
+        result["result"] = json.dumps(result.pop("structured_output"))
+        for missing in (None, "{}", [], True):
+            with self.subTest(value=missing):
+                result["structured_output"] = missing
+                with self.assertRaisesRegex(ValueError, "no structured review"):
+                    runner.parse_stream("\n".join(json.dumps(e) for e in events), "correctness", {})
+
+    def test_structured_findings_preserved_without_reclassification(self):
+        response = dict(verdict="FINDINGS", findings=[dict(path="a", line=1, severity="high",
+                        explanation="Concrete regression")], coverage=[])
+        self.assertEqual(runner.parse_stream(stream(result=response), "security", {})["response"], response)
+
     def test_cli_isolated_and_has_no_repository_token(self):
         data = fixtures.bundle()
         data["payload"] = {"diff": "public fixture", "files": []}
@@ -72,6 +87,7 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(args[args.index("--tools") + 1], "")
             self.assertIn("--strict-mcp-config", args)
             self.assertIn("--safe-mode", args)
+            self.assertEqual(json.loads(args[args.index("--json-schema") + 1]), runner.RESPONSE_SCHEMA)
             self.assertEqual(args[args.index("--setting-sources") + 1], "")
             self.assertNotIn("GH_TOKEN", kwargs["env"])
             self.assertNotIn("GITHUB_TOKEN", kwargs["env"])
