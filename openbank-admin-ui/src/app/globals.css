@@ -209,6 +209,36 @@
   --privacy-skip-shadow: 0 8px 30px rgba(10, 27, 58, .18);
   --privacy-contact-shadow: 0 20px 55px rgba(17, 45, 79, .16);
 
+  /* Pre-auth login story. The cinematic half is deliberately stable; the
+   * access half reuses the adaptive public privacy palette. */
+  --login-story-bg: #0a3d91;
+  --login-story-text: #ffffff;
+  --login-story-overlay: linear-gradient(180deg, rgba(2, 14, 42, .12) 12%, rgba(2, 18, 52, .34) 48%, rgba(2, 18, 52, .94) 86%);
+  --login-story-ring: rgba(255, 255, 255, .13);
+  --login-story-ring-soft: rgba(255, 255, 255, .025);
+  --login-story-ring-faint: rgba(255, 255, 255, .018);
+  --login-story-glow: rgba(30, 197, 174, .09);
+  --login-story-brand-muted: #bdcbe0;
+  --login-story-accent: #63e7ff;
+  --login-story-intro: #d3deed;
+  --login-story-benefit: #edf5ff;
+  --login-story-check: #7ce2cf;
+  --login-story-footnote: #b8c8da;
+  --login-story-control: rgba(255, 255, 255, .34);
+  --login-story-control-focus: rgba(99, 231, 255, .45);
+  --login-story-mark-bg: rgba(255, 255, 255, .1);
+  --login-story-mark-border: rgba(255, 255, 255, .22);
+  --login-story-mark-highlight: inset 0 1px 0 rgba(255, 255, 255, .16);
+  --login-story-shadow: 0 2px 18px rgba(0, 11, 38, .45);
+  --login-error-bg: #fff2f2;
+  --login-error-border: #efb9b9;
+  --login-error-text: #962828;
+  --login-action-start: #0d5f6c;
+  --login-action-end: #0f7180;
+  --login-action-shadow: 0 13px 28px rgba(12, 91, 104, .2);
+  --login-action-shadow-hover: 0 17px 34px rgba(12, 91, 104, .27);
+  --login-key-shadow: 0 10px 30px rgba(23, 52, 87, .08);
+
   /* ── Radius ── */
   --r-sm:  6px;
   --r-md:  8px;
@@ -278,6 +308,10 @@
     --privacy-focus: rgba(125, 211, 252, .45);
     --privacy-skip-shadow: 0 8px 30px rgba(0, 0, 0, .34);
     --privacy-contact-shadow: 0 20px 55px rgba(0, 0, 0, .3);
+    --login-error-bg: #3f151b;
+    --login-error-border: #8b3a43;
+    --login-error-text: #fecaca;
+    --login-key-shadow: 0 10px 30px rgba(0, 0, 0, .28);
   }
 }
 
