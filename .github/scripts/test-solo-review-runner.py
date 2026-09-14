@@ -104,6 +104,12 @@ class DriverTest(unittest.TestCase):
             else:
                 runner.proof.validate_reports(data)
 
+    def test_activity_after_final_result_is_rejected(self):
+        for kind in ("assistant", "user", "tool", "tool_result"):
+            event = dict(type=kind, message=dict(model="claude-sonnet-test", content=[]))
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "after final"):
+                runner.parse_stream(stream() + "\n" + json.dumps(event), "correctness", {})
+
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"

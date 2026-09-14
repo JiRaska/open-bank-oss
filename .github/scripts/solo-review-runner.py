@@ -141,7 +141,10 @@ def parse_stream(raw, slot, subject):
     results = [e for e in events if e.get("type") == "result"]
     require(len(results) == 1 and results[0].get("is_error") is False
             and results[0].get("subtype") == "success", "model failed or exhausted its budget")
-    assistant = [e["message"] for e in events if e.get("type") == "assistant"]
+    result_index = next(i for i, event in enumerate(events) if event.get("type") == "result")
+    require(not any(e.get("type") in ("assistant", "user", "tool", "tool_result")
+                    for e in events[result_index + 1:]), "activity after final model result")
+    assistant = [e["message"] for e in events[:result_index] if e.get("type") == "assistant"]
     models = {m.get("model") for m in assistant}
     require(len(models) == 1 and all(isinstance(m, str) and m for m in models), "missing observed model")
     result = results[0]
