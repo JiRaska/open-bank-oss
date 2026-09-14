@@ -165,6 +165,19 @@
   --chart-series-6: #ef4444;
   --chart-series-7: #94a3b8;
 
+  /* Authentication is a branded trust boundary. Its story panel remains visually
+   * stable across themes, while the access panel consumes the shared semantic
+   * surfaces below. Keeping this compact palette here prevents the login module
+   * from becoming a second, ungoverned theme system. */
+  --auth-story-bg: #0a3d91;
+  --auth-story-text: #ffffff;
+  --auth-story-muted: #d3deed;
+  --auth-story-subtle: #bdcbe0;
+  --auth-story-accent: #63e7ff;
+  --auth-story-success: #7ce2cf;
+  --auth-action-start: #0d5f6c;
+  --auth-action-end: #0f7180;
+
   /* ── Shadows ── */
   --shadow-xs:  0 1px 2px rgba(15,23,42,.03);
   --shadow-sm:  0 1px 3px rgba(15,23,42,.04), 0 1px 2px rgba(15,23,42,.02);

@@ -212,7 +212,10 @@ describe('admin UI token contrast', () => {
     // --text-inverse is excluded by design: it exists to sit on a solid accent/tone fill, not on any
     // token in SURFACE_TOKENS, so including it would assert 12 pairs nobody writes.
     const missingTexts = [...texts, ...tones]
-      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
+      // The branded auth palette has one intentional surface and is exhaustively checked below;
+      // putting it in the content-surface cross-product would manufacture combinations the UI
+      // cannot render, just like --text-inverse.
+      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !n.startsWith('--auth-') && !TEXT_TOKENS.includes(n as never))
     expect({ missingSurfaces, missingTexts }).toEqual({ missingSurfaces: [], missingTexts: [] })
   })
 
@@ -244,6 +247,21 @@ describe('admin UI token contrast', () => {
   it.each(themes)('%s link text remains AA on primary content surfaces', (_name, tokens) => {
     for (const surface of ['--surface', '--surface-2', '--accent-bg']) {
       expect(contrast(resolve(tokens, '--link'), resolve(tokens, surface))).toBeGreaterThanOrEqual(AA)
+    }
+  })
+
+  it('the branded authentication palette meets AA on every surface it can render on', () => {
+    const tokens = declarations(':root')
+    for (const text of [
+      '--auth-story-text', '--auth-story-muted', '--auth-story-subtle',
+      '--auth-story-accent', '--auth-story-success',
+    ]) {
+      expect(contrast(resolve(tokens, text), resolve(tokens, '--auth-story-bg')))
+        .toBeGreaterThanOrEqual(AA)
+    }
+    for (const action of ['--auth-action-start', '--auth-action-end']) {
+      expect(contrast(resolve(tokens, '--auth-story-text'), resolve(tokens, action)))
+        .toBeGreaterThanOrEqual(AA)
     }
   })
 
