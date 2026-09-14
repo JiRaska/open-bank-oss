@@ -47,15 +47,15 @@ interface VerificationCase {
 
 // ── Display helpers ─────────────────────────────────────────────────────────────
 
-const TRIGGER_COLOR: Record<Trigger, string> = {
-  RN_COLLISION: '#dc2626',
-  NAMESAKE_CANDIDATE: '#d97706',
-  PROBABILISTIC_CANDIDATE: '#7c3aed',
+const TRIGGER_TONE: Record<Trigger, { color: string; background: string; border: string }> = {
+  RN_COLLISION: { color: 'var(--danger-text)', background: 'var(--danger-bg)', border: 'var(--danger-border)' },
+  NAMESAKE_CANDIDATE: { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  PROBABILISTIC_CANDIDATE: { color: 'var(--accent-text)', background: 'var(--accent-bg)', border: 'var(--accent-border)' },
 }
 const VERDICT_COLOR: Record<Verdict, string> = {
-  LINK_TO_EXISTING: '#16a34a',
-  DISTINCT_NEW: '#2563eb',
-  REJECT: '#dc2626',
+  LINK_TO_EXISTING: 'var(--success-text)',
+  DISTINCT_NEW: 'var(--info-text)',
+  REJECT: 'var(--danger-text)',
 }
 
 function shortId(id: string): string {
@@ -475,9 +475,9 @@ export default function IdentityCasesPage() {
                         fontWeight: 700,
                         padding: '2px 8px',
                         borderRadius: '20px',
-                        background: `${TRIGGER_COLOR[c.trigger]}15`,
-                        color: TRIGGER_COLOR[c.trigger],
-                        border: `1px solid ${TRIGGER_COLOR[c.trigger]}30`,
+                        background: TRIGGER_TONE[c.trigger].background,
+                        color: TRIGGER_TONE[c.trigger].color,
+                        border: `1px solid ${TRIGGER_TONE[c.trigger].border}`,
                       }}
                     >
                       {triggerLabel(c.trigger)}
@@ -486,7 +486,7 @@ export default function IdentityCasesPage() {
                       {t('případ', 'case')} {shortId(c.id)}
                     </span>
                     {c.status === 'AWAITING_SECOND_APPROVAL' && (
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--warning-text)' }}>
                         {t('čeká na 2. schválení', 'awaiting 2nd approval')}
                       </span>
                     )}
