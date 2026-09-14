@@ -198,15 +198,27 @@ class ContextGraphRepository(
     ): ContextNeighborhood? {
         val rootNode = findRoot(namespace, root, asOf) ?: return null
         val firstHop = findRootEdges(namespace, root, asOf, maxEdges + 1)
-        val secondHop = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
+        val paymentEvidence = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
             val transactionKeys = firstHop.filter {
                 it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
             }.map(ContextEdgeEntity::toKey)
-            findComplaintLifecycleEdges(transactionKeys, asOf, maxEdges - firstHop.size + 1)
+            findComplaintPaymentEvidenceEdges(transactionKeys, asOf, maxEdges - firstHop.size + 1)
         } else {
             emptyList()
         }
-        val edges = firstHop + secondHop
+        val ledgerEvidence = if (firstHop.size + paymentEvidence.size <= maxEdges) {
+            val bookingTransactionKeys = paymentEvidence.filter {
+                it.relationType == BOOKING_REQUESTED
+            }.map(ContextEdgeEntity::toKey)
+            findComplaintLedgerEvidenceEdges(
+                bookingTransactionKeys,
+                asOf,
+                maxEdges - firstHop.size - paymentEvidence.size + 1,
+            )
+        } else {
+            emptyList()
+        }
+        val edges = firstHop + paymentEvidence + ledgerEvidence
         val boundedEdges = edges.take(maxEdges)
         val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
         val nodes = findNodes(namespace, keys, asOf)
@@ -246,7 +258,7 @@ class ContextGraphRepository(
             .setParameter("root", root).setMaxResults(limit).resultList
     }.bounded().awaitSuspending()
 
-    private suspend fun findComplaintLifecycleEdges(
+    private suspend fun findComplaintPaymentEvidenceEdges(
         transactionKeys: List<String>,
         asOf: Instant,
         limit: Int,
@@ -255,13 +267,41 @@ class ContextGraphRepository(
         return sessions.withSession { session ->
             session.createQuery(
                 "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
-                    "toKey like :stagePrefix and relationType in (:relations) and " +
+                    "namespace = 'COMPLAINT' and fromKey in (:keys) and " +
+                    "((sourceSystem = :domesticSource and toKey like :stagePrefix and " +
+                    "relationType in (:lifecycleRelations)) or " +
+                    "(sourceSystem = :transactionSource and toKey like :transactionPrefix and " +
+                    "relationType = :bookingRequested)) and " +
                     "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
                 ContextEdgeEntity::class.java,
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", DOMESTIC_PAYMENT_SOURCE).setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
-                .setParameter("keys", transactionKeys).setParameter("relations", COMPLAINT_LIFECYCLE_RELATIONS)
+                .setParameter("domesticSource", DOMESTIC_PAYMENT_SOURCE)
+                .setParameter("transactionSource", TRANSACTION_SOURCE)
+                .setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
+                .setParameter("transactionPrefix", BOOKING_TRANSACTION_PREFIX)
+                .setParameter("bookingRequested", BOOKING_REQUESTED)
+                .setParameter("keys", transactionKeys)
+                .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
+                .setParameter("asOf", asOf).setMaxResults(limit).resultList
+        }.bounded().awaitSuspending()
+    }
+
+    private suspend fun findComplaintLedgerEvidenceEdges(
+        bookingTransactionKeys: List<String>,
+        asOf: Instant,
+        limit: Int,
+    ): List<ContextEdgeEntity> {
+        if (bookingTransactionKeys.isEmpty() || limit <= 0) return emptyList()
+        return sessions.withSession { session ->
+            session.createQuery(
+                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
+                    "toKey like :bookingPrefix and relationType = :relation and validFrom <= :asOf and " +
+                    "(validTo is null or validTo > :asOf) order by validFrom asc",
+                ContextEdgeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("source", LEDGER_SOURCE).setParameter("keys", bookingTransactionKeys)
+                .setParameter("bookingPrefix", LEDGER_BOOKING_PREFIX).setParameter("relation", BOOKED_AS)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
         }.bounded().awaitSuspending()
     }
@@ -287,7 +327,13 @@ class ContextGraphRepository(
     private companion object {
         const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
         const val DOMESTIC_PAYMENT_SOURCE = "domestic-payment"
+        const val TRANSACTION_SOURCE = "transaction-service"
+        const val LEDGER_SOURCE = "ledger-service"
         const val PAYMENT_STAGE_PREFIX = "payment-stage:domestic:%"
+        const val BOOKING_TRANSACTION_PREFIX = "booking-transaction:%"
+        const val LEDGER_BOOKING_PREFIX = "ledger-booking:%"
+        const val BOOKING_REQUESTED = "BOOKING_REQUESTED"
+        const val BOOKED_AS = "BOOKED_AS"
         val COMPLAINT_LIFECYCLE_RELATIONS = setOf(
             "CREATED",
             "VALIDATED",

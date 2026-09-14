@@ -50,6 +50,10 @@ quarkus:
           connector: smallrye-in-memory
         domestic-payment-events-in:
           connector: smallrye-in-memory
+        transaction-events-in:
+          connector: smallrye-in-memory
+        ledger-events-in:
+          connector: smallrye-in-memory
 
 mp:
   messaging:
@@ -88,6 +92,22 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.context-service.domestic-payment-events
+      transaction-events-in:
+        connector: smallrye-kafka
+        topic: openbank.transactions.transaction.initiated
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.transaction-events
+      ledger-events-in:
+        connector: smallrye-kafka
+        topic: openbank.ledger.journal.posted
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.ledger-events
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

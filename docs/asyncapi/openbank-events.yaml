@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.0.0
+  version: 2.1.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -1012,6 +1012,10 @@ components:
                 previous revision declared an `entries` array of debit/credit legs; no ledger
                 event has ever carried one.
 
+            sourceService:
+              type: string
+              const: ledger-service
+
     JournalReversedPayload:
       allOf:
         - $ref: '#/components/schemas/DomainEventEnvelope'
@@ -1190,6 +1194,10 @@ components:
               type: string
             instructionType:
               type: string
+            originatingPaymentId:
+              type: [string, 'null']
+              format: uuid
+              description: Rail payment that caused this booking; absent for non-rail postings.
 
     BalanceEventPayload:
       # A plain data class, not a DomainEvent — `eventType` is declared by the class itself, which

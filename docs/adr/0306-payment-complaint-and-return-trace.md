@@ -75,11 +75,15 @@ row lock and commit the revision plus event in the existing transactional outbox
 events now also carry a database-backed aggregate revision. A dedicated projector consumes the
 created and status-changed records idempotently, preserving one immutable evidence node per revision.
 The fixed complaint query follows only `CONCERNS_TRANSACTION` and an allow-listed directed lifecycle
-second hop, so it cannot pivot from a shared transaction into another complaint. The admin UI renders
-the same authorized payload as both graph and ordered payment timeline. Retained legacy records use a
-measured timestamp fallback until the replay boundary enables strict-only revisions. Ledger booking,
-clearing acknowledgement and an explicit return aggregate remain follow-up work, so this ADR stays
-`partial`.
+second hop, plus source/prefix/relation allow-listed booking-transaction and ledger-journal hops, so
+it cannot pivot from a shared transaction into another complaint. `TransactionInitiated` carries the
+stable originating payment id and `JournalPosted` carries explicit producer attribution; both are
+transactional-outbox events. Their projectors tolerate reverse delivery order through replaceable
+placeholder nodes and expose the actual posted journal rather than inferring booking from a payment
+status. The admin UI renders the same authorized payload as both graph and ordered payment timeline.
+The staged production manifest requires explicit revisions from the first replica; timestamp fallback
+remains a local compatibility aid for controlled legacy replay only. Clearing acknowledgement and an
+explicit return aggregate remain follow-up work, so this ADR stays `partial`.
 
 ## Alternatives considered
 

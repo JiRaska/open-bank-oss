@@ -50,6 +50,7 @@ spec:
               valueFrom: { secretKeyRef: { name: kafka-cluster-ca-truststore, key: ca.password } }
             - { name: CONTEXT_BANK_SCOPE, value: openbank-cz }
             - { name: CONTEXT_PROJECTION_GENERATION, value: "1" }
+            - { name: CONTEXT_REQUIRE_STRICT_REVISIONS, value: "true" }
             - { name: QUARKUS_CONFIG_LOCATIONS, value: /mnt/msg-config/override.properties }
           resources:
             requests: { cpu: 200m, memory: 512Mi }

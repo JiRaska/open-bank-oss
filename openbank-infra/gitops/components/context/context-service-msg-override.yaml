@@ -16,3 +16,7 @@ data:
     mp.messaging.incoming.ict-incident-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.domestic-payment-events-in.group.id=openbank-context-service
     mp.messaging.incoming.domestic-payment-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.transaction-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.transaction-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.ledger-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.ledger-events-in.auto.offset.reset=earliest

@@ -14,6 +14,7 @@ import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import io.smallrye.reactive.messaging.memory.InMemorySource
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,24 +85,20 @@ class ContextApiIT {
         val payload = complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version)
         val source = connector.source<String>("dispute-events-in")
         val payments = connector.source<String>("domestic-payment-events-in")
-        source.runOnVertxContext(true)
-        payments.runOnVertxContext(true)
+        val transactions = connector.source<String>("transaction-events-in")
+        val ledger = connector.source<String>("ledger-events-in")
+        listOf(source, payments, transactions, ledger).forEach { it.runOnVertxContext(true) }
 
         source.send(payload)
         source.send(payload)
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
         source.send("""{"eventType":"dispute.opened","disputeId":"${UUID.randomUUID()}"}""")
-        payments.send(domesticPaymentEvent(transactionId, 1, "RECEIVED"))
-        payments.send(domesticPaymentEvent(transactionId, 2, "SENT_TO_CLEARING"))
-        payments.send(domesticPaymentEvent(transactionId, 3, "RETURNED"))
-        payments.send(domesticPaymentEvent(transactionId, 3, "RETURNED"))
-        awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
-        awaitCount("context_projection_events", "aggregate_ref", "transaction:$transactionId", 3)
-        assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
-        assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
-        assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
-        assertThat(stringValue("context_nodes", "source_system", "node_key", "transaction:$transactionId"))
-            .isEqualTo("domestic-payment")
+        sendPaymentLifecycle(payments, transactionId)
+        val bookingTransactionId = UUID.randomUUID()
+        val journalId = UUID.randomUUID()
+        ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
+        transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
+        assertProjectionState(reference, transactionId, bookingTransactionId, journalId, complaintId)
         val unrelatedComplaint = "complaint:CMP-OTHER-${UUID.randomUUID()}"
         seedNode(unrelatedComplaint, "COMPLAINT", "Unrelated complaint")
         seedEdge(unrelatedComplaint, "transaction:$transactionId", "CONCERNS_TRANSACTION")
@@ -113,9 +110,18 @@ class ContextApiIT {
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(7))
-            .body("edges.size()", equalTo(6))
-            .body("edges.relation", org.hamcrest.Matchers.hasItems("CREATED", "SUBMITTED_TO", "RETURNED_BY"))
+            .body("nodes.size()", equalTo(9))
+            .body("edges.size()", equalTo(8))
+            .body(
+                "edges.relation",
+                org.hamcrest.Matchers.hasItems(
+                    "CREATED",
+                    "SUBMITTED_TO",
+                    "RETURNED_BY",
+                    "BOOKING_REQUESTED",
+                    "BOOKED_AS",
+                ),
+            )
             .extract().asString()
         assertThat(response).doesNotContain(unrelatedComplaint)
     }
@@ -368,6 +374,44 @@ class ContextApiIT {
             """"occurredAt":"${NOW.plusSeconds(revision)}"}"""
     }
 
+    private fun sendPaymentLifecycle(source: InMemorySource<String>, paymentId: UUID) {
+        source.send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
+        source.send(domesticPaymentEvent(paymentId, 2, "SENT_TO_CLEARING"))
+        source.send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
+        source.send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
+    }
+
+    private fun assertProjectionState(
+        reference: String,
+        paymentId: UUID,
+        bookingTransactionId: UUID,
+        journalId: UUID,
+        complaintId: UUID,
+    ) {
+        awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
+        awaitCount("context_projection_events", "aggregate_ref", "transaction:$paymentId", 3)
+        awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$bookingTransactionId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
+        assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
+        assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
+        assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
+        assertThat(stringValue("context_nodes", "source_system", "node_key", "transaction:$paymentId"))
+            .isEqualTo("domestic-payment")
+        assertThat(
+            stringValue("context_nodes", "source_system", "node_key", "booking-transaction:$bookingTransactionId"),
+        ).isEqualTo("transaction-service")
+    }
+
+    private fun transactionInitiatedEvent(transactionId: UUID, paymentId: UUID): String =
+        """{"eventType":"TransactionInitiated","sourceService":"transaction-service",""" +
+            """"aggregateId":"$transactionId","version":0,"originatingPaymentId":"$paymentId",""" +
+            """"occurredAt":"${NOW.minusSeconds(2)}"}"""
+
+    private fun ledgerPostedEvent(journalId: UUID, transactionId: UUID): String =
+        """{"eventType":"JournalPosted","sourceService":"ledger-service","aggregateId":"$journalId",""" +
+            """"version":0,"transactionId":"$transactionId","entryDate":"2026-09-13",""" +
+            """"occurredAt":"${NOW.minusSeconds(1)}"}"""
+
     private fun execute(sql: String, vararg values: Any) = connection().use { connection ->
         connection.prepareStatement(sql).use { statement ->
             values.forEachIndexed { index, value ->
@@ -396,6 +440,8 @@ class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
         "dispute-events-in",
         "ict-incident-events-in",
         "domestic-payment-events-in",
+        "transaction-events-in",
+        "ledger-events-in",
     ) + mapOf("openbank.context.require-strict-revisions" to "true")
 
     override fun stop() = InMemoryConnector.clear()

@@ -181,7 +181,7 @@ Počáteční rozpočty pro produkční kandidát, které musí potvrdit benchma
 | Oblast | Cíl / tvrdý limit |
 | --- | --- |
 | První okolí uzlu | p95 ≤ 300 ms, p99 ≤ 1 s serverově, včetně autorizace a auditu |
-| Rozšíření sousedů | 1 krok na request, nejvýše 2 kroky v synchronním dotazu; 100 uzlů / 200 hran / 256 KiB |
+| Rozšíření sousedů | Pevná čočka nejvýše 3 směrované kroky (complaint → payment → booking transaction → journal); 100 uzlů / 200 hran / 256 KiB |
 | Prohledaná práce | Nejvýše 5 000 kandidátních hran a 500 ms DB statement timeout; přerušení při zrušení requestu |
 | Sémantické hledání | p95 ≤ 800 ms bez generování odpovědi; top-k ≤ 20, omezené ANN skenování |
 | Čerstvost | p95 lag ≤ 10 s; nad 60 s viditelně opožděný pohled, bezpečnostní revokace nezávislá na tomto lagu |

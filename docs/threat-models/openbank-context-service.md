@@ -22,26 +22,27 @@ read audit. It is outside every synchronous payment path.
    sidecar. OPA is mandatory and the service fails closed.
 3. The service commits an allow/deny/unavailable audit record before an allowed graph result is
    released.
-4. Projection data arrives asynchronously over mTLS Kafka from ACL-scoped complaint, domestic-payment
-   and ICT-incident topics. Consumers validate source/schema/version, cap event size, dead-letter
-   invalid records and retain an idempotency ledger; source systems retain ownership.
+4. Projection data arrives asynchronously over mTLS Kafka from ACL-scoped complaint, domestic-payment,
+   transaction, ledger and ICT-incident topics. Consumers validate source/schema/version, cap event
+   size, dead-letter invalid records and retain an idempotency ledger; source systems retain ownership.
 
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |
 |---|---|---|
 | Spoofed purpose or case | Request values must match an active server-side assignment; creation needs an admin maker and distinct admin checker, is limited to 31 days, and is audited | Maker and checker can still collude; organizational access review remains required |
-| Tampered graph evidence | Kafka producer/consumer ACLs and mTLS, exact source/schema validation, source-issued ordering tokens, stale/duplicate suppression and evidence references | Timestamp-derived ordering tokens can collide or regress; P0/P1 has no signed event envelope |
+| Tampered graph evidence | Kafka producer/consumer ACLs and mTLS, exact source/schema validation, mandatory source-issued revisions in production, stale/duplicate suppression and evidence references | P0/P1 has no signed event envelope; a compromised authorized producer can still emit false facts |
 | Repudiated read | Durable audit records principal, case, purpose, action, root, outcome and policy version before disclosure; DB triggers reject application updates/deletes | Audit table needs export to the fleet tamper-evident audit service before production |
-| Relationship disclosure | Role gate, assignment, OPA, namespace-specific fixed query, 100-node/200-edge bounds; complaint hop two follows only outgoing payment lifecycle relations; denied requests return no counts | Broad assignment issuance could still expose linked cases |
-| Resource exhaustion | Indexed bounded one/two-hop queries with hard result limits and 500 ms DB timeout; dedicated CNPG/resources; staged at zero until the 100 RPS plus payment-control workload gate passes | Hot roots need production-distribution evidence and per-principal rate limits before increasing bounds |
+| Relationship disclosure | Role gate, assignment, OPA, namespace-specific fixed query, 100-node/200-edge bounds; complaint hops follow only explicit outgoing lifecycle and booking relations; denied requests return no counts | Broad assignment issuance could still expose linked cases |
+| Resource exhaustion | Indexed bounded fixed-template queries of at most three directed hops, with hard result limits and 500 ms DB timeout; dedicated CNPG/resources; staged at zero until the 100 RPS plus payment-control workload gate passes | Hot roots need production-distribution evidence and per-principal rate limits before increasing bounds |
 | Privilege escalation | `authz.enforce=true`; service and OPA both bind each action to its exact purpose; M2M identities are hard-denied; PDP outage returns 503 | Human maker/checker entitlements need periodic access review |
 
-Complaint, domestic-payment and ICT incident producers use transactional outboxes and database-backed
-aggregate revisions. Retained records predating those revisions still require a measured compatibility
-replay. Production activation therefore keeps strict-only consumption and non-zero replicas gated on a
-clean replay boundary plus workload evidence; the zero-replica deployment remains suitable for
-synthetic replay and control validation.
+Complaint, domestic-payment, transaction and ledger producers use transactional outboxes and
+database-backed aggregate revisions; ICT incident events also carry an explicit source revision.
+Retained records predating those revisions require a measured compatibility replay. The staged
+production manifest enables strict-only consumption before the first replica and keeps non-zero
+replicas gated on a clean replay boundary plus workload evidence; the zero-replica deployment remains
+suitable for synthetic replay and control validation.
 
 ## P1 privacy boundary
 
@@ -54,8 +55,8 @@ identifier drill-down requires a separate future action, assignment and audit tr
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.
 2. PDP failure, audit failure or missing assignment releases no graph data.
 3. Historical validity explains evidence and never grants current access.
-4. Queries are template-based and bounded; complaint hop two is directed and relation-allow-listed,
-   and there is no arbitrary graph query API.
+4. Queries are template-based and bounded; complaint payment, booking-transaction and ledger hops are
+   directed, source/prefix/relation allow-listed, and there is no arbitrary graph query API.
 5. Context ingestion never participates in payment authorization or ledger posting.
 6. P0/P1 stores opaque source references and bounded labels, not raw customer or payment text.
 

@@ -19,6 +19,12 @@ spec:
       - resource: { type: topic, name: openbank.domestic.payment.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      - resource: { type: topic, name: openbank.transactions.transaction.initiated, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.ledger.journal.posted, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.dispute-events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
@@ -26,6 +32,12 @@ spec:
         operations: [Write, Describe]
         host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.domestic-payment-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.transaction-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.ledger-events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }
