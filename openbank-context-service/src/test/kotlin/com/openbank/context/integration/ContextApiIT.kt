@@ -87,22 +87,30 @@ class ContextApiIT {
         val payments = connector.source<String>("domestic-payment-events-in")
         val transactions = connector.source<String>("transaction-events-in")
         val ledger = connector.source<String>("ledger-events-in")
-        listOf(source, payments, transactions, ledger).forEach { it.runOnVertxContext(true) }
+        val clearing = connector.source<String>("clearing-events-in")
+        val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        listOf(source, payments, transactions, ledger, clearing, sepaReturns)
+            .forEach { it.runOnVertxContext(true) }
 
         source.send(payload)
         source.send(payload)
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
         source.send("""{"eventType":"dispute.opened","disputeId":"${UUID.randomUUID()}"}""")
+        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId)
         sendPaymentLifecycle(payments, transactionId)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
         ledger.send(ledgerPostedEvent(journalId, bookingTransactionId))
         transactions.send(transactionInitiatedEvent(bookingTransactionId, transactionId))
-        assertProjectionState(reference, transactionId, bookingTransactionId, journalId, complaintId)
-        val unrelatedComplaint = "complaint:CMP-OTHER-${UUID.randomUUID()}"
-        seedNode(unrelatedComplaint, "COMPLAINT", "Unrelated complaint")
-        seedEdge(unrelatedComplaint, "transaction:$transactionId", "CONCERNS_TRANSACTION")
-        seedEdge("transaction:$transactionId", unrelatedComplaint, "CREATED")
+        assertProjectionState(
+            reference,
+            transactionId,
+            bookingTransactionId,
+            journalId,
+            clearingItemId,
+            complaintId,
+        )
+        val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
 
         seedAssignment(CASE, PURPOSE)
         val response = given()
@@ -110,8 +118,8 @@ class ContextApiIT {
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(9))
-            .body("edges.size()", equalTo(8))
+            .body("nodes.size()", equalTo(12))
+            .body("edges.size()", equalTo(11))
             .body(
                 "edges.relation",
                 org.hamcrest.Matchers.hasItems(
@@ -120,6 +128,7 @@ class ContextApiIT {
                     "RETURNED_BY",
                     "BOOKING_REQUESTED",
                     "BOOKED_AS",
+                    "SETTLED",
                 ),
             )
             .extract().asString()
@@ -381,17 +390,36 @@ class ContextApiIT {
         source.send(domesticPaymentEvent(paymentId, 3, "RETURNED"))
     }
 
+    private fun sendRailEvidence(
+        clearing: InMemorySource<String>,
+        sepaReturns: InMemorySource<String>,
+        paymentId: UUID,
+    ): UUID = UUID.randomUUID().also { itemId ->
+        clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
+        sepaReturns.send(sepaReturnedEvent(paymentId))
+    }
+
+    private fun seedUnrelatedComplaint(paymentId: UUID): String =
+        "complaint:CMP-OTHER-${UUID.randomUUID()}".also { complaint ->
+            seedNode(complaint, "COMPLAINT", "Unrelated complaint")
+            seedEdge(complaint, "transaction:$paymentId", "CONCERNS_TRANSACTION")
+            seedEdge("transaction:$paymentId", complaint, "CREATED")
+        }
+
     private fun assertProjectionState(
         reference: String,
         paymentId: UUID,
         bookingTransactionId: UUID,
         journalId: UUID,
+        clearingItemId: UUID,
         complaintId: UUID,
     ) {
         awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
         awaitCount("context_projection_events", "aggregate_ref", "transaction:$paymentId", 3)
         awaitCount("context_projection_events", "aggregate_ref", "booking-transaction:$bookingTransactionId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
         assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
         assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
@@ -410,6 +438,16 @@ class ContextApiIT {
     private fun ledgerPostedEvent(journalId: UUID, transactionId: UUID): String =
         """{"eventType":"JournalPosted","sourceService":"ledger-service","aggregateId":"$journalId",""" +
             """"version":0,"transactionId":"$transactionId","entryDate":"2026-09-13",""" +
+            """"occurredAt":"${NOW.minusSeconds(1)}"}"""
+
+    private fun clearingItemSettledEvent(itemId: UUID, batchId: UUID, paymentId: UUID): String =
+        """{"eventType":"openbank.clearing.item.cleared","sourceService":"clearing-service",""" +
+            """"itemId":"$itemId","batchId":"$batchId","paymentId":"$paymentId","version":2,""" +
+            """"status":"SETTLED","occurredAt":"${NOW.minusSeconds(2)}"}"""
+
+    private fun sepaReturnedEvent(paymentId: UUID): String =
+        """{"eventType":"sepa.payment.returned","sourceService":"sepa-payment","paymentId":"$paymentId",""" +
+            """"version":4,"returnReasonCode":"AC04","reversalPerformed":true,""" +
             """"occurredAt":"${NOW.minusSeconds(1)}"}"""
 
     private fun execute(sql: String, vararg values: Any) = connection().use { connection ->
@@ -442,6 +480,8 @@ class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
         "domestic-payment-events-in",
         "transaction-events-in",
         "ledger-events-in",
+        "clearing-events-in",
+        "sepa-payment-events-in",
     ) + mapOf("openbank.context.require-strict-revisions" to "true")
 
     override fun stop() = InMemoryConnector.clear()

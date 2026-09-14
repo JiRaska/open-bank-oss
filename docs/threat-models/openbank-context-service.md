@@ -23,8 +23,9 @@ read audit. It is outside every synchronous payment path.
 3. The service commits an allow/deny/unavailable audit record before an allowed graph result is
    released.
 4. Projection data arrives asynchronously over mTLS Kafka from ACL-scoped complaint, domestic-payment,
-   transaction, ledger and ICT-incident topics. Consumers validate source/schema/version, cap event
-   size, dead-letter invalid records and retain an idempotency ledger; source systems retain ownership.
+   transaction, ledger, clearing, SEPA-payment and ICT-incident topics. Consumers validate
+   source/schema/version, cap event size, dead-letter invalid records and retain an idempotency ledger;
+   source systems retain ownership.
 
 ## STRIDE analysis
 
@@ -37,8 +38,9 @@ read audit. It is outside every synchronous payment path.
 | Resource exhaustion | Indexed bounded fixed-template queries of at most three directed hops, with hard result limits and 500 ms DB timeout; dedicated CNPG/resources; staged at zero until the 100 RPS plus payment-control workload gate passes | Hot roots need production-distribution evidence and per-principal rate limits before increasing bounds |
 | Privilege escalation | `authz.enforce=true`; service and OPA both bind each action to its exact purpose; M2M identities are hard-denied; PDP outage returns 503 | Human maker/checker entitlements need periodic access review |
 
-Complaint, domestic-payment, transaction and ledger producers use transactional outboxes and
-database-backed aggregate revisions; ICT incident events also carry an explicit source revision.
+Complaint, domestic-payment, transaction, ledger, clearing and SEPA-payment producers use
+transactional outboxes and database-backed aggregate revisions; ICT incident events also carry an
+explicit source revision.
 Retained records predating those revisions require a measured compatibility replay. The staged
 production manifest enables strict-only consumption before the first replica and keeps non-zero
 replicas gated on a clean replay boundary plus workload evidence; the zero-replica deployment remains
@@ -55,8 +57,8 @@ identifier drill-down requires a separate future action, assignment and audit tr
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.
 2. PDP failure, audit failure or missing assignment releases no graph data.
 3. Historical validity explains evidence and never grants current access.
-4. Queries are template-based and bounded; complaint payment, booking-transaction and ledger hops are
-   directed, source/prefix/relation allow-listed, and there is no arbitrary graph query API.
+4. Queries are template-based and bounded; complaint payment, booking, clearing, return and ledger
+   hops are directed, source/prefix/relation allow-listed, and there is no arbitrary graph query API.
 5. Context ingestion never participates in payment authorization or ledger posting.
 6. P0/P1 stores opaque source references and bounded labels, not raw customer or payment text.
 

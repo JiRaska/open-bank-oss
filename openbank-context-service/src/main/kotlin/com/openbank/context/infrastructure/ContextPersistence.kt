@@ -218,7 +218,19 @@ class ContextGraphRepository(
         } else {
             emptyList()
         }
-        val edges = firstHop + paymentEvidence + ledgerEvidence
+        val clearingEvidence = if (firstHop.size + paymentEvidence.size + ledgerEvidence.size <= maxEdges) {
+            val clearingItemKeys = paymentEvidence.filter {
+                it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
+            }.map(ContextEdgeEntity::toKey)
+            findComplaintClearingEvidenceEdges(
+                clearingItemKeys,
+                asOf,
+                maxEdges - firstHop.size - paymentEvidence.size - ledgerEvidence.size + 1,
+            )
+        } else {
+            emptyList()
+        }
+        val edges = firstHop + paymentEvidence + ledgerEvidence + clearingEvidence
         val boundedEdges = edges.take(maxEdges)
         val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
         val nodes = findNodes(namespace, keys, asOf)
@@ -271,15 +283,25 @@ class ContextGraphRepository(
                     "((sourceSystem = :domesticSource and toKey like :stagePrefix and " +
                     "relationType in (:lifecycleRelations)) or " +
                     "(sourceSystem = :transactionSource and toKey like :transactionPrefix and " +
-                    "relationType = :bookingRequested)) and " +
+                    "relationType = :bookingRequested) or " +
+                    "(sourceSystem = :clearingSource and toKey like :clearingItemPrefix and " +
+                    "relationType = :submittedTo) or " +
+                    "(sourceSystem = :sepaSource and toKey like :returnPrefix and " +
+                    "relationType = :returnedBy)) and " +
                     "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
                 ContextEdgeEntity::class.java,
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
                 .setParameter("domesticSource", DOMESTIC_PAYMENT_SOURCE)
                 .setParameter("transactionSource", TRANSACTION_SOURCE)
+                .setParameter("clearingSource", CLEARING_SOURCE)
+                .setParameter("sepaSource", SEPA_SOURCE)
                 .setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
                 .setParameter("transactionPrefix", BOOKING_TRANSACTION_PREFIX)
                 .setParameter("bookingRequested", BOOKING_REQUESTED)
+                .setParameter("clearingItemPrefix", CLEARING_ITEM_PREFIX)
+                .setParameter("submittedTo", SUBMITTED_TO)
+                .setParameter("returnPrefix", RETURN_EVIDENCE_PREFIX)
+                .setParameter("returnedBy", RETURNED_BY)
                 .setParameter("keys", transactionKeys)
                 .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
@@ -302,6 +324,26 @@ class ContextGraphRepository(
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
                 .setParameter("source", LEDGER_SOURCE).setParameter("keys", bookingTransactionKeys)
                 .setParameter("bookingPrefix", LEDGER_BOOKING_PREFIX).setParameter("relation", BOOKED_AS)
+                .setParameter("asOf", asOf).setMaxResults(limit).resultList
+        }.bounded().awaitSuspending()
+    }
+
+    private suspend fun findComplaintClearingEvidenceEdges(
+        clearingItemKeys: List<String>,
+        asOf: Instant,
+        limit: Int,
+    ): List<ContextEdgeEntity> {
+        if (clearingItemKeys.isEmpty() || limit <= 0) return emptyList()
+        return sessions.withSession { session ->
+            session.createQuery(
+                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
+                    "toKey like :evidencePrefix and relationType = :relation and validFrom <= :asOf and " +
+                    "(validTo is null or validTo > :asOf) order by validFrom asc",
+                ContextEdgeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("source", CLEARING_SOURCE).setParameter("keys", clearingItemKeys)
+                .setParameter("evidencePrefix", CLEARING_EVIDENCE_PREFIX).setParameter("relation", SETTLED)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
         }.bounded().awaitSuspending()
     }
@@ -329,11 +371,19 @@ class ContextGraphRepository(
         const val DOMESTIC_PAYMENT_SOURCE = "domestic-payment"
         const val TRANSACTION_SOURCE = "transaction-service"
         const val LEDGER_SOURCE = "ledger-service"
+        const val CLEARING_SOURCE = "clearing-service"
+        const val SEPA_SOURCE = "sepa-payment"
         const val PAYMENT_STAGE_PREFIX = "payment-stage:domestic:%"
         const val BOOKING_TRANSACTION_PREFIX = "booking-transaction:%"
         const val LEDGER_BOOKING_PREFIX = "ledger-booking:%"
+        const val CLEARING_ITEM_PREFIX = "clearing-item:%"
+        const val CLEARING_EVIDENCE_PREFIX = "clearing-evidence:%"
+        const val RETURN_EVIDENCE_PREFIX = "return-evidence:sepa:%"
         const val BOOKING_REQUESTED = "BOOKING_REQUESTED"
         const val BOOKED_AS = "BOOKED_AS"
+        const val SUBMITTED_TO = "SUBMITTED_TO"
+        const val RETURNED_BY = "RETURNED_BY"
+        const val SETTLED = "SETTLED"
         val COMPLAINT_LIFECYCLE_RELATIONS = setOf(
             "CREATED",
             "VALIDATED",

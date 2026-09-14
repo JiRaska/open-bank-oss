@@ -80,10 +80,15 @@ it cannot pivot from a shared transaction into another complaint. `TransactionIn
 stable originating payment id and `JournalPosted` carries explicit producer attribution; both are
 transactional-outbox events. Their projectors tolerate reverse delivery order through replaceable
 placeholder nodes and expose the actual posted journal rather than inferring booking from a payment
-status. The admin UI renders the same authorized payload as both graph and ordered payment timeline.
+status. Clearing settlement now increments each item revision and commits one `item.cleared` evidence
+record per item in the same transaction as the batch, items and net-settlement intent. The SEPA
+`payment.returned` non-repudiation record carries the revision of its `RETURNED` transition. Two
+strict projectors add the clearing item, settlement acknowledgement and explicit return evidence to
+the same fixed trace while ignoring all unrelated records on the shared topics. The admin UI renders
+the same authorized payload as both graph and ordered payment timeline.
 The staged production manifest requires explicit revisions from the first replica; timestamp fallback
-remains a local compatibility aid for controlled legacy replay only. Clearing acknowledgement and an
-explicit return aggregate remain follow-up work, so this ADR stays `partial`.
+remains a local compatibility aid for controlled legacy replay only. Other rails, timeout evidence and
+an authoritative reversal result remain follow-up work, so this ADR stays `partial`.
 
 ## Alternatives considered
 
@@ -102,8 +107,8 @@ explicit return aggregate remain follow-up work, so this ADR stays `partial`.
 **Negative**
 - Producers need stable correlation identifiers and explicit missing-link handling.
 - Eventual consistency requires prominent freshness and incomplete-state semantics.
-- Retained legacy topic records still use timestamp ordering until the migration boundary is proven
-  clean and strict-only consumption is enabled.
+- Retained legacy topic records require a controlled compatibility replay before they can enter the
+  strict production projection.
 
 **Neutral**
 - No payment, return, reversal or complaint transition moves into context-service.

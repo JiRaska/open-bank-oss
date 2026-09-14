@@ -20,3 +20,7 @@ data:
     mp.messaging.incoming.transaction-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.ledger-events-in.group.id=openbank-context-service
     mp.messaging.incoming.ledger-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.clearing-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.clearing-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.sepa-payment-events-in.group.id=openbank-context-service
+    mp.messaging.incoming.sepa-payment-events-in.auto.offset.reset=earliest
