@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -166,6 +167,28 @@ def parse_stream(raw, slot, subject):
                 response=response)
 
 
+def invocation_failure(proc):
+    """Only fixed categories escape; provider output may contain source or secrets."""
+    errors = [proc.stderr or ""]
+    for line in (proc.stdout or "").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result" and event.get("is_error") is True:
+            errors.append(json.dumps(event.get("errors", [])))
+            errors.append(json.dumps(event.get("result", "")))
+    raw = "\n".join(errors)
+    categories = (
+        ("AUTHENTICATION", r"(?i)invalid[_ -]?(?:api[_ -]?)?key|authentication[_ -]error|oauth.{0,40}expired|unauthorized|not logged in"),
+        ("RATE_OR_USAGE_LIMIT", r"(?i)rate[_ -]?limit|usage limit|overloaded|too many requests|quota"),
+        ("CONTEXT_LIMIT", r"(?i)prompt is too long|context.{0,25}(?:exceed|limit)|too many tokens"),
+        ("PROVIDER_UNAVAILABLE", r"(?i)connection (?:refused|reset)|ENOTFOUND|ETIMEDOUT|service unavailable"),
+    )
+    category = next((name for name, pattern in categories if re.search(pattern, raw)), "UNKNOWN")
+    return f"model invocation failed: category={category}, exit_code={proc.returncode}; no admission produced"
+
+
 def review(input_path, output, slot, cli):
     repo, anchor = anchored()
     data = json.loads(Path(input_path).read_text())
@@ -200,7 +223,7 @@ def review(input_path, output, slot, cli):
              "--max-turns", "3", "--output-format", "stream-json", "--verbose",
              "--json-schema", json.dumps(RESPONSE_SCHEMA), "--system-prompt", system],
             input=json.dumps(data), text=True, capture_output=True, cwd=directory, env=env, timeout=900)
-    require(proc.returncode == 0, "model invocation failed; no admission produced")
+    require(proc.returncode == 0, invocation_failure(proc))
     write(output, parse_stream(proc.stdout, slot, data["subject"]))
 
 
@@ -254,6 +277,9 @@ def main():
             review(args.input, args.output, args.slot, args.cli)
         else:
             seal(args.input, args.reports, args.output, args.owner_accepted, args.preview)
+    except subprocess.TimeoutExpired:
+        print("REVIEW UNRESOLVED: operation timed out; no admission produced", file=sys.stderr)
+        return 2
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
         print(f"REVIEW UNRESOLVED: {error}", file=sys.stderr)
         return 2

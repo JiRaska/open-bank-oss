@@ -41,6 +41,18 @@ class DriverTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tool inventory"):
             runner.parse_stream("\n".join(json.dumps(e) for e in events[1:]), "correctness", {})
 
+    def test_provider_failure_diagnostics_never_echo_output(self):
+        for message, category in (("authentication_error", "AUTHENTICATION"),
+                                  ("rate_limit_error", "RATE_OR_USAGE_LIMIT"),
+                                  ("prompt is too long", "CONTEXT_LIMIT"),
+                                  ("ENOTFOUND", "PROVIDER_UNAVAILABLE"),
+                                  ("unexpected response", "UNKNOWN")):
+            proc = subprocess.CompletedProcess([], 1, stdout=json.dumps(dict(type="result", is_error=True, errors=["secret-fixture " + message])),
+                                               stderr="private-source-fixture")
+            with self.subTest(category=category):
+                self.assertEqual(runner.invocation_failure(proc),
+                                 f"model invocation failed: category={category}, exit_code=1; no admission produced")
+
     def test_finished_stream_observes_model_and_session(self):
         report = runner.parse_stream(stream(), "correctness", fixtures.bundle()["subject"])
         self.assertEqual(report["model"], "claude-sonnet-test")
