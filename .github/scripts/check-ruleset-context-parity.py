@@ -233,39 +233,88 @@ def required_contexts(repo: str) -> list[str]:
     return out
 
 
-def static_job_names(job_id: str, job: dict) -> set[str]:
-    """Expand literal include-only matrices; unknown expressions prove no concrete context.
+_MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
 
-    Do not wildcard-match a template: a removed/renamed slug must still fail parity.
-    Axis products and runtime matrices need their own evaluator before they can be counted.
+
+def _matrix_value(value: object) -> str:
+    # GitHub renders YAML booleans lower-case in check names ("test (true)"), not Python's "True".
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _matrix_combos(matrix: object) -> list[dict] | None:
+    """The job instances a `strategy.matrix` produces, in definition order.
+
+    None when the matrix cannot be expanded statically (e.g. `${{ fromJSON(...) }}`): the caller
+    then keeps the literal name, exactly as before matrix support existed.
     """
-    name = str(job.get("name", job_id))
-    if "${{" not in name:
-        return {name}
-    strategy = job.get("strategy") or {}
-    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
-    if not isinstance(matrix, dict) or set(matrix) != {"include"}:
-        return set()
-    rows = matrix["include"]
-    if not isinstance(rows, list):
-        return set()
-    names = set()
-    pattern = re.compile(r"\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-    for row in rows:
-        if not isinstance(row, dict):
+    import itertools
+
+    if not isinstance(matrix, dict):
+        return None
+    axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
+    if any(not isinstance(v, list) for v in axes.values()):
+        return None
+    combos = (
+        [dict(zip(axes, values, strict=True)) for values in itertools.product(*axes.values())]
+        if axes
+        else []
+    )
+    for ex in matrix.get("exclude") or []:
+        if isinstance(ex, dict):
+            combos = [c for c in combos if not all(c.get(k) == v for k, v in ex.items())]
+    for inc in matrix.get("include") or []:
+        if not isinstance(inc, dict):
             continue
-        def replace(match):
-            value = row.get(match.group(1))
-            return value if isinstance(value, str) else match.group(0)
-        rendered = pattern.sub(replace, name)
-        if "${{" not in rendered:
-            names.add(rendered)
+        on_axes = {k: v for k, v in inc.items() if k in axes}
+        matched = [c for c in combos if on_axes and all(c.get(k) == v for k, v in on_axes.items())]
+        if matched:
+            for c in matched:
+                c.update(inc)
+        else:
+            combos.append(dict(inc))
+    return combos
+
+
+def _job_context_names(job_id: str, job: dict) -> set[str]:
+    """The check-run names one job reports as.
+
+    A matrix job reports one check per instance, named by substituting `${{ matrix.X }}` into its
+    `name:` — or, with no `name:`, as `job_id (v1, v2, ...)`. Comparing only the literal name missed
+    every matrix context: `gates (${{ matrix.slug }})` never equals the required
+    `gates (gitops-api)`, so all PRs went red the moment those contexts became required (#10000).
+    """
+    literal = str(job.get("name", job_id))
+    strategy = job.get("strategy")
+    combos = _matrix_combos(strategy.get("matrix")) if isinstance(strategy, dict) else None
+    if combos is None:
+        # A runtime matrix cannot prove any concrete matrix-derived context. Keeping the
+        # expression would let a ruleset require the template text even though GitHub never
+        # emits that check name.
+        if _MATRIX_REF.search(literal):
+            return set()
+        return {literal}
+    if not combos:
+        # An empty matrix creates no job instances and therefore no check-run context.
+        return set()
+    names: set[str] = set()
+    for combo in combos:
+        if "name" in job:
+            rendered = _MATRIX_REF.sub(
+                lambda m, c=combo: _matrix_value(c[m.group(1)]) if m.group(1) in c else m.group(0),
+                literal,
+            )
+            if "${{" not in rendered:
+                names.add(rendered)
+        else:
+            rendered = f"{job_id} ({', '.join(_matrix_value(v) for v in combo.values())})"
+            if "${{" not in rendered:
+                names.add(rendered)
     return names
 
 
 def job_names_for_event(root: pathlib.Path, event: str = "pull_request") -> set[str]:
-    """Every job `name:` (or job id, if `name:` is absent) from a tracked workflow under
-    WORKFLOWS_DIR that triggers on `event`."""
+    """Every check-run name (job `name:` or job id, expanded per matrix instance) from a tracked
+    workflow under WORKFLOWS_DIR that triggers on `event`."""
     names: set[str] = set()
     for path in sorted((root / WORKFLOWS_DIR).glob("*.yml")):
         try:
@@ -284,7 +333,7 @@ def job_names_for_event(root: pathlib.Path, event: str = "pull_request") -> set[
         for job_id, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
-            names.update(static_job_names(job_id, job))
+            names.update(_job_context_names(str(job_id), job))
     return names
 
 
@@ -359,7 +408,8 @@ def self_test() -> int:
         ("missing value", {"include": [{"other": "one"}]}, set()),
         ("dynamic matrix", "${{ fromJSON(needs.detect.outputs.matrix) }}", set()),
         ("unresolved value", {"include": [{"slug": "${{ inputs.slug }}"}]}, set()),
-        ("axes require separate expansion", {"slug": ["one"], "include": [{"slug": "two"}]}, set()),
+        ("axes expand with additive include", {"slug": ["one"], "include": [{"slug": "two"}]},
+         {"gates (one)", "gates (two)"}),
     ]
     for label, matrix, expected in matrix_cases:
         with tempfile.TemporaryDirectory() as d:
@@ -398,6 +448,40 @@ def self_test() -> int:
                        "on:\n  merge_group:\njobs:\n  e:\n    name: MG only\n")
         if merge_group_gaps(root, ["MG only"]) != []:
             fails.append("merge_group_gaps: a merge_group-only workflow must count as ready")
+
+    # --- matrix jobs (#10000) ------------------------------------------------------------
+    # Both directions: an expanded instance must match, and the unexpanded template must not be
+    # what makes a context look reachable.
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        write_workflow(root, "matrix.yml",
+                       "on: [pull_request]\njobs:\n"
+                       "  gates:\n    name: gates (${{ matrix.slug }})\n    strategy:\n      matrix:\n"
+                       "        include:\n          - slug: gitops-api\n            groups: gitops api\n"
+                       "          - slug: lint-sec\n            groups: lint security\n"
+                       "  build:\n    strategy:\n      matrix:\n        os: [linux, mac]\n"
+                       "        jdk: [21, 25]\n        exclude:\n          - os: mac\n            jdk: 21\n"
+                       "  flags:\n    strategy:\n      matrix:\n        include:\n          - enabled: true\n"
+                       "  dyn:\n    name: dyn (${{ matrix.x }})\n    strategy:\n"
+                       "      matrix: ${{ fromJSON(needs.plan.outputs.m) }}\n")
+        got = pr_triggered_job_names(root)
+        for label, want_in in [
+            ("matrix: include + name template expands", "gates (gitops-api)"),
+            ("matrix: second include instance", "gates (lint-sec)"),
+            ("matrix: axes without name use GitHub's default", "build (linux, 21)"),
+            ("matrix: include-only without name", "flags (true)"),
+        ]:
+            ran.append(label)
+            if want_in not in got:
+                fails.append(f"{label}: {want_in!r} not in {sorted(got)}")
+        for label, want_out in [
+            ("matrix: template itself is not a context", "gates (${{ matrix.slug }})"),
+            ("matrix: exclude removes an instance", "build (mac, 21)"),
+            ("matrix: runtime matrix proves no concrete context", "dyn (${{ matrix.x }})"),
+        ]:
+            ran.append(label)
+            if want_out in got:
+                fails.append(f"{label}: {want_out!r} must not be in {sorted(got)}")
 
     # --- findings, with gh_api / required_contexts stubbed ------------------------------
     def case(label, contexts, jobs, want_missing):
