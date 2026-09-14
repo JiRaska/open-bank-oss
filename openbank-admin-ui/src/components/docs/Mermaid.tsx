@@ -5,11 +5,19 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import mermaid from 'mermaid'
 import DOMPurify from 'dompurify'
 import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
 
-mermaid.initialize(MERMAID_CONFIG)
+type MermaidApi = Pick<typeof import('mermaid').default, 'initialize' | 'render'>
+
+// Mermaid and its layout engines are larger than the entire shared application shell.
+// Load them after the explanatory page and accessible mode controls can render; the source
+// diagram remains represented by the surrounding UI while the SVG is being prepared.
+const mermaidReady: Promise<MermaidApi> = import('mermaid').then((mod) => {
+  const mermaid = mod.default
+  mermaid.initialize(MERMAID_CONFIG)
+  return mermaid
+})
 
 let seq = 0
 
@@ -24,8 +32,8 @@ export function Mermaid({ chart }: { chart: string }) {
   useEffect(() => {
     let cancelled = false
     const id = `mermaid-${++seq}`
-    mermaid
-      .render(id, chart)
+    void mermaidReady
+      .then((mermaid) => mermaid.render(id, chart))
       .then(({ svg }) => {
         if (!cancelled && ref.current) {
           // Same sanitize contract as MermaidEnhancer — never innerHTML a
