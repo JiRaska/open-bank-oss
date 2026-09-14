@@ -8,14 +8,13 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `context` service. Data domain **compliance**,
 > classification **restricted**, datastore **PostgreSQL**.
 
-## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
+## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED
 
-**GitOps deliberately declares zero replicas for this workload.** This is not a live
-service and does not authorize a replica increase, restart, log inspection, traffic claim,
-or metrics/health assertion. Activation remains the separately reviewed step after the
-pinned image, GitOps sync, and live cluster-health evidence are available. After that
-step, health must be checked on the management endpoint `:8085`;
-the public HTTP port is not a health-evidence substitute.
+The GitOps manifest declares this workload, but its owning ArgoCD Application has **no
+automated sync**. This is desired state, not evidence that the Deployment, database,
+metrics scrape, or traffic path exists in the cluster. Before using any command below
+as an incident procedure, complete the separately reviewed manual sync and observe
+the resulting deployment and health checks.
 
 ## Service identity
 
@@ -37,13 +36,20 @@ the public HTTP port is not a health-evidence substitute.
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `context`.
 
-## Runtime operations — DEFERRED
-
-Do not increase replicas, restart, or use log/metrics commands to activate this staged
-workload. The reviewed activation procedure must first establish the signed image,
-GitOps sync, and actual cluster health. The declared probes are:
+## Health & probes
 
 - Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Metrics: declared for the fleet PodMonitor (namespace `context`), but live scrape status is unverified until manual sync and health observation.
+- Logs: `kubectl logs -n context deploy/context-service -f`, or Loki
+  `{namespace="context"}`.
+
+## Routine operations
+
+> **Live status unverified:** the commands below are planned procedures until the manual ArgoCD sync and cluster health checks have been observed.
+
+- **Restart:** `kubectl rollout restart deploy/context-service -n context` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/context-service -n context --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
+- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
 
