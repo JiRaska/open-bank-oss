@@ -55,3 +55,16 @@ test('preserves the last verified readiness report through an outage and retry',
   await expect(ledgerGate).toBeVisible()
   expect(request).toBeGreaterThanOrEqual(3)
 })
+
+test('does not present an empty collector result as production readiness', async ({ page }) => {
+  await page.route('**/api/prod-readiness', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ generated_for: '2026-09-15', dimensions: [], services: [] }),
+  }))
+
+  await page.goto('/system/readiness')
+  await expect(page.getByText('No data yet: service-readiness matrix')).toBeVisible()
+  await expect(page.getByText(/an empty report is not evidence of production readiness/)).toBeVisible()
+  await expect(page.getByRole('table')).toHaveCount(0)
+})

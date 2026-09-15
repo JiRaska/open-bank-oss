@@ -8,6 +8,8 @@ import { useCallback, useState, useEffect } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle, CircleSlash } from 'lucide-react'
 import { LoadingState, PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
+import { TableViewport } from '@/components/ui/TableViewport'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 
 interface ReadinessService {
   service: string
@@ -43,7 +45,7 @@ const LEVELS: { score: number; cs: string; en: string; tone: Tone }[] = [
 const lvl = (s: number) => LEVELS[Math.max(0, Math.min(3, s))]
 
 export default function ReadinessPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [data, setData] = useState<ReadinessReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState(false)
@@ -170,14 +172,26 @@ export default function ReadinessPage() {
       )}
 
       {!loading && !unavailable && services.length === 0 && (
-        <div style={{ padding: '40px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-          {t('Žádná data — spusť prod-readiness-collector.py --all --json.', 'No data — run prod-readiness-collector.py --all --json.')}
+        <div className="card">
+          <DataUnavailable
+            kind="no_data"
+            feature={t('matice připravenosti služeb', 'service-readiness matrix')}
+            lang={language}
+            detail={t(
+              'Collector odpověděl úspěšně, ale report neobsahuje žádnou službu. Obnovte CI artefakt prod-readiness-collector.py --all --json; prázdný report není důkaz produkční připravenosti.',
+              'The collector answered successfully, but the report contains no services. Regenerate the CI artifact with prod-readiness-collector.py --all --json; an empty report is not evidence of production readiness.',
+            )}
+          />
         </div>
       )}
 
       {/* Matrix */}
       {!loading && services.length > 0 && (
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--card-bg)' }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--card-bg)' }}>
+          <TableViewport
+            label={t('Matice produkční připravenosti služeb', 'Service production-readiness matrix')}
+            hint={t('Posuňte tabulku vodorovně pro všech devět dimenzí, jejich důkaz a výsledný gate.', 'Scroll horizontally for all nine dimensions, their evidence and the final gate.')}
+          >
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '12px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -218,6 +232,7 @@ export default function ReadinessPage() {
               ))}
             </tbody>
           </table>
+          </TableViewport>
         </div>
       )}
 

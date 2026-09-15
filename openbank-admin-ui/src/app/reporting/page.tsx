@@ -19,6 +19,8 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
 import { ReportTrend } from '@/components/reporting/ReportTrend'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { LoadingState } from '@/components/ui/LoadingState'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
 import { parseReportCatalogue, parseReportResult, type CatalogueColumn, type CatalogueReport, type ReportResult } from '@/lib/reporting/clientContract'
 
@@ -71,7 +73,9 @@ export default function ReportingPage() {
     setFailure(null)
   }, [])
 
-  useEffect(() => {
+  const loadCatalogue = useCallback(async () => {
+    setCatalogueFailed(false)
+    setCatalogueDenied(false)
     void (async () => {
       try {
         const res = await fetch('/api/reporting', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
@@ -86,6 +90,8 @@ export default function ReportingPage() {
       }
     })()
   }, [selectReport])
+
+  useEffect(() => { void loadCatalogue() }, [loadCatalogue])
 
   const report = catalogue?.find((r) => r.id === selected) ?? null
 
@@ -144,7 +150,9 @@ export default function ReportingPage() {
           </div>
           {catalogueDenied && <DataUnavailable kind="unauthorized" service="Reporting" feature={t('reporting', 'reporting')} dense />}
           {catalogue && catalogue.length === 0 && !catalogueDenied && (
-            <DataUnavailable kind={catalogueFailed ? "unreachable" : "no_data"} feature={t('seznam reportů', 'report catalogue')} dense />
+            <DataUnavailable kind={catalogueFailed ? "unreachable" : "no_data"} service="Reporting" feature={t('seznam reportů', 'report catalogue')} lang={language} dense>
+              {catalogueFailed && <button type="button" className="btn btn-secondary" onClick={() => void loadCatalogue()}>{t('Načíst katalog znovu', 'Retry catalogue')}</button>}
+            </DataUnavailable>
           )}
           {catalogue?.map((r) => (
             <button
@@ -166,8 +174,14 @@ export default function ReportingPage() {
         </div>
 
         <div className="card min-w-0" style={{ padding: '20px' }}>
-          {!report && !catalogueDenied && (
+          {catalogue === null && !catalogueDenied && (
+            <LoadingState label={t('Načítám katalog reportů', 'Loading report catalogue')} description={t('Ověřuji dostupné governované dotazy a jejich oprávnění.', 'Checking available governed queries and their permissions.')} />
+          )}
+          {!report && catalogue !== null && !catalogueDenied && !catalogueFailed && (
             <DataUnavailable kind="no_data" feature={t('report', 'report')} dense />
+          )}
+          {!report && catalogueFailed && (
+            <DataUnavailable kind="unreachable" service="Reporting" feature={t('vybraný report', 'selected report')} lang={language} dense detail={t('Katalog se nepodařilo načíst, proto zatím nelze bezpečně vybrat ani spustit žádný governovaný report.', 'The catalogue could not be loaded, so no governed report can be safely selected or run yet.')} />
           )}
           {report && (
             <>
@@ -231,7 +245,7 @@ export default function ReportingPage() {
                     ) : (
                       <div>
                         <ReportTrend reportId={result.reportId} rows={result.rows} truncated={result.truncated} />
-                        <div style={{ overflowX: 'auto' }}>
+                        <TableViewport label={t(`Výsledek reportu ${cs ? report.titleCs : report.titleEn}`, `Results for ${report.titleEn}`)} hint={t('Posuňte tabulku vodorovně pro všechny governované sloupce výsledku.', 'Scroll horizontally for every governed result column.')}>
                         <table className="data-table" style={{ width: '100%' }}>
                           <thead>
                             <tr>{result.columns.map((c) => <th key={c.key}>{cs ? c.labelCs : c.labelEn}</th>)}</tr>
@@ -248,7 +262,7 @@ export default function ReportingPage() {
                             ))}
                           </tbody>
                         </table>
-                        </div>
+                        </TableViewport>
                         {result.rows.length > 25 && <div className="flex items-center justify-between gap-2 mt-3 text-sm">
                           <button className="btn btn-secondary" disabled={page === 0} onClick={() => setPage((n) => n - 1)}>{t('Předchozí', 'Previous')}</button>
                           <span>{page * 25 + 1}–{Math.min((page + 1) * 25, result.rows.length)} / {result.rows.length}</span>
@@ -265,7 +279,7 @@ export default function ReportingPage() {
                   <DataUnavailable kind="unreachable" service="ClickHouse (analytics)" feature={cs ? report.titleCs : report.titleEn} dense />
                 )
               )}
-              {loading && <p role="status" className="text-sm text-[var(--text-secondary)]">{t('Načítání reportu…', 'Loading report…')}</p>}
+              {loading && <LoadingState label={t('Načítám report', 'Loading report')} description={t('Dotazuji governovanou projekci a ověřuji tvar výsledku.', 'Querying the governed projection and validating the result shape.')} />}
               {!result && !failure && !loading && (
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <TableIcon size={13} aria-hidden="true" />

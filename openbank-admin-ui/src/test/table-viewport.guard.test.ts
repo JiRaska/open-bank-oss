@@ -41,6 +41,8 @@ const migratedTables = [
   'src/components/campaigns/PeopleSummary.tsx',
   'src/components/cards/CardCapabilityMatrix.tsx',
   'src/app/lending/risk/page.tsx',
+  'src/app/system/readiness/page.tsx',
+  'src/app/reporting/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {
