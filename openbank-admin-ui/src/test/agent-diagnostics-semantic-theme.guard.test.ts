@@ -29,4 +29,11 @@ describe('agent diagnostics semantic theme contract', () => {
       expect(source).toContain(`[data-status="${status}"]`)
     }
   })
+
+  it('keeps every diagnostic label at a readable 10px floor', () => {
+    expect(source).not.toMatch(/font-size:\s*[7-9]px/)
+    for (const selector of ['.anatomyTag', '.metricFoot', '.meshStatus', '.caseClasses', '.caseClasses code']) {
+      expect(source).toMatch(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{[^}]*font-size: 10px;`))
+    }
+  })
 })

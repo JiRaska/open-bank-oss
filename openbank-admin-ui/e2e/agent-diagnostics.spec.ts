@@ -65,6 +65,11 @@ test.describe('agent diagnostic education', () => {
       await expect(page.getByText('APPROVED', { exact: true })).toBeVisible()
       await expect(page.getByText('REJECTED', { exact: true })).toBeVisible()
 
+      const diagnosticLabels = page.locator('[class*="anatomyTag"], [class*="metricFoot"], [class*="meshStatus"], [class*="caseClasses"]')
+      const fontSizes = await diagnosticLabels.evaluateAll(elements => elements.map(element => Number.parseFloat(getComputedStyle(element).fontSize)))
+      expect(fontSizes.length).toBeGreaterThan(0)
+      expect(fontSizes.every(size => size >= 10)).toBe(true)
+
       const portraitTheme = await page.getByTestId('agent-portrait').first().evaluate(element => {
         const style = getComputedStyle(element)
         return {
@@ -92,5 +97,6 @@ test.describe('agent diagnostic education', () => {
       getComputedStyle(element, '::after').content,
     )
     expect(connector).toContain('↓')
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   })
 })

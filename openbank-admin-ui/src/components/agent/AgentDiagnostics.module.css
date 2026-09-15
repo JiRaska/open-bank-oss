@@ -132,7 +132,7 @@
   border-radius: 7px;
   color: var(--accent-text);
   background: var(--surface);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -196,7 +196,7 @@
   gap: 12px;
   margin-top: 4px;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
@@ -257,7 +257,7 @@
   top: 11px;
   right: 10px;
   color: var(--success-text);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 850;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -277,8 +277,8 @@
 
 .meshTruth { display: flex; align-items: flex-start; gap: 8px; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
 .meshTruth svg { flex-shrink: 0; color: var(--success-text); }
-.caseClasses { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--text-tertiary); font-size: 9px; }
-.caseClasses code { padding: 3px 6px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-2); font-size: 9px; }
+.caseClasses { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--text-tertiary); font-size: 10px; }
+.caseClasses code { padding: 3px 6px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-2); font-size: 10px; }
 
 .meshLink {
   display: inline-flex;
