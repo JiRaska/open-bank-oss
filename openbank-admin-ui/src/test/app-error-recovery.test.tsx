@@ -48,6 +48,7 @@ describe('app error recovery', () => {
 
     const alert = screen.getByRole('alert', { name: /The console failed to load/ })
     expect(alert).toHaveTextContent('root-ref-7')
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveFocus())
     fireEvent.click(screen.getByRole('button', { name: /Try loading the admin console again/ }))
     expect(reset).toHaveBeenCalledOnce()
     await waitFor(() => expect(captureException).toHaveBeenCalledWith(error))
