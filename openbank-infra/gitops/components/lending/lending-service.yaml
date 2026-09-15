@@ -196,6 +196,12 @@ spec:
               value: service-account-openbank-edge
             - name: LENDING_INTAKE_NOMINAL_ANNUAL_RATE
               value: "0.079"
+            # Sandbox-only opt-in for the visibly labelled noop-flat-v2 PD/LGD model. The
+            # application default remains false, so every unconfigured/production deployment
+            # fails closed instead of posting an allowance from unvalidated parameters. Credit
+            # risk summaries classify these rows as demonstration and suppress risk ratios.
+            - name: LENDING_RISK_ALLOW_DEMONSTRATION_MODEL
+              value: "true"
             # OTel traces → Tempo.
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
