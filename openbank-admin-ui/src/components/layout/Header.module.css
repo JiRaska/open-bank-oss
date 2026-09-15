@@ -31,6 +31,12 @@
 .searchTrigger:focus-visible { background: var(--surface); border-color: var(--accent-border); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); outline: none; }
 
 .actions { display: flex; align-items: center; gap: 5px; }
+.buildLink,
+.iconAction,
+.accountButton { flex: 0 0 auto; }
+.accountButton { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; cursor: pointer; border: none; border-radius: 20px; font: inherit; text-align: left; transition: background 0.12s; }
+.accountCopy { display: flex; }
+.actionDivider { width: 1px; height: 20px; flex: 0 0 auto; margin: 0 6px; background: var(--border); }
 .headerLink { display: grid; width: 34px; height: 34px; place-items: center; color: var(--text-secondary); text-decoration: none; background: transparent; border-radius: 9px; transition: background 0.12s ease, color 0.12s ease; }
 .headerLink:hover,
 .headerLink:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
@@ -64,4 +70,13 @@
   .searchTrigger { min-width: auto; }
   .searchTrigger span,
   .searchTrigger kbd { display: none; }
+}
+
+@media (max-width: 480px) {
+  .buildLink,
+  .accountCopy,
+  .accountChevron,
+  .actionDivider { display: none; }
+
+  .accountButton { width: 34px; height: 34px; padding: 4px; justify-content: center; }
 }

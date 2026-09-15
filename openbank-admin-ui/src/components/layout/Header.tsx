@@ -130,6 +130,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         {build && (
           <Link
             href="/docs/release-notes/admin-ui"
+            className={styles.buildLink}
             title={
               `admin-ui ${build.version}` +
               `\ngit: ${build.gitSha}` +
@@ -163,6 +164,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         {/* Theme (#9831): the `.dark` tokens existed and nothing could apply them. */}
         <button
           type="button"
+          className={styles.iconAction}
           aria-label={theme === 'dark'
             ? t('Přepnout na světlý motiv', 'Switch to the light theme')
             : t('Přepnout na tmavý motiv', 'Switch to the dark theme')}
@@ -183,6 +185,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         </button>
         <button
           type="button"
+          className={styles.iconAction}
           aria-label={t('Přepnout na angličtinu', 'Switch to Czech')}
           title={t('Přepnout jazyk', 'Switch language')}
           onClick={() => setLanguage(language === 'en' ? 'cs' : 'en')}
@@ -199,12 +202,13 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         </button>
         {canReadDocs && <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} aria-hidden="true" /></HeaderLink>}
         {canViewApprovals && <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} aria-hidden="true" /></HeaderLink>}
-        <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 6px' }} />
+        <div className={styles.actionDivider} aria-hidden="true" />
 
         {/* User menu */}
         <div style={{ position: 'relative' }}>
           <button
             type="button"
+            className={styles.accountButton}
             ref={userMenuButtonRef}
             onClick={() => setMenuOpen(v => !v)}
             aria-expanded={menuOpen}
@@ -212,11 +216,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             aria-controls={menuOpen ? 'admin-user-menu' : undefined}
             aria-label={t('Otevřít uživatelskou nabídku', 'Open user menu')}
             style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '4px 8px 4px 4px', border: 'none', borderRadius: '20px', cursor: 'pointer',
-              transition: 'background 0.12s',
               background: menuOpen ? 'var(--surface-3)' : 'transparent',
-              font: 'inherit', textAlign: 'left',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
             onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = 'transparent' }}
@@ -226,7 +226,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '11px', fontWeight: 700, color: 'var(--surface-1)', flexShrink: 0,
             }}>{initials}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <div className={styles.accountCopy} style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                 {user?.name ?? user?.email ?? 'User'}
               </span>
@@ -239,7 +239,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
                 </span>
               )}
             </div>
-            <ChevronDown aria-hidden="true" size={12} style={{ color: 'var(--text-tertiary)', marginLeft: '2px' }} />
+            <ChevronDown className={styles.accountChevron} aria-hidden="true" size={12} style={{ color: 'var(--text-tertiary)', marginLeft: '2px' }} />
           </button>
 
           {/* Dropdown */}
