@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme, type OperatorTheme } from './helpers/theme'
 
 const audience = {
   name: 'actives-tenured-30d',
@@ -89,3 +90,38 @@ test('explains a Czech catalogue outage and recovers on a narrow screen', async 
   expect(results.violations).toEqual([])
   expect(attempts).toBe(2)
 })
+
+for (const theme of ['light', 'dark'] as const satisfies readonly OperatorTheme[]) {
+  test(`inherits the ${theme} theme across the audience card and approval evidence`, async ({ page }) => {
+    await setOperatorTheme(page, theme)
+    await page.route(/\/api\/audiences$/, route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ state: 'ok', items: [audience] }),
+    }))
+
+    await page.goto('/segments')
+    const semanticSurface = await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.backgroundColor = 'var(--surface)'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return color
+    })
+    const card = page.locator('[data-audience-card]').first()
+    await expect(card).toBeVisible()
+    await expect(card).toHaveCSS('background-color', semanticSurface)
+
+    await page.getByRole('button', { name: /Review and approve|Zkontrolovat a schválit/ }).click()
+    const dialog = page.getByRole('alertdialog')
+    await expect(dialog).toBeVisible()
+    const panel = dialog.locator('> div')
+    await expect(panel).toHaveCSS('background-color', semanticSurface)
+
+    const results = await new AxeBuilder({ page })
+      .include('[role="alertdialog"]')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(results.violations).toEqual([])
+  })
+}

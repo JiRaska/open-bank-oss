@@ -166,7 +166,7 @@ export default function SegmentsPage() {
         <button
           type="button"
           onClick={() => loadPreview(s)}
-          className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50"
+          className="rounded-lg border border-[var(--accent-border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-bg)]"
           data-audience-count={key(s)}
         >
           {t('Spočítat', 'Count')}
@@ -178,7 +178,7 @@ export default function SegmentsPage() {
       // Never render a failed preview as 0 — "nobody matches" is a business answer a marketer
       // would act on, and a 403 or a timeout is not that answer.
       return (
-        <span className="inline-flex items-center gap-2 text-xs text-amber-600">
+        <span className="inline-flex items-center gap-2 text-xs text-[var(--warning-text)]">
           {p.state === 'unauthorized'
             ? t('Bez oprávnění', 'Not permitted')
             : p.state === 'unknown_segment'
@@ -220,7 +220,7 @@ export default function SegmentsPage() {
           'Choose an audience by intent, verify its current reach, then go straight to designing the journey.',
         )}
         icon={<Users className="h-6 w-6" />}
-        actions={<Can permission="campaign:create"><Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link></Can>}
+        actions={<Can permission="campaign:create"><Link href="/segments/new" className="btn btn-primary"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link></Can>}
       />
 
       {loading && (
@@ -248,7 +248,7 @@ export default function SegmentsPage() {
       )}
 
       {!loading && !unavailable && lifecycleError && !approvalIntent && (
-        <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+        <p role="alert" className="rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-text)]">
           {lifecycleError}
         </p>
       )}
@@ -275,34 +275,34 @@ export default function SegmentsPage() {
       {!loading && !unavailable && items.length > 0 && (
         <>
           <section className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
-            <div className="rounded-2xl border border-violet-100 bg-[radial-gradient(circle_at_top_left,_rgba(116,91,255,.18),_transparent_42%),linear-gradient(135deg,_#fff,_#f8f7ff)] p-5 shadow-sm">
-              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.12em] text-violet-700"><Sparkles className="h-3.5 w-3.5" /> {t('Audience library', 'Audience library')}</p>
-              <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{t('Rozhodujte se nad skutečným dosahem, ne nad názvem segmentu.', 'Decide using real reach, not a segment name.')}</h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{t('Velikost se počítá stejným pravidlem, které následně zařazuje lidi do kampaně. Je to aktuální náhled, ne slib doručení.', 'Size uses the same rule that later enrols people into a campaign. It is a current preview, not a delivery promise.')}</p>
+            <div className="rounded-2xl border border-[var(--accent-border)] p-5 shadow-sm" style={{ background: 'linear-gradient(135deg, var(--accent-bg), var(--surface) 48%, var(--surface-2))' }}>
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.12em] text-[var(--accent-text)]"><Sparkles className="h-3.5 w-3.5" /> {t('Audience library', 'Audience library')}</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-[var(--text-primary)]">{t('Rozhodujte se nad skutečným dosahem, ne nad názvem segmentu.', 'Decide using real reach, not a segment name.')}</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">{t('Velikost se počítá stejným pravidlem, které následně zařazuje lidi do kampaně. Je to aktuální náhled, ne slib doručení.', 'Size uses the same rule that later enrols people into a campaign. It is a current preview, not a delivery promise.')}</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <ShieldCheck className="h-5 w-5 text-emerald-600" />
-              <p className="mt-3 text-sm font-semibold text-slate-900">{t('Bezpečné publikum', 'Safe audiences')}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Pravidla jsou uzavřená a typovaná. Verze se stává použitelnou až po schválení jiným člověkem; souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Rules are closed and typed. A version becomes targetable only after a different person approves it; consent and frequency protections are evaluated again at send time.')}</p>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+              <ShieldCheck className="h-5 w-5 text-[var(--success-text)]" />
+              <p className="mt-3 text-sm font-semibold text-[var(--text-primary)]">{t('Bezpečné publikum', 'Safe audiences')}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-tertiary)]">{t('Pravidla jsou uzavřená a typovaná. Verze se stává použitelnou až po schválení jiným člověkem; souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Rules are closed and typed. A version becomes targetable only after a different person approves it; consent and frequency protections are evaluated again at send time.')}</p>
             </div>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2" aria-label={t('Katalog publik', 'Audience catalogue')}>
             {items.map(s => (
-              <article key={key(s)} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-950/5" data-audience-card={key(s)}>
+              <article key={key(s)} className="group rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:shadow-lg" data-audience-card={key(s)}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{s.state === 'APPROVED' ? t('Schválené publikum', 'Approved audience') : s.state === 'PENDING_APPROVAL' ? t('Čeká na schválení', 'Awaiting approval') : t('Rozpracované publikum', 'Draft audience')} · v{s.version}</p>
-                    <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{audienceName(s)}</h2>
-                    <p className="mt-1 text-sm leading-5 text-slate-500">{audiencePurpose(s)}</p>
+                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-[var(--text-tertiary)]">{s.state === 'APPROVED' ? t('Schválené publikum', 'Approved audience') : s.state === 'PENDING_APPROVAL' ? t('Čeká na schválení', 'Awaiting approval') : t('Rozpracované publikum', 'Draft audience')} · v{s.version}</p>
+                    <h2 className="mt-1 text-lg font-semibold tracking-tight text-[var(--text-primary)]">{audienceName(s)}</h2>
+                    <p className="mt-1 text-sm leading-5 text-[var(--text-tertiary)]">{audiencePurpose(s)}</p>
                   </div>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><Users className="h-5 w-5" /></span>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-bg)] text-[var(--accent-text)]"><Users className="h-5 w-5" /></span>
                 </div>
 
-                <div className="mt-5 rounded-xl bg-slate-50 p-3">
-                  <p className="text-[.68rem] font-bold uppercase tracking-[.1em] text-slate-400">{t('Pravidla výběru', 'Selection rules')}</p>
-                  <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
-                    {s.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}
+                <div className="mt-5 rounded-xl bg-[var(--surface-2)] p-3">
+                  <p className="text-[.68rem] font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">{t('Pravidla výběru', 'Selection rules')}</p>
+                  <ul className="mt-2 space-y-1.5 text-sm text-[var(--text-secondary)]">
+                    {s.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />{rule}</li>)}
                   </ul>
                 </div>
 
@@ -310,13 +310,13 @@ export default function SegmentsPage() {
                   <div className="min-h-8">{renderPreview(s)}</div>
                   {s.state === 'APPROVED' ? <Link
                     href={`/campaigns/new?audience=${encodeURIComponent(key(s))}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-700"
+                    className="btn btn-primary px-3 py-2 text-xs"
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={event => { approvalTriggerRef.current = event.currentTarget; approvalCloseFocusOverrideRef.current = null; setLifecycleError(null); setApprovalIntent(s) }} disabled={lifecycleFlight.busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{t('Zkontrolovat a schválit', 'Review and approve')}</button></Can>}
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="btn btn-primary px-3 py-2 text-xs">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={event => { approvalTriggerRef.current = event.currentTarget; approvalCloseFocusOverrideRef.current = null; setLifecycleError(null); setApprovalIntent(s) }} disabled={lifecycleFlight.busy} className="rounded-lg border border-[var(--success-border)] bg-[var(--success-bg)] px-3 py-2 text-xs font-semibold text-[var(--success-text)] transition hover:border-[var(--success-text)] disabled:cursor-wait disabled:opacity-60">{t('Zkontrolovat a schválit', 'Review and approve')}</button></Can>}
                 </div>
-                <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
+                <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-[var(--text-tertiary)]"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
             ))}
           </section>
@@ -357,7 +357,7 @@ function AudienceApprovalDialog({ audience, busy, error, closeFocusOverrideRef, 
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[1200] bg-slate-950/70" />
+        <Dialog.Overlay className="fixed inset-0 z-[1200] bg-black/70" />
         <Dialog.Content
           role="alertdialog"
           aria-busy={busy}
@@ -379,26 +379,26 @@ function AudienceApprovalDialog({ audience, busy, error, closeFocusOverrideRef, 
           }}
           onInteractOutside={event => event.preventDefault()}
         >
-          <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+          <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
             <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--success-bg)] text-[var(--success-text)]"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
               <div>
-                <Dialog.Title className="text-lg font-semibold text-slate-950">{t('Schválit publikum', 'Approve audience')}</Dialog.Title>
-                <Dialog.Description className="mt-1 text-sm leading-6 text-slate-600">{t(
+                <Dialog.Title className="text-lg font-semibold text-[var(--text-primary)]">{t('Schválit publikum', 'Approve audience')}</Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{t(
                   'Tato verze se stane použitelnou v kampaních. Schválení samo nic neodešle; souhlas a frekvenční ochrany se znovu ověří při odeslání.',
                   'This version will become available to campaigns. Approval sends nothing by itself; consent and frequency protections are checked again at send time.',
                 )}</Dialog.Description>
               </div>
             </div>
-            <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 font-semibold text-slate-900">{audience.name} · v{audience.version}</dd></div>
-              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{audience.createdBy || t('neuvedeno', 'not provided')}</dd></div>
-              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Pravidla, která schvalujete', 'Rules you are approving')}</dt><dd><ul className="mt-2 space-y-1.5 text-slate-700">{audience.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}</ul></dd></div>
+            <dl className="mt-5 grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4 text-sm">
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Publikum', 'Audience')}</dt><dd className="mt-1 font-semibold text-[var(--text-primary)]">{audience.name} · v{audience.version}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-[var(--text-secondary)]">{audience.createdBy || t('neuvedeno', 'not provided')}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Pravidla, která schvalujete', 'Rules you are approving')}</dt><dd><ul className="mt-2 space-y-1.5 text-[var(--text-secondary)]">{audience.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" />{rule}</li>)}</ul></dd></div>
             </dl>
-            {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+            {error && <p role="alert" className="mt-4 rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-text)]">{error}</p>}
             <div className="mt-5 flex justify-end gap-2">
-              <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
-              <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Schvaluji…', 'Approving…') : t('Potvrdit schválení', 'Confirm approval')}</button>
+              <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="btn btn-secondary">{t('Zpět ke kontrole', 'Back to review')}</button>
+              <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg border border-[var(--success-border)] bg-[var(--success-bg)] px-4 py-2 text-sm font-semibold text-[var(--success-text)] disabled:cursor-wait disabled:opacity-60">{busy ? t('Schvaluji…', 'Approving…') : t('Potvrdit schválení', 'Confirm approval')}</button>
             </div>
           </div>
         </Dialog.Content>
