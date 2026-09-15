@@ -240,14 +240,11 @@ class CreditDecisionQueryRepositoryImpl @Inject constructor(
 class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory, private val mapper: LendingMapper) :
     LoanRepository {
     override fun <T> withLocked(loanId: LoanId, operation: (Loan?) -> Uni<T>): Uni<T> = sf.withTransaction { session ->
-        session.find(LoanEntity::class.java, loanId.value, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-            .flatMap { entity ->
-                if (entity == null) {
-                    operation(null)
-                } else {
-                    session.refresh(entity).flatMap { operation(mapper.toDomain(entity)) }
-                }
-            }
+        session.createQuery("FROM LoanEntity WHERE id = :id", LoanEntity::class.java)
+            .setParameter("id", loanId.value)
+            .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+            .singleResultOrNull
+            .flatMap { entity -> operation(entity?.let(mapper::toDomain)) }
     }
 
     @WithTransaction override fun save(loan: Loan): Uni<Loan> {
