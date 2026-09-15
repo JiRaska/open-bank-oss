@@ -29,15 +29,15 @@ type PageHeaderProps = {
 export function PageHeader({ title, subtitle, icon, breadcrumb, actions, className }: PageHeaderProps) {
   return (
     <div className={cn('page-header', className)}>
-      <div>
+      <div className="page-header__copy">
         {breadcrumb}
-        <div className="flex items-center gap-3">
+        <div className="page-header__title-row">
           {icon}
           <h1 className="page-title">{title}</h1>
         </div>
         {subtitle && <p className="page-subtitle">{subtitle}</p>}
       </div>
-      {actions && <div>{actions}</div>}
+      {actions && <div className="page-header__actions">{actions}</div>}
     </div>
   )
 }

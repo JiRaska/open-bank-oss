@@ -33,3 +33,49 @@ for (const width of [320, 360, 390]) {
     expect(menu!.x + menu!.width).toBeLessThanOrEqual(width)
   })
 }
+
+test('keeps a content header and its actions inside a 320px operator viewport', async ({ page, context, baseURL }) => {
+  await page.setViewportSize({ width: 320, height: 760 })
+  await signInAsOperator(context, baseURL!)
+  await page.route('**/api/infra/status', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ components: {} }),
+  }))
+  await page.route('**/api/infra/kafka-topics', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ topics: [], clusterName: 'sandbox' }),
+  }))
+  await page.route('**/api/infra/lifecycle', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ components: [] }),
+  }))
+
+  await page.goto('/infrastructure')
+  const contentHeader = page.locator('.page-header')
+  const refresh = contentHeader.getByRole('button', { name: 'Refresh infrastructure status' })
+  await expect(contentHeader).toBeVisible()
+  await expect(refresh).toBeVisible()
+
+  const layout = await contentHeader.evaluate(element => {
+    const viewport = document.documentElement.clientWidth
+    const bounds = element.getBoundingClientRect()
+    const actions = element.querySelector<HTMLElement>('.page-header__actions')?.getBoundingClientRect()
+    return {
+      viewport,
+      documentWidth: document.documentElement.scrollWidth,
+      headerLeft: bounds.left,
+      headerRight: bounds.right,
+      actionsLeft: actions?.left ?? -1,
+      actionsRight: actions?.right ?? viewport + 1,
+    }
+  })
+
+  expect(layout.documentWidth).toBe(layout.viewport)
+  expect(layout.headerLeft).toBeGreaterThanOrEqual(0)
+  expect(layout.headerRight).toBeLessThanOrEqual(layout.viewport)
+  expect(layout.actionsLeft).toBeGreaterThanOrEqual(layout.headerLeft)
+  expect(layout.actionsRight).toBeLessThanOrEqual(layout.headerRight)
+})
