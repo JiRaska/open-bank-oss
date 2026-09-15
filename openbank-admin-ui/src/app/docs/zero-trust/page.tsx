@@ -25,9 +25,9 @@ type Status = 'enforced' | 'exception' | 'audit' | 'unknown'
 
 function statusStyle(s: Status): { color: string; bg: string } {
   switch (s) {
-    case 'enforced':  return { color: 'var(--success)', bg: 'var(--success-bg)' }
-    case 'exception': return { color: 'var(--warning)', bg: 'var(--warning-bg)' }
-    case 'audit':     return { color: 'var(--warning)', bg: 'var(--warning-bg)' }
+    case 'enforced':  return { color: 'var(--success-text)', bg: 'var(--success-bg)' }
+    case 'exception': return { color: 'var(--warning-text)', bg: 'var(--warning-bg)' }
+    case 'audit':     return { color: 'var(--warning-text)', bg: 'var(--warning-bg)' }
     default:          return { color: 'var(--text-tertiary)', bg: 'var(--surface-2)' }
   }
 }
@@ -85,11 +85,11 @@ export default async function ZeroTrustPage() {
   // Perimeters, OUTER → INNER (the path a request travels toward the data plane).
   // Each status flag is read from the derived posture, never asserted.
   const perimeters: {
-    key: string; icon: React.ReactNode; color: string; title: string; tech: string
+    key: string; icon: React.ReactNode; color: string; background: string; title: string; tech: string
     status: Status; fact: string; regs: string[]
   }[] = [
     {
-      key: 'netpol', icon: <Network size={15} />, color: '#0891b2',
+      key: 'netpol', icon: <Network size={15} />, color: 'var(--zero-trust-network)', background: 'var(--zero-trust-network-bg)',
       title: t('Síťová segmentace (L3/L4)', 'Network segmentation (L3/L4)'),
       tech: 'Kubernetes NetworkPolicy (gen-network-policies.py)',
       status: netpolStatus,
@@ -102,7 +102,7 @@ export default async function ZeroTrustPage() {
       regs: ['NIS2 Art. 21', 'DORA Art. 9'],
     },
     {
-      key: 'mtls', icon: <Lock size={15} />, color: '#2563eb',
+      key: 'mtls', icon: <Lock size={15} />, color: 'var(--zero-trust-transport)', background: 'var(--zero-trust-transport-bg)',
       title: t('Šifrovaný transport (mTLS)', 'Encrypted transport (mTLS)'),
       tech: 'Istio PeerAuthentication (not deployed)',
       status: meshDeployed ? 'enforced' : 'unknown',
@@ -110,7 +110,7 @@ export default async function ZeroTrustPage() {
       regs: ['NIS2 Art. 21', 'DORA Art. 9'],
     },
     {
-      key: 'jwt', icon: <KeyRound size={15} />, color: '#7c3aed',
+      key: 'jwt', icon: <KeyRound size={15} />, color: 'var(--zero-trust-identity)', background: 'var(--zero-trust-identity-bg)',
       title: t('Ověření identity (JWT)', 'Identity authentication (JWT)'),
       tech: 'Keycloak · quarkus-oidc (per-service, not a mesh edge)',
       status: 'unknown',
@@ -119,7 +119,7 @@ export default async function ZeroTrustPage() {
       regs: ['PSD2 SCA', 'EBA ICT'],
     },
     {
-      key: 'l7', icon: <ShieldCheck size={15} />, color: '#059669',
+      key: 'l7', icon: <ShieldCheck size={15} />, color: 'var(--zero-trust-authorization)', background: 'var(--zero-trust-authorization-bg)',
       title: t('Autorizace (L7 default-deny)', 'Authorization (L7 default-deny)'),
       tech: 'Istio AuthorizationPolicy (not deployed)',
       status: meshDeployed ? 'enforced' : 'unknown',
@@ -161,7 +161,7 @@ export default async function ZeroTrustPage() {
     return (
       <div style={{
         border: `2px solid ${p.color}`, borderRadius: 'var(--r-lg)',
-        padding: '14px', background: `${p.color}08`,
+        padding: '14px', background: p.background,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 700, color: p.color }}>
@@ -272,7 +272,7 @@ export default async function ZeroTrustPage() {
                   <span style={{ color: 'var(--text-tertiary)', marginTop: '1px' }}>{b.icon}</span>
                   <div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '3px' }}>{b.attack}</div>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 600, color: 'var(--danger)' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 600, color: 'var(--danger-text)' }}>
                       <Ban size={11} /> {b.stop}
                     </div>
                   </div>
@@ -286,7 +286,7 @@ export default async function ZeroTrustPage() {
             <div className="card" style={{ padding: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  <ScanLine size={15} style={{ color: '#d97706' }} />
+                  <ScanLine size={15} style={{ color: 'var(--warning-text)' }} />
                   {t('Dodavatelský řetězec (admission)', 'Supply chain (admission)')}
                 </span>
                 <span style={{

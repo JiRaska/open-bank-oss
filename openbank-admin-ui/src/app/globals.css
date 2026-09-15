@@ -182,6 +182,16 @@
   --finops-domain-finops:        #15803d;
   --finops-domain-tax:           #64748b;
 
+  /* Zero-Trust nested request perimeters. Each category is named in text as well as colour. */
+  --zero-trust-network:          #0e7490;
+  --zero-trust-network-bg:       #ecfeff;
+  --zero-trust-transport:        #1d4ed8;
+  --zero-trust-transport-bg:     #eff6ff;
+  --zero-trust-identity:         #6d28d9;
+  --zero-trust-identity-bg:      #f5f3ff;
+  --zero-trust-authorization:    #047857;
+  --zero-trust-authorization-bg: #ecfdf5;
+
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
   --dashboard-hero-start: #111a35;
@@ -469,6 +479,14 @@
   --finops-domain-observability: #67e8f9;
   --finops-domain-finops: #86efac;
   --finops-domain-tax: #cbd5e1;
+  --zero-trust-network: #67e8f9;
+  --zero-trust-network-bg: #164e63;
+  --zero-trust-transport: #93c5fd;
+  --zero-trust-transport-bg: #172554;
+  --zero-trust-identity: #c4b5fd;
+  --zero-trust-identity-bg: #2e1065;
+  --zero-trust-authorization: #86efac;
+  --zero-trust-authorization-bg: #064e3b;
   --agent-shell-strength: 18%;
   --agent-glow-strength: 22%;
   --agent-frame: #64748b;
