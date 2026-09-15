@@ -17,6 +17,11 @@ test('identity deduplication remains understandable and accessible in both theme
   await expect(page.locator('#main-content').getByText(/Tok rozhodnutí při onboardingu|Onboarding resolution flow/).first()).toBeVisible()
   await expect(page.getByText('MATCH_EXISTING', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('NEEDS_MANUAL_VERIFICATION', { exact: true }).first()).toBeVisible()
+  const resolutionFlow = page.getByRole('region', { name: /Posuvný tok rozhodnutí při onboardingu|Scrollable onboarding resolution flow/ })
+  await resolutionFlow.focus()
+  await expect(resolutionFlow).toBeFocused()
+  await expect(page.getByText(/Posuňte diagram vodorovně pro všechny výsledky|Scroll the diagram horizontally to see every resolver outcome/)).toBeVisible()
+  await expect(page.getByRole('region', { name: /Posuvný diagram blind indexu|Scrollable blind-index diagram/ })).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   for (const dark of [false, true]) {

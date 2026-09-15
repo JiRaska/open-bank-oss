@@ -28,6 +28,10 @@ test.describe('/docs/document-management — semantic theme', () => {
       await expect(page.getByText(/non-money-path|mimo peněžní cestu/i).first()).toBeVisible()
       await expect(page.getByRole('link', { name: /ADR-0161/ }).first()).toBeVisible()
       await expect(page.getByRole('link', { name: /ADR-0162/ }).first()).toBeVisible()
+      const documentFlow = page.getByRole('region', { name: /Posuvný diagram toku správy dokumentů|Scrollable document-management flow diagram/ })
+      await documentFlow.focus()
+      await expect(documentFlow).toBeFocused()
+      await expect(page.getByText(/Posuňte diagram vodorovně pro vstupy|Scroll the diagram horizontally for inputs/)).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
       const results = await new AxeBuilder({ page })

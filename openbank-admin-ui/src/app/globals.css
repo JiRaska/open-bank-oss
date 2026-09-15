@@ -554,14 +554,14 @@ main {
   transform: translateY(-180%);
   padding: .6rem .8rem;
   border-radius: .5rem;
-  background: var(--accent);
-  color: #fff;
+  background: var(--selection-bg);
+  color: var(--text-inverse);
   font-size: .875rem;
   font-weight: 700;
   text-decoration: none;
   transition: transform .15s ease-out;
 }
-.ob-skip-link:focus { transform: translateY(0); outline: 3px solid rgba(255, 255, 255, .9); outline-offset: 2px; }
+.ob-skip-link:focus { transform: translateY(0); outline: 3px solid var(--text-primary); outline-offset: 2px; }
 .ob-mobile-nav-overlay { display: none; }
 
 /* ── Operator application shell ── */

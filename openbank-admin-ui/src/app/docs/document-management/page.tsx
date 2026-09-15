@@ -11,7 +11,7 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
-import { TableViewport } from '@/components/ui'
+import { HorizontalScrollRegion, TableViewport } from '@/components/ui'
 
 const ACCENT = 'var(--accent)'
 const ACCENT_TEXT = 'var(--accent-text)'
@@ -236,11 +236,10 @@ function ArchitectureFlowDiagram() {
   const right = (n: Node) => ({ x: n.x + n.w, y: n.y + n.h / 2 })
 
   return (
-    <div
-      style={{ position: 'relative', width: '100%', overflowX: 'auto' }}
-      role="region"
-      tabIndex={0}
-      aria-label={t('Posuvný diagram toku správy dokumentů', 'Scrollable document-management flow diagram')}
+    <HorizontalScrollRegion
+      style={{ position: 'relative', width: '100%' }}
+      label={t('Posuvný diagram toku správy dokumentů', 'Scrollable document-management flow diagram')}
+      hint={t('Posuňte diagram vodorovně pro vstupy, úložiště a bezpečnostní vazby.', 'Scroll the diagram horizontally for inputs, storage, and security relationships.')}
     >
       <div style={{ position: 'relative', width: W, height: H, margin: '0 auto' }}>
         <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
@@ -297,7 +296,7 @@ function ArchitectureFlowDiagram() {
           </div>
         ))}
       </div>
-    </div>
+    </HorizontalScrollRegion>
   )
 }
 

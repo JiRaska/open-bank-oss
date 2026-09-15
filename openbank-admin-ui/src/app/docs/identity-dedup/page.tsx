@@ -8,7 +8,7 @@ import { Fingerprint, ShieldCheck, GitMerge, KeyRound, Layers, AlertTriangle, Lo
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
-import { TableViewport } from '@/components/ui'
+import { HorizontalScrollRegion, TableViewport } from '@/components/ui'
 
 const readableTone = (tone: string) => tone.replace(/\)$/, '-text)')
 
@@ -167,17 +167,17 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Tok rozhodnutí při onboardingu', 'Onboarding resolution flow')}
       </div>
-      <div className="card" style={{ padding: '20px', marginBottom: '28px', overflowX: 'auto' }} role="region" tabIndex={0} aria-label={t('Posuvný tok rozhodnutí při onboardingu', 'Scrollable onboarding resolution flow')}>
+      <HorizontalScrollRegion className="card" style={{ padding: '20px', marginBottom: '28px' }} label={t('Posuvný tok rozhodnutí při onboardingu', 'Scrollable onboarding resolution flow')} hint={t('Posuňte diagram vodorovně pro všechny výsledky resolveru.', 'Scroll the diagram horizontally to see every resolver outcome.')}>
         <ResolutionFlow t={t} />
-      </div>
+      </HorizontalScrollRegion>
 
       {/* ---- Blind index pipeline SVG ---- */}
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Jak funguje blind index (privacy by design)', 'How the blind index works (privacy by design)')}
       </div>
-      <div className="card" style={{ padding: '20px', marginBottom: '12px', overflowX: 'auto' }} role="region" tabIndex={0} aria-label={t('Posuvný diagram blind indexu', 'Scrollable blind-index diagram')}>
+      <HorizontalScrollRegion className="card" style={{ padding: '20px', marginBottom: '12px' }} label={t('Posuvný diagram blind indexu', 'Scrollable blind-index diagram')} hint={t('Posuňte diagram vodorovně od plaintextu k uloženému blind indexu.', 'Scroll the diagram horizontally from plaintext to the stored blind index.')}>
         <BlindIndexPipeline t={t} />
-      </div>
+      </HorizontalScrollRegion>
       <p style={{ fontSize: '12.5px', color: sub, lineHeight: 1.6, marginBottom: '28px' }}>
         {t(
           'Dvě žádosti se stejným rodným číslem dají vždy stejný index, takže pid je spolehlivě spáruje — ale databáze ani logy nikdy neobsahují samotné rodné číslo. Bez pepperu (uloženého v OpenBao) z indexu rodné číslo nezískáte. Kolize indexu s rozdílným datem narození / pohlavím = podezření → manuální verifikace (RN_COLLISION).',
