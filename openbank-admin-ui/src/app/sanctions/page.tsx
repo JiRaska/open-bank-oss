@@ -250,6 +250,7 @@ export default function SanctionsPage() {
   const [decideMsg, setDecideMsg] = useState('')
   const [decisionIntent, setDecisionIntent] = useState<ApprovalDecisionIntent | null>(null)
   const decisionTriggerRef = useRef<HTMLElement | null>(null)
+  const decisionWorkspaceRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const linkedApprovalId = readApprovalId(window.location.search)
@@ -613,10 +614,18 @@ export default function SanctionsPage() {
     })
   }
 
+  const restoreApprovalDecisionFocus = () => {
+    const trigger = decisionTriggerRef.current
+    const target = trigger?.isConnected && !trigger.hasAttribute('disabled')
+      ? trigger
+      : decisionWorkspaceRef.current
+    requestAnimationFrame(() => target?.focus())
+  }
+
   const closeApprovalDecision = () => {
     if (decideBusy) return
     setDecisionIntent(null)
-    requestAnimationFrame(() => decisionTriggerRef.current?.focus())
+    restoreApprovalDecisionFocus()
   }
 
   const filtered = checks.filter(c =>
@@ -864,7 +873,7 @@ export default function SanctionsPage() {
               {/* Checker half of the four-eyes gate. The served queue is authoritative; manual ID
                   entry remains a recovery path for an approval handed over out of band. */}
               <Can permission="sanctions:review" fallback={<div style={{ padding: '16px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '12px' }}>{t('Rozhodování sankčních žádostí je dostupné pouze operátorům a administrátorům.', 'Sanctions decisions are available to operators and administrators only.')}</div>}>
-              <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
+              <div ref={decisionWorkspaceRef} tabIndex={-1} aria-label={t('Pracovní plocha sankčních schválení', 'Sanctions approval workspace')} style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
                 <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
                     {t('Schválit žádost (druhý pár očí)', 'Decide an approval (second pair of eyes)')}
@@ -1192,7 +1201,10 @@ export default function SanctionsPage() {
         onCancel={closeApprovalDecision}
         onConfirm={async () => {
           const succeeded = await decideApproval(decisionIntent.approval, decisionIntent.approve)
-          if (succeeded) setDecisionIntent(null)
+          if (succeeded) {
+            setDecisionIntent(null)
+            restoreApprovalDecisionFocus()
+          }
         }}
       />}
     </AuthGuard>

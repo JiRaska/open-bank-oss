@@ -99,6 +99,7 @@ test.describe('sanctions maker-checker workflow', () => {
     await confirm.click()
 
     await expect(dialog).toBeHidden()
+    await expect(page.getByLabel(/Sanctions approval workspace|Pracovní plocha sankčních schválení/)).toBeFocused()
     await expect(page.getByText(/Approved\. The maker can now retry the action\.|Schváleno\./)).toBeVisible()
     await expect(page.getByText(/No approvals waiting\.|Žádné čekající žádosti\./)).toBeVisible()
     expect(decisionRequests).toBe(2)

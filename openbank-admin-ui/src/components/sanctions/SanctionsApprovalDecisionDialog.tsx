@@ -46,6 +46,7 @@ export function SanctionsApprovalDecisionDialog({ intent, busy, message, onCance
         }}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => event.preventDefault()}
+        onCloseAutoFocus={event => event.preventDefault()}
         className="card"
         style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 40px)', maxWidth: 560, maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
       >
