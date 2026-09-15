@@ -70,7 +70,7 @@ export function ProcessView({ proc }: { proc: Process }) {
               padding: '6px 14px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer',
               fontFamily: 'inherit',
               background: mode === m ? 'var(--accent-strong)' : 'var(--surface)',
-              color: mode === m ? '#fff' : 'var(--text-secondary)',
+              color: mode === m ? 'var(--text-inverse)' : 'var(--text-secondary)',
             }}>{m === 'reality' ? 'Realita (dnes)' : 'Cíl (CNB/EBA)'}</button>
           ))}
         </div>
@@ -93,7 +93,7 @@ export function ProcessView({ proc }: { proc: Process }) {
             padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
             border: `1px solid ${lens === id ? 'var(--accent)' : 'var(--border)'}`,
             background: lens === id ? 'var(--accent-strong)' : 'var(--surface)',
-            color: lens === id ? '#fff' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+            color: lens === id ? 'var(--text-inverse)' : 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
           }}>{label}</button>
         ))}
       </div>

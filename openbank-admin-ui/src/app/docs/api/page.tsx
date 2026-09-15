@@ -139,14 +139,14 @@ const GROUP_LABELS_CS: Record<string, string> = {
 const SPEC_BASE_URL = 'https://raw.githubusercontent.com/JiRaska/open-bank-oss/main'
 
 const GROUP_COLORS: Record<string, string> = {
-  'Core Banking': '#2563eb',
-  'Identity':     '#059669',
-  'Compliance':   '#dc2626',
-  'Payments':     '#7c3aed',
-  'PSD2':         '#d97706',
-  'Platform':     '#6b7280',
-  'Cards':        '#d02571',
-  'Other':        '#64748b',
+  'Core Banking': 'var(--graph-product)',
+  'Identity':     'var(--graph-account)',
+  'Compliance':   'var(--graph-card)',
+  'Payments':     'var(--graph-domain)',
+  'PSD2':         'var(--warning-text)',
+  'Platform':     'var(--text-secondary)',
+  'Cards':        'var(--graph-case)',
+  'Other':        'var(--text-tertiary)',
 }
 
 const METHOD_COLORS: Record<string, { bg: string, text: string, border: string }> = {
@@ -668,7 +668,7 @@ export default function ApiCatalogPage() {
         {filtered.map(svc => {
           const status = statuses[svc.id]
           const isExpanded = expanded === svc.id
-          const groupColor = GROUP_COLORS[svc.group] || '#6b7280'
+          const groupColor = GROUP_COLORS[svc.group] || GROUP_COLORS.Other
           const k8s = k8sName(svc)
           // Real, code-derived facts (ADR-0029 D3) overlaid on the editorial card.
           const cat = catalog[svc.specId ?? 'openbank-product-catalog']
@@ -695,8 +695,8 @@ export default function ApiCatalogPage() {
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{svc.name}</span>
                     <span style={{
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`, color: groupColor,
-                      borderRadius: '4px', border: `1px solid ${groupColor}30`,
+                      background: `color-mix(in srgb, ${groupColor} 8%, transparent)`, color: groupColor,
+                      borderRadius: '4px', border: `1px solid color-mix(in srgb, ${groupColor} 19%, transparent)`,
                     }}>{groupLabel(svc.group)}</span>
                     <span style={{
                       fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',
