@@ -18,7 +18,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge, type Tone } from '@/components/ui'
+import { StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import styles from './page.module.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -726,7 +726,7 @@ function FinOpsContent() {
               </span>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport label={t('Posuvný životní cyklus verzí EKS', 'Scrollable EKS version lifecycle')} hint={t('Posuňte tabulku vodorovně pro termíny podpory a upgrade runway.', 'Scroll horizontally to see support deadlines and upgrade runway.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -773,7 +773,7 @@ function FinOpsContent() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
 
             {lifecycle.runwayStatus !== 'ok' && (
               <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '8px',
@@ -885,7 +885,7 @@ function FinOpsContent() {
                 {t('Žádná data z Promethea (JVM metriky ještě nejsou k dispozici).', 'No data from Prometheus yet (JVM metrics not yet scraped).')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <TableViewport label={t('Posuvná tabulka vytížení služeb', 'Scrollable service utilisation table')} hint={t('Posuňte tabulku vodorovně pro CPU, RPS a stav efektivity.', 'Scroll horizontally to see CPU, RPS, and efficiency status.')}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -941,7 +941,7 @@ function FinOpsContent() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableViewport>
             )}
           </div>
 
@@ -1132,7 +1132,7 @@ function FinOpsContent() {
                       : t('VPA zatím nemá data (CRDs instalovány; počkejte ≥1 h po instalaci).', 'VPA not yet providing recommendations (CRDs installed; allow ≥1 h for initial data).')}
                   </span>
                 </div>
-                <div style={{ overflowX: 'auto' }}>
+                <TableViewport label={t('Posuvná tabulka right-sizing doporučení', 'Scrollable right-sizing recommendations')} hint={t('Posuňte tabulku vodorovně pro využití zdrojů, VPA doporučení a potenciál úspor.', 'Scroll horizontally to see resource usage, VPA recommendations, and savings potential.')}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -1226,7 +1226,7 @@ function FinOpsContent() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                </TableViewport>
               </>
             )}
           </div>

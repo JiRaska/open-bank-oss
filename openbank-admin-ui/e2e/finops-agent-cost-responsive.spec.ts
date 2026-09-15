@@ -43,6 +43,7 @@ test('presents agent costs as labelled evidence without mobile overflow', async 
   } }))
 
   await page.goto('/finops')
+  await expect(page.getByRole('region', { name: 'Scrollable EKS version lifecycle' })).toBeVisible()
   const agent = page.getByText('case-coordinator-agent-with-a-long-identifier', { exact: true })
   await expect(agent).toBeVisible()
   await expect.poll(() => agent.evaluate(element => getComputedStyle(element, '::before').content)).toBe('"Agent"')

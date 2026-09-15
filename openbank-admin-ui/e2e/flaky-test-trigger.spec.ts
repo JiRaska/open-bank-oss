@@ -13,6 +13,21 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   }))
 })
 
+test('keeps test-agent findings discoverable in a mobile keyboard viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.unroute('**/api/flaky-test-hunter/findings')
+  await page.route('**/api/flaky-test-hunter/findings', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ findings: [{
+      id: 'finding-mobile', severity: 'WARNING', checkType: 'RUNBLOCKING_UNIT_MISSING', component: 'openbank-payment-service-with-long-name',
+      title: 'Intermittent settlement regression', status: 'OPEN', detectedAt: '2026-09-15T08:00:00Z',
+    }], available: true }),
+  }))
+  await page.goto('/iaops/flaky-test-hunter')
+  await expect(page.getByRole('region', { name: /Posuvná tabulka nálezů testovacího agenta|Scrollable test-agent findings table/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})
+
 test('renders a 202 as admission only, never as a completed or currently running workflow', async ({ page }) => {
   await page.route('**/api/iaops/flaky-test-hunter/trigger', async route => {
     expect(route.request().method()).toBe('POST')

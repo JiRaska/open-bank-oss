@@ -19,7 +19,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
 import type { FlakyTestFinding } from '@/app/api/flaky-test-hunter/findings/route'
 
 const CHECK_TYPE_LABEL: Record<FlakyTestFinding['checkType'], { cs: string; en: string }> = {
@@ -84,7 +84,10 @@ function FlakyTestHunterContent() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(load, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [load])
 
   const runCheck = useCallback(async () => {
     setTriggering(true)
@@ -276,7 +279,7 @@ function FlakyTestHunterContent() {
           <DataUnavailable kind="no_data" feature={t('Nálezy', 'Findings')} lang={language}
             detail={t('Žádné aktivní nálezy — poslední sweep nic nenašel.', 'No active findings — the last sweep found nothing.')} />
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <TableViewport label={t('Posuvná tabulka nálezů testovacího agenta', 'Scrollable test-agent findings table')} hint={t('Posuňte tabulku vodorovně pro stav, čas detekce a bezpečný detail.', 'Scroll horizontally to see status, detection time, and the governed detail action.')}>
             <table className="table">
               <thead><tr>
                 {[
@@ -304,7 +307,7 @@ function FlakyTestHunterContent() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableViewport>
         )}
       </div>
     </div>

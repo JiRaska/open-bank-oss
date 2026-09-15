@@ -44,7 +44,7 @@ test.describe('AI collaboration education', () => {
   }
 
   test('mobile layout preserves the four-step flow vertically', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
+    await page.setViewportSize({ width: 320, height: 844 })
     await page.goto('/iaops')
 
     const mesh = page.locator('#ai-swarm')
@@ -53,5 +53,7 @@ test.describe('AI collaboration education', () => {
       getComputedStyle(element, '::after').content,
     )
     expect(connector).toContain('↓')
+    await expect(page.getByRole('region', { name: /Posuvné regulační mapování AI operací|Scrollable AI operations regulatory mapping/ })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   })
 })

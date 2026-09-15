@@ -53,6 +53,9 @@ const migratedTables = [
   'src/app/docs/document-management/page.tsx',
   'src/app/docs/qrlesspay/page.tsx',
   'src/app/docs/identity-dedup/page.tsx',
+  'src/app/finops/page.tsx',
+  'src/app/iaops/page.tsx',
+  'src/app/iaops/flaky-test-hunter/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

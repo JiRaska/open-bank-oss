@@ -21,7 +21,7 @@ import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge, type Tone } from '@/components/ui'
+import { StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { AI_INSIGHTS } from '@/components/insights/catalog'
@@ -821,7 +821,7 @@ function IAOpsContent() {
               sub={t('Co jako banka musíme splňovat a jak to tato architektura adresuje (ADR-0031 compliance impact).', 'What we must meet as a bank and how this architecture addresses it (ADR-0031 compliance impact).')}>
               {t('Compliance — regulační mapování', 'Compliance — regulatory mapping')}
             </SectionTitle>
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport label={t('Posuvné regulační mapování AI operací', 'Scrollable AI operations regulatory mapping')} hint={t('Posuňte tabulku vodorovně pro požadavek, kontrolu a stav plnění.', 'Scroll horizontally to see each requirement, control, and compliance status.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--border)' }}>
@@ -841,7 +841,7 @@ function IAOpsContent() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '12px 0 0', lineHeight: 1.5 }}>
               {t(
                 'Pozn.: Fáze 1 je vynucovaná, je-li PDP dostupný: policy gate je deny-by-default a OPA blokuje nepovolené volání nástrojů. Při výpadku PDP se režim degraduje na advisory. Fáze 2 zůstává read-only a proposal-only — každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
