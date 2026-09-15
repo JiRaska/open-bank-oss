@@ -7,7 +7,7 @@
 import { useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Toaster } from 'sonner'
-import { AgentDock } from '@/components/agent/AgentDock'
+import { LazyAgentDock } from '@/components/agent/LazyAgentDock'
 import { SessionProvider } from '@/components/auth/SessionProvider'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
@@ -31,7 +31,7 @@ export function AppProviders({
   const shared = (
     <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
       {children}
-      {!publicSurface && <AgentDock />}
+      {!publicSurface && <LazyAgentDock />}
       <Toaster richColors position="top-right" />
     </LanguageProvider>
   )

@@ -4,11 +4,10 @@
 
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { usePathname } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { isPublicSurface } from '@/lib/auth/publicSurface'
-import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
+import { Bot, Send, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
 /** isProposal (D4 ADR-0031): true when the assistant recommends an action requiring operator review. */
@@ -40,27 +39,32 @@ export function modelLabel(id: string): string {
   return MODEL_LABELS[id] || id.split('/').filter(Boolean).pop() || id || '(unnamed model)'
 }
 
-export function AgentDock() {
+export function AgentDock({
+  open,
+  onOpenChange,
+  triggerRef,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  triggerRef: RefObject<HTMLButtonElement | null>
+}) {
   const pathname = usePathname()
-  const publicSurface = isPublicSurface(pathname)
   const { t } = useLanguage()
-  const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [model, setModel] = useState<string>('')
   const scrollRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (publicSurface || !open || models.length) return
+    if (!open || models.length) return
     fetch('/api/agent/chat')
       .then(r => r.json())
       .then(d => { setModels(d.models ?? []); setModel(d.default ?? '') })
       .catch(() => {})
-  }, [open, models.length, publicSurface])
+  }, [open, models.length])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -71,14 +75,12 @@ export function AgentDock() {
     inputRef.current?.focus()
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
-      setOpen(false)
+      onOpenChange(false)
       requestAnimationFrame(() => triggerRef.current?.focus())
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [open])
-
-  if (publicSurface) return null
+  }, [onOpenChange, open, triggerRef])
 
   async function send() {
     const text = input.trim()
@@ -111,29 +113,7 @@ export function AgentDock() {
     }
   }
 
-  return (
-    <>
-      {/* Floating bot button — present on every page via root layout */}
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label={open ? t('Zavřít asistenta', 'Close assistant') : t('Otevřít asistenta', 'Open assistant')}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-controls={open ? 'agent-dock-panel' : undefined}
-        onClick={() => setOpen(o => !o)}
-        style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
-          width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: 'var(--accent-strong)', color: 'var(--text-inverse)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: 'var(--floating-action-shadow)',
-        }}
-      >
-        {open ? <X size={22} aria-hidden="true" /> : <Bot size={22} aria-hidden="true" />}
-      </button>
-
-      {open && (
+  return open ? (
         <div
           id="agent-dock-panel"
           role="dialog"
@@ -253,7 +233,5 @@ export function AgentDock() {
             </button>
           </div>
         </div>
-      )}
-    </>
-  )
+  ) : null
 }

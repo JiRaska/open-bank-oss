@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/auth/SessionProvider', () => ({
   SessionProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="session-provider">{children}</div>,
 }))
-vi.mock('@/components/agent/AgentDock', () => ({ AgentDock: () => <div data-testid="agent-dock" /> }))
+vi.mock('@/components/agent/LazyAgentDock', () => ({ LazyAgentDock: () => <div data-testid="agent-dock" /> }))
 vi.mock('@/components/telemetry/RumScreenTracker', async () => {
   const React = await import('react')
   return {
