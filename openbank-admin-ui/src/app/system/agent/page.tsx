@@ -272,7 +272,7 @@ export default function AgentPage() {
         <p style={{ fontSize: '12.5px', color: 'var(--text-tertiary)', margin: '0 0 16px', maxWidth: 640 }}>
           {t('Platforma poskytuje i konzumuje MCP. Každý AI agent vybere server podle potřeby — banking nástroje přes openbank-agent-service, observability přes Grafana MCP.', 'The platform both provides and consumes MCP. Each AI agent picks a server by need — banking tools via openbank-agent-service, observability via Grafana MCP.')}
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '12px' }}>
           {([
             {
               nameCs: 'OpenBank Agent Service',

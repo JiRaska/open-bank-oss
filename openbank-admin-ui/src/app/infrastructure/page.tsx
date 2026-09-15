@@ -225,7 +225,7 @@ export default function InfrastructurePage() {
       )}
 
       {loading && !lastRefresh ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '12px' }}>
           {Array.from({ length: INFRA_COMPONENTS.length }).map((_, i) => (
             <div key={i} className="skeleton" style={{ height: '120px' }} />
           ))}
@@ -236,7 +236,7 @@ export default function InfrastructurePage() {
             <Server size={16} color="var(--accent)" />
             {t('Komponenty infrastruktury', 'Infrastructure Components')}
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '16px', marginBottom: '32px' }}>
             {INFRA_COMPONENTS.map(comp => {
               const st = statuses[comp.id]
               const status: InfraStatus = st?.status ?? 'UNKNOWN'

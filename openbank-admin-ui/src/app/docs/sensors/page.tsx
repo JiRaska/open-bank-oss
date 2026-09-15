@@ -83,7 +83,7 @@ export default async function SensorsIndexPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: 14 }}>
         {FAMILY_ORDER.map(family => {
           const meta = FAMILY_META[family]
           const entries = sensorsByFamily(family)

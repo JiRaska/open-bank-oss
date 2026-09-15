@@ -148,7 +148,7 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Principy', 'Principles')}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '14px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 330px), 1fr))', gap: '14px', marginBottom: '28px' }}>
         {principles.map((p, i) => (
           <div key={i} className="card" style={{ padding: '18px', borderTop: `3px solid ${p.color}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: p.color, marginBottom: '8px' }}>
@@ -217,7 +217,7 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Ukázka: jak se to chová na třech žadatelích', 'Worked example: behaviour across three applicants')}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '14px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '14px', marginBottom: '28px' }}>
         <WorkedCase
           t={t} accent="var(--success)"
           title={['1 · Stejná osoba, jiný zápis jména', '1 · Same person, different name spelling']}

@@ -243,7 +243,7 @@ export default function CardDetailPage() {
               )}</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '16px', alignItems: 'start' }}>
               {/* ── the card itself ──────────────────────────────────────── */}
               <Panel icon={<CreditCard size={15} style={{ color: 'var(--accent)' }} />} title={t('Karta', 'Card')}>
                 <Row label={t('Maskovaný PAN', 'Masked PAN')} value={card.maskedPan} mono />

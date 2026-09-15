@@ -251,7 +251,7 @@ function CreditRiskConsole() {
 
       {tab === 'decisions' && (
         <div style={{ display: 'grid', gap: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 16 }}>
             <section className="card" style={{ padding: 14 }} aria-label={t('Vývoj výsledků po týdnech', 'Outcome trend by week')}>
               <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>{t('Výsledky enginu po týdnech', 'Engine outcomes by week')}</h3>
               {weekly.length ? <OutcomeTrend data={weekly} /> : <Empty />}
@@ -275,7 +275,7 @@ function CreditRiskConsole() {
             </div>
             {visible.some(d => d.affordability) ? <AffordabilityScatter decisions={visible} dstiLimit={dstiLimit} dtiLimit={dtiLimit} includeExistingDebt={totalDsti} /> : <Empty />}
           </section>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 16 }}>
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Engine versus člověk', 'Engine versus human')}>
               <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Engine × konečný stav', 'Engine × final disposition')}</h3>
               <TableViewport label={t('Engine versus konečné lidské rozhodnutí', 'Engine versus final human disposition')} hint={t('Posuňte tabulku vodorovně pro všechny konečné stavy a počet přebití.', 'Scroll horizontally for every final state and override count.')}>
@@ -358,7 +358,7 @@ function CreditRiskConsole() {
             : <div className="card"><DataUnavailable kind={portfolio?.ok ? 'no_data' : 'error'} service="lending-service" feature={t('IFRS 9 portfolio', 'IFRS 9 portfolio')} lang={language} dense detail={portfolio?.ok ? t('Zdroj odpověděl úspěšně, ale úvěrová kniha je zatím prázdná.', 'The source answered successfully, but the loan book is empty.') : undefined}>{!portfolio?.ok && <button type="button" className="btn btn-secondary" onClick={load} disabled={loading}>{t('Zkusit znovu', 'Retry')}</button>}</DataUnavailable></div>)}
           {mixes.map(mix => (
             <div key={mix.currency} style={{ display: 'grid', gap: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 16 }}>
                 <section className="card" style={{ padding: 14 }} aria-label={t(`Stage mix ${mix.currency}`, `Stage mix ${mix.currency}`)}>
                   <h3 style={{ fontSize: 13, margin: '0 0 8px' }}>{t(`Expozice podle IFRS 9 stage (${mix.currency})`, `Exposure by IFRS 9 stage (${mix.currency})`)}</h3>
                   {mix.assessed ? <StageMixPie stages={mix.stages} /> : <Empty />}

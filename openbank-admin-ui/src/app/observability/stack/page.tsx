@@ -229,7 +229,7 @@ export default function ObservabilityStackPage() {
       </div>
 
       {/* Correlation links + flow */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '20px' }}>
         <div className="card" style={{ padding: '18px' }}>
           <h2 style={{ fontSize: '15px', fontWeight: 700, margin: '0 0 12px' }}>
             {t('Propojení — korelace i on-call', 'Links — correlation & on-call')}

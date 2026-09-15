@@ -506,7 +506,7 @@ export default function SecurityExcellencePage() {
 
         {/* ── Doménové pilíře ───────────────────────────────────────────── */}
         <section aria-label={t('Doménové pilíře bezpečnosti', 'Security domain pillars')}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 16 }}>
           {domains.map(d => {
             const tone = STATUS_TONE[d.status]
             const Icon = d.icon

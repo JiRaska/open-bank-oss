@@ -810,7 +810,7 @@ function FinOpsContent() {
               )}
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '12px' }}>
               {lifecycle.components.map(svc => {
                 const runway = svc.daysRemaining
                 const rcolor = runway == null ? 'var(--text-tertiary)'

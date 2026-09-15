@@ -227,7 +227,7 @@ export default function DocsPage() {
         icon={<BookOpen aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '16px' }}>
         {sections.map(s => (
           <Link key={s.href} href={s.href} style={{ textDecoration: 'none' }}>
             <div className="card" style={{

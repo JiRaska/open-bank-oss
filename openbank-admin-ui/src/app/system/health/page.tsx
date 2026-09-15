@@ -124,7 +124,7 @@ export default function SystemHealthPage() {
           {Array.from({ length: 9 }).map((_, i) => <div key={i} className="skeleton" style={{ height: '180px' }} />)}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '12px' }}>
           {snapshots.map(s => <ServiceCard key={s.name} snapshot={s} resilience={configMap[s.name] ?? null} governance={govMap[s.name]} govTimestamp={govTimestamp} />)}
         </div>
       )}

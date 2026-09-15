@@ -84,7 +84,7 @@ export default function QrlessPayPage() {
         title={t('Bezpečnostní vrstvy (obrana do hloubky)', 'Security layers (defense in depth)')}
         subtitle={t('Žádné peníze se nehnou bez potvrzení plátce. Některé vrstvy jsou povinné, jiné volitelné podle HW a banky.', 'No money moves without payer confirmation. Some layers are required, others optional depending on hardware and bank.')}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 12 }}>
           {LAYERS.map((l, i) => (
             <div key={i} className="card" style={{ padding: 14, borderLeft: `3px solid ${l.req ? PAYER : NEUTRAL}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>

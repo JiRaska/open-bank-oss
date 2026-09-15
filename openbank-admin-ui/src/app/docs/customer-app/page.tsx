@@ -227,7 +227,7 @@ export default function CustomerAppDossierPage() {
           </div>
 
           {/* Capability cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: 14 }}>
             {filtered.map((c) => {
               const m = STATUS_META[c.status]
               return (

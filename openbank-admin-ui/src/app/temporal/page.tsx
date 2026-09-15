@@ -407,7 +407,7 @@ export default function TemporalPage() {
                   'Each money-path workflow lives as code — Temporal can replay it step by step even after a process restart or outage. Key insight: the workers are Quarkus services; Temporal server only coordinates and records history.',
                 )}
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: '12px' }}>
                 {MONEY_WORKFLOWS.map((wf) => {
                   const WfIcon = wf.icon
                   return (
@@ -493,7 +493,7 @@ export default function TemporalPage() {
                 <Shield size={16} color="var(--accent-text)" />
                 {t('Regulatorní zarovnání', 'Regulatory alignment')}
               </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '12px' }}>
                 {COMPLIANCE_LINKS.map(item => (
                   <div key={item.code} style={{
                     padding: '14px 16px', borderRadius: '10px',
