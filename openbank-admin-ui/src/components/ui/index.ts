@@ -25,6 +25,7 @@ export { EmptyState } from './EmptyState'
 export { Tabs, type TabItem } from './Tabs'
 export { TableViewport } from './TableViewport'
 export { HorizontalScrollRegion } from './HorizontalScrollRegion'
+export { CodeViewport } from './CodeViewport'
 export {
   BADGE_CLASS,
   DOT_CLASS,

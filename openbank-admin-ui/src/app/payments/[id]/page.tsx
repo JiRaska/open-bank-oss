@@ -13,7 +13,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { parsePaymentDetailEvidence, type PaymentDetailEvidence, type PaymentRail } from '@/lib/payments/detailEvidence'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
+import { CodeViewport, PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
 // These two statuses are specific to payment processing. Keep their explicit
 // meaning here rather than broadening the cross-domain status vocabulary:
@@ -198,10 +198,10 @@ function PaymentDetailContent() {
               {t('Surová data (JSON)', 'Raw payload (JSON)')}
             </button>
             {showRaw && (
-              <div id="payment-raw-payload" role="region" aria-label={t('Surová data platby', 'Raw payment payload')}>
-                <pre style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
+              <div>
+                <CodeViewport id="payment-raw-payload" label={t('Surová data platby', 'Raw payment payload')} style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                   {JSON.stringify(payment, null, 2)}
-                </pre>
+                </CodeViewport>
               </div>
             )}
           </div>

@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { CodeViewport } from '@/components/ui/CodeViewport'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { AgentCallError, classifyAgentFailure, type AgentFailureKind } from '@/lib/agent/mcpFailure'
 
@@ -451,14 +452,12 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
                   {result.isError ? t('Chyba', 'Error') : t('Výsledek', 'Result')}
                 </span>
               </div>
-              <pre style={{
+              <CodeViewport label={result.isError ? t('Technický výstup chyby agenta', 'Agent error technical output') : t('Technický výstup agenta', 'Agent technical output')} style={{
                 padding: '12px',
                 fontSize: '12px',
                 fontFamily: 'JetBrains Mono, monospace',
                 color: 'var(--text-primary)',
-                overflowX: 'auto',
                 maxHeight: '280px',
-                overflowY: 'auto',
                 margin: 0,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
@@ -466,7 +465,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
                 {result.content.map(c => {
                   try { return JSON.stringify(JSON.parse(c.text), null, 2) } catch { return c.text }
                 }).join('\n')}
-              </pre>
+              </CodeViewport>
             </div>
           )}
         </div>

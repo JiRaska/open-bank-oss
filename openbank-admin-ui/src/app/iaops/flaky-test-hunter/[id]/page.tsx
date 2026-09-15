@@ -16,7 +16,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { CodeViewport, PageHeader, StatusBadge } from '@/components/ui'
 import type { FlakyTestFinding } from '@/app/api/flaky-test-hunter/findings/route'
 
 function FlakyTestFindingDetailContent() {
@@ -120,10 +120,10 @@ function FlakyTestFindingDetailContent() {
                   </a>
                 )}
               </div>
-              <pre style={{ fontSize: '11px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px',
-                padding: '12px', overflowX: 'auto', margin: 0, fontFamily: 'monospace', color: 'var(--text-primary)' }}>
+              <CodeViewport label={t('Navržený diff opravy flaky testu', 'Proposed flaky-test fix diff')} style={{ fontSize: '11px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px',
+                padding: '12px', margin: 0, fontFamily: 'monospace', color: 'var(--text-primary)' }}>
                 {finding.proposedFixDiff}
-              </pre>
+              </CodeViewport>
             </div>
           )}
         </>

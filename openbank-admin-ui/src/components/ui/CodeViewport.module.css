@@ -1,0 +1,12 @@
+.viewport {
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.viewport:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -2px;
+}

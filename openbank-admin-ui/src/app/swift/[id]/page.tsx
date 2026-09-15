@@ -15,6 +15,7 @@ import { clearStashedRow, readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui'
+import { CodeViewport } from '@/components/ui/CodeViewport'
 import { parseSwiftMessages, swiftStatusTone, type SwiftMessage } from '@/lib/swift/swiftMessageContract'
 
 export default function SwiftDetailPage() {
@@ -151,9 +152,9 @@ export default function SwiftDetailPage() {
               {t('Surová data (JSON)', 'Raw payload (JSON)')}
             </button>
             {showRaw && (
-              <pre id="swift-raw-payload" style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
+              <CodeViewport id="swift-raw-payload" label={t('Surový payload SWIFT zprávy', 'Raw SWIFT message payload')} style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                 {JSON.stringify(message, null, 2)}
-              </pre>
+              </CodeViewport>
             )}
           </div>
         </div>

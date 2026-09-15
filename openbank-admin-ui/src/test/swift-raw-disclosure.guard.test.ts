@@ -8,6 +8,7 @@ describe('SWIFT raw payload disclosure contract', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/swift/[id]/page.tsx'), 'utf8')
     expect(source).toContain('type="button" aria-expanded={showRaw} aria-controls="swift-raw-payload"')
     expect(source).toContain('id="swift-raw-payload"')
+    expect(source).toContain("label={t('Surový payload SWIFT zprávy', 'Raw SWIFT message payload')}")
     expect(source).toContain("aria-label={showRaw ? t('Skrýt surový payload', 'Hide raw payload') : t('Zobrazit surový payload', 'Show raw payload')}")
     expect(source).toContain('<ChevronDown size={14} aria-hidden="true" />')
   })

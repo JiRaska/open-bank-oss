@@ -19,6 +19,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('authorization loss removes payment evidence and an open raw disclosure', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 })
   let request = 0
   await page.route(`**/api/svc/sepa-payment/api/v1/sepa-payments/${PAYMENT_ID}`, route => {
     request += 1
@@ -31,7 +32,11 @@ test('authorization loss removes payment evidence and an open raw disclosure', a
   await page.goto(`/payments/${PAYMENT_ID}?type=SEPA`)
   await expect(page.getByText('Verified creditor')).toBeVisible()
   await page.getByRole('button', { name: /Show raw payment payload|Zobrazit surová data platby/ }).click()
-  await expect(page.getByRole('region', { name: /Raw payment payload|Surová data platby/ })).toContainText('Verified creditor')
+  const rawPayload = page.getByRole('region', { name: /Raw payment payload|Surová data platby/ })
+  await expect(rawPayload).toContainText('Verified creditor')
+  await rawPayload.focus()
+  await expect(rawPayload).toBeFocused()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   await page.getByRole('button', { name: /Refresh payment|Obnovit platbu/ }).click()
   await expect(page.getByText(/Session expired|Vypršela relace/)).toBeVisible()

@@ -8,6 +8,7 @@ import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, C
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { CodeViewport } from '@/components/ui/CodeViewport'
 
 // UI short-id → Kubernetes Deployment/Service name (the BFF's canonical key).
 // All but `catalog` carry a `specId` of the form `openbank-<k8s-name>`, so we
@@ -382,13 +383,13 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
           <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
             {t('Tělo požadavku', 'Request Body')} {operation.requestBody?.required && <span style={{ color: 'var(--danger)' }}>*</span>} {bodySchemaRefName && <span style={{ textTransform: 'none', fontWeight: 400, marginLeft: '8px' }}>({bodySchemaRefName})</span>}
           </div>
-          <pre style={{
+          <CodeViewport label={t('JSON schéma těla požadavku', 'Request body JSON schema')} style={{
             background: 'var(--surface)', padding: '12px', borderRadius: '4px',
             fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-primary)',
-            overflowX: 'auto', border: '1px solid var(--border)', margin: 0
+            border: '1px solid var(--border)', margin: 0
           }}>
             {bodySchemaSnippet ? JSON.stringify(bodySchemaSnippet, null, 2) : t('// JSON schéma není k dispozici', '// No JSON schema available')}
-          </pre>
+          </CodeViewport>
         </div>
       )}
 

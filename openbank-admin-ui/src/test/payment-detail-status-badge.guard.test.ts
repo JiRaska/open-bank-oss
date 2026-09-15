@@ -9,7 +9,7 @@ describe('payment detail status presentation', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/payments/[id]/page.tsx'), 'utf8')
 
   it('uses the shared status badge while preserving payment-specific in-flight meanings', () => {
-    expect(source).toContain("import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'")
+    expect(source).toContain("import { CodeViewport, PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'")
     expect(source).toContain("if (status === 'RECEIVED') return 'info'")
     expect(source).toContain("if (status === 'SENT_TO_CLEARING') return 'warning'")
     expect(source).toContain('<StatusBadge status={payment.status} tone={paymentStatusTone(payment.status)} />')
