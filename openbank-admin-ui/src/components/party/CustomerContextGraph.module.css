@@ -232,14 +232,14 @@
 .coreHalo { fill: rgba(34, 211, 238, .08); stroke: #67e8f9; stroke-width: 1; stroke-dasharray: 3 7; filter: url('#customer-graph-glow'); transform-origin: 400px 250px; animation: orbit 16s linear infinite; }
 .coreInner { fill: rgba(3, 8, 18, .78); stroke: rgba(207, 250, 254, .72); stroke-width: 1; }
 .coreTitle { fill: #f8fafc; font-size: 13px; font-weight: 800; }
-.coreMeta { fill: #a5f3fc; font-size: 9px; letter-spacing: .03em; }
+.coreMeta { fill: #a5f3fc; font-size: 10px; letter-spacing: .03em; }
 
 .node { cursor: pointer; opacity: 1; transition: opacity .18s ease; }
 .node:focus { outline: none; }
 .node:focus-visible circle:nth-last-of-type(1) { stroke-width: 4; }
 .nodeMuted { opacity: .2; }
-.nodeType { fill: #e6f8ff; font-size: 8.5px; font-weight: 750; pointer-events: none; }
-.nodeLabel { fill: #a9bfd3; font-size: 9px; pointer-events: none; }
+.nodeType { fill: #e6f8ff; font-size: 10px; font-weight: 750; pointer-events: none; }
+.nodeLabel { fill: #a9bfd3; font-size: 10px; pointer-events: none; }
 .nodeBeacon { filter: url('#customer-graph-glow'); }
 .selectionRing { stroke-width: 1.2; stroke-dasharray: 3 5; opacity: .86; transform-box: fill-box; transform-origin: center; animation: orbit 6s linear infinite; }
 
@@ -249,7 +249,7 @@
   bottom: 9px;
   color: #67e8f9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: .1em;
   opacity: .65;
 }
@@ -283,7 +283,7 @@
 }
 
 .partyName { margin: 13px 0 3px; color: #f8fafc; font-size: 16px; font-weight: 800; }
-.partyId { margin: 0 0 16px; color: #829bb2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.partyId { margin: 0 0 16px; color: #829bb2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
 .selectedLabel { margin: 0 0 10px; padding: 10px 11px; border-left: 2px solid; color: #f8fafc; background: rgba(255, 255, 255, .035); font-size: 13px; }
 .source,
 .relations { color: #b5c7da; font-size: 10px; line-height: 1.55; }
@@ -291,7 +291,7 @@
 .facts { margin: 12px 0; padding-left: 17px; color: #d6e4f0; font-size: 11px; line-height: 1.7; }
 .facts li::marker { color: #67e8f9; }
 .emptyEvidence { min-height: 170px; color: #9bb1c5; font-size: 11px; line-height: 1.6; }
-.disclaimer { margin-top: 18px; padding-top: 13px; border-top: 1px solid rgba(148, 163, 184, .15); color: #829bb2; font-size: 9px; line-height: 1.55; }
+.disclaimer { margin-top: 18px; padding-top: 13px; border-top: 1px solid rgba(148, 163, 184, .15); color: #829bb2; font-size: 10px; line-height: 1.55; }
 
 @keyframes orbit { to { transform: rotate(360deg); } }
 @keyframes scan { to { left: 70%; } }

@@ -410,8 +410,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>v{v.version}</span>
-                        {!v.isPublic && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
-                        {isCurrent && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{t('Aktuální', 'Current')}</span>}
+                        {!v.isPublic && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
+                        {isCurrent && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{t('Aktuální', 'Current')}</span>}
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                         {v.validFrom}{v.validTo ? ` → ${v.validTo}` : ` → ${t('dosud', 'present')}`}
