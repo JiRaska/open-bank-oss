@@ -58,6 +58,13 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(amount).toBeVisible()
     expect(await amount.textContent()).not.toMatch(/[+-]/)
 
+    await page.setViewportSize({ width: 320, height: 720 })
+    const ledger = page.getByRole('region', { name: /Posuvná tabulka transakčního deníku|Scrollable transaction-ledger table/ })
+    await ledger.focus()
+    await expect(ledger).toBeFocused()
+    await expect(page.getByText(/Posuňte tabulku vodorovně pro účty|Scroll horizontally for accounts/)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
     await page.getByRole('button', { name: /Search transactions|Vyhledat transakce/ }).click()
 
     await expect(page.getByText('TXN-EVIDENCE-42')).toBeVisible()

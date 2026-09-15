@@ -9,7 +9,7 @@ import { ArrowLeftRight, Search, SearchX, RefreshCw, Filter, X } from 'lucide-re
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { EmptyState, PageHeader, StatusBadge } from '@/components/ui'
+import { EmptyState, PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { PAYMENT_INSIGHTS } from '@/components/insights/catalog'
 import { Can } from '@/components/auth/AuthGuard'
@@ -300,8 +300,11 @@ export default function TransactionsPage() {
               </span>
               <span>{t(`Stránka ${Math.floor(result.offset / PAGE_SIZE) + 1}`, `Page ${Math.floor(result.offset / PAGE_SIZE) + 1}`)}</span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table">
+            <TableViewport
+              label={t('Posuvná tabulka transakčního deníku', 'Scrollable transaction-ledger table')}
+              hint={t('Posuňte tabulku vodorovně pro účty, popis a datum zaúčtování.', 'Scroll horizontally for accounts, description, and booking date.')}
+            >
+              <table className="table" style={{ minWidth: 1080 }}>
                 <thead>
                   <tr>
                     <th>{t('Reference', 'Reference')}</th>
@@ -348,7 +351,7 @@ export default function TransactionsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
             <nav aria-label={t('Stránkování transakcí', 'Transaction pagination')} style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button
                 type="button"
