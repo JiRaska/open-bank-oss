@@ -74,6 +74,18 @@ describe('client source maps reach GlitchTip and never the browser (#3235)', () 
     expect(config).toMatch(/telemetry\s*:\s*false/)
   })
 
+  it('keeps the errors-only browser SDK free of unused tracing and debug code', () => {
+    const config = stripJsLineComments(readFileSync(join(UI_ROOT, 'next.config.mjs'), 'utf8'))
+    const instrumentation = stripJsLineComments(
+      readFileSync(join(UI_ROOT, 'src/instrumentation-client.ts'), 'utf8'),
+    )
+
+    expect(config).toMatch(/excludeDebugStatements\s*:\s*true/)
+    expect(config).toMatch(/excludeTracing\s*:\s*true/)
+    expect(config).toMatch(/suppressOnRouterTransitionStartWarning\s*:\s*true/)
+    expect(instrumentation).not.toContain('captureRouterTransitionStart')
+  })
+
   it('hands the build an auth token, or nothing is ever uploaded', () => {
     // The maps existing on disk is half the fix. `withSentryConfig` reads SENTRY_AUTH_TOKEN and,
     // when it is empty, SKIPS the upload and completes the build normally — deliberately, so a

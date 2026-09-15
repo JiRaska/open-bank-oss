@@ -8,6 +8,3 @@ import * as Sentry from '@sentry/nextjs'
 import { buildSentryOptions } from '@/lib/telemetry/glitchtip'
 
 Sentry.init(buildSentryOptions('browser'))
-
-// Links client-side App-Router navigations to their pageload/transaction (Next 15.3+/16).
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart

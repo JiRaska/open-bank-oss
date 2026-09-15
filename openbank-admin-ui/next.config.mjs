@@ -1,4 +1,4 @@
-import { withSentryConfig } from '@sentry/nextjs'
+import { withSentryConfig } from '@sentry/nextjs/config'
 /** @type {import('next').NextConfig} */
 
 const securityHeaders = [
@@ -124,6 +124,16 @@ export default withSentryConfig(nextConfig, {
     // option cannot become a source disclosure.
     deleteSourcemapsAfterUpload: true,
   },
+  // This console deliberately captures errors only (`tracesSampleRate: 0`). Tell the build
+  // plugin too, otherwise the tracing implementation remains in the root client chunk even
+  // though it can never emit a span. Debug branches are equally unused in production.
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+    excludeTracing: true,
+  },
+  // The missing navigation hook is intentional in this errors-only build; without this the SDK
+  // prints an "ACTION REQUIRED" warning that points maintainers back to the code removed above.
+  suppressOnRouterTransitionStartWarning: true,
   silent: true,
   telemetry: false,
 })
