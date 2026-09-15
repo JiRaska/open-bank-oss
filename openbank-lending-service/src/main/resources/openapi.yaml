@@ -3,7 +3,12 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.22.0
+  # 1.22.0 -> 1.23.0: additive — GET /api/v1/lending/risk/portfolio/summary and the
+  # CreditPortfolioSummary schema. Classified additive by the contract gate's own oasdiff run, so
+  # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
+  # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
+  # one and nothing in a merge can tell them apart.
+  version: 1.23.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -382,6 +387,26 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/LoanRiskView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/portfolio/summary:
+    get:
+      tags: [Lending]
+      operationId: riskPortfolioSummary
+      summary: Whole outstanding book by currency with same-date assessment completeness
+      description: >-
+        Excludes derecognized loans, includes delinquent and defaulted exposure. All counts are
+        database aggregates without a list cap. Amounts use assessments for today's reporting
+        date only. Ratios must not be presented as complete if unassessed, stale or demonstration
+        counts are nonzero. This is the current population, not a historical regulatory return.
+      responses:
+        '200':
+          description: Per-currency whole-book aggregates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CreditPortfolioSummary' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/risk/policy:
@@ -1124,14 +1149,29 @@ components:
           type: string
           enum: [INPUT_MISSING, RULE_NOT_EVALUABLE, POLICY_TABLE_MISSING, EXCLUSION_MATCHED, ELIGIBILITY_FAILED, AFFORDABILITY_FAILED, PRICING_BAND_UNMATCHED]
         ruleId: { type: string, nullable: true }
+    CreditPortfolioSummary:
+      type: object
+      required: [currency, asOf, loans, unassessed, stale, demonstration, pending, outstanding, ecl, stage23Outstanding, over90Outstanding]
+      properties:
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        asOf: { type: string, format: date }
+        loans: { type: integer, format: int64, minimum: 0 }
+        unassessed: { type: integer, format: int64, minimum: 0 }
+        stale: { type: integer, format: int64, minimum: 0 }
+        demonstration: { type: integer, format: int64, minimum: 0 }
+        pending: { type: integer, format: int64, minimum: 0, description: "Loans with unacknowledged allowance commands, including terminal loans; may exceed exposure-bearing loans." }
+        outstanding: { type: number, minimum: 0 }
+        ecl: { type: number, minimum: 0 }
+        stage23Outstanding: { type: number, minimum: 0 }
+        over90Outstanding: { type: number, minimum: 0 }
     AffordabilityRatios:
       type: object
       required: [dsti, dti, dstiIncludingExistingDebt]
       description: >-
-        dsti is the new installment over verified income — what PolicyAttribute.DSTI carries into
-        the affordability table. dstiIncludingExistingDebt adds existingDebtServiceMonthly (the
-        CNB/EBA total-debt-service definition); it is exposed so the console can show the gap, and
-        is NOT what the engine evaluates today.
+        Persisted total-debt ratios used at evaluation. DSTI includes existing debt service and
+        normalizes the largest contractual installment to a monthly amount. DTI includes existing
+        outstanding debt. The legacy dstiIncludingExistingDebt alias equals dsti for new decisions.
+        Historical decisions without stored ratios return affordability=null; they are not recomputed.
       properties:
         dsti: { type: number }
         dti: { type: number }
@@ -1188,7 +1228,7 @@ components:
       type: object
       required: [period, asOf, outstandingBalance, daysPastDue, bucket, stage, expectedCreditLoss, modelVersion]
       properties:
-        period: { type: string, description: Reporting period key, yyyy-MM. }
+        period: { type: string, description: Reporting key, yyyy-MM-dd (legacy yyyy-MM). }
         asOf: { type: string, format: date }
         outstandingBalance: { type: number }
         daysPastDue: { type: integer }
@@ -1351,7 +1391,10 @@ components:
             absent input fails closed to REFER.
         existingDebtServiceMonthly:
           $ref: '#/components/schemas/Money'
-          description: Existing monthly debt service, if any (nullable).
+          description: Verified existing monthly debt service. Explicit zero means none; absent means unknown.
+        existingDebtOutstanding:
+          $ref: '#/components/schemas/Money'
+          description: Verified existing outstanding debt, in requested currency. Absent means unknown and cannot approve.
         ageYears: { type: integer, nullable: true, description: Applicant age in years (majority floor) }
         residency: { type: string, nullable: true, description: Residency country code (e.g. CZ) }
         employmentTenureMonths: { type: integer, nullable: true }

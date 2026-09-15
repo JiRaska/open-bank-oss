@@ -80,19 +80,29 @@ class NoOpCollateralValuationPort : CollateralValuationPort {
 
 @ApplicationScoped
 @Default
-class ConservativeRiskParameterSource : RiskParameterSource {
+class ConservativeRiskParameterSource(
+    @org.eclipse.microprofile.config.inject.ConfigProperty(
+        name = "lending.risk.allow-demonstration-model",
+        defaultValue = "false",
+    )
+    private val allowDemonstrationModel: Boolean = false,
+) : RiskParameterSource {
     private val log = Logger.getLogger(ConservativeRiskParameterSource::class.java)
 
     /** Deliberately conservative flat PD/LGD until a real risk model is bound (ADR-0028 D4). */
-    override fun parametersFor(loan: Loan, exposureAtDefault: Money): Uni<EclInputs> = Uni.createFrom().item(
-        EclInputs(
-            pd12Month = RiskParameterSource.DEFAULT_PD_12M,
-            pdLifetime = RiskParameterSource.DEFAULT_PD_LIFETIME,
-            lgd = RiskParameterSource.DEFAULT_LGD,
-            exposureAtDefault = exposureAtDefault,
-            modelVersion = MODEL_VERSION,
-        ),
-    )
+    override fun parametersFor(loan: Loan, exposureAtDefault: Money): Uni<EclInputs> = if (!allowDemonstrationModel) {
+        Uni.createFrom().failure(IllegalStateException("A validated credit risk model is required for provisioning"))
+    } else {
+        Uni.createFrom().item(
+            EclInputs(
+                pd12Month = RiskParameterSource.DEFAULT_PD_12M,
+                pdLifetime = RiskParameterSource.DEFAULT_PD_LIFETIME,
+                lgd = RiskParameterSource.DEFAULT_LGD,
+                exposureAtDefault = exposureAtDefault,
+                modelVersion = MODEL_VERSION,
+            ),
+        )
+    }
 
     /**
      * Boot-time audit (issue #8364): which risk-parameter model this pod provisions with. `@Startup`
@@ -103,7 +113,7 @@ class ConservativeRiskParameterSource : RiskParameterSource {
     fun logBoundModel() {
         log.infof(
             "IFRS 9 risk-parameter model bound: %s (PD12M=%s, PDLT=%s, LGD=%s) — conservative placeholder, " +
-                "not production-grade regulatory capital (ADR-0028 D4)",
+                "not a validated IFRS 9 allowance model (ADR-0028 D4)",
             MODEL_VERSION,
             RiskParameterSource.DEFAULT_PD_12M,
             RiskParameterSource.DEFAULT_PD_LIFETIME,
@@ -118,7 +128,7 @@ class ConservativeRiskParameterSource : RiskParameterSource {
          * what makes a parameter change a reviewed event with a visible before/after in every
          * persisted provisioning record (`loan_provisioning.model_version`), not a silent edit.
          */
-        const val MODEL_VERSION = "noop-flat-v1"
+        const val MODEL_VERSION = "noop-flat-v2"
     }
 }
 
@@ -129,6 +139,9 @@ class LoggingLoanEventEmitter : LoanEventEmitter {
 
     /** Real adapter writes to `lending_outbox` in the state-change transaction (ADR-0003). */
     override fun emit(message: LendingOutboxMessage): Uni<Unit> {
+        if (message.eventType == "lending.allowance.posting") {
+            return Uni.createFrom().failure(IllegalStateException("A durable outbox is required for allowance posting"))
+        }
         log.debugf("no-op outbox emit: %s for %s", message.eventType, message.aggregateId)
         return Uni.createFrom().item(Unit)
     }
