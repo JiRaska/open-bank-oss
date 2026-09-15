@@ -108,7 +108,7 @@ export function PartyLookup({ onSelect, lang = 'en', resolve = resolveParty }: P
       )}
 
       {!busy && result.status === 'failed' && (
-        <div data-testid="lookup-state" data-state="failed" className="card" style={{ padding: 12, marginBottom: 12, fontSize: 13, color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div data-testid="lookup-state" data-state="failed" className="card" style={{ padding: 12, marginBottom: 12, fontSize: 13, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', display: 'flex', gap: 8, alignItems: 'center' }}>
           <ServerOff size={15} aria-hidden="true" />
           {failureCopy(result.reason, cs)}
         </div>

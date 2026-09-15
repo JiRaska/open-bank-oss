@@ -132,7 +132,7 @@ export function SbomViewer({ serviceName }: Props) {
               title={`Running image doesn't match GitOps: ${drift.runningImage ?? '?'} vs declared ${drift.declaredImage ?? '?'}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: '3px',
-                fontSize: '10px', color: 'var(--warning, #d97706)',
+                fontSize: '10px', color: 'var(--warning-text)',
                 padding: '2px 6px', background: 'var(--surface-2)', borderRadius: '8px',
               }}
             >
@@ -342,7 +342,7 @@ function BarBlock({ title, rows, total }: { title: string; rows: Array<{ label: 
             <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.label}>{r.label}</div>
               <div style={{ flex: 2, height: '8px', background: 'var(--surface-2)', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{ width: `${widthPct}%`, height: '100%', background: 'var(--accent, #2563eb)' }} />
+                <div style={{ width: `${widthPct}%`, height: '100%', background: 'var(--accent)' }} />
               </div>
               <div style={{ width: '60px', textAlign: 'right', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>
                 {r.count} · {pct}%

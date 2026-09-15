@@ -241,6 +241,12 @@ describe('admin UI token contrast', () => {
     expect(contrast(resolve(tokens, '--text-inverse'), resolve(tokens, '--selection-bg'))).toBeGreaterThanOrEqual(AA)
   })
 
+  it.each(themes)('%s transaction interest category remains legible on content surfaces', (_name, tokens) => {
+    for (const surface of ['--surface', '--surface-2']) {
+      expect(contrast(resolve(tokens, '--transaction-interest'), resolve(tokens, surface))).toBeGreaterThanOrEqual(AA)
+    }
+  })
+
   // Ported from the light-theme guard #9788 added, which this file subsumes: if the arithmetic is
   // wrong, every comparison above is wrong in the same direction and the suite agrees with itself.
   it('reproduces two known ratios, so the arithmetic is not self-confirming', () => {

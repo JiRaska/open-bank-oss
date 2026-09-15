@@ -93,18 +93,18 @@ type NodeTone = 'done' | 'current' | 'future' | 'stopped'
 /** Dot colours carry the state. They differ by fill and by glyph, never by shade alone — a reader
  *  scanning the rail should see "done / here / not yet" without comparing greys. */
 const DOT: Record<NodeTone, CSSProperties> = {
-  done: { background: 'var(--success)', borderColor: 'var(--success)', color: '#fff' },
+  done: { background: 'var(--success-text)', borderColor: 'var(--success-text)', color: 'var(--text-inverse)' },
   current: {
-    background: 'var(--accent)',
-    borderColor: 'var(--accent)',
-    color: '#fff',
+    background: 'var(--selection-bg)',
+    borderColor: 'var(--selection-bg)',
+    color: 'var(--text-inverse)',
     boxShadow: '0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent)',
   },
   future: { background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-tertiary)' },
   stopped: {
-    background: 'var(--danger)',
-    borderColor: 'var(--danger)',
-    color: '#fff',
+    background: 'var(--danger-text)',
+    borderColor: 'var(--danger-text)',
+    color: 'var(--text-inverse)',
     boxShadow: '0 0 0 4px color-mix(in srgb, var(--danger) 24%, transparent)',
   },
 }

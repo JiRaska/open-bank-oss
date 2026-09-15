@@ -25,7 +25,7 @@ const TYPE_COLOR: Record<string, string> = {
   CREDIT:     'var(--success)',
   TRANSFER:   'var(--accent)',
   FEE:        'var(--warning)',
-  INTEREST:   '#7c3aed',
+  INTEREST:   'var(--transaction-interest)',
   REVERSAL:   'var(--text-tertiary)',
   ADJUSTMENT: 'var(--text-tertiary)',
 }

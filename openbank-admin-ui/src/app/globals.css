@@ -132,6 +132,7 @@
   --info-text:            #1d4ed8;
   --chart-purple:         #a855f7;
   --chart-cyan:           #0891b2;
+  --transaction-interest: #7c3aed;
 
   /* Customer-context graph categories. Labels remain the primary meaning; this adaptive palette
    * keeps neighbouring banking domains visually distinct on both graph surfaces. */
@@ -464,6 +465,7 @@
     --info-text: #bfdbfe;
     --chart-purple: #d8b4fe;
     --chart-cyan: #67e8f9;
+    --transaction-interest: #c4b5fd;
   --graph-domain: #c4b5fd;
   --graph-account: #5eead4;
   --graph-product: #93c5fd;

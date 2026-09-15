@@ -18,10 +18,10 @@ const STATUS_ORDER: AdrStatus[] = ['Accepted', 'Proposed', 'Superseded', 'Deprec
 
 function statusStyle(s: AdrStatus): { color: string; bg: string } {
   switch (s) {
-    case 'Accepted':   return { color: 'var(--success)', bg: 'var(--success-bg)' }
-    case 'Proposed':   return { color: 'var(--info, #2563eb)', bg: 'var(--info-bg, #dbeafe)' }
-    case 'Deprecated': return { color: 'var(--warning)', bg: 'var(--warning-bg)' }
-    case 'Rejected':   return { color: 'var(--danger)', bg: 'var(--danger-bg)' }
+    case 'Accepted':   return { color: 'var(--success-text)', bg: 'var(--success-bg)' }
+    case 'Proposed':   return { color: 'var(--info-text)', bg: 'var(--info-bg)' }
+    case 'Deprecated': return { color: 'var(--warning-text)', bg: 'var(--warning-bg)' }
+    case 'Rejected':   return { color: 'var(--danger-text)', bg: 'var(--danger-bg)' }
     default:           return { color: 'var(--text-tertiary)', bg: 'var(--surface-2)' }
   }
 }
