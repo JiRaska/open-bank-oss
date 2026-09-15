@@ -48,14 +48,14 @@ const STAGE_LABEL_EN: Record<Stage, string> = {
   BLOCKED:                  'Blocked',
 }
 
-const STAGE_COLOR: Record<Stage, string> = {
-  REGISTERED:               'var(--text-muted)',
-  KYC_OPEN:                 'var(--yellow)',
-  KYC_DOCUMENTS_REQUIRED:  '#f59e0b',
-  KYC_UNDER_REVIEW:         'var(--accent)',
-  SCA_PENDING:              '#a855f7',
-  ACTIVE:                   'var(--green)',
-  BLOCKED:                  'var(--red)',
+const STAGE_TONE: Record<Stage, { color: string; background: string; border: string }> = {
+  REGISTERED:              { color: 'var(--text-secondary)', background: 'var(--surface-3)', border: 'var(--border-strong)' },
+  KYC_OPEN:                { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  KYC_DOCUMENTS_REQUIRED: { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  KYC_UNDER_REVIEW:        { color: 'var(--accent-text)', background: 'var(--accent-bg)', border: 'var(--accent-border)' },
+  SCA_PENDING:             { color: 'var(--info-text)', background: 'var(--info-bg)', border: 'var(--info-border)' },
+  ACTIVE:                  { color: 'var(--success-text)', background: 'var(--success-bg)', border: 'var(--success-border)' },
+  BLOCKED:                 { color: 'var(--danger-text)', background: 'var(--danger-bg)', border: 'var(--danger-border)' },
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export default function OnboardingPage() {
           {STAGES.map(s => {
             const count = counts?.[s] ?? 0
             const isActive = stage === s
-            const color = STAGE_COLOR[s]
+            const tone = STAGE_TONE[s]
             return (
               <button
                 key={s}
@@ -227,8 +227,8 @@ export default function OnboardingPage() {
                 aria-pressed={isActive}
                 onClick={() => handleStageFilter(isActive ? '' : s)}
                 style={{
-                  background: isActive ? `${color}18` : 'var(--surface)',
-                  border: `1px solid ${isActive ? color : 'var(--border)'}`,
+                  background: isActive ? tone.background : 'var(--surface)',
+                  border: `1px solid ${isActive ? tone.border : 'var(--border)'}`,
                   borderRadius: '8px',
                   padding: '12px 8px',
                   cursor: 'pointer',
@@ -236,8 +236,8 @@ export default function OnboardingPage() {
                   transition: 'all 0.15s',
                 }}
               >
-                <div style={{ fontSize: '22px', fontWeight: 700, color, lineHeight: 1 }}>{count}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.3 }}>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: tone.color, lineHeight: 1 }}>{count}</div>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: isActive ? tone.color : 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.3 }}>
                   {stageLabel(s)}
                 </div>
               </button>
@@ -250,7 +250,7 @@ export default function OnboardingPage() {
       {stage && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Filtr:', 'Filter:')}</span>
-          <span className="pill" style={{ background: `${STAGE_COLOR[stage]}22`, color: STAGE_COLOR[stage], display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span className="pill" style={{ background: STAGE_TONE[stage].background, color: STAGE_TONE[stage].color, borderColor: STAGE_TONE[stage].border, display: 'flex', alignItems: 'center', gap: '4px' }}>
             {stageLabel(stage)}
             <button type="button"
               onClick={() => handleStageFilter('')}
@@ -313,7 +313,7 @@ export default function OnboardingPage() {
                   <td style={{ fontWeight: 500 }}>{r.legalName ?? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{r.email ?? '—'}</td>
                   <td>
-                    <span className="pill" style={{ background: `${STAGE_COLOR[r.funnelStage as Stage] ?? 'var(--text-muted)'}22`, color: STAGE_COLOR[r.funnelStage as Stage] ?? 'var(--text-muted)' }}>
+                    <span className="pill" style={{ background: STAGE_TONE[r.funnelStage as Stage]?.background ?? 'var(--surface-3)', color: STAGE_TONE[r.funnelStage as Stage]?.color ?? 'var(--text-secondary)', borderColor: STAGE_TONE[r.funnelStage as Stage]?.border ?? 'var(--border-strong)' }}>
                       {stageLabel(r.funnelStage)}
                     </span>
                   </td>
@@ -325,12 +325,12 @@ export default function OnboardingPage() {
                   </td>
                   <td>
                     {r.scaEnrolled
-                      ? <span style={{ color: 'var(--green)', fontSize: '12px' }}>✓ {r.deviceCount}</span>
+                      ? <span style={{ color: 'var(--success-text)', fontSize: '12px' }}>✓ {r.deviceCount}</span>
                       : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
                   </td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.updatedAt).toLocaleDateString(dateLocale)}</td>
                   <td>
-                    <span style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                    <span style={{ color: 'var(--accent-text)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: 600 }}>
                       {t('Detail', 'Detail')} <ChevronRight size={12} />
                     </span>
                   </td>
@@ -379,7 +379,7 @@ function RecordDrawer({
 }) {
   const { language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const stageColor = STAGE_COLOR[record.funnelStage as Stage] ?? 'var(--text-muted)'
+  const stageTone = STAGE_TONE[record.funnelStage as Stage] ?? STAGE_TONE.REGISTERED
 
   return (
     <Drawer
@@ -404,11 +404,11 @@ function RecordDrawer({
 
         {/* Stage badge */}
         <div style={{ marginBottom: '20px' }}>
-          <span className="pill" style={{ background: `${stageColor}22`, color: stageColor, fontSize: '13px', padding: '6px 12px' }}>
+          <span className="pill" style={{ background: stageTone.background, color: stageTone.color, borderColor: stageTone.border, fontSize: '13px', padding: '6px 12px' }}>
             {stageLabel(record.funnelStage)}
           </span>
           {record.blockedReason && (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--red)', background: '#fee2e222', padding: '6px 10px', borderRadius: '6px' }}>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', padding: '6px 10px', borderRadius: '6px' }}>
               {t('Důvod blokace:', 'Blocked reason:')} {record.blockedReason}
             </div>
           )}
