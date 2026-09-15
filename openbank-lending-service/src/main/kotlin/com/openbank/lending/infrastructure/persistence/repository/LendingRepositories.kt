@@ -167,6 +167,8 @@ class LoanApplicationRepositoryImpl @Inject constructor(
                 .setParameter("versions", application.policyVersions)
                 .setParameter("hash", application.decisionInputHash)
                 .setParameter("engineAt", application.decidedEngineAt)
+                .setParameter("dsti", application.decisionDsti)
+                .setParameter("dti", application.decisionDti)
                 .setParameter("id", application.id.value)
                 .setParameter("from", from)
                 .executeUpdate()
@@ -188,7 +190,7 @@ class LoanApplicationRepositoryImpl @Inject constructor(
                 "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt, " +
                 "decisionOutcome = :outcome, decisionPriceBand = :band, decisionReasons = :reasons, " +
                 "decisionMatchedRules = :matched, policyVersions = :versions, decisionInputHash = :hash, " +
-                "decidedEngineAt = :engineAt " +
+                "decidedEngineAt = :engineAt, decisionDsti = :dsti, decisionDti = :dti " +
                 "where id = :id and status = :from"
 
         const val ADVANCE_HQL =
@@ -237,6 +239,17 @@ class CreditDecisionQueryRepositoryImpl @Inject constructor(
 @ApplicationScoped
 class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory, private val mapper: LendingMapper) :
     LoanRepository {
+    override fun <T> withLocked(loanId: LoanId, operation: (Loan?) -> Uni<T>): Uni<T> = sf.withTransaction { session ->
+        session.find(LoanEntity::class.java, loanId.value, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+            .flatMap { entity ->
+                if (entity == null) {
+                    operation(null)
+                } else {
+                    session.refresh(entity).flatMap { operation(mapper.toDomain(entity)) }
+                }
+            }
+    }
+
     @WithTransaction override fun save(loan: Loan): Uni<Loan> {
         val e = mapper.toEntity(loan)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
@@ -274,6 +287,27 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
 
     @WithSession override fun findRecent(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery("FROM LoanEntity ORDER BY disbursedAt DESC, id ASC", LoanEntity::class.java)
+            .setMaxResults(limit)
+            .resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithSession override fun findUnprovisioned(period: String, limit: Int): Uni<List<Loan>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanEntity l WHERE l.status NOT IN :closed AND NOT EXISTS " +
+                "(SELECT p.id FROM LoanProvisioningEntity p WHERE p.loanId = l.id AND p.period = :period) " +
+                "ORDER BY l.disbursedAt ASC, l.id ASC",
+            LoanEntity::class.java,
+        )
+            .setParameter(
+                "closed",
+                setOf(
+                    com.openbank.lending.domain.model.LoanStatus.CLOSED,
+                    com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
+                    com.openbank.lending.domain.model.LoanStatus.UNWOUND,
+                    com.openbank.lending.domain.model.LoanStatus.SETTLED,
+                ),
+            )
+            .setParameter("period", period)
             .setMaxResults(limit)
             .resultList
     }.map { it.map(mapper::toDomain) }
@@ -405,6 +439,68 @@ class ProvisioningRepositoryImpl @Inject constructor(
             .setParameter("p", period)
             .setMaxResults(1)
             .resultList
+    }.map { it.firstOrNull()?.let(mapper::toDomain) }
+
+    @WithSession
+    override fun summariseActive(
+        asOf: java.time.LocalDate,
+    ): Uni<List<com.openbank.lending.domain.model.CreditPortfolioSummary>> = sf.withSession { s ->
+        s.createNativeQuery(
+            """
+            WITH exposures AS (
+                SELECT l.currency, count(*) AS loans,
+                    count(*) FILTER (WHERE p.id IS NULL) AS unassessed,
+                    count(*) FILTER (WHERE p.id IS NOT NULL AND p.as_of <> :asOf) AS stale,
+                    count(*) FILTER (WHERE p.model_version LIKE 'noop-%' OR p.model_version = 'unknown') AS demo,
+                    coalesce(sum(p.outstanding_balance) FILTER (WHERE p.as_of = :asOf), 0) AS outstanding,
+                    coalesce(sum(p.expected_credit_loss) FILTER (WHERE p.as_of = :asOf), 0) AS ecl,
+                    coalesce(sum(p.outstanding_balance) FILTER
+                        (WHERE p.as_of = :asOf AND p.stage IN ('STAGE_2', 'STAGE_3')), 0) AS stage23,
+                    coalesce(sum(p.outstanding_balance) FILTER
+                        (WHERE p.as_of = :asOf AND p.days_past_due > 90), 0) AS over90
+                FROM loan l
+                LEFT JOIN LATERAL (
+                    SELECT * FROM loan_provisioning p WHERE p.loan_id = l.id AND p.as_of <= :asOf
+                    ORDER BY p.as_of DESC, p.created_at DESC, p.id DESC LIMIT 1
+                ) p ON true
+                WHERE l.status NOT IN ('CLOSED', 'WRITTEN_OFF', 'UNWOUND', 'SETTLED')
+                GROUP BY l.currency
+            ), pending AS (
+                SELECT l.currency, count(DISTINCT l.id) AS loans
+                FROM loan l JOIN lending_outbox o ON o.aggregate_id = l.id
+                WHERE o.event_type = 'lending.allowance.posting' AND o.status <> 'SENT'
+                GROUP BY l.currency
+            )
+            SELECT coalesce(e.currency, q.currency), coalesce(e.loans, 0), coalesce(e.unassessed, 0),
+                coalesce(e.stale, 0), coalesce(e.demo, 0), coalesce(q.loans, 0),
+                coalesce(e.outstanding, 0), coalesce(e.ecl, 0), coalesce(e.stage23, 0), coalesce(e.over90, 0)
+            FROM exposures e FULL OUTER JOIN pending q ON q.currency = e.currency ORDER BY 1
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).setParameter("asOf", asOf).resultList
+    }.map { rows ->
+        rows.map { row ->
+            com.openbank.lending.domain.model.CreditPortfolioSummary(
+                currency = row[0] as String,
+                asOf = asOf,
+                loans = (row[1] as Number).toLong(),
+                unassessed = (row[2] as Number).toLong(),
+                stale = (row[3] as Number).toLong(),
+                demonstration = (row[4] as Number).toLong(),
+                pending = (row[5] as Number).toLong(),
+                outstanding = row[6] as BigDecimal,
+                ecl = row[7] as BigDecimal,
+                stage23Outstanding = row[8] as BigDecimal,
+                over90Outstanding = row[9] as BigDecimal,
+            )
+        }
+    }
+
+    @WithSession override fun findLatestByLoan(loanId: LoanId): Uni<LoanProvisioningRecord?> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanProvisioningEntity WHERE loanId = :loanId ORDER BY asOf DESC, createdAt DESC, id DESC",
+            LoanProvisioningEntity::class.java,
+        ).setParameter("loanId", loanId.value).setMaxResults(1).resultList
     }.map { it.firstOrNull()?.let(mapper::toDomain) }
 
     @WithSession override fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>> = sf.withSession { s ->

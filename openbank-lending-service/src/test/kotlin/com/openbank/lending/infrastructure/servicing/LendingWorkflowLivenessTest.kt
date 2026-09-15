@@ -147,7 +147,7 @@ class LendingWorkflowLivenessTest {
         val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
         val cycleUseCase = object : RunProvisioningCycleUseCase {
             override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int) =
-                Uni.createFrom().item(ProvisioningRunOutcome(period = period, loansAssessed = 5, journalsPosted = 3))
+                Uni.createFrom().item(ProvisioningRunOutcome(period = period, loansAssessed = 5, journalsQueued = 3))
         }
         val scheduler =
             ProvisioningCycleScheduler(
@@ -169,7 +169,7 @@ class LendingWorkflowLivenessTest {
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "lending-provisioning-cycle")
                 .gauge()?.value(),
-        ).isEqualTo(Duration.ofHours(720).toSeconds().toDouble())
+        ).isEqualTo(Duration.ofHours(24).toSeconds().toDouble())
 
         scheduler.runProvisioningPass().await().indefinitely()
 

@@ -341,6 +341,12 @@ spec:
             secretName: kafka-cluster-ca-truststore
   strategy:
     canary:
+      # One replica makes this a terminate-first compatibility fence: the old
+      # outbox publisher exits before the new publisher starts. This is required
+      # for the allowance-command event introduced with the credit-risk V17
+      # migration because an older publisher does not understand that command.
+      maxSurge: 0
+      maxUnavailable: 1
       stableService: lending-service
       canaryService: lending-service-canary
       analysis:

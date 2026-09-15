@@ -254,7 +254,7 @@ lending:
   # adapter is bound — see the ADR for the explicit "not production-calibrated" caveat.
   provisioning:
     cycle:
-      every: ${LENDING_PROVISIONING_EVERY:720h} # ~30 days; a monthly-cadence batch, not calendar-month aware
+      every: ${LENDING_PROVISIONING_EVERY:24h} # immutable daily reporting snapshots
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
 
 # Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`
