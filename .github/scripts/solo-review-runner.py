@@ -207,24 +207,35 @@ def usage_summary(raw):
 def invocation_failure(proc):
     """Only fixed categories escape; provider output may contain source or secrets."""
     errors = [proc.stderr or ""]
+    statuses = set()
     for line in (proc.stdout or "").splitlines():
         try:
             event = json.loads(line)
         except ValueError:
             continue
         if isinstance(event, dict) and event.get("type") == "result" and event.get("is_error") is True:
-            if event.get("api_error_status") == 429:
-                return f"model invocation failed: category=RATE_OR_USAGE_LIMIT, exit_code={proc.returncode}; no admission produced"
+            status = event.get("api_error_status")
+            if type(status) is int:
+                statuses.add(status)
             errors.append(json.dumps(event.get("errors", [])))
             errors.append(json.dumps(event.get("result", "")))
     raw = "\n".join(errors)
     categories = (
         ("AUTHENTICATION", r"(?i)invalid[_ -]?(?:api[_ -]?)?key|authentication[_ -]error|oauth.{0,40}expired|unauthorized|not logged in"),
-        ("RATE_OR_USAGE_LIMIT", r"(?i)rate[_ -]?limit|usage limit|hit your (?:weekly |daily )?limit|overloaded|too many requests|quota"),
+        ("SPEND_LIMIT", r"(?i)insufficient[_ -]quota|credit balance.{0,30}(?:low|exhaust|insufficient)|(?:budget|spend(?:ing)? limit).{0,30}(?:exceed|exhaust|reached)"),
+        ("USAGE_LIMIT", r"(?i)usage limit|hit your (?:weekly |daily )?limit"),
+        ("PROVIDER_OVERLOADED", r"(?i)overloaded"),
+        ("RATE_LIMIT", r"(?i)rate[_ -]?limit|too many requests"),
         ("CONTEXT_LIMIT", r"(?i)prompt is too long|context.{0,25}(?:exceed|limit)|too many tokens"),
         ("PROVIDER_UNAVAILABLE", r"(?i)connection (?:refused|reset)|ENOTFOUND|ETIMEDOUT|service unavailable"),
     )
-    category = next((name for name, pattern in categories if re.search(pattern, raw)), "UNKNOWN")
+    # A bare 429 cannot distinguish exhausted allowance from transient throttling.
+    # Explicit errors take precedence; none of these categories authorizes a retry.
+    fallback = next((category for status, category in (
+        (401, "AUTHENTICATION"), (402, "SPEND_LIMIT"),
+        (429, "RATE_OR_USAGE_LIMIT"), (529, "PROVIDER_OVERLOADED"),
+        (503, "PROVIDER_UNAVAILABLE")) if status in statuses), "UNKNOWN")
+    category = next((name for name, pattern in categories if re.search(pattern, raw)), fallback)
     return f"model invocation failed: category={category}, exit_code={proc.returncode}; no admission produced"
 
 

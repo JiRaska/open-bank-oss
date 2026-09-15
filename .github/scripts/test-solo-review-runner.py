@@ -119,7 +119,7 @@ class DriverTest(unittest.TestCase):
 
     def test_provider_failure_diagnostics_never_echo_output(self):
         for message, category in (("authentication_error", "AUTHENTICATION"),
-                                  ("rate_limit_error", "RATE_OR_USAGE_LIMIT"),
+                                  ("rate_limit_error", "RATE_LIMIT"),
                                   ("prompt is too long", "CONTEXT_LIMIT"),
                                   ("ENOTFOUND", "PROVIDER_UNAVAILABLE"),
                                   ("unexpected response", "UNKNOWN")):
@@ -134,6 +134,27 @@ class DriverTest(unittest.TestCase):
             type="result", is_error=True, api_error_status=429, result="provider-specific-private-message")), stderr="")
         self.assertEqual(runner.invocation_failure(proc),
                          "model invocation failed: category=RATE_OR_USAGE_LIMIT, exit_code=1; no admission produced")
+
+    def test_provider_limits_are_distinguished_without_automatic_retry(self):
+        cases = (
+            (429, "credit balance is too low", "SPEND_LIMIT"),
+            (429, "insufficient_quota", "SPEND_LIMIT"),
+            (None, "max budget exceeded", "SPEND_LIMIT"),
+            (429, "hit your weekly limit", "USAGE_LIMIT"),
+            (429, "rate_limit_error", "RATE_LIMIT"),
+            (529, "overloaded_error", "PROVIDER_OVERLOADED"),
+            (529, "provider-specific-private-message", "PROVIDER_OVERLOADED"),
+            (503, "provider-specific-private-message", "PROVIDER_UNAVAILABLE"),
+            (401, "provider-specific-private-message", "AUTHENTICATION"),
+            (429, "provider-specific-private-message", "RATE_OR_USAGE_LIMIT"),
+        )
+        for status, message, category in cases:
+            proc = subprocess.CompletedProcess([], 1, stdout=json.dumps(dict(
+                type="result", is_error=True, api_error_status=status,
+                errors=["secret-fixture " + message])), stderr="")
+            with self.subTest(status=status, message=message):
+                self.assertEqual(runner.invocation_failure(proc),
+                                 f"model invocation failed: category={category}, exit_code=1; no admission produced")
 
     def test_finished_stream_observes_model_and_session(self):
         report = runner.parse_stream(stream(), "correctness", fixtures.bundle()["subject"])
