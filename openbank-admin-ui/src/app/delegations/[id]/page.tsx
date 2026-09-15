@@ -34,6 +34,7 @@ import {
   formatCeiling,
   type Grant,
 } from '@/components/delegations/GrantView'
+import styles from './page.module.css'
 
 function formatDelegationTimestamp(
   value: string | null | undefined,
@@ -107,7 +108,7 @@ export default function DelegationDetailPage() {
       {!unavail && grant && (
         <>
           <div className="card" style={{ padding: '16px', marginTop: '16px' }}>
-            <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 240px) 1fr', gap: '10px 16px', fontSize: '13px' }}>
+            <dl className={styles.grantFacts} data-testid="delegation-detail-facts">
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Stav', 'Status')}</dt>
               <dd><DelegationStatusBadge status={grant.status} /></dd>
 

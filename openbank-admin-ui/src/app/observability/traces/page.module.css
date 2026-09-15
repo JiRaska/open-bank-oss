@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.traceLayout {
+  align-items: start;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+}
+
+.spanRow {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 180px minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .traceLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .spanRow {
+    align-items: stretch;
+    gap: 4px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

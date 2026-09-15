@@ -86,6 +86,7 @@ test('Test Coverage is backed by a dated CI evidence snapshot, not a static scor
 })
 
 test('Trace Explorer renders an OTLP waterfall after selecting a trace', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 })
   await json(page, '**/api/tempo/api/search**', { traces: [{ traceID: TRACE_ID, rootServiceName: 'ledger-service', rootTraceName: 'POST /entries', durationMs: 1.5 }] })
   await json(page, `**/api/tempo/api/traces/${TRACE_ID}`, { batches: [{
     resource: { attributes: [{ key: 'service.name', value: { stringValue: 'ledger-service' } }] },
@@ -93,9 +94,13 @@ test('Trace Explorer renders an OTLP waterfall after selecting a trace', async (
   }] })
 
   await page.goto('/observability/traces')
+  const layout = page.getByTestId('trace-explorer-layout')
+  expect(await layout.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
   await page.getByRole('button', { name: /ledger-service.*POST \/entries/ }).click()
   await expect(page.getByText(/1 spanů|1 spans/)).toBeVisible()
   await expect(page.getByText('POST /entries').last()).toBeVisible()
+  expect(await page.getByTestId('trace-span-row').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
 test('compliance pack detail exposes exact reviewed content, not a summary only', async ({ page }) => {

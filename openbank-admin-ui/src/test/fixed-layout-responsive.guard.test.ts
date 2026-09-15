@@ -21,4 +21,13 @@ describe('fixed asymmetric layouts', () => {
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/)
     expect(styles).toContain('overflow-wrap: anywhere')
   })
+
+  it('stacks trace navigation and every waterfall span', () => {
+    const page = readFileSync(path.resolve(__dirname, '../app/observability/traces/page.tsx'), 'utf8')
+    const styles = readFileSync(path.resolve(__dirname, '../app/observability/traces/page.module.css'), 'utf8')
+    expect(page).toContain('data-testid="trace-explorer-layout"')
+    expect(page).toContain('data-testid="trace-span-row"')
+    expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.traceLayout[\s\S]*grid-template-columns: minmax\(0, 1fr\)/)
+    expect(styles).toMatch(/@media \(max-width: 560px\)[\s\S]*\.spanRow[\s\S]*grid-template-columns: minmax\(0, 1fr\)/)
+  })
 })

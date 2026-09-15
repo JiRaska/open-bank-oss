@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.grantFacts {
+  display: grid;
+  font-size: 13px;
+  gap: 10px 16px;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+}
+
+.grantFacts > dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .grantFacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .grantFacts > dt:not(:first-child) {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+}

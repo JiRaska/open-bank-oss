@@ -18,6 +18,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 import { parseTempoSearch, parseTempoTrace, type FlatSpan, type TraceSummary } from '@/lib/observability/tempo-evidence'
+import styles from './page.module.css'
 
 // Stable per-service hue so the same service keeps its colour across spans.
 function serviceColor(service: string): string {
@@ -48,7 +49,6 @@ export default function TraceExplorerPage() {
     setLoading(true)
     setUnavailable(null)
     try {
-      // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
       const now = Math.floor(Date.now() / 1000)
       const res = await fetch(`/api/tempo/api/search?limit=20&start=${now - 3600}&end=${now}`, {
         signal: AbortSignal.timeout(8000),
@@ -172,7 +172,7 @@ export default function TraceExplorerPage() {
               />
             </div>
           ) : null}
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 340px) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
+          <div className={styles.traceLayout} data-testid="trace-explorer-layout">
             {/* Trace list */}
             <div className="card" role="region" aria-label={t('Seznam posledních tras', 'Recent traces list')} style={{ padding: '8px' }}>
               <div style={{
@@ -243,7 +243,7 @@ export default function TraceExplorerPage() {
                       const widthPct = Math.max(0.6, ((s.endNano - s.startNano) / traceTotal) * 100)
                       const durMs = (s.endNano - s.startNano) / 1e6
                       return (
-                        <div key={s.spanId} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '10px', alignItems: 'center' }}>
+                        <div key={s.spanId} className={styles.spanRow} data-testid="trace-span-row">
                           <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: serviceColor(s.service) }} />
                             <span title={`${s.service} · ${s.name}`} style={{ fontSize: '11px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
