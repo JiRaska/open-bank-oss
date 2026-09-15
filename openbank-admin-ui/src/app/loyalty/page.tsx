@@ -165,11 +165,11 @@ export default function LoyaltyPage() {
         {tab === 'principles' && (
           <section className={styles.section} aria-label={tabLabel.principles}>
             <div className={styles.card}>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-emerald-900">
+              <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--success-text)]">
                 <Leaf className="h-4 w-4" />
                 {t('Co je Lístek', 'What a Lístek is')}
               </h2>
-              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-emerald-950">
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--success-text)]">
                 {t(
                   'Lístek je uzavřená jednotka závazku banky. Klient ho získá za doložené finanční zdraví, vymění za benefit, který banka sama doručí, a po dvou letech mu propadne. Není to měna ani platební prostředek a záměrně se jím nikdy nestane.',
                   'A Lístek is a closed-loop unit of bank obligation. A customer earns it for evidenced financial health, redeems it for a benefit the bank itself delivers, and it expires after two years. It is not a currency or a means of payment, and by design it never becomes one.',
@@ -180,29 +180,29 @@ export default function LoyaltyPage() {
             <div className={styles.actionGrid}>
               {PRINCIPLES.map(p => (
                 <article key={p.id} className={styles.card}>
-                  <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+                    <ShieldCheck className="h-4 w-4 text-[var(--success-text)]" />
                     {say(p.title)}
                   </h3>
-                  <p className="mt-2 text-sm text-slate-700">{say(p.rule)}</p>
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">{say(p.rule)}</p>
                   <details className={styles.details}><summary>{t('Souvislosti a omezení', 'Context and limitations')}</summary>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                     {t('Proč', 'Why')}
                   </p>
-                  <p className="text-sm text-slate-700">{say(p.why)}</p>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-rose-600">
+                  <p className="text-sm text-[var(--text-secondary)]">{say(p.why)}</p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--danger-text)]">
                     {t('Co by to porušilo', 'What would break it')}
                   </p>
-                  <p className="text-sm text-slate-700">{say(p.breaks)}</p></details>
+                  <p className="text-sm text-[var(--text-secondary)]">{say(p.breaks)}</p></details>
                 </article>
               ))}
             </div>
 
             <div className={styles.card}>
-              <h2 className="text-base font-semibold text-slate-900">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
                 {t('Životní cyklus Lístku', 'The life of a Lístek')}
               </h2>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 {t(
                   'Všimněte si dvou konců, které nejsou chyba: strop nic nezapíše a nedostatek Lístků nic neodepíše. Obojí je legitimní odpověď, ne selhání.',
                   'Note the two endings that are not errors: the cap writes nothing, and an unaffordable redemption burns nothing. Both are legitimate answers, not faults.',
@@ -220,22 +220,22 @@ export default function LoyaltyPage() {
             </div>
 
             <div className={styles.card}>
-              <h2 className="text-base font-semibold text-slate-900">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
                 {t('Jak Lípa souvisí se zbytkem platformy', 'How Lípa connects to the rest of the platform')}
               </h2>
               <ul className={styles.list}>
                 {CONNECTIONS.map(c => (
                   <li key={c.id} className={styles.inset}>
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-semibold text-slate-900">{say(c.system)}</h3>
+                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{say(c.system)}</h3>
                       {c.href && (
-                        <Link href={c.href} className="inline-flex items-center gap-1 text-xs font-semibold text-violet-700 hover:underline">
+                        <Link href={c.href} className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-text)] hover:underline">
                           {t('Otevřít', 'Open')}<ArrowRight className="h-3 w-3" />
                         </Link>
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-slate-700">{say(c.what)}</p>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">{say(c.what)}</p>
+                    <p className="mt-1 text-sm text-[var(--text-tertiary)]">
                       <span className="font-semibold">{t('Hranice: ', 'Boundary: ')}</span>{say(c.limit)}
                     </p>
                   </li>
@@ -249,8 +249,8 @@ export default function LoyaltyPage() {
           <section className={styles.section} aria-label={tabLabel.catalogues}>
             <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t('Nabídka programu', 'Programme offer')}</span><h2>{t('Odměny a benefity', 'Earning and rewards')}</h2></div></div>
             <div className={styles.notice} role="note">
-              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-              <p className="text-sm text-amber-900">
+              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning-text)]" />
+              <p className="text-sm text-[var(--warning-text)]">
                 {t(
                   'Aktuální katalogy slouží jako podklad pro marketing. Změnu nabídky připravte jako návrh níže; před zavedením musí projít odbornou revizí a schválením.',
                   'Use the current catalogues to plan marketing. Prepare an offer change using the brief below; changes require expert review and approval before implementation.',
@@ -258,7 +258,7 @@ export default function LoyaltyPage() {
               </p>
             </div>
 
-            {loading && <p className="text-sm text-slate-500">{t('Načítám…', 'Loading…')}</p>}
+            {loading && <p className="text-sm text-[var(--text-tertiary)]">{t('Načítám…', 'Loading…')}</p>}
             {!loading && serviceKind && (
               <DataUnavailable
                 kind={serviceKind}
@@ -273,11 +273,11 @@ export default function LoyaltyPage() {
               <>
                 <label className={styles.filter}>{t('Hledat v katalozích', 'Search catalogues')}<input type="search" value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Název nebo popis…', 'Name or description…')} /></label>
                 <div className={styles.card}>
-                  <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-                    <Coins className="h-4 w-4 text-emerald-600" />
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                    <Coins className="h-4 w-4 text-[var(--success-text)]" />
                     {t('Za co se Lístky získávají', 'What earns Lístky')}
                   </h2>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {t(
                       'Katalog uvádí pravidla odměňování. Před kampaní ověřte s vlastníkem programu, že se daná aktivita skutečně vyhodnocuje a odměňuje.',
                       'The catalogue lists earning rules. Before a campaign, confirm with the programme owner that the activity is actually tracked and rewarded.',
@@ -289,7 +289,7 @@ export default function LoyaltyPage() {
                   >
                   <table className="mt-4 w-full text-sm">
                     <thead>
-                      <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                         <th className="py-2">{t('Důvod', 'Source')}</th>
                         <th className="py-2 text-right">{t('Lístků', 'Lístky')}</th>
                         <th className="py-2 text-right">{t('Platnost', 'Validity')}</th>
@@ -297,10 +297,10 @@ export default function LoyaltyPage() {
                     </thead>
                     <tbody>
                       {catalogue.earnSources.filter(s => s.id.toLowerCase().includes(filter.toLowerCase())).map(s => (
-                        <tr key={s.id} className="border-b border-slate-100 last:border-none">
-                          <td className="py-2 font-medium text-slate-800">{s.id}</td>
+                        <tr key={s.id} className="border-b border-[var(--border)] last:border-none">
+                          <td className="py-2 font-medium text-[var(--text-primary)]">{s.id}</td>
                           <td className="py-2 text-right tabular-nums">{num(s.leaves)}</td>
-                          <td className="py-2 text-right text-slate-600">
+                          <td className="py-2 text-right text-[var(--text-secondary)]">
                             {t(`${num(s.validityDays)} dní`, `${num(s.validityDays)} days`)}
                           </td>
                         </tr>
@@ -312,11 +312,11 @@ export default function LoyaltyPage() {
                 </div>
 
                 <div className={styles.card}>
-                  <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-                    <Gift className="h-4 w-4 text-violet-600" />
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                    <Gift className="h-4 w-4 text-[var(--accent-text)]" />
                     {t('Za co se Lístky vyměňují', 'What Lístky buy')}
                   </h2>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {t(
                       'Cena je uvedena v Lístcích. Příslušný tým musí potvrdit připravenost plnění; Lípa eviduje udělení benefitu, sama jej neposkytuje.',
                       'Prices are in Lístky. The responsible team must confirm fulfilment readiness; Lípa records a benefit grant but does not fulfil it itself.',
@@ -328,7 +328,7 @@ export default function LoyaltyPage() {
                   >
                   <table className="mt-4 w-full text-sm">
                     <thead>
-                      <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                         <th className="py-2">{t('Benefit', 'Benefit')}</th>
                         <th className="py-2">{t('Zajišťuje', 'Handled by')}</th>
                         <th className="py-2 text-right">{t('Cena', 'Price')}</th>
@@ -337,14 +337,14 @@ export default function LoyaltyPage() {
                     </thead>
                     <tbody>
                       {catalogue.benefits.filter(b => `${b.id} ${b.description} ${b.engine}`.toLowerCase().includes(filter.toLowerCase())).map(b => (
-                        <tr key={b.id} className="border-b border-slate-100 last:border-none align-top">
+                        <tr key={b.id} className="border-b border-[var(--border)] last:border-none align-top">
                           <td className="py-2">
-                            <span className="font-medium text-slate-800">{b.id}</span>
-                            <span className="block text-xs text-slate-500">{b.description}</span>
+                            <span className="font-medium text-[var(--text-primary)]">{b.id}</span>
+                            <span className="block text-xs text-[var(--text-tertiary)]">{b.description}</span>
                           </td>
-                          <td className="py-2 text-slate-700">{b.engine}</td>
+                          <td className="py-2 text-[var(--text-secondary)]">{b.engine}</td>
                           <td className="py-2 text-right tabular-nums">{num(b.priceLeaves)}</td>
-                          <td className="py-2 text-right text-slate-600">
+                          <td className="py-2 text-right text-[var(--text-secondary)]">
                             {t(`${num(b.validityDays)} dní`, `${num(b.validityDays)} days`)}
                           </td>
                         </tr>
@@ -377,8 +377,8 @@ export default function LoyaltyPage() {
         {tab === 'party' && (
           <section className={styles.section} aria-label={tabLabel.party}>
             <div className={styles.card}>
-              <h2 className="text-base font-semibold text-slate-900">{t('Zůstatek klienta', 'A customer balance')}</h2>
-              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">{t('Zůstatek klienta', 'A customer balance')}</h2>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--text-secondary)]">
                 {t(
                   'Ověřte stav programu u konkrétního klienta. Zůstatek, historie a expirace vycházejí ze stejných údajů jako klientská aplikace. Pro širší kontext otevřete Customer 360.',
                   'Check programme activity for an individual customer. Balance, history and expiry use the same evidence as the customer app. Open Customer 360 for the broader context.',
@@ -392,29 +392,29 @@ export default function LoyaltyPage() {
                   onChange={e => setPartyId(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !partyLoading) void lookUpParty() }}
                   placeholder={t('UUID klienta', 'Customer UUID')}
-                  className="w-96 max-w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm"
+                  className="w-96 max-w-full rounded-xl border border-[var(--border-strong)] px-3 py-2 font-mono text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => void lookUpParty()}
                   disabled={partyLoading}
                   aria-busy={partyLoading}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700"
+                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent-strong)] px-4 py-2 text-sm font-semibold text-[var(--text-inverse)] transition hover:bg-[var(--accent-hover)]"
                 >
                   <Search className="h-4 w-4" />
                   {t('Vyhledat', 'Look up')}
                 </button>
                 {party && (
-                  <Link href={`/customer-360?partyId=${party.partyId}`} className="inline-flex items-center gap-1 text-sm font-semibold text-violet-700 hover:underline">
+                  <Link href={`/customer-360?partyId=${party.partyId}`} className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--accent-text)] hover:underline">
                     {t('Otevřít Customer 360', 'Open Customer 360')}<ArrowRight className="h-3 w-3" />
                   </Link>
                 )}
               </div>
-              {partyError && <p role="alert" className="mt-2 text-sm text-rose-700">{partyError}</p>}
+              {partyError && <p role="alert" className="mt-2 text-sm text-[var(--danger-text)]">{partyError}</p>}
             </div>
 
             {!party && !partyLoading && !partyError && <div className={styles.notice}><Search aria-hidden="true" /><div><h3>{t('Začněte identifikátorem klienta', 'Start with a customer ID')}</h3><p>{t('UUID najdete v detailu klienta. Vyhledávání zobrazí skutečný zůstatek a historii; neprovádí žádné změny.', 'Find the UUID in the customer record. Lookup shows the actual balance and history without changing them.')}</p><Link href="/customer-360">{t('Přejít do Customer 360', 'Go to Customer 360')} →</Link></div></div>}
-            {partyLoading && <p className="text-sm text-slate-500">{t('Načítám…', 'Loading…')}</p>}
+            {partyLoading && <p className="text-sm text-[var(--text-tertiary)]">{t('Načítám…', 'Loading…')}</p>}
 
             {party && unavailableKind(party.state) && (
               <DataUnavailable
@@ -438,16 +438,16 @@ export default function LoyaltyPage() {
                     },
                   ].map(stat => (
                     <div key={stat.label} className={styles.inset}>
-                      <p className="text-xs uppercase tracking-wide text-slate-500">{stat.label}</p>
+                      <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">{stat.label}</p>
                       <p className={styles.metricValue}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
 
                 <div className={styles.card}>
-                  <h3 className="text-sm font-semibold text-slate-900">{t('Historie', 'History')}</h3>
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('Historie', 'History')}</h3>
                   {party.history.length === 0 && (
-                    <p className="mt-2 text-sm text-slate-500">
+                    <p className="mt-2 text-sm text-[var(--text-tertiary)]">
                       {t('Tento klient zatím nemá žádný pohyb.', 'This customer has no entries yet.')}
                     </p>
                   )}
@@ -458,7 +458,7 @@ export default function LoyaltyPage() {
                     >
                     <table className="mt-3 w-full text-sm">
                       <thead>
-                        <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                        <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                           <th className="py-2">{t('Kdy', 'When')}</th>
                           <th className="py-2">{t('Typ', 'Type')}</th>
                           <th className="py-2">{t('Důvod', 'Reason')}</th>
@@ -469,13 +469,13 @@ export default function LoyaltyPage() {
                       </thead>
                       <tbody>
                         {party.history.map(row => (
-                          <tr key={row.id} className="border-b border-slate-100 last:border-none">
-                            <td className="py-2 text-slate-600">{new Date(row.occurredAt).toLocaleString(locale)}</td>
-                            <td className="py-2 font-medium text-slate-800">{row.type}</td>
-                            <td className="py-2 text-slate-700">{row.earnSourceId ?? row.benefitId ?? '—'}</td>
+                          <tr key={row.id} className="border-b border-[var(--border)] last:border-none">
+                            <td className="py-2 text-[var(--text-secondary)]">{new Date(row.occurredAt).toLocaleString(locale)}</td>
+                            <td className="py-2 font-medium text-[var(--text-primary)]">{row.type}</td>
+                            <td className="py-2 text-[var(--text-secondary)]">{row.earnSourceId ?? row.benefitId ?? '—'}</td>
                             <td className="py-2 text-right tabular-nums">{num(row.leaves)}</td>
                             <td className="py-2 text-right tabular-nums">{num(row.remainingLeaves)}</td>
-                            <td className="py-2 text-right text-slate-600">
+                            <td className="py-2 text-right text-[var(--text-secondary)]">
                               {row.expiresAt ? new Date(row.expiresAt).toLocaleDateString(locale) : '—'}
                             </td>
                           </tr>
@@ -493,11 +493,11 @@ export default function LoyaltyPage() {
         {tab === 'finance' && (
           <section className={styles.section} aria-label={tabLabel.finance}>
             <div className={styles.card}>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-                <Landmark className="h-4 w-4 text-slate-700" />
+              <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                <Landmark className="h-4 w-4 text-[var(--text-secondary)]" />
                 {t('Závazek banky', 'What the bank owes')}
               </h2>
-              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+              <p className="mt-1 max-w-3xl text-sm text-[var(--text-secondary)]">
                 {t(
                   'Nespotřebované Lístky jsou závazek. Číslo níže je vstup do denního zaúčtování rezervy, ne zaúčtování samo — to vlastní billing, protože ten je na peněžní cestě a Lípa ne.',
                   'Unspent Lístky are an obligation. The figure below is the input to the daily provisioning journal, not the journal — billing owns that, because billing is on the money path and Lípa is not.',
@@ -506,39 +506,39 @@ export default function LoyaltyPage() {
               {!loading && catalogue?.state === 'ok' && catalogue.provisioning ? (
                 <div className={styles.summaryGrid}>
                   <div className={styles.inset}>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                    <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                       {t('Nesplacený závazek', 'Outstanding obligation')}
                     </p>
                     <p className={styles.metricValue}>
                       {num(catalogue.provisioning.outstandingLeaves)}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--text-tertiary)]">
                       {t('Lístků, nikoli korun. Lípa Lístek neoceňuje.', 'Lístky, not korunas. Lípa does not price a Lístek.')}
                     </p>
                   </div>
                   <div className={styles.inset}>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                    <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                       {t('Roční strop na klienta', 'Annual cap per customer')}
                     </p>
                     <p className={styles.metricValue}>
                       {num(catalogue.provisioning.annualCapPerParty)}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--text-tertiary)]">
                       {t('Ohraničuje ekonomickou expozici programu.', 'It bounds the economic exposure of the programme.')}
                     </p>
                   </div>
                   <div className={styles.inset}>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                    <p className="text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
                       {t('Verze pravidla', 'Rule version')}
                     </p>
                     <p className={styles.metricValue}>{catalogue.provisioning.ruleVersion}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[var(--text-tertiary)]">
                       {t('Zmrazí se na každém zápisu, takže změna sazby historii nepřepíše.', 'Frozen onto every entry, so changing a rate never rewrites history.')}
                     </p>
                   </div>
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-slate-500">
+                <p className="mt-3 text-sm text-[var(--text-tertiary)]">
                   {loading ? t('Načítám údaje…', 'Loading figures…') : t('Údaje o závazku nejsou dostupné.', 'Obligation figures are unavailable.')}
                   {!loading && <button className={styles.textButton} onClick={() => { setLoading(true); setRefresh(value => value + 1) }}>{t('Zkusit znovu', 'Try again')}</button>}
                 </p>
@@ -546,20 +546,20 @@ export default function LoyaltyPage() {
             </div>
 
             <div className={styles.card}>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-                <Scale className="h-4 w-4 text-slate-700" />
+              <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                <Scale className="h-4 w-4 text-[var(--text-secondary)]" />
                 {t('Právní rámec', 'The legal position')}
               </h2>
               <ul className={styles.list}>
                 {LEGAL.map(item => (
                   <li key={item.id} className={styles.inset}>
-                    <h3 className="text-sm font-semibold text-slate-900">{say(item.regime)}</h3>
-                    <p className="mt-1 text-sm text-slate-800">{say(item.position)}</p>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">{say(item.regime)}</h3>
+                    <p className="mt-1 text-sm text-[var(--text-primary)]">{say(item.position)}</p>
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
                       <span className="font-semibold">{t('Na čem to stojí: ', 'What holds it: ')}</span>{say(item.holds)}
                     </p>
                     {item.open && (
-                      <p className="mt-1 flex items-start gap-1.5 text-sm text-amber-800">
+                      <p className="mt-1 flex items-start gap-1.5 text-sm text-[var(--warning-text)]">
                         <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                         <span><span className="font-semibold">{t('Otevřené: ', 'Still open: ')}</span>{say(item.open)}</span>
                       </p>
@@ -575,14 +575,14 @@ export default function LoyaltyPage() {
           <section className={styles.section} aria-label={tabLabel.ai}>
             <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t('Rozvoj programu', 'Programme development')}</span><h2>{t('Asistenti pro marketing', 'Marketing assistants')}</h2></div><span className={styles.badge}>{t('Plánované možnosti · nejsou aktivní', 'Planned capabilities · not active')}</span></div>
             <div className={styles.card}>
-              <h2 className="flex items-center gap-2 text-base font-semibold text-violet-900">
+              <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--accent-text)]">
                 <Sparkles className="h-4 w-4" />
                 {t('Kde umělá inteligence pomáhá a kde končí', 'Where AI helps and where it stops')}
               </h2>
               <ul className="mt-3 space-y-1.5">
                 {AI_RED_LINES.map(line => (
-                  <li key={line.en} className="flex items-start gap-2 text-sm text-violet-950">
-                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-violet-700" />
+                  <li key={line.en} className="flex items-start gap-2 text-sm text-[var(--accent-text)]">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" />
                     {say(line)}
                   </li>
                 ))}
@@ -593,28 +593,28 @@ export default function LoyaltyPage() {
               {AI_ROLES.map(role => (
                 <article key={role.id} className={styles.card}>
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <Bot className="h-4 w-4 text-violet-600" />
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+                      <Bot className="h-4 w-4 text-[var(--accent-text)]" />
                       {say(role.name)}
                     </h3>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">
                       {role.status === 'available' ? t('dostupné', 'available') : t('návrh', 'proposed')}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-700">{say(role.does)}</p>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-rose-600">
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">{say(role.does)}</p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--danger-text)]">
                     {t('Nesmí', 'Cannot')}
                   </p>
-                  <p className="text-sm text-slate-700">{say(role.cannot)}</p>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <p className="text-sm text-[var(--text-secondary)]">{say(role.cannot)}</p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
                     {t('Rozhoduje', 'Decides instead')}
                   </p>
-                  <p className="text-sm text-slate-700">{say(role.decides)}</p>
+                  <p className="text-sm text-[var(--text-secondary)]">{say(role.decides)}</p>
                 </article>
               ))}
             </div>
 
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-[var(--text-tertiary)]">
               {t(
                 'Všechny čtyři role jsou zatím návrh. Žádná z nich není v systému zapojená a tahle stránka to nezastírá — role označená jako návrh nic nedělá.',
                 'All four roles are proposals. None is wired into the system, and this page does not obscure that — a role marked as proposed does nothing.',
