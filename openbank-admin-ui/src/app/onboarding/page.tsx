@@ -12,6 +12,7 @@ import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-re
 import Link from 'next/link'
 import { Drawer, PageHeader } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import styles from './page.module.css'
 import {
   ONBOARDING_STAGES as STAGES,
   parseFunnelCounts,
@@ -453,9 +454,9 @@ function RecordDrawer({
 
 function DrawerRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'start' }}>
+    <div className={styles.drawerRow}>
       <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingTop: '2px' }}>{label}</span>
-      <span style={{ fontSize: '13px', fontFamily: mono ? 'var(--font-mono)' : undefined, wordBreak: 'break-all' }}>{value}</span>
+      <span className={styles.drawerValue} style={{ fontSize: '13px', fontFamily: mono ? 'var(--font-mono)' : undefined }}>{value}</span>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { getAgentPersona } from '@/components/agent/AgentIdentity'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { TestAgentFinding } from '@/lib/types/test-intelligence'
 import { useSession } from 'next-auth/react'
+import styles from './TestAgentPanel.module.css'
 
 type AgentGovernance = {
   activePrompt: string | null
@@ -78,7 +79,7 @@ export function TestAgentPanel() {
       {available === null ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Načítám agentní nálezy…', 'Loading agent findings…')}</span>
         : !available ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Agent v tomto prostředí není dostupný. Měřená evidence výše zůstává úplná a beze změny.', 'The agent is unavailable in this environment. Measured evidence above remains complete and unchanged.')}</span>
           : findings.length === 0 ? <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('Žádné aktivní nálezy. To není důkaz bezchybnosti; jen aktuální výstup agentova omezeného charteru.', 'No active findings. This is not proof of correctness; only the current output of the agent’s bounded charter.')}</span>
-            : <div style={{ display: 'grid', gap: 8 }}>{visibleFindings.map(finding => <div key={finding.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, alignItems: 'center', fontSize: 12 }}><span style={{ color: finding.severity === 'CRITICAL' ? '#dc2626' : '#d97706', fontWeight: 700 }}>{finding.severity}</span><span><strong>{finding.component}</strong> · {finding.title}{finding.rootCause && <small style={{ display: 'block', color: 'var(--text-tertiary)', marginTop: 3 }}>{finding.rootCause}</small>}</span>{finding.proposalUrl && <a href={finding.proposalUrl} target="_blank" rel="noreferrer" aria-label={t('Otevřít návrh agenta', 'Open agent proposal')}><ExternalLink size={14}/></a>}</div>)}{findings.length > FINDINGS_DISPLAY_LIMIT && <span role="status" style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t(`Zobrazeno ${visibleFindings.length} z ${findings.length} nálezů.`, `Showing ${visibleFindings.length} of ${findings.length} findings.`)}</span>}</div>}
+            : <div style={{ display: 'grid', gap: 8 }}>{visibleFindings.map(finding => <div key={finding.id} className={styles.finding}><span style={{ color: finding.severity === 'CRITICAL' ? 'var(--danger-text)' : 'var(--warning-text)', fontWeight: 700 }}>{finding.severity}</span><span className={styles.findingDetail}><strong>{finding.component}</strong> · {finding.title}{finding.rootCause && <small style={{ display: 'block', color: 'var(--text-tertiary)', marginTop: 3 }}>{finding.rootCause}</small>}</span>{finding.proposalUrl && <a className={styles.findingAction} href={finding.proposalUrl} target="_blank" rel="noreferrer" aria-label={t('Otevřít návrh agenta', 'Open agent proposal')}><ExternalLink size={14}/></a>}</div>)}{findings.length > FINDINGS_DISPLAY_LIMIT && <span role="status" style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t(`Zobrazeno ${visibleFindings.length} z ${findings.length} nálezů.`, `Showing ${visibleFindings.length} of ${findings.length} findings.`)}</span>}</div>}
     </div>
   </section>
 }

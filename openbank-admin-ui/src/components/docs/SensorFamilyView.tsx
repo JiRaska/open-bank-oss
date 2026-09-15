@@ -18,6 +18,7 @@ import {
 } from '@/lib/docs/sensors'
 import { STATUS_META, type Status } from '@/lib/docs/status'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import styles from './SensorFamilyView.module.css'
 
 const PLATFORM_LABEL: Record<Platform, { label: string; Icon: React.ElementType }> = {
   ios: { label: 'iOS', Icon: Apple },
@@ -39,11 +40,11 @@ function StatusPill({ status, lang }: { status: Status; lang: 'cs' | 'en' }) {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 170px) 1fr', gap: 12, padding: '7px 0', borderTop: '1px solid var(--border)' }}>
+    <div className={styles.field}>
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text-tertiary)' }}>
         {label}
       </div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{children}</div>
+      <div className={styles.value} style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{children}</div>
     </div>
   )
 }

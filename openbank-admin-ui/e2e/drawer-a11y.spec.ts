@@ -38,6 +38,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('onboarding drawer is modal, keyboard-dismissable and restores row focus', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   await page.route('**/api/svc/onboarding-service/api/v1/onboarding/funnel', route =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ACTIVE: 1 }) }))
   await page.route('**/api/svc/onboarding-service/api/v1/onboarding/records?**', route =>
@@ -54,6 +55,7 @@ test('onboarding drawer is modal, keyboard-dismissable and restores row focus', 
   const dialog = page.getByRole('dialog', { name: /Onboarding details for Ada Banking|Detail onboardingu Ada Banking/ })
   await expect(dialog).toBeVisible()
   await expect(dialog).toHaveAttribute('aria-modal', 'true')
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await expect(page.getByRole('button', { name: /Close onboarding details|Zavřít detail onboardingu/ })).toBeFocused()
 
   await page.keyboard.press('Escape')
