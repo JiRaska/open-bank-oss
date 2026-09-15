@@ -21,6 +21,11 @@ export interface NetworkCoverageGap {
   service: string
 }
 
+export interface EgressTarget {
+  target: string
+  ports: number[]
+}
+
 export interface SecurityPosture {
   schema: string
   source: string
@@ -34,7 +39,7 @@ export interface SecurityPosture {
     available: boolean
     defaultDeny?: boolean
     coverage?: { total: number; covered: number; gaps: NetworkCoverageGap[] }
-    egressTargets?: { target: string; ports: number[] }[]
+    egressTargets?: EgressTarget[]
     ingressRules?: { policy: string | null; namespace?: string; ports: number[] }[]
     internetEgress?: 'opt-in' | 'open'
     egressRestrictedApps?: string[]
@@ -49,6 +54,20 @@ export interface SecurityPosture {
     enforced?: boolean
   }
   available: boolean
+}
+
+/** Collapse policy-level duplicates into the effective destination shown to operators. */
+export function consolidateEgressTargets(targets: EgressTarget[]): EgressTarget[] {
+  const portsByTarget = new Map<string, Set<number>>()
+  for (const entry of targets) {
+    const ports = portsByTarget.get(entry.target) ?? new Set<number>()
+    entry.ports.forEach(port => ports.add(port))
+    portsByTarget.set(entry.target, ports)
+  }
+  return Array.from(portsByTarget, ([target, ports]) => ({
+    target,
+    ports: Array.from(ports).sort((left, right) => left - right),
+  }))
 }
 
 function postureFile(): string {

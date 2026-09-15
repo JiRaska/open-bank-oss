@@ -10,6 +10,10 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`Zero-Trust map explains the deployed posture accessibly (${theme})`, async ({ page }) => {
+    const duplicateKeyErrors: string[] = []
+    page.on('console', message => {
+      if (message.type() === 'error' && message.text().includes('same key')) duplicateKeyErrors.push(message.text())
+    })
     await page.addInitScript(selectedTheme => window.localStorage.setItem('openbank-theme', selectedTheme), theme)
     await page.goto('/docs/zero-trust')
     await expect(page.getByRole('heading', { level: 1, name: /Zero-Trust Security Map|Zero-Trust bezpečnostní mapa/i })).toBeVisible()
@@ -22,5 +26,6 @@ for (const theme of ['light', 'dark'] as const) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze()
     expect(scan.violations).toEqual([])
+    expect(duplicateKeyErrors).toEqual([])
   })
 }

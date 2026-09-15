@@ -15,7 +15,7 @@ import {
   ChevronLeft, ShieldCheck, Lock, KeyRound, Network, ScanLine, Database,
   AlertTriangle, Ban, CheckCircle2, Globe,
 } from 'lucide-react'
-import { loadSecurityPosture } from '@/lib/governance/security'
+import { consolidateEgressTargets, loadSecurityPosture } from '@/lib/governance/security'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
@@ -143,7 +143,9 @@ export default async function ZeroTrustPage() {
         </span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
-        {(net?.egressTargets ?? []).filter(e => !e.target.startsWith('internet:')).map(e => (
+        {consolidateEgressTargets(
+          (net?.egressTargets ?? []).filter(entry => !entry.target.startsWith('internet:')),
+        ).map(e => (
           <span key={e.target} style={{
             fontSize: '11px', fontFamily: 'JetBrains Mono, monospace',
             padding: '2px 7px', borderRadius: '6px',
