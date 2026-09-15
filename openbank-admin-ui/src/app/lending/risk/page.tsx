@@ -28,7 +28,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { EntityChip } from '@/components/entities/EntityChip'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { LoadingState, PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { Tone } from '@/components/ui/tone'
 import {
   type Decision, type LoanRisk, type OutcomeSummary, type Policy,
@@ -188,8 +189,23 @@ function CreditRiskConsole() {
       />
 
       {unavailable.length > 0 && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger-text)', fontSize: 13 }}>
-          {t('lending-service neodpověděl na:', 'lending-service did not answer:')} {unavailable.join(', ')}
+        <div className="card" style={{ marginBottom: 16, borderLeft: '3px solid var(--danger)' }}>
+          <DataUnavailable
+            kind="error"
+            service="lending-service"
+            feature={t('část evidence kreditního rizika', 'part of the credit-risk evidence')}
+            lang={language}
+            dense
+            title={t('lending-service neodpověděl pro část risk evidence', 'lending-service did not answer for part of the risk evidence')}
+            detail={t(
+              `Dostupné části zůstávají zobrazené. Nenačtené zdroje: ${unavailable.join(', ')}. Nevyvozujte z jejich prázdných hodnot nulové riziko.`,
+              `Available sections remain visible. Sources not loaded: ${unavailable.join(', ')}. Do not interpret their empty values as zero risk.`,
+            )}
+          >
+            <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+              <RefreshCw size={14} aria-hidden="true" /> {t('Načíst chybějící evidenci znovu', 'Retry missing evidence')}
+            </button>
+          </DataUnavailable>
         </div>
       )}
 
@@ -262,6 +278,7 @@ function CreditRiskConsole() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Engine versus člověk', 'Engine versus human')}>
               <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Engine × konečný stav', 'Engine × final disposition')}</h3>
+              <TableViewport label={t('Engine versus konečné lidské rozhodnutí', 'Engine versus final human disposition')} hint={t('Posuňte tabulku vodorovně pro všechny konečné stavy a počet přebití.', 'Scroll horizontally for every final state and override count.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="override-matrix">
                 <thead><tr style={{ background: 'var(--surface-2)' }}>
                   <th style={th}>{t('Engine', 'Engine')}</th><th style={th}>{t('Schváleno', 'Approved')}</th><th style={th}>{t('Zamítnuto', 'Declined')}</th><th style={th}>{t('Zaniklo', 'Lapsed')}</th><th style={th}>{t('V běhu', 'In flight')}</th><th style={th}>{t('Přebito', 'Overridden')}</th>
@@ -274,9 +291,11 @@ function CreditRiskConsole() {
                   </tr>
                 ))}</tbody>
               </table>
+              </TableViewport>
             </section>
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Podle jurisdikce a pásma', 'By jurisdiction and band')}>
               <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Jurisdikce a cenová pásma', 'Jurisdictions and price bands')}</h3>
+              <TableViewport label={t('Výsledky risk enginu podle jurisdikce', 'Risk-engine outcomes by jurisdiction')} hint={t('Posuňte tabulku vodorovně pro všechny výsledky a celkový počet.', 'Scroll horizontally for every outcome and total count.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: 'var(--surface-2)' }}>
                   <th style={th}>{t('Jurisdikce', 'Jurisdiction')}</th><th style={th}>APPROVE</th><th style={th}>REFER</th><th style={th}>DECLINE</th><th style={th}>{t('Celkem', 'Total')}</th>
@@ -287,6 +306,7 @@ function CreditRiskConsole() {
                   </tr>
                 ))}</tbody>
               </table>
+              </TableViewport>
               <div style={{ padding: 14, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12 }}>
                 {bands.length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>{t('Žádné schválené pásmo', 'No approved band yet')}</span>}
                 {bands.map(b => <span key={b.band}><StatusBadge status={b.band} tone="accent" /> {b.count.toLocaleString(numberLocale)}</span>)}
@@ -295,7 +315,7 @@ function CreditRiskConsole() {
           </div>
           <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Poslední rozhodnutí', 'Latest decisions')}>
             <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t(`Poslední rozhodnutí (${visible.length} z max. ${DECISION_LIMIT})`, `Latest decisions (${visible.length} of at most ${DECISION_LIMIT})`)}</h3>
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport label={t('Nejnovější rozhodnutí kreditního rizika', 'Latest credit-risk decisions')} hint={t('Posuňte tabulku vodorovně pro bonitu, výsledek, důvody, stav a odkaz na evidenci.', 'Scroll horizontally for affordability, outcome, reasons, state and evidence link.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: 'var(--surface-2)' }}>
                   <th style={th}>{t('Klient', 'Party')}</th><th style={th}>{t('Částka', 'Amount')}</th><th style={th}>DSTI</th><th style={th}>DTI</th><th style={th}>{t('Engine', 'Engine')}</th><th style={th}>{t('Pásmo', 'Band')}</th><th style={th}>{t('Důvody', 'Reasons')}</th><th style={th}>{t('Stav', 'Status')}</th><th style={th}>{t('Vyhodnoceno', 'Evaluated')}</th><th style={th} />
@@ -315,10 +335,10 @@ function CreditRiskConsole() {
                       <td style={td}><Link href={`/lending/applications/${d.applicationId}`} style={{ color: 'var(--accent)', fontSize: 12 }}>{t('Evidence', 'Evidence')} ›</Link></td>
                     </tr>
                   ))}
-                  {!loading && visible.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>{t('Engine zatím nic nevyhodnotil', 'The engine has evaluated nothing yet')}</td></tr>}
+                  {!loading && decisions?.ok && visible.length === 0 && <tr><td colSpan={10} style={{ padding: 0 }}><DataUnavailable kind="no_data" feature={t('rozhodnutí kreditního rizika', 'credit-risk decisions')} lang={language} dense detail={jurisdiction ? t(`Žádné načtené rozhodnutí neodpovídá jurisdikci ${jurisdiction}.`, `No loaded decision matches jurisdiction ${jurisdiction}.`) : t('Zdroj odpověděl úspěšně, ale engine zatím nevytvořil žádné rozhodnutí.', 'The source answered successfully, but the engine has not created a decision yet.')} /></td></tr>}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
           </section>
         </div>
       )}
@@ -326,12 +346,16 @@ function CreditRiskConsole() {
       {tab === 'policy' && (
         policy?.data
           ? <PolicyTables policy={policy.data} hits={hits} sample={visible.length} />
-          : <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{t('Politika nenačtena', 'Policy not loaded')}</div>
+          : loading && policy === null
+            ? <LoadingState label={t('Načítám kreditní politiku', 'Loading credit policy')} description={t('Ověřuji pravidla, verzi a jejich původ.', 'Checking rules, version and provenance.')} />
+            : <div className="card"><DataUnavailable kind="error" service="lending-service" feature={t('kreditní politika', 'credit policy')} lang={language} dense><button type="button" className="btn btn-secondary" onClick={load} disabled={loading}>{t('Zkusit znovu', 'Retry')}</button></DataUnavailable></div>
       )}
 
       {tab === 'portfolio' && (
         <div style={{ display: 'grid', gap: 16 }}>
-          {mixes.length === 0 && <div className="card" style={{ padding: 20, color: 'var(--text-tertiary)', fontSize: 13 }}>{portfolio?.ok ? t('Prázdná kniha', 'Empty book') : t('Portfolio nenačteno', 'Portfolio not loaded')}</div>}
+          {mixes.length === 0 && (loading && portfolio === null
+            ? <LoadingState label={t('Načítám IFRS 9 portfolio', 'Loading IFRS 9 portfolio')} description={t('Sestavuji expozici, staging a ECL evidenci.', 'Assembling exposure, staging and ECL evidence.')} />
+            : <div className="card"><DataUnavailable kind={portfolio?.ok ? 'no_data' : 'error'} service="lending-service" feature={t('IFRS 9 portfolio', 'IFRS 9 portfolio')} lang={language} dense detail={portfolio?.ok ? t('Zdroj odpověděl úspěšně, ale úvěrová kniha je zatím prázdná.', 'The source answered successfully, but the loan book is empty.') : undefined}>{!portfolio?.ok && <button type="button" className="btn btn-secondary" onClick={load} disabled={loading}>{t('Zkusit znovu', 'Retry')}</button>}</DataUnavailable></div>)}
           {mixes.map(mix => (
             <div key={mix.currency} style={{ display: 'grid', gap: 16 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
@@ -345,6 +369,7 @@ function CreditRiskConsole() {
                 </section>
                 <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('ECL po stage', 'ECL by stage')}>
                   <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('ECL a krytí po stage', 'ECL and coverage by stage')}</h3>
+                  <TableViewport label={t(`ECL a krytí podle stage v ${mix.currency}`, `ECL and coverage by stage in ${mix.currency}`)} hint={t('Posuňte tabulku vodorovně pro expozici, ECL a krytí.', 'Scroll horizontally for exposure, ECL and coverage.')}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="stage-table">
                     <thead><tr style={{ background: 'var(--surface-2)' }}><th style={th}>Stage</th><th style={th}>{t('Úvěry', 'Loans')}</th><th style={th}>{t('Expozice', 'Outstanding')}</th><th style={th}>ECL</th><th style={th}>{t('Krytí', 'Coverage')}</th></tr></thead>
                     <tbody>{mix.stages.map(s => (
@@ -354,6 +379,7 @@ function CreditRiskConsole() {
                       </tr>
                     ))}</tbody>
                   </table>
+                  </TableViewport>
                   <div style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>
                     {t('PD/LGD model:', 'PD/LGD model:')} <code>{mix.modelVersions.join(', ') || UNKNOWN}</code> · {t(`${mix.unassessed} úvěrů bez posouzení`, `${mix.unassessed} loans not assessed`)}
                   </div>
@@ -364,6 +390,7 @@ function CreditRiskConsole() {
           {vintages.length > 0 && (
             <section className="card" style={{ padding: 0, overflow: 'hidden' }} aria-label={t('Vintage', 'Vintage')}>
               <h3 style={{ fontSize: 13, margin: 0, padding: 14 }}>{t('Vintage: měsíc čerpání × aktuální stage', 'Vintage: disbursement month × current stage')}</h3>
+              <TableViewport label={t('Vintage úvěrů podle měsíce čerpání a stage', 'Loan vintage by disbursement month and stage')} hint={t('Posuňte tabulku vodorovně pro všechny stage a neposouzené úvěry.', 'Scroll horizontally for every stage and unassessed loans.')}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="vintage-table">
                 <thead><tr style={{ background: 'var(--surface-2)' }}><th style={th}>{t('Měsíc', 'Month')}</th><th style={th}>{t('Úvěry', 'Loans')}</th><th style={th}>Stage 1</th><th style={th}>Stage 2</th><th style={th}>Stage 3</th><th style={th}>{t('Neposouzeno', 'Unassessed')}</th></tr></thead>
                 <tbody>{vintages.map(v => (
@@ -376,6 +403,7 @@ function CreditRiskConsole() {
                   </tr>
                 ))}</tbody>
               </table>
+              </TableViewport>
             </section>
           )}
         </div>
