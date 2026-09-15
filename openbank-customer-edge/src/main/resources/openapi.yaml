@@ -13,8 +13,28 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # Additive recertification review and evidence routes.
-  version: 1.67.0
+  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
+  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
+  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
+  # (1.57.0) in the same turn as this edit and confirmed free with
+  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
+  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
+  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
+  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
+  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
+  # takes the next free version (ADR-0048).
+  # 1.62.0 -> 1.65.0: additive — Lístky (/loyalty, /loyalty/benefits, /loyalty/earn-sources,
+  # /loyalty/redemptions, /loyalty/grants) and member-get-member (/referrals/program,
+  # /referrals/invites GET+POST, /referrals/attributions). NOT 1.63.0/1.64.0: claimed by open PRs
+  # #9417/#9237 against this file (and 1.59.0 by #9215). The 503 LOYALTY_UNAVAILABLE on the
+  # /loyalty routes is part of the same unreleased additive bump (main is still 1.62.0).
+  # 1.65.0 -> 1.66.0 (#9215): additive — recertification review and evidence routes.
+  # 1.66.0 -> 1.67.0 (#10059): additive — 422 INITIATOR_IDENTITY_MISMATCH on the KYB initiator route.
+  # 1.67.0 -> 1.68.0 (#10016): additive — GET /capabilities (ADR-0310 D5). This branch held 1.66.0 and
+  # then 1.67.0, taken by #9215 and #10059 while it sat open. Read off live origin/main (1.67.0) and
+  # confirmed free with `git log -S 'version: 1.68.0' --all -- <this file>` (no hits) and no open PR
+  # claiming it.
+  version: 1.68.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -4022,6 +4042,31 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /capabilities:
+    get:
+      tags: [Capabilities]
+      summary: Which app capabilities this environment offers
+      description: >-
+        ADR-0310 D5. Not marketing and not party-specific: identical for every authenticated caller
+        and computed from edge configuration only, never from a live health probe, so the app moves a
+        feature from demo to live without a release. A capability is live only when its backend is
+        wired AND an operator switched it on. Clients MUST ignore capability ids they do not know and
+        treat any state other than `live` as unavailable. Cacheable (Cache-Control: private,
+        max-age=300).
+      operationId: getCapabilities
+      security:
+        - customerOidc: []
+      responses:
+        '200':
+          description: Every capability this edge knows, with its state
+          headers:
+            Cache-Control:
+              schema: {type: string, example: 'private, max-age=300'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilitiesResponse'}
+        '401': {description: Unauthenticated}
+
   /loyalty:
     get:
       tags: [Loyalty]
@@ -4296,6 +4341,36 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    CapabilityId:
+      type: string
+      description: >-
+        Closed set of capability ids (ADR-0310 D5). Adding an id is a MINOR change; a client ignores
+        an id it does not know.
+      enum: [loyalty, referrals, offers, accept.settlement, allmoney.linked, business.tax, approvals.multisig, rewards.points]
+    Capability:
+      type: object
+      required: [id, state]
+      properties:
+        id: {$ref: '#/components/schemas/CapabilityId'}
+        state:
+          type: string
+          enum: [live, unavailable]
+        reason:
+          type: string
+          description: >-
+            Present only when state is unavailable. NOT_BUILT — no backend exists; NOT_DEPLOYED — the
+            backend is not wired to this edge in this environment; DISABLED — an operator switched it off.
+          enum: [NOT_BUILT, NOT_DEPLOYED, DISABLED]
+    CapabilitiesResponse:
+      type: object
+      required: [schemaVersion, capabilities]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        capabilities:
+          type: array
+          items: {$ref: '#/components/schemas/Capability'}
     LoyaltySummary:
       type: object
       required: [balance, earnedThisYear, history]
