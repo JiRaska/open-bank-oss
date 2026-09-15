@@ -10,7 +10,7 @@ import { Users, Plus, Search, RefreshCw, ChevronRight, ChevronDown } from 'lucid
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { parsePartyListPage, type PartyListItem, type PartyListPage } from '@/lib/party/partyListContract'
 
@@ -257,6 +257,10 @@ export default function PartiesPage() {
 
       {!displayUnavail && (
         <div className="card" style={{ overflow: 'hidden' }}>
+          <TableViewport
+            label={t('Posuvná tabulka subjektů', 'Scrollable parties table')}
+            hint={t('Posuňte tabulku vodorovně pro všechny údaje.', 'Scroll horizontally to see every column.')}
+          >
           <table className="data-table">
             <thead>
               <tr>
@@ -308,6 +312,7 @@ export default function PartiesPage() {
               ))}
             </tbody>
           </table>
+          </TableViewport>
 
           {/* Cursor-page Load more (ADR-0055) */}
           {inSearchMode && searchPagi?.hasNextPage && !loadingMore && (

@@ -13,7 +13,7 @@ import { RefreshCw, ShieldAlert, CircleAlert, Clock3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
 
 function scoreTone(score: number): Tone {
@@ -96,6 +96,10 @@ export default function FraudPage() {
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {unavailable && !hasSnapshot ? <DataUnavailable kind={unavailable.kind} service="fraud-service" feature={t('Fraud review fronta', 'Fraud review queue')} lang={language} dense /> : (
+        <TableViewport
+          label={t('Posuvná tabulka fraud review fronty', 'Scrollable fraud review queue table')}
+          hint={t('Posuňte tabulku vodorovně pro všechny rizikové signály.', 'Scroll horizontally to see every risk signal.')}
+        >
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -138,6 +142,7 @@ export default function FraudPage() {
             )}
           </tbody>
         </table>
+        </TableViewport>
         )}
       </div>
     </div>

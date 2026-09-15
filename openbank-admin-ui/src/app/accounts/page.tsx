@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
-import { LoadMoreControl, PageHeader, StatusBadge } from '@/components/ui'
+import { LoadMoreControl, PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
@@ -345,7 +345,11 @@ export default function AccountsPage() {
 
         {/* Table */}
         {!unavailable && (
-          <div id="accounts-results" style={{ overflowX: 'auto' }}>
+          <TableViewport
+            id="accounts-results"
+            label={t('Posuvná tabulka účtů', 'Scrollable accounts table')}
+            hint={t('Posuňte tabulku vodorovně pro všechny údaje.', 'Scroll horizontally to see every column.')}
+          >
             <table className="data-table">
               <thead>
                 <tr>
@@ -393,7 +397,7 @@ export default function AccountsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableViewport>
         )}
 
         {!unavailable && result && page.length > 0 && (

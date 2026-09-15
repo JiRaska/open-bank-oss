@@ -10,7 +10,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 import { parseKycCaseEvidence, parseKycCasePageEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
@@ -213,6 +213,10 @@ export default function KycPage() {
       )}
 
       <div className="card" aria-busy={loading} style={{ overflow: 'hidden' }}>
+        <TableViewport
+          label={t('Posuvná tabulka KYC případů', 'Scrollable KYC cases table')}
+          hint={t('Posuňte tabulku vodorovně pro všechny údaje.', 'Scroll horizontally to see every column.')}
+        >
         <table className="data-table">
           <thead>
             <tr>
@@ -269,6 +273,7 @@ export default function KycPage() {
             ))}
           </tbody>
         </table>
+        </TableViewport>
         {/*
           Only the collection route is paginated — the party-scoped one answers a single case, so
           `pagination` is null there and no pager renders.

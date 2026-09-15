@@ -30,7 +30,7 @@ import { RefreshCw, TrendingUp, Layers, Wallet, AlertTriangle, Clock } from 'luc
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
 import { STATE_LABELS } from '@/components/lending/OriginationFlow'
 import { OriginationPipeline, type PipelineItem } from '@/components/lending/OriginationPipeline'
 
@@ -325,6 +325,10 @@ export default function LendingPage() {
       </div>
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <TableViewport
+          label={t('Posuvná tabulka úvěrových žádostí a portfolia', 'Scrollable lending applications and portfolio table')}
+          hint={t('Posuňte tabulku vodorovně pro celý úvěrový kontext.', 'Scroll horizontally to see the complete lending context.')}
+        >
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -376,6 +380,7 @@ export default function LendingPage() {
             )}
           </tbody>
         </table>
+        </TableViewport>
       </div>
     </div>
   )
