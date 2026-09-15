@@ -28,6 +28,8 @@ class SettlementWorkflowImpl : SettlementWorkflow {
         .build()
 
     companion object {
+        private const val BALANCE_OUTCOME_CHANGE_ID = "settlement-balance-outcome-guard"
+        private const val BALANCE_OUTCOME_VERSION = 1
         private const val MAX_ATTEMPTS = 5
         private const val INITIAL_INTERVAL_SECONDS = 5L
         private const val BACKOFF_COEFFICIENT = 2.0
@@ -100,6 +102,12 @@ class SettlementWorkflowImpl : SettlementWorkflow {
     @Suppress("TooGenericExceptionCaught")
     override fun settle(settlementId: UUID): SettlementStatus {
         val compensations = ArrayDeque<Compensation>()
+        val guardBalanceOutcome = Workflow.getVersion(
+            BALANCE_OUTCOME_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            BALANCE_OUTCOME_VERSION,
+        ) != Workflow.DEFAULT_VERSION
+        var balanceMovementInFlight = true
 
         return try {
             activities.debitPayer(settlementId)
@@ -111,6 +119,8 @@ class SettlementWorkflowImpl : SettlementWorkflow {
             compensations.addFirst(
                 Compensation({ SettlementStatus.REVERSAL_FAILED }) { activities.reverseCredit(settlementId) },
             )
+
+            balanceMovementInFlight = false
 
             // Registered BEFORE the activity runs, and this ordering is the whole fix for #6410.
             //
@@ -143,6 +153,13 @@ class SettlementWorkflowImpl : SettlementWorkflow {
             SettlementStatus.BOOKED
         } catch (ex: ActivityFailure) {
             val log = Workflow.getLogger(SettlementWorkflowImpl::class.java)
+            if (guardBalanceOutcome && balanceMovementInFlight) {
+                // A failed activity can have committed its remote movement before losing the reply
+                // or failing its local status write. Until the original movement is reconciled,
+                // neither a blind counter-movement nor REJECTED is a safe outcome.
+                activities.recordBalanceStateUnknown(settlementId)
+                return SettlementStatus.BALANCE_STATE_UNKNOWN
+            }
             log.warn("Settlement $settlementId failed; running ${compensations.size} compensation(s)", ex)
 
             unwind(settlementId, compensations)?.let { status ->

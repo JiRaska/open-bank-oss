@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+
+gradle.projectsEvaluated {
+    def destination = System.getenv('OPENBANK_DEPENDENCY_PLAN_DIRECTORY')
+    if (!destination) throw new GradleException('OPENBANK_DEPENDENCY_PLAN_DIRECTORY is required')
+    def directory = gradle.rootProject.projectDir.canonicalPath
+    def projects = gradle.rootProject.allprojects.collect { it.path }.sort()
+    def included = gradle.includedBuilds.collect { [name: it.name, directory: it.projectDir.canonicalPath] }
+    def key = MessageDigest.getInstance('SHA-256').digest(directory.bytes).encodeHex().toString()
+    gradle.rootProject.tasks.register('openbankDependencyResolutionPlan') {
+        dependsOn(gradle.includedBuilds.collect { it.task(':openbankDependencyResolutionPlan') })
+        doLast {
+            def output = new File(destination, key + '.json')
+            output.parentFile.mkdirs()
+            output.text = JsonOutput.toJson([directory: directory, projects: projects, included: included])
+        }
+    }
+}

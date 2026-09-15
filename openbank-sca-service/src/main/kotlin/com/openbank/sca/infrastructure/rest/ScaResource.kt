@@ -4,6 +4,7 @@
 
 package com.openbank.sca.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
@@ -21,11 +22,14 @@ import com.openbank.sca.application.port.`in`.ListDevicesQuery
 import com.openbank.sca.application.port.`in`.ListDevicesUseCase
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.RevokeDeviceCommand
+import com.openbank.sca.application.port.`in`.RevokeDeviceUseCase
 import com.openbank.sca.application.port.`in`.VerifyScaCommand
 import com.openbank.sca.application.port.`in`.VerifyScaUseCase
 import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
 import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
+import com.openbank.sca.application.usecase.DeviceRevokedException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
 import com.openbank.sca.application.usecase.ScaChallengeAlreadyConsumedException
 import com.openbank.sca.application.usecase.ScaChallengeExpiredException
@@ -49,6 +53,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -60,7 +65,10 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.time.Instant
+import java.util.HexFormat
 import java.util.UUID
 
 data class InitiateScaRequest(
@@ -78,7 +86,20 @@ data class EnrollDeviceRequest(
     /** Base64 X.509 SubjectPublicKeyInfo of the device public key. */
     val publicKey: String,
     val algorithm: SignatureAlgorithm,
-)
+) {
+    /** Bind the authorization to every credential field without exposing the key in the queue. */
+    @get:JsonIgnore
+    val approvalFingerprint: String
+        get() {
+            val digest = MessageDigest.getInstance("SHA-256")
+            for (value in listOf(credentialId, publicKey, algorithm.name)) {
+                val bytes = value.toByteArray(Charsets.UTF_8)
+                digest.update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+            return HexFormat.of().formatHex(digest.digest())
+        }
+}
 
 data class EnrolledDeviceResponse(
     val id: UUID,
@@ -86,10 +107,17 @@ data class EnrolledDeviceResponse(
     val credentialId: String,
     val algorithm: SignatureAlgorithm,
     val enrolledAt: String,
+    val revokedAt: String? = null,
 ) {
     companion object {
-        fun from(d: EnrolledDevice) =
-            EnrolledDeviceResponse(d.id, d.partyId, d.credentialId, d.algorithm, d.createdAt.toString())
+        fun from(d: EnrolledDevice) = EnrolledDeviceResponse(
+            d.id,
+            d.partyId,
+            d.credentialId,
+            d.algorithm,
+            d.createdAt.toString(),
+            d.revokedAt?.toString(),
+        )
     }
 }
 
@@ -191,6 +219,7 @@ class ScaResource(
     private val getSca: GetScaUseCase,
     private val enrollDevice: EnrollDeviceUseCase,
     private val listDevices: ListDevicesUseCase,
+    private val revokeDevice: RevokeDeviceUseCase,
     private val recordDecision: RecordDeviceDecisionUseCase,
     private val consumeSca: ConsumeScaUseCase,
     private val idempotencyStore: IdempotencyStore,
@@ -268,8 +297,10 @@ class ScaResource(
     @Path("/parties/{partyId}/challenges/pending")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.read", resource = "#partyId")
-    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
-        getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> {
+        identity.requirePartyOwnership(partyId)
+        return getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    }
 
     /**
      * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
@@ -281,12 +312,7 @@ class ScaResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.list", resource = "#partyId")
     suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot list devices for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         return listDevices.listDevices(ListDevicesQuery(partyId)).map { EnrolledDeviceResponse.from(it) }
     }
 
@@ -298,20 +324,9 @@ class ScaResource(
     @POST
     @Path("/parties/{partyId}/devices")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
-    @Authorize(action = "device.enroll", resource = "#partyId")
+    @Authorize(action = "device.enroll", resource = "#partyId@#request.approvalFingerprint")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
-        // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
-        // the authenticated principal may only enroll devices for their OWN partyId.
-        // When the customer realm (ADR-0065) issues JWTs, the 'sub' claim carries the partyId;
-        // in the operator realm 'sub' is the operator user id — operators with ROLE_OPERATOR
-        // may enroll on behalf of a party (service-desk credential reset path, future scope).
-        // For now: reject if sub == UUID && sub != partyId (i.e. the caller is a party, not an operator).
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot enroll device for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         val device = enrollDevice.enroll(
             EnrollDeviceCommand(
                 partyId = partyId,
@@ -321,6 +336,16 @@ class ScaResource(
             ),
         )
         return Response.status(201).entity(EnrolledDeviceResponse.from(device)).build()
+    }
+
+    @DELETE
+    @Path("/parties/{partyId}/devices/{deviceId}")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @Authorize(action = "device.revoke", resource = "#partyId@#deviceId")
+    suspend fun revoke(@PathParam("partyId") partyId: UUID, @PathParam("deviceId") deviceId: UUID): Response {
+        identity.requirePartyOwnership(partyId)
+        revokeDevice.revoke(RevokeDeviceCommand(partyId, deviceId, identity.principal.name))
+        return Response.noContent().build()
     }
 
     /**
@@ -449,6 +474,12 @@ class DeviceCredentialConflictMapper : ExceptionMapper<CredentialAlreadyEnrolled
 }
 
 @Provider
+class DeviceRevokedMapper : ExceptionMapper<DeviceRevokedException> {
+    override fun toResponse(e: DeviceRevokedException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(err(ErrorCode.FORBIDDEN, e.message!!)).build()
+}
+
+@Provider
 class DeviceOwnershipMismatchMapper : ExceptionMapper<DeviceOwnershipMismatchException> {
     override fun toResponse(e: DeviceOwnershipMismatchException): Response =
         Response.status(403).entity(err(ErrorCode.FORBIDDEN, e.message ?: "Device ownership mismatch")).build()
@@ -485,4 +516,16 @@ class ScaPartyMismatchMapper : ExceptionMapper<ScaChallengePartyMismatchExceptio
 class ScaDynamicLinkingMismatchMapper : ExceptionMapper<ScaDynamicLinkingMismatchException> {
     override fun toResponse(e: ScaDynamicLinkingMismatchException): Response = Response.status(Response.Status.CONFLICT)
         .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Dynamic linking mismatch")).build()
+}
+
+/** Customer self-service requires a resolved party; service identities remain subject to OPA. */
+private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
+    if (hasRole("ROLE_OPERATOR") || hasRole("ROLE_ADMIN")) return
+    val principalPartyId = principal?.name?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    if (hasRole("ROLE_CUSTOMER") && principalPartyId == null) {
+        throw ForbiddenException("Customer party identity is required")
+    }
+    if (principalPartyId != null && principalPartyId != partyId) {
+        throw ForbiddenException("Cannot access another party's SCA data")
+    }
 }

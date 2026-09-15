@@ -103,3 +103,21 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.sca.domain.*Kt")
 }
+
+// The complete suite boots several Quarkus profiles; the default 512m fork exhausted its heap
+// during the trace-contract IT. Match the existing balance/account test budget, scoped here.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+    val keycloakDockerfile = rootProject.file("openbank-infra/docker/keycloak/Dockerfile")
+    inputs.file(keycloakDockerfile).withPropertyName("scaKeycloakImage").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.keycloak-dockerfile", keycloakDockerfile.absolutePath)
+    val approvalContract = rootProject.file("openbank-contracts/openbank-sca-service/asyncapi.yaml")
+    inputs.file(approvalContract).withPropertyName("scaApprovalContract").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.sca-contract", approvalContract.absolutePath)
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/sca/sca-opa-bundle.yaml")
+    val scaDeployment = rootProject.file("openbank-infra/gitops/components/sca/sca-service.yaml")
+    inputs.file(opaBundle).withPropertyName("scaOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(scaDeployment).withPropertyName("scaDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.sca-deployment", scaDeployment.absolutePath)
+}

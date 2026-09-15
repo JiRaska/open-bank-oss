@@ -104,15 +104,9 @@ jobs:
     permissions:
       contents: write # required by the dependency-submission API
     env:
-      # Same OOM guard as fleet-lint.yml / security.yml CodeQL job: a full-fleet dependency
-      # resolution (~30 modules + the quarkus-bom) needs more than Gradle's 3 GiB default heap.
-      # 4g stopped being enough as the fleet grew: every run since 2026-07-14 failed with
-      # "Java heap space" (`assemble testClasses` OOMs before the graph is written), so the
-      # dependency graph GitHub uses for Dependabot alerts/SBOM has been silently stale since
-      # then — no graph file to submit, but the job still exits without visibly failing that
-      # step (issue #909's residual-alert investigation traced back here). security.yml's
-      # CodeQL java-kotlin leg resolves the same whole-fleet graph on the same ubuntu-latest
-      # runner at -Xmx6g without OOMing — match that proven headroom here.
+      # Keep the established heap cap. The resolver starts a fresh JVM for each
+      # bounded project batch; a whole-fleet JVM retains resolved configurations
+      # until shutdown and can exhaust this heap even without compiling code.
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
@@ -165,6 +159,8 @@ jobs:
           # unaffected.
           cache-read-only: true
           dependency-graph: generate-and-submit
+          # Fresh per-job directory, outside restored Gradle/build caches.
+          dependency-graph-report-dir: ${{ runner.temp }}/openbank-complete-dependency-graph
           # COUPLING: setup-gradle injects its own
           # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
           # classpath, and Gradle dependency verification checks it against
@@ -210,12 +206,18 @@ jobs:
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
-      # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
-      # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
-      # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
-      # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
+      - name: Test dependency inventory and snapshot union
+        run: python3 .github/scripts/tests/test_resolve_fleet_dependencies.py
+
+      - name: Verify resolver against real Gradle regression fixtures
+        run: python3 .github/scripts/tests/test_dependency_resolution_gradle.py
+
+      # Resolve every selected runtime/test configuration and verify external artifacts
+      # without compiling service code. Intermediate snapshots stay in a separate
+      # temporary directory; setup-gradle can submit only the final, complete union.
+      # Any failed batch, unresolved module or corrupt artifact prevents publication.
       - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
+        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- python3 .github/scripts/resolve-fleet-dependencies.py
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
@@ -225,9 +227,8 @@ jobs:
   # looked. Dependabot alerts and (since #1421) the PR-time Gradle dependency gate both
   # read that graph, and a stale graph makes the gate green without checking anything.
   #
-  # The heap is a RATCHET with nothing measuring it: 4g was fine until the fleet grew
-  # past it, and 6g will go the same way. This job cannot prevent that — it makes the
-  # next occurrence arrive as an addressed issue instead of three quiet days.
+  # Bounded resolution and heap telemetry reduce the OOM risk; resolution, artifact
+  # verification and upload can still fail. Surface those failures on main promptly.
   #
   # Not gated on `schedule` (unlike fleet-attestation's equivalent): the OOM ran red on
   # main PUSHES, and the schedule is only weekly, so a schedule-only alarm would have
@@ -279,16 +280,15 @@ jobs:
 
           Run: ${RUN_URL}
 
-          **Check the heap first.** The 2026-07-14..07-17 outage was \`Java heap space\` in
-          \`Resolve fleet dependency graph\`: \`-Xmx4g\` stopped fitting as the fleet grew, every
-          run died for three days, and nobody noticed because a red push-triggered workflow on
-          main is addressed to nobody. It is now \`-Xmx6g\`; that is a ratchet, not a fix. If the
-          log says \`Java heap space\`, raise \`GRADLE_OPTS\` in this workflow and match the
-          headroom \`security.yml\`'s CodeQL java-kotlin leg already proves on the same runner.
+          Inspect the failing batch and the heap-headroom report. Resolution uses bounded
+          project batches and verifies runtime and test artifacts without compiling services.
+          A heap failure requires checking batch size and measured runner headroom; increasing
+          the heap without checking total process memory can cause a runner-level OOM.
 
-          Note \`dependency-graph-continue-on-failure: true\` (setup-gradle's default): graph
-          submission is NOT gated on the resolve succeeding, so a partial graph may have been
-          submitted rather than none. Do not assume the previous good graph is still intact.
+          Intermediate graphs stay outside setup-gradle's submission directory. The resolver
+          writes the final snapshot only after every batch and the complete union validate.
+          A resolution failure therefore produces no new snapshot for the action to submit.
+          An upload failure still requires checking whether the API accepted the final graph.
 
           This issue is refreshed on each further failure; close it once a run is green.
           EOF

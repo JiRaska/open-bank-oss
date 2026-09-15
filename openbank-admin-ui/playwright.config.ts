@@ -19,9 +19,11 @@ export default defineConfig({
   // The suite has grown past 200 browser tests. One CI worker made its wall time grow
   // linearly until otherwise-green PR runs were cancelled near the end of the suite.
   // Files are isolated (fresh browser context plus route-local mocks), while tests inside
-  // each file keep Playwright's default serial ordering, so four workers bound wall time
-  // without weakening state isolation or retry evidence.
-  workers: process.env.CI ? 4 : undefined,
+  // each file keep Playwright's default serial ordering. Four browser workers overloaded the
+  // same two-core hosted runner that compiles cold Next routes: unrelated page.goto calls timed
+  // out, browser sessions closed and one trace ZIP was truncated. Two workers retain bounded
+  // parallelism without starving the dev server that every test shares.
+  workers: process.env.CI ? 2 : undefined,
   // CI retains both the human GitHub/HTML reports and a machine-readable JUnit
   // report. The latter is consumed by the shared Test Intelligence envelope;
   // merely exporting PLAYWRIGHT_JUNIT_OUTPUT_FILE in the workflow does nothing

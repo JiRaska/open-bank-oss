@@ -17,8 +17,8 @@ import org.testcontainers.utility.DockerImageName
  *
  * PostgreSQL: Flyway migrations run on boot (challenge/device/outbox tables).
  * Valkey: redis-client extension contributes a readiness health check, so a real instance is
- * needed for `/q/health/ready` to pass. The `sca-events-out` Kafka emitter is switched to
- * the in-memory connector (configured in test application.properties) — no broker needed.
+ * needed for `/q/health/ready` to pass. Both outgoing emitters use the in-memory connector;
+ * these database/Redis fixtures do not test Kafka delivery.
  */
 class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
 
@@ -51,6 +51,7 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.password" to "openbank_secret",
             "quarkus.redis.hosts" to "redis://${rd.host}:${rd.getFirstMappedPort()}",
             "mp.messaging.outgoing.sca-events-out.connector" to "smallrye-in-memory",
+            "mp.messaging.outgoing.notification-requests-out.connector" to "smallrye-in-memory",
             "quarkus.devservices.enabled" to "false",
         )
     }

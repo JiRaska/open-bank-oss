@@ -334,3 +334,28 @@ also be deleted (nothing else in balance-service depends on it).
   No new surface, role, or data flow — same endpoint, same authz, tighter input handling.
   Risk class = **availability/information disclosure** (500s on an operator control endpoint).
   Rollback: revert the guard; no stored data or schema changes.
+
+## Atomic ledger projection and reservation consumption
+
+**Threat:** a payee event could release the payer's hold before the payer debit was projected,
+or a committed projection could lose its subsequent hold release. Either breaks the spendable
+balance invariant. A hold or overdraft update prepared from an older balance could also overwrite
+a concurrent ledger movement despite Hibernate versioning, because the repository loaded a newer
+entity and copied old amounts onto it.
+
+**Controls:** lock the account/currency pocket, then commit the booked delta, projection marker,
+matching account/currency/transaction cover release and outbox records in one transaction. A
+redelivery skips the booked delta and can finish an older partial cover release. Snapshot-based
+hold and overdraft writes compare the expected domain version before copying amounts; Hibernate
+optimistic locking protects changes after that comparison. A conflict rolls the transaction back.
+Explicit hold release rechecks the active hold while holding the same pocket lock, and replays an
+already released hold without changing another reservation or emitting another release event.
+
+**Evidence:** `ProjectionCoverAtomicityIT` exercises payee-first delivery, failed release-outbox
+persistence and old partial-write redelivery against PostgreSQL. `HoldSnapshotConcurrencyIT`
+interleaves a ledger credit between a snapshot read and a hold/overdraft write.
+
+**Residual risk:** these controls do not reconcile historic balance drift or prove that every
+producer uses the ledger as its sole booked-money writer. Reservation consumption assumes the
+journal transaction reference identifies the covered movement. Authorization, DLQ replay and
+ledger reconciliation remain required operational controls.

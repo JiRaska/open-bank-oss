@@ -20,6 +20,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.restassured.RestAssured.given
 import io.vertx.core.Vertx
 import io.vertx.core.impl.ContextInternal
 import jakarta.inject.Inject
@@ -28,6 +29,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.OffsetDateTime
@@ -143,6 +145,7 @@ class ScaPactFolderProviderVerificationTest {
         challengeRepo.save(
             ScaChallenge(
                 id = CHALLENGE_ID,
+                version = challengeRepo.findById(CHALLENGE_ID)?.version ?: 0,
                 partyId = PARTY_ID,
                 purpose = ScaPurpose.CONSENT_GRANT,
                 method = ScaMethod.PUSH_NOTIFICATION,
@@ -160,7 +163,7 @@ class ScaPactFolderProviderVerificationTest {
      * consent or payment challenge can never be spent to mint a grant) and status `COMPLETED`
      * (delegation-service refuses anything else), with `consumedAt` null so the pact's second
      * interaction — the compare-and-consume that makes the ceremony single-use — has something
-     * left to spend. `save` is a `merge`, so re-running this handler per interaction resets
+     * left to spend. The fixture reads the current version before `save`, so re-running it resets
      * `consumedAt` and the two interactions do not have to care which order they run in.
      *
      * `dynamicLinkingData` is deliberately null: a delegation challenge links to no operation, and
@@ -172,6 +175,7 @@ class ScaPactFolderProviderVerificationTest {
         challengeRepo.save(
             ScaChallenge(
                 id = DELEGATION_CHALLENGE_ID,
+                version = challengeRepo.findById(DELEGATION_CHALLENGE_ID)?.version ?: 0,
                 partyId = DELEGATION_PARTY_ID,
                 purpose = ScaPurpose.DELEGATION_GRANT,
                 method = ScaMethod.PUSH_NOTIFICATION,
@@ -183,5 +187,17 @@ class ScaPactFolderProviderVerificationTest {
             ),
         )
         Unit
+    }
+}
+
+/** Real HTTP role boundary, separate from Pact's template-only context initialization. */
+@QuarkusTest
+@QuarkusTestResource(com.openbank.sca.it.PostgresRedisTestResource::class)
+@TestSecurity(user = "pact-unprivileged-caller", roles = ["ROLE_VIEWER"])
+class ScaPactFolderProviderAuthorizationTest {
+    @Test
+    fun `a caller without a permitted role cannot read the challenge contract`() {
+        given().get("/api/v1/sca/challenges/99999999-9999-9999-9999-999999999999")
+            .then().statusCode(403)
     }
 }

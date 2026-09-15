@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'sca'
   action: string
   resourceId: string | null
   maker: string | null
@@ -423,6 +423,21 @@ async function communicationPending(headers: HeadersInit): Promise<SourceResult>
   }
 }
 
+async function scaPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('sca-service', 'sca', 8110, '/api/v1/sca/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as LendingApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(row => ({
+      id: row.id, domain: 'sca' as const, action: row.action,
+      resourceId: row.resourceId, maker: row.makerId, proposedAt: row.createdAt,
+    })),
+  }
+}
+
 async function agentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(`${agentBase()}/api/v1/proposals?state=proposed`, {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -445,7 +460,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, sca] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -465,8 +480,9 @@ export async function GET() {
     delegationPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
     communicationPending(headers).catch(() => unavailable),
+    scaPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...sca.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -490,6 +506,7 @@ export async function GET() {
       delegation: delegation.state,
       agent: agent.state,
       communication: communication.state,
+      sca: sca.state,
     },
   })
 }

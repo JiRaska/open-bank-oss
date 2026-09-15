@@ -1,0 +1,106 @@
+{
+  "consumer": {
+    "name": "openbank-settlement-service"
+  },
+  "interactions": [
+    {
+      "description": "settlement reserves payer cover until ledger projection consumes it",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the holds account with sufficient funds"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 125.50,
+          "currency": "CZK",
+          "reason": "Settlement cover",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "ttlSeconds": null
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1/holds"
+      },
+      "response": {
+        "body": {
+          "accountId": "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1",
+          "amount": 125.50,
+          "currency": "CZK",
+          "expiresAt": null,
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "releasedAt": null
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "settlement cannot reserve cover for a missing payer",
+      "providerStates": [
+        {
+          "name": "no balance exists for the settlement cover account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 125.50,
+          "currency": "CZK",
+          "reason": "Settlement cover",
+          "referenceId": "55555555-5555-5555-5555-555555555520",
+          "ttlSeconds": null
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/88888888-8888-4888-8888-888888888820/holds"
+      },
+      "response": {
+        "body": {
+          "error": "NOT_FOUND"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

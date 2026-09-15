@@ -109,4 +109,21 @@ class LedgerBookAdapterTest {
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger-service down")
     }
+
+    @Test
+    fun `unposted or unrelated journal response cannot complete settlement`() {
+        val ledgerClient = mockk<LedgerRestClient>()
+        val repo = mockk<SettlementRepository>()
+        coEvery { repo.findById(settlement.id) } returns settlement
+        val adapter = LedgerBookAdapter(ledgerClient, repo, glDebitAccountId, glCreditAccountId, fixedClock)
+        listOf(
+            JournalResponse(UUID.randomUUID(), settlement.id, "PENDING"),
+            JournalResponse(UUID.randomUUID(), settlement.id, "REJECTED"),
+            JournalResponse(UUID.randomUUID(), UUID.randomUUID(), "POSTED"),
+        ).forEach { response ->
+            every { ledgerClient.postJournal(any()) } returns Uni.createFrom().item(response)
+            assertThatThrownBy { runBlocking { adapter.book(settlement.id) } }
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+    }
 }
