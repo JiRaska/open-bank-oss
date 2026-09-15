@@ -72,6 +72,8 @@ describe('Customer context graph', () => {
     expect(screen.getByRole('button', { name: 'AML case: TRANSACTION_MONITORING' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Device: IOS' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Document: ACCOUNT_AGREEMENT' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Account: CZ12…3456' }).querySelector('circle')).toHaveAttribute('stroke', 'var(--graph-account)')
+    expect(screen.getByRole('button', { name: 'AML case: TRANSACTION_MONITORING' }).querySelector('circle')).toHaveAttribute('stroke', 'var(--graph-case)')
     expect(screen.getByText('7/7 domain feeds')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

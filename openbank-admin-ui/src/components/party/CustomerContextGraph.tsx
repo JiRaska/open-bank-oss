@@ -66,9 +66,9 @@ export function CustomerContextGraph({ evidence, partyName }: {
     return [node.id, { x: 400 + Math.cos(angle) * radiusX, y: 250 + Math.sin(angle) * radiusY }] as const
   }))
   const colors: Record<CustomerGraphKind, string> = {
-    domain: '#7c3aed', account: '#0f766e', product: '#2563eb', card: '#dc2626',
-    notification: '#d97706', consent: '#9333ea', application: '#0891b2', case: '#be123c',
-    device: '#4f46e5', document: '#15803d',
+    domain: 'var(--graph-domain)', account: 'var(--graph-account)', product: 'var(--graph-product)', card: 'var(--graph-card)',
+    notification: 'var(--graph-notification)', consent: 'var(--graph-consent)', application: 'var(--graph-application)', case: 'var(--graph-case)',
+    device: 'var(--graph-device)', document: 'var(--graph-document)',
   }
   const labels: Record<CustomerGraphKind, string> = {
     domain: t('Doména', 'Domain'), account: t('Účet', 'Account'), product: t('Produkt', 'Product'),

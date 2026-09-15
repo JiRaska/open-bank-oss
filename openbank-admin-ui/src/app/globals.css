@@ -133,6 +133,19 @@
   --chart-purple:         #a855f7;
   --chart-cyan:           #0891b2;
 
+  /* Customer-context graph categories. Labels remain the primary meaning; this adaptive palette
+   * keeps neighbouring banking domains visually distinct on both graph surfaces. */
+  --graph-domain:         #7c3aed;
+  --graph-account:        #0f766e;
+  --graph-product:        #2563eb;
+  --graph-card:           #dc2626;
+  --graph-notification:   #b45309;
+  --graph-consent:        #9333ea;
+  --graph-application:    #0e7490;
+  --graph-case:           #be123c;
+  --graph-device:         #4f46e5;
+  --graph-document:       #15803d;
+
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
   --dashboard-hero-start: #111a35;
@@ -404,6 +417,16 @@
     --info-text: #bfdbfe;
     --chart-purple: #d8b4fe;
     --chart-cyan: #67e8f9;
+  --graph-domain: #c4b5fd;
+  --graph-account: #5eead4;
+  --graph-product: #93c5fd;
+  --graph-card: #fca5a5;
+  --graph-notification: #fcd34d;
+  --graph-consent: #e879f9;
+  --graph-application: #67e8f9;
+  --graph-case: #fda4af;
+  --graph-device: #a5b4fc;
+  --graph-document: #86efac;
   --agent-shell-strength: 18%;
   --agent-glow-strength: 22%;
   --agent-frame: #64748b;
