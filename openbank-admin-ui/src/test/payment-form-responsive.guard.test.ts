@@ -22,4 +22,12 @@ describe('payment maker forms', () => {
     expect(styles).toContain('min-width: 0')
     expect(styles).toMatch(/@media \(max-width: 560px\)[\s\S]*\.formActions > \*[\s\S]*width: 100%/)
   })
+
+  it('stacks the exact-order review evidence and actions on narrow screens', () => {
+    expect(page.match(/data-testid="payment-review-details"/g)).toHaveLength(2)
+    expect(styles).toContain('.reviewDetails > dd')
+    expect(styles).toContain('overflow-wrap: anywhere')
+    expect(styles).toMatch(/@media \(max-width: 560px\)[\s\S]*\.reviewDetails[\s\S]*grid-template-columns: minmax\(0, 1fr\)/)
+    expect(styles).toMatch(/\.reviewActions > \*[\s\S]*width: 100%/)
+  })
 })

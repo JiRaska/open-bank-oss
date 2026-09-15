@@ -11,7 +11,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 test('reviews and creates one SEPA payment with one idempotent BFF request under a double confirmation', async ({ page }) => {
   const posts: { key: string | null; body: Record<string, unknown> }[] = []
 
-  await page.route('**/api/sepa-payments', async route => {
+  await page.route('**/api/sepa-payments**', async route => {
     const request = route.request()
     if (request.method() === 'POST') {
       posts.push({
@@ -23,13 +23,13 @@ test('reviews and creates one SEPA payment with one idempotent BFF request under
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) })
   })
-  await page.route('**/api/domestic-payments', route => route.fulfill({
+  await page.route('**/api/domestic-payments**', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ items: [] }),
   }))
 
-  await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 320, height: 760 })
   await page.goto('/payments')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'New Payment' }).click()
@@ -48,6 +48,8 @@ test('reviews and creates one SEPA payment with one idempotent BFF request under
 
   const review = page.getByRole('alertdialog', { name: 'Review payment order' })
   await expect(review).toBeVisible()
+  expect(await page.getByTestId('payment-review-details').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await expect(review).toContainText('100.00 EUR')
   await expect(review).toContainText('Jane Doe')
   await expect(review).toContainText('DE89370400440532013000')
@@ -73,8 +75,8 @@ test('reviews and creates one SEPA payment with one idempotent BFF request under
 
 test('reviews the exact domestic payment before the BFF request leaves the browser', async ({ page }) => {
   const posts: { key: string | null; body: Record<string, unknown> }[] = []
-  await page.route('**/api/sepa-payments', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
-  await page.route('**/api/domestic-payments', async route => {
+  await page.route('**/api/sepa-payments**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+  await page.route('**/api/domestic-payments**', async route => {
     const request = route.request()
     if (request.method() === 'POST') {
       posts.push({ key: request.headers()['idempotency-key'] ?? null, body: request.postDataJSON() as Record<string, unknown> })
@@ -83,7 +85,7 @@ test('reviews the exact domestic payment before the BFF request leaves the brows
     return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   })
 
-  await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 320, height: 760 })
   await page.goto('/payments')
   await page.getByRole('button', { name: 'New Payment' }).click()
   await page.getByRole('button', { name: /Domestic Standard/ }).click()
@@ -102,6 +104,8 @@ test('reviews the exact domestic payment before the BFF request leaves the brows
   await create.click()
 
   const review = page.getByRole('alertdialog', { name: 'Review payment order' })
+  expect(await page.getByTestId('payment-review-details').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await expect(review).toContainText('1,250.50 CZK')
   await expect(review).toContainText('OpenBank Treasury')
   await expect(review).toContainText('7654321/0800')

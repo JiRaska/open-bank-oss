@@ -61,6 +61,29 @@
   margin-top: 8px;
 }
 
+.reviewDetails {
+  background: var(--surface-2);
+  border-radius: 8px;
+  display: grid;
+  font-size: 12px;
+  gap: 9px 12px;
+  grid-template-columns: 155px minmax(0, 1fr);
+  padding: 14px;
+}
+
+.reviewDetails > dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reviewActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
 @media (max-width: 720px) {
   .statsGrid {
     grid-template-columns: minmax(0, 1fr);
@@ -83,5 +106,24 @@
   .formActions {
     align-items: stretch;
     flex-direction: column-reverse;
+  }
+
+  .reviewDetails {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reviewDetails > dt:not(:first-child) {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  .reviewActions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .reviewActions > * {
+    justify-content: center;
+    width: 100%;
   }
 }

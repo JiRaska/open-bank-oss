@@ -1110,7 +1110,7 @@ function PaymentsContent() {
                   {t('Potvrzením odešlete přesně tento příkaz platební službě. Přijetí příkazu ještě neznamená vypořádání; další stav a případné schválení řídí platební workflow.', 'Confirmation submits this exact order to the payment service. Acceptance is not settlement; subsequent status and any required approval remain controlled by the payment workflow.')}
                 </Dialog.Description>
                 {paymentReview === 'domestic' ? (
-                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                  <dl className={styles.reviewDetails} data-testid="payment-review-details">
                     <dt>{t('Typ', 'Type')}</dt><dd>{domesticForm.instant ? t('Domácí okamžitá', 'Domestic instant') : t('Domácí standardní', 'Domestic standard')}</dd>
                     <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(domesticForm.amount), domesticForm.currency, language)}</dd>
                     <dt>{t('Plátce', 'Debtor')}</dt><dd>{domesticForm.debtorName}<br/><span className="mono">{domesticForm.debtorAccountNumber}/{domesticForm.debtorBankCode}</span></dd>
@@ -1122,7 +1122,7 @@ function PaymentsContent() {
                     <dt>{t('Zpráva', 'Message')}</dt><dd>{domesticForm.messageForPayee || '—'}</dd>
                   </dl>
                 ) : (
-                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                  <dl className={styles.reviewDetails} data-testid="payment-review-details">
                     <dt>{t('Typ', 'Type')}</dt><dd>{sepaForm.instant ? 'SEPA Instant (SCT Inst)' : 'SEPA Credit Transfer (SCT)'}</dd>
                     <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(sepaForm.amount), 'EUR', language)}</dd>
                     <dt>{t('IBAN plátce', 'Debtor IBAN')}</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{sepaForm.debtorIban}</dd>
@@ -1134,7 +1134,7 @@ function PaymentsContent() {
                   </dl>
                 )}
                 {createError && <div role="alert" data-testid="payment-create-review-error" style={{ marginTop: 14, padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{createError}</div>}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <div className={styles.reviewActions}>
                   <button ref={reviewBackRef} autoFocus type="button" className="btn btn-secondary" disabled={creating} onClick={returnToPaymentForm}>{t('Zpět k úpravám', 'Back to editing')}</button>
                   <button ref={reviewConfirmRef} type="button" className="btn btn-primary" aria-busy={creating} disabled={creating} onClick={() => void (paymentReview === 'domestic' ? handleDomesticCreate(undefined, true) : handleSepaCreate(undefined, true))}>
                     {creating ? t('Odesílám…', 'Submitting…') : t('Potvrdit a odeslat', 'Confirm and submit')}
