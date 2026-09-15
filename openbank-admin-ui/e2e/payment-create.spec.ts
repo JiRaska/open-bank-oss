@@ -29,9 +29,14 @@ test('reviews and creates one SEPA payment with one idempotent BFF request under
     body: JSON.stringify({ items: [] }),
   }))
 
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/payments')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'New Payment' }).click()
+  expect(await page.getByRole('button', { name: /SEPA Credit Transfer/ }).evaluate(element => getComputedStyle(element.parentElement!).gridTemplateColumns.split(' ').length)).toBe(1)
   await page.getByRole('button', { name: /SEPA Credit Transfer/ }).click()
+  expect(await page.getByLabel('Debtor IBAN').evaluate(element => getComputedStyle(element.parentElement!.parentElement!).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   await page.getByLabel('Debtor IBAN').fill('CZ6508000000192000145399')
   await page.getByLabel('Creditor IBAN').fill('DE89370400440532013000')
@@ -78,9 +83,12 @@ test('reviews the exact domestic payment before the BFF request leaves the brows
     return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
   })
 
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/payments')
   await page.getByRole('button', { name: 'New Payment' }).click()
   await page.getByRole('button', { name: /Domestic Standard/ }).click()
+  expect(await page.getByLabel('Debtor Account ID').evaluate(element => getComputedStyle(element.parentElement!.parentElement!).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.getByLabel('Debtor Account ID').fill('account-42')
   await page.getByLabel('Debtor Account No.').fill('1234567890')
   await page.getByLabel('Debtor bank code').fill('0100')

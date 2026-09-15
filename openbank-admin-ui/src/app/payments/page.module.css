@@ -1,0 +1,87 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.newPaymentAction {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.paymentTypeGrid,
+.twoColumnGrid,
+.threeColumnGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.paymentTypeGrid,
+.twoColumnGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.threeColumnGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.formHeader {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.formGuidance {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.accountNumberField {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.accountNumberField > input {
+  min-width: 0;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .statsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .paymentTypeGrid,
+  .twoColumnGrid,
+  .threeColumnGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .newPaymentAction > *,
+  .formActions > * {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .formActions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}
