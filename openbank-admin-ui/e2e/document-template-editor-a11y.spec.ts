@@ -28,6 +28,7 @@ test('template editor traps focus, closes with Escape and restores its trigger',
   await page.route('**/api/svc/document-service/api/v1/documents/templates/preview', route =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ renderedHtml: '<p>Hello Ada</p>' }) }))
 
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/document-templates')
   const trigger = page.getByRole('button', { name: /New Template|Nová šablona/ })
   await trigger.focus()
@@ -36,6 +37,11 @@ test('template editor traps focus, closes with Escape and restores its trigger',
   const dialog = page.getByRole('dialog', { name: /New Template|Nová šablona/ })
   await expect(dialog).toBeVisible()
   await expect(page.getByLabel(/Code|Kód/)).toBeFocused()
+  const workspace = page.getByTestId('template-editor-workspace')
+  expect(await workspace.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  await expect(page.getByTestId('template-source-mobile-label')).toBeVisible()
+  await expect(page.getByTestId('template-preview-mobile-label')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   await page.keyboard.press('Shift+Tab')
   await expect(page.getByRole('button', { name: /Close template editor|Zavřít editor šablony/ })).toBeFocused()

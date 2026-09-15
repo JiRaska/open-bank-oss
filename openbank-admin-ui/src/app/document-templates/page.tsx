@@ -19,6 +19,7 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
 import { PageHeader, StatusBadge, TableViewport, Tabs, type TabItem, type Tone } from '@/components/ui'
+import styles from './page.module.css'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -742,7 +743,7 @@ export default function DocumentTemplatesPage() {
                     />
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '6px' }}>
+                  <div className={styles.editorLabels}>
                     <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
                       {t('Zdrojový kód', 'Source')}
                     </span>
@@ -766,13 +767,15 @@ export default function DocumentTemplatesPage() {
                       </button>
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', height: '320px' }}>
+                  <div className={styles.editorWorkspace} data-testid="template-editor-workspace">
                     {/* Syntax-highlight overlay: a read-only, aria-hidden <pre> renders the
                         colored markup behind a textarea whose own text/background are
                         transparent (only the caret and native text-selection show), so
                         typing/scrolling/selecting all still work exactly like a plain
                         textarea while the author sees tags/attributes/{{tokens}} colored. */}
-                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                    <div className={styles.editorGroup}>
+                      <span className={styles.mobilePaneLabel} data-testid="template-source-mobile-label">{t('Zdrojový kód', 'Source')}</span>
+                      <div className={styles.editorPane}>
                       <pre
                         ref={highlightRef}
                         aria-hidden="true"
@@ -809,18 +812,23 @@ export default function DocumentTemplatesPage() {
                           whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                         }}
                       />
+                      </div>
                     </div>
-                    <iframe
-                      title={t('Náhled šablony', 'Template preview')}
-                      // Sandboxed WITHOUT allow-scripts: the merged HTML still
-                      // embeds attacker-influenceable content (the *data* merged
-                      // in — e.g. a party name — can originate from any caller in
-                      // production) and this is an admin console, not a public
-                      // site — the preview must never execute script.
-                      sandbox="allow-same-origin"
-                      srcDoc={previewHtml}
-                      style={{ width: '100%', height: '100%', border: '1px solid var(--border)', borderRadius: '8px', background: '#fff' }}
-                    />
+                    <div className={styles.editorGroup}>
+                      <span className={styles.mobilePaneLabel} data-testid="template-preview-mobile-label">{t('Náhled', 'Preview')}</span>
+                      <iframe
+                        title={t('Náhled šablony', 'Template preview')}
+                        // Sandboxed WITHOUT allow-scripts: the merged HTML still
+                        // embeds attacker-influenceable content (the *data* merged
+                        // in — e.g. a party name — can originate from any caller in
+                        // production) and this is an admin console, not a public
+                        // site — the preview must never execute script.
+                        sandbox="allow-same-origin"
+                        srcDoc={previewHtml}
+                        className={styles.editorPane}
+                        style={{ width: '100%', border: '1px solid var(--border)', borderRadius: '8px', background: '#fff' }}
+                      />
+                    </div>
                   </div>
                   {previewNote && (
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', marginTop: '8px', fontSize: '11px', color: 'var(--warning-text)' }}>
@@ -1047,7 +1055,7 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
               <Download size={13} /> {t('Stáhnout / zobrazit', 'Download / view')}
             </a>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', fontSize: '12px' }}>
+          <div className={styles.documentDetails}>
             <Row label={t('ID dokumentu', 'Document ID')} value={doc.id} mono />
             <Row label={t('Status', 'Status')} value={doc.status ?? '—'} />
             <Row label={t('Party ref', 'Party ref')} value={doc.partyRef ?? '—'} mono />
@@ -1065,9 +1073,9 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
+    <div className={styles.documentDetailRow}>
       <span style={{ color: 'var(--text-tertiary)' }}>{label}</span>
-      <span style={{ fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : undefined, textAlign: 'right' }}>{value}</span>
+      <span className={styles.documentDetailValue} style={{ fontFamily: mono ? 'var(--font-mono)' : undefined }}>{value}</span>
     </div>
   )
 }
