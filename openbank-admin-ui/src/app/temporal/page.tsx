@@ -416,7 +416,7 @@ export default function TemporalPage() {
                         <WfIcon size={15} style={{ color: wf.color }} />
                         <span style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--text)' }}>{t(wf.serviceCs, wf.serviceEn)}</span>
                       </div>
-                      <div style={{ fontSize: '11.5px', fontFamily: 'monospace', color: wf.color, marginBottom: 8, background: `${wf.color}14`, padding: '3px 8px', borderRadius: 5, display: 'inline-block' }}>
+                      <div style={{ fontSize: '11.5px', fontFamily: 'monospace', color: wf.color, marginBottom: 8, background: `color-mix(in srgb, ${wf.color} 8%, transparent)`, padding: '3px 8px', borderRadius: 5, display: 'inline-block' }}>
                         {wf.workflowCs}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>

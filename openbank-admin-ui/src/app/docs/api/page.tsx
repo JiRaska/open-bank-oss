@@ -938,7 +938,7 @@ export default function ApiCatalogPage() {
                   ) : item.publishers.map(p => (
                     <span key={p} style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                      background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
+                      background: `color-mix(in srgb, ${item.color} 8%, transparent)`, color: item.color, border: `1px solid color-mix(in srgb, ${item.color} 19%, transparent)`,
                       fontWeight: 600,
                     }}>↑ {p}</span>
                   ))}

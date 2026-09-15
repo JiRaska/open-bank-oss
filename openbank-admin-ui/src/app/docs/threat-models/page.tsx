@@ -99,7 +99,7 @@ export default async function ThreatModelRegistryPage() {
                     <span style={{
                       fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px',
                       background: 'var(--danger-bg)', color: 'var(--danger-text)',
-                      border: '1px solid var(--danger)30', textTransform: 'uppercase', letterSpacing: '0.04em',
+                      border: '1px solid var(--danger-border)', textTransform: 'uppercase', letterSpacing: '0.04em',
                     }}>
                       {t('Peněžní cesta', 'Money path')}
                     </span>

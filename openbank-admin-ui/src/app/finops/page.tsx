@@ -165,10 +165,10 @@ function KpiCard({ icon, label, value, sub, color, accent }: {
   icon: React.ReactNode; label: string; value: string; sub: string; color: string; accent?: boolean
 }) {
   return (
-    <div className="stat-card" style={accent ? { border: `1px solid ${color}40`, background: `${color}06` } : {}}>
+    <div className="stat-card" style={accent ? { border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`, background: `color-mix(in srgb, ${color} 2%, transparent)` } : {}}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div style={{ width: '36px', height: '36px', borderRadius: '10px',
-          background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+          background: `color-mix(in srgb, ${color} 9%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
           {icon}
         </div>
       </div>

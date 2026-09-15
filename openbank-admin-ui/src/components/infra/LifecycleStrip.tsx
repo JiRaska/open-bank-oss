@@ -118,7 +118,7 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }} title={data.running.source}>
           {running ?? t('neznámá', 'unknown')}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid ${u.color}33`, padding: '2px 8px', borderRadius: 20 }}>
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: u.color, background: u.bg, border: `1px solid color-mix(in srgb, ${u.color} 20%, transparent)`, padding: '2px 8px', borderRadius: 20 }}>
           {t(u.cs, u.en)}
         </span>
       </div>

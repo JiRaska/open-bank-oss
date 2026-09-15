@@ -184,7 +184,7 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
           <div style={{
             width: '8px', height: '8px', borderRadius: '50%',
             background: dotColor,
-            boxShadow: `0 0 0 2px ${dotColor}33`,
+            boxShadow: `0 0 0 2px color-mix(in srgb, ${dotColor} 20%, transparent)`,
           }} />
           <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{name}</span>
         </div>

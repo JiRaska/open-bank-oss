@@ -92,7 +92,7 @@ export default function StandingOrdersPage() {
             { label: t('Zrušené', 'Cancelled'), value: orders.filter(o => o.status === 'CANCELLED').length, icon: <XCircle size={16} aria-hidden="true" />, color: 'var(--danger)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `color-mix(in srgb, ${k.color} 9%, transparent)`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{loading && orders.length === 0 ? '—' : k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>

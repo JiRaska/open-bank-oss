@@ -139,7 +139,7 @@ export function ProcessView({ proc }: { proc: Process }) {
           {lens === 'tech' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {proc.tech.map(z => (
-                <div key={z.title} style={{ border: `1.5px solid ${z.accent}`, borderRadius: '12px', padding: '14px 16px', background: `${z.accent}08` }}>
+                <div key={z.title} style={{ border: `1.5px solid ${z.accent}`, borderRadius: '12px', padding: '14px 16px', background: `color-mix(in srgb, ${z.accent} 3%, transparent)` }}>
                   <div style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', color: z.accent, textTransform: 'uppercase', marginBottom: '10px' }}>{z.title}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {z.nodes.map(n => {

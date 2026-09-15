@@ -384,7 +384,7 @@ export default function FxPage() {
             { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume > 0 ? totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }) : '—', icon: <TrendingUp size={16} />, color: 'var(--warning)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `color-mix(in srgb, ${k.color} 9%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{loading ? '—' : k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
@@ -649,7 +649,7 @@ export default function FxPage() {
             {schedules.map(s => (
               <div key={s.id} style={{ borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)', overflow: 'hidden' }}>
                 <div className={styles.scheduleRow}>
-                  <div className={styles.scheduleIcon} style={{ background: s.source === 'CNB' ? 'var(--accent)18' : 'var(--info)18', color: s.source === 'CNB' ? 'var(--accent)' : 'var(--info)' }}>
+                  <div className={styles.scheduleIcon} style={{ background: s.source === 'CNB' ? 'var(--accent-bg)' : 'var(--info-bg)', color: s.source === 'CNB' ? 'var(--accent-text)' : 'var(--info-text)' }}>
                     {s.source === 'CNB' ? <Banknote size={14} /> : <Globe size={14} />}
                   </div>
                   <div className={styles.scheduleIdentity}>

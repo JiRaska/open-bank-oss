@@ -86,7 +86,7 @@ export default async function AdrDetailPage({ params }: PageProps) {
               <span style={{
                 fontSize: '12px', fontWeight: 700, padding: '4px 12px', borderRadius: '20px',
                 background: statusStyle(adr.status).bg, color: statusStyle(adr.status).color,
-                border: `1px solid ${statusStyle(adr.status).color}30`,
+                border: `1px solid color-mix(in srgb, ${statusStyle(adr.status).color} 19%, transparent)`,
               }}>
                 {statusLabel(adr.status)}
               </span>

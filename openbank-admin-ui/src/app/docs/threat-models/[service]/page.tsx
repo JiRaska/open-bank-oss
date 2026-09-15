@@ -42,8 +42,8 @@ export default async function ThreatModelDetailPage({ params }: PageProps) {
             {model?.moneyPath && (
               <span style={{
                 fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px',
-                background: 'var(--danger-bg)', color: 'var(--danger)',
-                border: '1px solid var(--danger)30', textTransform: 'uppercase', letterSpacing: '0.04em',
+                background: 'var(--danger-bg)', color: 'var(--danger-text)',
+                border: '1px solid var(--danger-border)', textTransform: 'uppercase', letterSpacing: '0.04em',
               }}>
                 {t('Peněžní cesta', 'Money path')}
               </span>

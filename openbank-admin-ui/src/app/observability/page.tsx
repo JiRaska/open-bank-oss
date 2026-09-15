@@ -265,7 +265,7 @@ function KpiCard({ icon, label, value, sub, color, known }: {
     <div className="stat-card" data-metric-state={known ? 'available' : 'unknown'}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div data-metric-icon style={{ width: '36px', height: '36px', borderRadius: '10px',
-          background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+          background: `color-mix(in srgb, ${color} 9%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
           {icon}
         </div>
       </div>

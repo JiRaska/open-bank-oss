@@ -116,7 +116,7 @@ function StatusPill({ status }: { status: DStatus }) {
 
 function Card({ children, accent, id }: { children: React.ReactNode; accent?: string; id?: string }) {
   return (
-    <div id={id} style={{ background: 'var(--surface)', border: accent ? `1px solid ${accent}40` : '1px solid var(--border)',
+    <div id={id} style={{ background: 'var(--surface)', border: accent ? `1px solid color-mix(in srgb, ${accent} 25%, transparent)` : '1px solid var(--border)',
       borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
       {children}
     </div>
@@ -507,7 +507,7 @@ function IAOpsContent() {
                   return (
                     <article key={a.id}
                       style={{ position: 'relative', overflow: 'hidden', padding: '18px', borderRadius: '16px',
-                        border: `1px solid ${isExceeded ? 'var(--danger-border)' : `${persona.accent}30`}`,
+                        border: `1px solid ${isExceeded ? 'var(--danger-border)' : `color-mix(in srgb, ${persona.accent} 19%, transparent)`}`,
                         background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`,
                         boxShadow: '0 6px 18px rgba(15,23,42,0.05)', transition: 'transform .15s ease, box-shadow .15s ease' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '14px' }}>
@@ -538,7 +538,7 @@ function IAOpsContent() {
                         </div>
                       </div>
 
-                      <div style={{ padding: '10px 12px', borderRadius: '10px', background: `${persona.accent}0d`, borderLeft: `3px solid ${persona.accent}`, marginBottom: '12px' }}>
+                      <div style={{ padding: '10px 12px', borderRadius: '10px', background: `color-mix(in srgb, ${persona.accent} 5%, transparent)`, borderLeft: `3px solid ${persona.accent}`, marginBottom: '12px' }}>
                         <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
                           {t('Proč je tu', 'Why this colleague matters')}
                         </div>

@@ -1228,7 +1228,7 @@ main {
 @media (max-width: 560px) { .campaign-outcome-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Stat-card internals (ADR-0208 D1). `.stat-card` only ever styled the container, so every page
    hand-rolled the label/value typography inline — including colour values derived from a literal
-   (`background: ${k.color}18`), which is the duplication D2 exists to remove. These three classes
+   (`background: color-mix(in srgb, ${k.color} 9%, transparent)`), which is the duplication D2 exists to remove. These three classes
    are the one place that decides it. This deliberately GROWS the CSS vocabulary rather than
    consuming it, which the ADR otherwise avoids: the alternative is inline styles inside the shared
    primitive, which reintroduces the same problem one layer down. */

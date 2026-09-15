@@ -277,7 +277,7 @@ export default function PidPage() {
             { label: t('Expirované/Zrušené', 'Expired/Revoked'), value: records.filter(r => r.status === 'EXPIRED' || r.status === 'REVOKED').length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `color-mix(in srgb, ${k.color} 9%, transparent)`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>

@@ -87,7 +87,7 @@ export default async function AdrRegistryPage() {
               return (
                 <span key={s} style={{
                   fontSize: '12px', fontWeight: 600, padding: '4px 10px', borderRadius: '20px',
-                  background: st.bg, color: st.color, border: `1px solid ${st.color}30`,
+                  background: st.bg, color: st.color, border: `1px solid color-mix(in srgb, ${st.color} 19%, transparent)`,
                 }}>
                   {statusLabel(s)} · {byStatus.get(s)!.length}
                 </span>
