@@ -4,19 +4,10 @@
 #
 # Submits the fleet's resolved Gradle/Maven dependency graph to GitHub.
 #
-# THE GAP THIS CLOSES: `gh api repos/.../dependency-graph/sbom` shows ~1100 packages, but
-# only ~2 are Maven/Gradle coordinates — every openbank-*-service's Kotlin/Java dependency
-# tree is effectively invisible to GitHub's dependency graph, because nothing in this repo
-# ever submits it (npm/pip manifests are parsed natively by GitHub; Gradle needs an explicit
-# submission step). Consequence: Dependabot security alerts report 0 open findings while
-# Scorecard's own OSV-scanner (which reads build.gradle.kts / libs.versions.toml directly,
-# independent of GitHub's graph) reports dozens of GHSA IDs with no per-package, per-fix-version
-# context — the worst of both worlds (silent Dependabot, noisy unopinionated Scorecard).
-#
-# This wires `gradle/actions/setup-gradle`'s built-in dependency-graph extractor so the graph
-# gets submitted from a real build on every main push. Once populated, Dependabot
-# alerts become the authoritative, actionable, per-service view (exact vulnerable version +
-# suggested fix), and Scorecard's Vulnerabilities check should stop flying blind.
+# GitHub parses npm/pip manifests natively; Gradle dependencies need explicit
+# resolution and submission. Resolve every fleet project in bounded processes,
+# validate complete coverage, and publish one snapshot for the checked-out SHA.
+# An incomplete graph fails the job and is never published as a successful scan.
 name: Dependency submission
 
 on:
@@ -56,6 +47,11 @@ on:
       - "openbank-libs/gradle/libs.versions.toml"
       - "settings.gradle.kts"
       - "gradle/wrapper/**"
+      - ".github/workflows/dependency-submission.yml"
+      - ".github/scripts/dependency_snapshot.py"
+      - ".github/scripts/dependency-resolution-strict.init.gradle"
+      - ".github/scripts/tests/test_dependency_snapshot.py"
+      - ".github/scripts/tests/test_dependency_resolution_guard.py"
   schedule:
     # Weekly belt-and-braces resubmission — dependency resolution can drift even without a
     # manifest change (a transitive version moving inside a declared range).
@@ -104,20 +100,19 @@ jobs:
     permissions:
       contents: write # required by the dependency-submission API
     env:
-      # Same OOM guard as fleet-lint.yml / security.yml CodeQL job: a full-fleet dependency
-      # resolution (~30 modules + the quarkus-bom) needs more than Gradle's 3 GiB default heap.
-      # 4g stopped being enough as the fleet grew: every run since 2026-07-14 failed with
-      # "Java heap space" (`assemble testClasses` OOMs before the graph is written), so the
-      # dependency graph GitHub uses for Dependabot alerts/SBOM has been silently stale since
-      # then — no graph file to submit, but the job still exits without visibly failing that
-      # step (issue #909's residual-alert investigation traced back here). security.yml's
-      # CodeQL java-kotlin leg resolves the same whole-fleet graph on the same ubuntu-latest
-      # runner at -Xmx6g without OOMing — match that proven headroom here.
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+      # Bound each resolver process independently; the full fleet is never retained
+      # in one Gradle heap. The generator records incomplete shards as failures.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setup-gradle labels PR snapshots with head.sha, not the synthetic merge SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Test dependency snapshot integrity
+        run: python3 .github/scripts/tests/test_dependency_snapshot.py
 
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -160,11 +155,13 @@ jobs:
           # preemption-exposed job in the fleet; demoting either would trade a real, felt
           # regression for the same headroom.
           #
-          # Read-only does NOT affect the submitted graph: `generate-and-submit` resolves
+          # Read-only does NOT affect the submitted graph: `generate` resolves
           # the fleet regardless of cache state, so the #1449 stale-graph alarm below is
           # unaffected.
           cache-read-only: true
-          dependency-graph: generate-and-submit
+          # Generate only: partial shards must never be submitted by the post action.
+          dependency-graph: generate
+          dependency-graph-continue-on-failure: false
           # COUPLING: setup-gradle injects its own
           # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
           # classpath, and Gradle dependency verification checks it against
@@ -210,12 +207,34 @@ jobs:
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
-      # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
-      # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
-      # fleet depends on. No tests executed, so no Docker/Testcontainers needed.
-      # --continue: one module failing to resolve shouldn't blank out the graph for the rest.
-      - name: Resolve fleet dependency graph
-        run: .github/scripts/gradle-heap-headroom.sh dependency-submission -- ./gradlew assemble testClasses --continue --no-daemon
+      - name: Test unresolved dependency rejection with Gradle
+        run: python3 .github/scripts/tests/test_dependency_resolution_guard.py
+
+      # Bound retained Gradle resolution state to four modules per process. The
+      # resolver rejects unresolved dependencies and records each intended project.
+      # Only a complete, matching set becomes the single snapshot we publish.
+      - name: Resolve and validate fleet dependency graph
+        run: >-
+          python3 .github/scripts/dependency_snapshot.py
+          --out "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Submit complete fleet snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/dependency-graph/snapshots" \
+            --input "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/merged.json"
+
+      - name: Retain dependency graph diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-snapshot-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 3
+          if-no-files-found: warn
 
   # ── The alarm (issue #1449) ───────────────────────────────────────────────────
   # Why this exists: from 2026-07-14 to 2026-07-17 EVERY run of the job above died
@@ -269,26 +288,19 @@ jobs:
           \`dependency-submission.yml\` FAILED (trigger: \`${EVENT}\`), so the fleet's Gradle
           dependency graph did not update.
 
-          **This is latent, not cosmetic.** Two things read that graph and neither goes red
-          when it is stale:
-
-          - **Dependabot security alerts** stop reflecting reality — no new alerts for the
-            Kotlin/Java fleet, which reads exactly like "no vulnerabilities".
-          - **The PR-time Gradle dependency gate** (\`dependency-review\`, #1419) diffs the PR
-            against this graph. A stale base makes the gate **pass without checking anything**.
+          Dependabot needs a current graph, and dependency review requires verified
+          snapshots for both sides of its comparison. Missing evidence is not a clean scan.
 
           Run: ${RUN_URL}
 
-          **Check the heap first.** The 2026-07-14..07-17 outage was \`Java heap space\` in
-          \`Resolve fleet dependency graph\`: \`-Xmx4g\` stopped fitting as the fleet grew, every
-          run died for three days, and nobody noticed because a red push-triggered workflow on
-          main is addressed to nobody. It is now \`-Xmx6g\`; that is a ratchet, not a fix. If the
-          log says \`Java heap space\`, raise \`GRADLE_OPTS\` in this workflow and match the
-          headroom \`security.yml\`'s CodeQL java-kotlin leg already proves on the same runner.
+          Check the failed shard log and its project receipts first. The generator resolves
+          at most four fleet modules per process and rejects missing dependencies, incomplete
+          project coverage, inconsistent commit identity and conflicting graph entries.
+          A timeout, resource failure or API failure remains a failed submission.
 
-          Note \`dependency-graph-continue-on-failure: true\` (setup-gradle's default): graph
-          submission is NOT gated on the resolve succeeding, so a partial graph may have been
-          submitted rather than none. Do not assume the previous good graph is still intact.
+          Partial shards are never submitted: setup-gradle is generation-only, and the
+          explicit upload runs only after a complete merged snapshot is validated.
+          Do not increase heap or retry blindly; diagnose the recorded failing stage.
 
           This issue is refreshed on each further failure; close it once a run is green.
           EOF
