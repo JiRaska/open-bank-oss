@@ -20,6 +20,7 @@ describe('Zero-Trust educational map theme', () => {
     expect(page).toContain('background: p.background')
     expect(page).not.toMatch(/\$\{p\.color\}(?:08|[0-9a-f]{2})/iu)
     expect(page).toContain("fontWeight: 600, color: 'var(--danger-text)'")
+    expect(page).toContain("fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '3px'")
     expect(page).toContain('consolidateEgressTargets(')
   })
 })

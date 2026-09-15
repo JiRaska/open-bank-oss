@@ -233,7 +233,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
               {roleInfo && (
                 <span style={{
                   fontSize: '10px', fontWeight: 600, lineHeight: 1.2,
-                  color: roleInfo.color,
+                  color: 'var(--text-secondary)',
                 }}>
                   {roleInfo.label}
                 </span>

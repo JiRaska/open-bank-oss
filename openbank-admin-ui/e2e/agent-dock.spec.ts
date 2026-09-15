@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -31,9 +32,7 @@ test.describe('OpenBank assistant dock', () => {
           }),
         })
       })
-      await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('openbank-theme', selectedTheme)
-      }, theme)
+      await setOperatorTheme(page, theme)
       await page.goto('/settings')
 
       const trigger = page.getByRole('button', { name: /Open assistant|Otevřít asistenta/i })

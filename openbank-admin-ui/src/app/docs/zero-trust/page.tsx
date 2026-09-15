@@ -176,7 +176,7 @@ export default async function ZeroTrustPage() {
             {statusLabel(p.status)}
           </span>
         </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '3px', fontFamily: 'JetBrains Mono, monospace' }}>
           {p.tech}
         </div>
         <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.4 }}>

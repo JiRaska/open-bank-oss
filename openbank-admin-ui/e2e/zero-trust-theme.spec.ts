@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -14,7 +15,7 @@ for (const theme of ['light', 'dark'] as const) {
     page.on('console', message => {
       if (message.type() === 'error' && message.text().includes('same key')) duplicateKeyErrors.push(message.text())
     })
-    await page.addInitScript(selectedTheme => window.localStorage.setItem('openbank-theme', selectedTheme), theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/docs/zero-trust')
     await expect(page.getByRole('heading', { level: 1, name: /Zero-Trust Security Map|Zero-Trust bezpečnostní mapa/i })).toBeVisible()
     await expect(page.getByText(/Network segmentation|Síťová segmentace/i)).toBeVisible()

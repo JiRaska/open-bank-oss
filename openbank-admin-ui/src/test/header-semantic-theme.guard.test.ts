@@ -14,6 +14,7 @@ describe('shared header semantic theme contract', () => {
     expect(styles).toContain('color: var(--danger-text);')
     expect(styles).toContain('box-shadow: 0 0 0 2px var(--danger-border)')
     expect(header).toContain('className={styles.logoutButton}')
+    expect(header).toContain("fontSize: '10px', fontWeight: 600, lineHeight: 1.2,\n                  color: 'var(--text-secondary)',")
     expect(header).not.toMatch(/['"]#[0-9a-f]{3,8}\b/iu)
     expect(header).not.toMatch(/\$\{info\.color\}[0-9a-f]{2}/iu)
   })

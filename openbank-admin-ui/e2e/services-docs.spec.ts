@@ -12,6 +12,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { test, expect } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 // The console gates every route on an Auth.js session (src/proxy.ts); there is no
 // Keycloak in this environment, so each test signs in via a minted session cookie instead
@@ -43,9 +44,7 @@ test.describe('/services — Service Documentation page', () => {
         route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found', service: 'x' }) })
       )
 
-      await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('openbank-theme', selectedTheme)
-      }, theme)
+      await setOperatorTheme(page, theme)
       await page.goto('/services')
 
       const disclosure = page.getByRole('button', { name: /Serverless tiers.*scale-to-zero|Serverless tiery.*škálování na nulu/i })
@@ -74,9 +73,7 @@ test.describe('/services — Service Documentation page', () => {
       await page.route('**/api/catalog/services', route =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [{ short: 'future-bank-service', kind: 'service' }] }) })
       )
-      await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('openbank-theme', selectedTheme)
-      }, theme)
+      await setOperatorTheme(page, theme)
 
       await page.goto('/services')
 

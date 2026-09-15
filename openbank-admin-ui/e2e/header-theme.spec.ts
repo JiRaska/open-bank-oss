@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -10,7 +11,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`shared operator header remains accessible and adaptive (${theme})`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => window.localStorage.setItem('openbank-theme', selectedTheme), theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/dashboard')
 
     const accountMenu = page.getByRole('button', { name: /Open user menu|Otevřít uživatelskou nabídku/i })

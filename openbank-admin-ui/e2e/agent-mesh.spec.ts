@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -11,9 +12,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 test.describe('AI collaboration education', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme explains governed human-first collaboration`, async ({ page }) => {
-      await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('openbank-theme', selectedTheme)
-      }, theme)
+      await setOperatorTheme(page, theme)
       await page.goto('/iaops')
 
       const crew = page.getByRole('region', { name: /Meet the colleagues|Seznamte se s kolegy/i })
