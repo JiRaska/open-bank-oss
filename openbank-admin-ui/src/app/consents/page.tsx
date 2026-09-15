@@ -10,7 +10,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
-import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport, statusTone } from '@/components/ui'
 import { parseConsentEvidenceList, type ConsentEvidence } from '@/lib/consents/consentContract'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
@@ -254,8 +254,12 @@ export default function ConsentsPage() {
       )}
 
       {rows && rows.length > 0 && (
-        <div className="card" style={{ overflowX: 'auto' }}>
-          <table className="table">
+        <div className="card">
+          <TableViewport
+            label={t('Posuvná tabulka souhlasů', 'Scrollable consent table')}
+            hint={t('Posuňte tabulku vodorovně pro vlastníka, rozsahy, stav a platnost.', 'Scroll horizontally for ownership, scopes, status, and validity.')}
+          >
+          <table className="table" style={{ minWidth: 760 }}>
             <thead>
               <tr>
                 <th>{t('Party', 'Party')}</th>
@@ -292,6 +296,7 @@ export default function ConsentsPage() {
               ))}
             </tbody>
           </table>
+          </TableViewport>
         </div>
       )}
     </div>

@@ -59,6 +59,7 @@ const migratedTables = [
   'src/app/system/tests/page.tsx',
   'src/components/party/PartySearch.tsx',
   'src/app/customer-360/page.tsx',
+  'src/app/consents/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

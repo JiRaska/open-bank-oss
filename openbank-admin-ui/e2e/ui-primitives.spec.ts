@@ -221,6 +221,13 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await expect(lookUp).toBeEnabled()
     await lookUp.click()
 
+    await page.setViewportSize({ width: 320, height: 720 })
+    const consentTable = page.getByRole('region', { name: /Posuvná tabulka souhlasů|Scrollable consent table/ })
+    await consentTable.focus()
+    await expect(consentTable).toBeFocused()
+    await expect(page.getByText(/Posuňte tabulku vodorovně pro vlastníka|Scroll horizontally for ownership/)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
     const active = page.locator('.badge', { hasText: /^ACTIVE$/ })
     const revoked = page.locator('.badge', { hasText: /^REVOKED$/ })
     await expect(active).toBeVisible()
