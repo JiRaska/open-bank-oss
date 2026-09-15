@@ -29,7 +29,7 @@ const incidents = [
 
 test('triages verified DORA incidents and preserves the snapshot after malformed refresh', async ({ page, context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
-  await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 320, height: 844 })
   await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'en'))
   let malformed = false
   let impactMalformed = false
@@ -45,6 +45,12 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
   }))
 
   await page.goto('/security/incidents')
+  for (const control of ['Search incidents', 'Filter by severity', 'Filter by status']) {
+    await expect.poll(async () => page.getByLabel(control).evaluate(element => {
+      const bounds = element.getBoundingClientRect()
+      return bounds.left >= 0 && bounds.right <= document.documentElement.clientWidth
+    })).toBe(true)
+  }
   const register = page.getByLabel('Scrollable ICT incident register')
   await expect(register.getByText('Payment dependency outage', { exact: true })).toBeVisible()
   await expect(page.getByText('3', { exact: true }).first()).toBeVisible()

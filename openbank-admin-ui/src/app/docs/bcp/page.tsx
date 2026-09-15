@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import styles from './page.module.css'
 
 type Bilingual = [cs: string, en: string]
 
@@ -537,11 +538,11 @@ export default function BcpPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {INCIDENTS.map(inc => (
             <div key={inc.severity} className="card" style={{ padding: '14px 18px', borderLeft: `4px solid ${inc.color}` }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 120px 200px', gap: '16px', alignItems: 'center' }}>
-                <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>{inc.severity} — {t(...inc.label)}</span>
-                <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{t(...inc.criteria)}</span>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(...inc.response)}</span>
-                <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t(...inc.reporting)}</span>
+              <div className={styles.incidentClassification}>
+                <span data-label={t('Závažnost', 'Severity')} style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)' }}>{inc.severity} — {t(...inc.label)}</span>
+                <span data-label={t('Kritéria', 'Criteria')} style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{t(...inc.criteria)}</span>
+                <span data-label={t('Reakce', 'Response')} style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(...inc.response)}</span>
+                <span data-label={t('Hlášení', 'Reporting')} style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t(...inc.reporting)}</span>
               </div>
             </div>
           ))}
@@ -557,7 +558,11 @@ export default function BcpPage() {
           <BookOpen size={15} style={{ color: 'var(--accent)' }} />
           {t('Plán testování BCP (DORA Art. 11)', 'BCP testing schedule (DORA Art. 11)')}
         </h2>
-        <div style={{ overflowX: 'auto' }}>
+        <div
+          style={{ overflowX: 'auto' }}
+          tabIndex={0}
+          aria-label={t('Posuvný plán testování BCP', 'Scrollable BCP testing schedule')}
+        >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>

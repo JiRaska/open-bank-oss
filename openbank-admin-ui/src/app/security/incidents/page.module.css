@@ -1,0 +1,16 @@
+.incidentFilters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .incidentFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .incidentFilters > * {
+    min-width: 0;
+    width: 100%;
+  }
+}

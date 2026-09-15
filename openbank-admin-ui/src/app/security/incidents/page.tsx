@@ -13,6 +13,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { IncidentImpactInvestigation } from '@/components/context/IncidentImpactInvestigation'
 import type { Tone } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import styles from './page.module.css'
 import {
   INCIDENT_SEVERITIES, INCIDENT_STATUSES, parseIncidentList,
   type IctIncident, type IncidentSeverity, type IncidentStatus,
@@ -147,7 +148,7 @@ export default function IncidentsPage() {
                 <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>{lastVerifiedAt && t(`Ověřeno ${lastVerifiedAt.toLocaleTimeString(dateLocale)}`, `Verified ${lastVerifiedAt.toLocaleTimeString(dateLocale)}`)}</p></div>
               <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>{t(`${filtered.length} z ${incidents.length} incidentů`, `${filtered.length} of ${incidents.length} incidents`)}</p>
             </div>
-            <div className="incident-filters" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto auto auto', gap: 8 }}>
+            <div className={styles.incidentFilters}>
               <label style={{ position: 'relative' }}><span className="sr-only">{t('Hledat incidenty', 'Search incidents')}</span><Search size={14} aria-hidden="true" style={{ position: 'absolute', left: 11, top: 13, color: 'var(--text-tertiary)' }} /><input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('Název, služba, kategorie, vlastník…', 'Title, service, category, owner…')} style={{ width: '100%', paddingLeft: 32 }} /></label>
               <select className="input" aria-label={t('Filtrovat podle závažnosti', 'Filter by severity')} value={severity} onChange={event => setSeverity(event.target.value)}><option value={ALL}>{t('Všechny závažnosti', 'All severities')}</option>{INCIDENT_SEVERITIES.map(value => <option key={value} value={value}>{severityLabel(value)}</option>)}</select>
               <select className="input" aria-label={t('Filtrovat podle stavu', 'Filter by status')} value={status} onChange={event => setStatus(event.target.value)}><option value={ALL}>{t('Všechny stavy', 'All statuses')}</option>{INCIDENT_STATUSES.map(value => <option key={value} value={value}>{statusLabel(value)}</option>)}</select>

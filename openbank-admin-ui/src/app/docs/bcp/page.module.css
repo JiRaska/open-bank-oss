@@ -1,0 +1,29 @@
+.incidentClassification {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) 120px 200px;
+  gap: 16px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .incidentClassification {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .incidentClassification > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .incidentClassification > span::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+}

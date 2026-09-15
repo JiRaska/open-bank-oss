@@ -47,6 +47,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`keeps degraded compliance evidence readable and accessible in ${theme} theme`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 })
     if (theme === 'dark') {
       // Set the operator preference before hydration. Mutating the class after navigation races
       // useTheme(), which correctly reapplies the stored preference on mount.
@@ -59,6 +60,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText(/Compliance gate failed — payment processing BLOCKED|Compliance gate selhala — platební zpracování BLOKOVÁNO/)).toBeVisible()
     await expect(page.getByText(/BLOCKED|BLOKOVÁNO/, { exact: true }).first()).toBeVisible()
     await expect(page.getByText('1/6', { exact: true }).or(page.getByText('5/6', { exact: true }))).toBeVisible()
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.waitForTimeout(300)
 
     const scan = await new AxeBuilder({ page })

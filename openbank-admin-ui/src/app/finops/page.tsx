@@ -19,6 +19,7 @@ import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
+import styles from './page.module.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1029,8 +1030,7 @@ function FinOpsContent() {
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '160px 100px 1fr 90px 90px', gap: '12px',
-                      padding: '4px 8px', borderBottom: '1px solid var(--border)' }}>
+                    <div className={styles.agentCostHeader}>
                       {[t('Agent', 'Agent'), t('Burn rate', 'Burn rate'), t('Budget', 'Budget'), t('Náklady 24h', 'Cost 24h'), t('Náklady 7d', 'Cost 7d')].map(h => (
                         <span key={h} style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</span>
                       ))}
@@ -1048,16 +1048,15 @@ function FinOpsContent() {
                         : budgetPct > 80  ? 'var(--warning-text)'
                         : 'var(--success-text)'
                       return (
-                        <div key={agent.agentId} style={{ display: 'grid', gridTemplateColumns: '160px 100px 1fr 90px 90px', gap: '12px',
-                          alignItems: 'center', padding: '8px', borderRadius: '8px', background: 'var(--surface-2)' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+                        <div key={agent.agentId} className={styles.agentCostRow}>
+                          <span data-label={t('Agent', 'Agent')} className={styles.agentName} style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
                             {agent.agentId}
                           </span>
-                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                          <span data-label={t('Burn rate', 'Burn rate')} style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
                             color: burnCfg.color, background: burnCfg.bg, display: 'inline-block' }}>
                             {burnCfg.label}
                           </span>
-                          <div>
+                          <div data-label={t('Budget', 'Budget')} className={styles.agentBudget}>
                             {budgetPct != null ? (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <div style={{ flex: 1, height: '5px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', maxWidth: '120px' }}>
@@ -1069,10 +1068,10 @@ function FinOpsContent() {
                               <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
                             )}
                           </div>
-                          <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
+                          <span data-label={t('Náklady 24h', 'Cost 24h')} style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
                             ${agent.costLast24hUsd.toFixed(2)}
                           </span>
-                          <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
+                          <span data-label={t('Náklady 7d', 'Cost 7d')} style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
                             ${agent.costLast7dUsd.toFixed(2)}
                           </span>
                         </div>

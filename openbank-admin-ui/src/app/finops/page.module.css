@@ -1,0 +1,53 @@
+.agentCostHeader,
+.agentCostRow {
+  display: grid;
+  grid-template-columns: 160px 100px minmax(0, 1fr) 90px 90px;
+  gap: 12px;
+}
+
+.agentCostHeader {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agentCostRow {
+  align-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+@media (max-width: 720px) {
+  .agentCostHeader {
+    display: none;
+  }
+
+  .agentCostRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px 12px;
+    padding: 14px;
+  }
+
+  .agentCostRow > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .agentCostRow > *::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-tertiary);
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .agentName,
+  .agentBudget {
+    grid-column: 1 / -1;
+  }
+}
