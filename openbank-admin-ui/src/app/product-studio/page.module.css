@@ -51,7 +51,7 @@
 .marketTitle { display: flex; align-items: center; gap: 6px; color: var(--accent-text); font-size: 11px; font-weight: 800; }
 .marketContext p { margin: 5px 0 9px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 .marketGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.marketGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.marketGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .marketGrid input { min-width: 0; font-size: 11px; }
 .revisionList { display: flex; flex-direction: column; gap: 5px; margin-top: 13px; }
 .revision { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
@@ -74,8 +74,8 @@
 .bundleProposal > div { min-width: 0; }
 .bundleProposal strong, .bundleProposal small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bundleProposal strong { color: var(--text-primary); font-size: 11px; }
-.bundleProposal small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
-.bundleProposal em { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 9px; font-style: normal; line-height: 1.35; }
+.bundleProposal small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; }
+.bundleProposal em { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 10px; font-style: normal; line-height: 1.35; }
 .bundleProposal button { flex: 0 0 auto; padding: 6px 8px; font-size: 10px; }
 .compositionEmpty { margin-top: 9px; color: var(--text-tertiary); font-size: 10px; }
 .relationships { display: grid; gap: 5px; margin-top: 9px; }
@@ -106,7 +106,7 @@
 .readinessRow { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 5px; padding: 4px 0; color: var(--text-secondary); font-size: 10px; }
 .readinessRow svg { color: var(--success-text); }
 .readinessRow:has(svg[data-lucide="circle-alert"]) svg { color: var(--warning-text); }
-.readinessRow b { color: var(--text-tertiary); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.readinessRow b { color: var(--text-tertiary); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .insightGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 12px; }
 .insight { padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
 .insight b { display: block; color: var(--text-primary); font-size: 16px; letter-spacing: -.03em; }
@@ -133,7 +133,7 @@
 .previewContextTitle { display: flex; align-items: center; gap: 6px; color: var(--accent-text); font-size: 11px; font-weight: 800; }
 .previewContext p { margin: 5px 0 9px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 .previewContextGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.previewContextGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.previewContextGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .previewContextGrid input { min-width: 0; font-size: 11px; }
 .selectionList { display: grid; gap: 5px; margin-bottom: 12px; }
 .selection { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 8px; width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text-primary); cursor: pointer; text-align: left; }
@@ -142,13 +142,13 @@
 .selectionCopy { min-width: 0; }
 .selectionCopy strong, .selectionCopy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selectionCopy strong { font-size: 11px; }
-.selectionCopy small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
+.selectionCopy small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; }
 .explanation, .explanationHidden { margin-bottom: 12px; padding: 11px; border-radius: 11px; font-size: 10px; line-height: 1.5; }
 .explanation { border: 1px solid var(--success-border); background: linear-gradient(135deg, var(--success-bg), var(--surface-2)); color: var(--text-secondary); }
 .explanationTitle { display: flex; align-items: center; gap: 6px; color: var(--success-text); font-size: 11px; font-weight: 800; }
 .explanation p { margin: 5px 0 8px; }
 .explanationTrace { display: flex; flex-wrap: wrap; gap: 4px; }
-.explanationTrace code { padding: 2px 5px; border-radius: 5px; background: color-mix(in srgb, var(--surface) 75%, transparent); color: var(--success-text); font-size: 9px; }
+.explanationTrace code { padding: 2px 5px; border-radius: 5px; background: color-mix(in srgb, var(--surface) 75%, transparent); color: var(--success-text); font-size: 10px; }
 .explanation small { display: block; margin-top: 8px; color: var(--text-secondary); }
 .explanationHidden { display: flex; gap: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-tertiary); }
 .explanationHidden svg { flex: 0 0 auto; margin-top: 1px; }
