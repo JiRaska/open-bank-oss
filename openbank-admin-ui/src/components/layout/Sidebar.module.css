@@ -75,7 +75,7 @@
 .navIcon { flex: 0 0 auto; }
 .navLabel { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lockIcon { flex: 0 0 auto; opacity: 0.7; }
-.navBadge { padding: 2px 6px; color: #fff; background: var(--sidebar-accent); border-radius: 999px; font-size: 10px; font-weight: 800; }
+.navBadge { padding: 2px 6px; color: var(--text-inverse); background: var(--selection-bg); border-radius: 999px; font-size: 10px; font-weight: 800; }
 
 .footer { flex-shrink: 0; padding: 15px 20px 17px; background: rgba(2, 6, 23, 0.34); border-top: 1px solid rgba(148, 163, 184, 0.12); }
 .footerVersion { color: #a8b7cc; font-size: 11px; font-weight: 700; }

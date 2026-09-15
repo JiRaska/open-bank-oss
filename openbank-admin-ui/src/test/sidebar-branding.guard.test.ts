@@ -16,4 +16,10 @@ describe('sidebar product branding contract', () => {
     expect(styles).toMatch(/\.sectionLabel\s*\{[\s\S]*?color:\s*var\(--sidebar-text-muted\)/)
     expect(styles).toMatch(/\.footerScope\s*\{[\s\S]*?color:\s*var\(--sidebar-text-muted\)/)
   })
+
+  it('keeps the tiny live badge on the contrast-checked selected-control pair', () => {
+    const badge = styles.match(/\.navBadge\s*\{([^}]*)\}/)?.[1]
+    expect(badge).toContain('color: var(--text-inverse)')
+    expect(badge).toContain('background: var(--selection-bg)')
+  })
 })
