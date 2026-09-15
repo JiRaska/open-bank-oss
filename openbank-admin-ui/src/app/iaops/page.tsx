@@ -325,7 +325,7 @@ function IAOpsContent() {
                 fill priority unoptimized sizes="(max-width: 900px) 100vw, 55vw"
                 style={{ objectFit: 'cover', objectPosition: '52% 48%', opacity: 0.96 }} />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #172554 0%, transparent 32%)' }} />
-              <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '8px', color: 'rgba(226,232,240,.7)', letterSpacing: '0.04em' }}>
+              <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '10px', color: 'rgba(226,232,240,.7)', letterSpacing: '0.04em' }}>
                 {t('Vlastní vizuální koncept · bez postav třetích stran', 'Original visual concept · no third-party characters')}
               </span>
             </div>
@@ -523,7 +523,7 @@ function IAOpsContent() {
                                   <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                                 </Link>
                                 {isExceeded && (
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700,
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700,
                                     padding: '2px 6px', borderRadius: '8px', background: 'var(--danger-bg)', color: 'var(--danger-text)', border: '1px solid var(--danger-border)' }}>
                                     <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--danger-text)', display: 'inline-block' }} />
                                     {t('Budget!', 'Budget!')}
@@ -531,7 +531,7 @@ function IAOpsContent() {
                                 )}
                               </div>
                               <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)', marginTop: '1px' }}>{persona.role}</div>
-                              <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '4px' }}>{a.id}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '4px' }}>{a.id}</div>
                             </div>
                           </div>
                           <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '9px 0 0', lineHeight: 1.55 }}>{persona.purpose}</p>
@@ -539,14 +539,14 @@ function IAOpsContent() {
                       </div>
 
                       <div style={{ padding: '10px 12px', borderRadius: '10px', background: `${persona.accent}0d`, borderLeft: `3px solid ${persona.accent}`, marginBottom: '12px' }}>
-                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
                           {t('Proč je tu', 'Why this colleague matters')}
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{persona.value}</div>
                       </div>
 
                       <div style={{ marginBottom: '12px' }}>
-                        <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>
                           {t('Co umí', 'Skills in plain language')}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -564,11 +564,11 @@ function IAOpsContent() {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', marginBottom: costEntry ? '10px' : '12px' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '10px',
+                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '3px 8px', borderRadius: '10px',
                           color: plane.text, background: plane.bg, border: `1px solid ${plane.border}`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                           {planeLabel(a.plane)}
                         </span>
-                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}>
                           <Hand size={9} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
@@ -609,7 +609,7 @@ function IAOpsContent() {
                             )}
                           </div>
                           {costCoverage && (
-                            <div role="status" style={{ marginTop: '7px', fontSize: '9px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                            <div role="status" style={{ marginTop: '7px', fontSize: '10px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
                               {costCoverage.source} · retention {costCoverage.retentionHours}h · {costCoverage.dataFrom} → {costCoverage.dataTo} · last successful load {costCoverage.lastSuccessfulLoad ?? 'unavailable'}
                             </div>
                           )}
