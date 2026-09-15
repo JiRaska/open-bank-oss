@@ -14,6 +14,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { formatClearingMoney, parseClearingBatches, type ClearingBatch } from '@/lib/clearing/clearingBatchContract'
 
 export default function ClearingPage() {
@@ -113,6 +114,10 @@ export default function ClearingPage() {
                 ? t('Služba běží, zatím žádné clearing dávky.', 'The service is running; no clearing batches yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
+            <TableViewport
+              label={t('Posuvná tabulka clearingových dávek', 'Scrollable clearing batches table')}
+              hint={t('Posuňte tabulku vodorovně pro finanční pozici a stav vypořádání.', 'Scroll horizontally to see the financial position and settlement state.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[t('Reference', 'Reference'), t('Rail', 'Rail'), t('Položky', 'Items'), t('Debet / Kredit', 'Debit / Credit'), t('Čistá pozice', 'Net position'), t('Status', 'Status'), t('Vytvořeno', 'Created')].map(h => (
@@ -138,6 +143,7 @@ export default function ClearingPage() {
                 )
               })}</tbody>
             </table>
+            </TableViewport>
           )}
         </div>
       </div>

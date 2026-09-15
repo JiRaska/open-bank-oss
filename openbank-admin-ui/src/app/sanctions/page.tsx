@@ -26,7 +26,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
 
@@ -712,6 +712,10 @@ export default function SanctionsPage() {
                 <DataUnavailable kind="no_data" feature={t('Sankční kontroly', 'Sanctions checks')} lang={language}
                   detail={t('Použijte záložku Manuální vyhledávání pro první kontrolu.', 'Use the Manual Search tab to run a first check.')} />
               ) : (
+                <TableViewport
+                  label={t('Posuvná tabulka sankčních kontrol', 'Scrollable sanctions checks table')}
+                  hint={t('Posuňte tabulku vodorovně pro shody, skóre a auditní rozhodnutí.', 'Scroll horizontally to see matches, scores, and the audit disposition.')}
+                >
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Entita', 'Entity'), t('Typ', 'Type'), t('Seznamy', 'Lists'), t('Skóre', 'Score'), t('Výsledek', 'Result'), t('Zkontrolováno', 'Checked At'), t('Rozhodnutí', 'Disposition')].map(h => (
@@ -854,6 +858,7 @@ export default function SanctionsPage() {
                     )
                   })}</tbody>
                 </table>
+                </TableViewport>
               )}
 
               {/* Checker half of the four-eyes gate. The served queue is authoritative; manual ID

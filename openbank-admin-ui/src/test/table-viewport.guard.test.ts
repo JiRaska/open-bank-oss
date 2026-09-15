@@ -8,6 +8,10 @@ const migratedTables = [
   'src/app/kyc/page.tsx',
   'src/app/fraud/page.tsx',
   'src/app/lending/page.tsx',
+  'src/app/aml/page.tsx',
+  'src/app/clearing/page.tsx',
+  'src/app/approvals/page.tsx',
+  'src/app/sanctions/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

@@ -11,7 +11,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
 import { parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
 
@@ -143,6 +143,10 @@ export default function AmlPage() {
                 : t('Služba běží, ale zadaný výběr zatím neobsahuje žádné AML případy.', 'The service is running, but the current result set contains no AML cases.')}
             />
           ) : (
+            <TableViewport
+              label={t('Posuvná tabulka AML případů', 'Scrollable AML cases table')}
+              hint={t('Posuňte tabulku vodorovně pro celý rizikový a vlastnický kontext.', 'Scroll horizontally to see the complete risk and ownership context.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[t('Případ / klient', 'Case / customer'), t('Screening', 'Screening'), t('Riziko', 'Risk'), t('Důvod alertu', 'Alert evidence'), t('Stav', 'Status'), t('Vlastník', 'Owner'), t('Aktualizováno', 'Updated')].map(h => (
@@ -179,6 +183,7 @@ export default function AmlPage() {
                 )
               })}</tbody>
             </table>
+            </TableViewport>
           )}
         </div>
       </div>

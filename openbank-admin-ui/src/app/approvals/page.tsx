@@ -18,6 +18,7 @@ import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound, ExternalLink, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
@@ -410,6 +411,10 @@ export default function ApprovalsPage() {
             <ShieldCheck size={13} /> {t('Rozhodnuté', 'Decided')} ({decided.length})
           </div>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <TableViewport
+              label={t('Posuvná tabulka rozhodnutých návrhů', 'Scrollable decided proposals table')}
+              hint={t('Posuňte tabulku vodorovně pro rozhodovatele a odůvodnění.', 'Scroll horizontally to see the decision owner and rationale.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2)' }}>
@@ -435,6 +440,7 @@ export default function ApprovalsPage() {
                 })}
               </tbody>
             </table>
+            </TableViewport>
           </div>
         </>
       )}
