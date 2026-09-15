@@ -245,7 +245,7 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
               Governance
             </div>
             {govTimestamp && (
-              <div style={{ fontSize: '9px', color: 'var(--text-tertiary)' }} title="Metadata freshness">
+              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }} title="Metadata freshness">
                 {new Date(govTimestamp).toLocaleTimeString(dateLocale)}
               </div>
             )}

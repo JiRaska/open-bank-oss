@@ -310,7 +310,7 @@ export default function IaopsCaseThreadPage() {
                       {entry.capability && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent-text)' }}>{entry.capability}</span>}
                       <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
                     </div>
-                    <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>
+                    <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-tertiary)' }}>
                       {entry.signalId && <>signal {entry.signalId}</>}{entry.signalId && entry.rolloutId && ' · '}{entry.rolloutId && <>rollout {entry.rolloutId}</>}
                     </div>
                     {entry.summary && <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.summary}</p>}

@@ -6,19 +6,24 @@ import { describe, expect, it } from 'vitest'
 
 const sourceRoot = join(process.cwd(), 'src')
 
-function cssFiles(directory: string): string[] {
+function productionStyleSources(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) return cssFiles(path)
-    return entry.isFile() && entry.name.endsWith('.css') ? [path] : []
+    if (entry.isDirectory()) return productionStyleSources(path)
+    return entry.isFile() && /\.(?:css|ts|tsx)$/.test(entry.name) ? [path] : []
   })
 }
 
 describe('minimum readable font-size contract', () => {
   it('keeps production CSS text at or above the 10px compact-label floor', () => {
-    const violations = cssFiles(sourceRoot).flatMap(path => {
+    const violations = productionStyleSources(sourceRoot).flatMap(path => {
       const source = readFileSync(path, 'utf8')
-      return [...source.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px\b/g)]
+      const declarations = [
+        ...source.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px\b/g),
+        ...source.matchAll(/fontSize:\s*['"](\d+(?:\.\d+)?)px['"]/g),
+        ...source.matchAll(/fontSize:\s*(\d+(?:\.\d+)?)\b/g),
+      ]
+      return declarations
         .filter(match => Number(match[1]) < 10)
         .map(match => `${relative(process.cwd(), path)}:${source.slice(0, match.index).split('\n').length} (${match[0]})`)
     })

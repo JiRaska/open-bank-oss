@@ -1015,8 +1015,8 @@ export default function SanctionsPage() {
                               <div style={{ fontSize: '12px', fontWeight: 600, color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', lineHeight: 1.3 }}>
                                 {lst.displayName}
-                                {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
-                                {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
+                                {isPep && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
+                                {!lst.enabled && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
                               {/* A checked row paints --accent-bg (#eef2ff) behind this line, and
                                   --text-tertiary (#64748b) on it measures 4.26:1 — under the 4.5:1
