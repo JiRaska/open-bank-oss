@@ -10,6 +10,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -448,6 +449,10 @@ export default function TemporalPage() {
                 {t('Porovnání: ruční saga vs. Temporal', 'Comparison: hand-rolled saga vs. Temporal')}
               </h2>
               <div style={{ border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
+                <TableViewport
+                  label={t('Posuvné porovnání ruční sagy a Temporal', 'Scrollable comparison of hand-rolled sagas and Temporal')}
+                  hint={t('Posuňte porovnání vodorovně pro celý kontext před a po migraci.', 'Scroll horizontally to see the complete before-and-after context.')}
+                >
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ background: 'var(--card-bg)' }}>
@@ -478,6 +483,7 @@ export default function TemporalPage() {
                     ))}
                   </tbody>
                 </table>
+                </TableViewport>
               </div>
             </div>
 

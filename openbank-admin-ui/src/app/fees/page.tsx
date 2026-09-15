@@ -10,7 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
 import { describeWaiverRule, FeeScheduleContractError, parseFeeSchedule, type FeeScheduleItem } from '@/lib/fees/feeScheduleContract'
 
 export default function FeesPage() {
@@ -130,6 +130,10 @@ export default function FeesPage() {
         )}
 
         <div className="card" style={{ overflow: 'hidden' }}>
+          <TableViewport
+            label={t('Posuvná tabulka sazebníku poplatků', 'Scrollable fee schedule table')}
+            hint={t('Posuňte tabulku vodorovně pro waiver pravidla a stav poplatku.', 'Scroll horizontally to see waiver rules and fee status.')}
+          >
           <table className="data-table">
             <thead>
               <tr>
@@ -193,6 +197,7 @@ export default function FeesPage() {
               ))}
             </tbody>
           </table>
+          </TableViewport>
         </div>
       </div>
     </AuthGuard>

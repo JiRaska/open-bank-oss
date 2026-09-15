@@ -12,6 +12,7 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { formatLocalDate, formatMinorUnits, parseStandingOrders, type StandingOrder } from '@/lib/standing-orders/standingOrderContract'
 
 const FREQ_LABELS: Record<StandingOrder['frequency'], [string, string]> = {
@@ -120,6 +121,10 @@ export default function StandingOrdersPage() {
                 ? t('Služba běží, zatím žádné trvalé příkazy.', 'The service is running; no standing orders yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
+            <TableViewport
+              label={t('Posuvná tabulka trvalých příkazů', 'Scrollable standing orders table')}
+              hint={t('Posuňte tabulku vodorovně pro frekvenci, příští běh a stav.', 'Scroll horizontally to see frequency, next run, and status.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[t('Příjemce', 'Recipient'), t('Částka', 'Amount'), t('Typ platby', 'Payment type'), t('Frekvence', 'Frequency'), t('Příští platba', 'Next run'), t('Status', 'Status'), t('Popis', 'Description')].map(h => (
@@ -150,6 +155,7 @@ export default function StandingOrdersPage() {
                 </tr>
               ))}</tbody>
             </table>
+            </TableViewport>
           )}
         </div>
       </div>

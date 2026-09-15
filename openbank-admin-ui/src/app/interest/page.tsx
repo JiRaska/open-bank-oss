@@ -13,6 +13,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { parseInterestAccruals, statusTone, type AccrualRecord } from '@/lib/interest/interestAccrualContract'
 
 type AccessBlock = 'unauthorized' | 'forbidden'
@@ -210,6 +211,10 @@ export default function InterestPage() {
                   : t('Služba běží, zatím žádné úrokové záznamy.', 'The service is running; no interest records yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
+            <TableViewport
+              label={t('Posuvná tabulka úrokových akruálů', 'Scrollable interest accruals table')}
+              hint={t('Posuňte tabulku vodorovně pro sazbu, day-count konvenci a stav.', 'Scroll horizontally to see the rate, day-count convention, and status.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[t('Účet', 'Account'), t('Datum', 'Date'), t('Naakruováno', 'Accrued'), t('Měna', 'Currency'), t('Sazba', 'Rate'), t('Day Count', 'Day Count'), t('Status', 'Status')].map(h => (
@@ -230,6 +235,7 @@ export default function InterestPage() {
                 </tr>
               ))}</tbody>
             </table>
+            </TableViewport>
           )}
         </div>
       </div>

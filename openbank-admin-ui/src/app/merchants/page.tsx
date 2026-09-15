@@ -21,7 +21,7 @@ import { AlertTriangle, RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff, MapPi
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui'
+import { PageHeader, TableViewport } from '@/components/ui'
 import { parseMerchantCataloguePage, parseUnmatchedMerchantDescriptors, type MerchantCatalogueRow, type UnmatchedMerchantDescriptor } from '@/lib/merchants/merchantCatalogueContract'
 
 const SERVICE = 'transaction-service'
@@ -498,6 +498,10 @@ export default function MerchantsPage() {
               <Plus size={12} aria-hidden="true" /> {t('Nový záznam', 'New entry')}
             </button>
           </div>
+          <TableViewport
+            label={t('Posuvná tabulka katalogu obchodníků', 'Scrollable merchant catalogue table')}
+            hint={t('Posuňte tabulku vodorovně pro lokalitu, aktuálnost a bezpečné akce.', 'Scroll horizontally to see location, freshness, and governed actions.')}
+          >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -618,6 +622,7 @@ export default function MerchantsPage() {
               )}
             </tbody>
           </table>
+          </TableViewport>
           <nav aria-label={t('Stránkování katalogu obchodníků', 'Merchant catalogue pagination')} style={{ padding: '12px 14px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span aria-live="polite" style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
               {total === 0 ? t('Žádné záznamy', 'No entries') : t(`Zobrazeno ${page * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE + rows.length, total)} z ${total}`, `Showing ${page * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE + rows.length, total)} of ${total}`)}
