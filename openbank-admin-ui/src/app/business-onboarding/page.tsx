@@ -78,10 +78,10 @@ interface Decision {
   previous: Attestation | null
 }
 
-const STATE_COLOR: Record<DecisionState, string> = {
-  ATTESTED: '#16a34a',
-  UNATTESTED: '#d97706',
-  SUPERSEDED: '#dc2626',
+const STATE_TONE: Record<DecisionState, { color: string; background: string; border: string }> = {
+  ATTESTED: { color: 'var(--success-text)', background: 'var(--success-bg)', border: 'var(--success-border)' },
+  UNATTESTED: { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  SUPERSEDED: { color: 'var(--danger-text)', background: 'var(--danger-bg)', border: 'var(--danger-border)' },
 }
 
 function shortId(id: string): string {
@@ -214,7 +214,7 @@ function AttestationForm({
       </label>
       {roles.trim() !== '' && (
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-          <AlertTriangle size={14} aria-hidden="true" style={{ color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+          <AlertTriangle size={14} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0, marginTop: 1 }} />
           <span>
             {t(
               'Pravidlo vázané na funkce jde vždy na ruční kontrolu podepisujících — počet sám nestačí, každou funkci musí pokrýt jiná osoba.',
@@ -223,7 +223,7 @@ function AttestationForm({
           </span>
         </div>
       )}
-      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: 12, color: 'var(--danger-text)' }}>{error}</div>}
       <div>
         <button
           type="button"
@@ -282,8 +282,11 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
   }, [scheme, identifier])
 
   useEffect(() => {
-    load()
-    return () => { generation.current += 1 }
+    const initialId = window.setTimeout(load, 0)
+    return () => {
+      window.clearTimeout(initialId)
+      generation.current += 1
+    }
   }, [load])
 
   const loadHistory = useCallback(async () => {
@@ -314,6 +317,7 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
     UNATTESTED: t('Čeká na potvrzení', 'Awaiting confirmation'),
     SUPERSEDED: t('Pravidlo se ZMĚNILO', 'The rule has CHANGED'),
   }
+  const stateTone = STATE_TONE[decision.state]
 
   return (
     <section aria-label={t('Způsob zastoupení', 'Representation rule')} style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -324,9 +328,9 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
             fontWeight: 700,
             padding: '2px 8px',
             borderRadius: 20,
-            background: `${STATE_COLOR[decision.state]}15`,
-            color: STATE_COLOR[decision.state],
-            border: `1px solid ${STATE_COLOR[decision.state]}30`,
+            background: stateTone.background,
+            color: stateTone.color,
+            border: `1px solid ${stateTone.border}`,
           }}
         >
           {stateLabel[decision.state]}
@@ -341,7 +345,7 @@ function RepresentationPanel({ scheme, identifier }: { scheme: string; identifie
       </div>
 
       {decision.state === 'SUPERSEDED' && decision.previous && (
-        <div role="alert" style={{ fontSize: 12, padding: 10, borderRadius: 6, background: 'var(--danger-bg, #fee2e2)', color: 'var(--danger, #991b1b)', marginBottom: 8 }}>
+        <div role="alert" style={{ fontSize: 12, padding: 10, borderRadius: 6, background: 'var(--danger-bg)', color: 'var(--danger-text)', marginBottom: 8 }}>
           {t(
             'Dřívější potvrzení platilo pro JINÉ znění a nesmí se použít.',
             'The earlier confirmation was about a DIFFERENT wording and must not be reused.',
@@ -474,8 +478,11 @@ export default function BusinessOnboardingPage() {
   }, [])
 
   useEffect(() => {
-    load()
-    return () => { loadGeneration.current += 1 }
+    const initialId = window.setTimeout(load, 0)
+    return () => {
+      window.clearTimeout(initialId)
+      loadGeneration.current += 1
+    }
   }, [load])
 
   const visible = useMemo(() => {
