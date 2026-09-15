@@ -70,7 +70,7 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
   const summary = loading ? null : fxTrendSummary(points)
   const geometry = useMemo(() => loading ? null : chartGeometry(points), [loading, points])
   const direction = fxTrendDirection(summary?.changePercent ?? 0)
-  const tone = direction === 'up' ? 'var(--success)' : direction === 'down' ? 'var(--danger)' : 'var(--accent)'
+  const tone = direction === 'up' ? 'var(--success-text)' : direction === 'down' ? 'var(--danger-text)' : 'var(--accent-text)'
   const locale = lang === 'cs' ? 'cs-CZ' : 'en-GB'
   const formatRate = (rate: number) => rate.toLocaleString(locale, { maximumFractionDigits: 6 })
   const formatDate = (timestamp: string) => new Date(timestamp).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })

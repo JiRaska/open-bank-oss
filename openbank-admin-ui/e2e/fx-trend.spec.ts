@@ -92,6 +92,7 @@ test('does not mislabel an outage as missing fixings and can retry', async ({ pa
 })
 
 test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -106,6 +107,7 @@ test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page
   const scheduleEditor = page.getByRole('button', { name: /Upravit plán CNB|Edit CNB schedule/ })
   await expect(scheduleEditor).toBeVisible()
   await expect(scheduleEditor).toHaveAttribute('aria-expanded', 'false')
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   const scan = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

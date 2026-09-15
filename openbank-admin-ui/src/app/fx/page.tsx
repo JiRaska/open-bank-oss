@@ -17,6 +17,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { FxTrendChart } from '@/components/fx/FxTrendChart'
+import styles from './page.module.css'
 
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
@@ -69,7 +70,6 @@ function nextRunTime(hour: number, minute: number, days: string[]): string {
 }
 
 function formatNextRun(iso: string, t: (cs: string, en: string) => string): string {
-  // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
   const diffMs = new Date(iso).getTime() - Date.now()
   if (diffMs < 0) return t('brzy', 'soon')
   const h = Math.floor(diffMs / 3600000)
@@ -213,7 +213,10 @@ export default function FxPage() {
     }
   }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    const initialLoad = window.setTimeout(loadData, 0)
+    return () => window.clearTimeout(initialLoad)
+  }, [loadData])
 
   const manualRefresh = async (source: 'cnb' | 'ecb' | 'all') => {
     setRefreshing(source)
@@ -546,7 +549,11 @@ export default function FxPage() {
                 </span>
               </div>
 
-              <div style={{ maxHeight: '480px', overflowY: 'auto' }}>
+              <div
+                style={{ maxHeight: '480px', overflowY: 'auto' }}
+                tabIndex={0}
+                aria-label={t('Posuvný kurzovní lístek ECB', 'Scrollable ECB rate sheet')}
+              >
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Publikovat', 'Publish'), t('Měna', 'Currency'), t('ECB Střed', 'ECB Mid'), t('Nákup (banka)', 'Buy (bank)'), t('Prodej (banka)', 'Sell (bank)'), t('Override', 'Override'), t('Datum', 'Date')].map(h => (
@@ -630,7 +637,7 @@ export default function FxPage() {
         </div>
 
         <div className="card" style={{ marginBottom: '24px' }}>
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className={styles.scheduleHeader}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Calendar size={14} style={{ color: 'var(--accent)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Plánované aktualizace', 'Scheduled Updates')}</span>
@@ -640,27 +647,27 @@ export default function FxPage() {
           <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {schedules.map(s => (
               <div key={s.id} style={{ borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)', overflow: 'hidden' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr auto auto auto auto', alignItems: 'center', gap: '16px', padding: '14px 16px' }}>
-                  <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: s.source === 'CNB' ? 'var(--accent)18' : 'var(--info)18', display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.source === 'CNB' ? 'var(--accent)' : 'var(--info)' }}>
+                <div className={styles.scheduleRow}>
+                  <div className={styles.scheduleIcon} style={{ background: s.source === 'CNB' ? 'var(--accent)18' : 'var(--info)18', color: s.source === 'CNB' ? 'var(--accent)' : 'var(--info)' }}>
                     {s.source === 'CNB' ? <Banknote size={14} /> : <Globe size={14} />}
                   </div>
-                  <div>
+                  <div className={styles.scheduleIdentity}>
                     <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(s.label, SCHEDULE_LABELS_EN[s.id] ?? s.label)}</div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
                       {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')} · {s.days.map(d => t(DAY_LABELS_CS[d], DAY_LABELS_EN[d])).join(', ')}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', minWidth: '110px' }}>
+                  <div className={styles.scheduleFact} data-label={t('Příští spuštění', 'Next run')}>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Příští spuštění', 'Next run')}</div>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
                       <Clock size={11} style={{ color: 'var(--text-tertiary)' }} />{formatNextRun(s.nextRun, t)}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', minWidth: '110px' }}>
+                  <div className={styles.scheduleFact} data-label={t('Poslední spuštění', 'Last run')}>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Poslední spuštění', 'Last run')}</div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{s.lastRun ? new Date(s.lastRun).toLocaleTimeString(numberLocale) : '—'}</div>
                   </div>
-                  <div style={{ minWidth: '80px', textAlign: 'center' }}>
+                  <div className={styles.scheduleStatus} data-label={t('Stav', 'Status')}>
                     {s.lastStatus === 'ok' && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)' }}>
                         <CheckCircle2 size={10} /> OK {s.lastCount != null ? `(${s.lastCount})` : ''}
@@ -673,7 +680,7 @@ export default function FxPage() {
                     )}
                     {!s.lastStatus && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>}
                   </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <div className={styles.scheduleActions}>
                     <button onClick={() => manualRefresh(s.source.toLowerCase() as 'cnb' | 'ecb')} disabled={!!refreshing || loading} className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', whiteSpace: 'nowrap' }}>
                       <Play size={11} style={{ animation: isRefreshing(s.source.toLowerCase()) ? 'spin 1s linear infinite' : 'none' }} />
                       {t('Spustit', 'Run')}
@@ -753,7 +760,11 @@ export default function FxPage() {
               <History size={14} style={{ color: 'var(--text-primary)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
-            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+            <div
+              style={{ maxHeight: '220px', overflowY: 'auto' }}
+              tabIndex={0}
+              aria-label={t('Posuvná historie akcí operátora', 'Scrollable operator action log')}
+            >
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {[t('Čas', 'Time'), t('Zdroj', 'Source'), t('Pár', 'Pair'), t('Kurz', 'Rate')].map(h => (
@@ -791,7 +802,11 @@ export default function FxPage() {
                 {t('Žádné konverze v interním systému.', 'No conversions in internal system.')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
+              <div
+                style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}
+                tabIndex={0}
+                aria-label={t('Posuvná tabulka posledních FX konverzí', 'Scrollable recent FX conversions table')}
+              >
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Datum', 'Date'), t('Z → Na', 'From → To'), t('Částka Z', 'From'), t('Částka Na', 'To'), t('Status', 'Status')].map(h => (
