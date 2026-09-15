@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.defenseLayout {
+  align-items: center;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  margin-bottom: 32px;
+}
+
+@media (max-width: 720px) {
+  .defenseLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

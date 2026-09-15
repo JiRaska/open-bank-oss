@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.docsLayout {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: calc(100vh - 100px);
+}
+
+.docsNavigation {
+  align-self: start;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  height: fit-content;
+  padding: 14px;
+  position: sticky;
+  top: 16px;
+}
+
+@media (max-width: 840px) {
+  .docsLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docsNavigation {
+    position: static;
+  }
+}

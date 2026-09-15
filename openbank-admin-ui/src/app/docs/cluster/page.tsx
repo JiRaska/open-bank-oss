@@ -16,6 +16,7 @@ import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
 } from 'lucide-react'
+import styles from './page.module.css'
 
 type Status = 'live' | 'partial' | 'planned'
 
@@ -272,7 +273,7 @@ export default function ClusterDossierPage() {
 
       {/* ── 2) Defense in depth ── */}
       <SectionTitle icon={Shield} title={t('2 · Obrana do hloubky — „vrstvy ochranky"', '2 · Defense in depth — "layers of security"')} />
-      <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 24, alignItems: 'center', marginBottom: 32 }}>
+      <div className={styles.defenseLayout} data-testid="cluster-defense-layout">
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer} onPick={setActiveLayer} lang={language} />}
         </div>

@@ -17,6 +17,7 @@ import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { loadDocsIndex, loadDocsDocument } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
+import styles from './page.module.css'
 
 interface PageProps {
   params: Promise<{ name: string; slug?: string[] }>
@@ -74,16 +75,8 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
   const docLangs = doc?.availableLanguages ?? []
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '24px', minHeight: 'calc(100vh - 100px)' }}>
-      <aside style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-lg)',
-        padding: '14px',
-        height: 'fit-content',
-        position: 'sticky',
-        top: '16px',
-      }}>
+    <div className={styles.docsLayout} data-testid="service-docs-layout">
+      <aside className={styles.docsNavigation}>
         <Link
           href="/services"
           style={{
