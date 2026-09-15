@@ -164,7 +164,7 @@ function PartyDetailPage() {
               display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px',
               fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer',
               background: tab === item.id ? 'var(--accent)' : 'transparent',
-              color: tab === item.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s',
+              color: tab === item.id ? 'var(--text-inverse)' : 'var(--text-secondary)', transition: 'all 0.1s',
             }}
           >
             <span aria-hidden="true">{item.icon}</span>{item.label}

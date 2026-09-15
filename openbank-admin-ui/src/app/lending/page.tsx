@@ -311,7 +311,7 @@ export default function LendingPage() {
             style={{
               padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer',
               background: tab === id ? 'var(--accent)' : 'var(--surface-3)',
-              color: tab === id ? '#fff' : 'var(--text-secondary)',
+              color: tab === id ? 'var(--text-inverse)' : 'var(--text-secondary)',
             }}
           >
             {id === 'queue' ? t('Fronta žádostí', 'Applications queue') : t('Portfolio', 'Portfolio')}

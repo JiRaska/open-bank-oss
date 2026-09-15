@@ -43,6 +43,14 @@ const SURFACE_TOKENS = [
   '--accent-bg', '--success-bg', '--warning-bg', '--danger-bg', '--info-bg', '--sidebar-bg',
 ] as const
 
+// These palettes belong to fixed, named canvases rather than the generic content cross-product.
+// Their source guards and browser Axe suites own the exact foreground/background combinations.
+const SPECIALIZED_TOKEN_PREFIXES = [
+  '--privacy-', '--login-', '--recovery-', '--iaops-crew-', '--dashboard-',
+] as const
+
+const isSpecializedToken = (name: string) => SPECIALIZED_TOKEN_PREFIXES.some(prefix => name.startsWith(prefix))
+
 // Every pair below is BELOW AA today. The list is a ratchet, not a permission slip: a pair that is
 // not listed must pass, and a listed pair that starts passing fails too, so an entry cannot quietly
 // become permanent. It replaces a hand-written coverage set that checked text tokens against
@@ -221,12 +229,16 @@ describe('admin UI token contrast', () => {
     // Tone tokens are not named "text" and the axe sweep found all four rendering AS text
     // (e.g. --success #10b981 on --success-bg = 2.41:1 on /day-end and /system/health).
     const tones = ['--success', '--warning', '--danger', '--info', '--accent']
-    const missingSurfaces = surfaces.filter(n => !SURFACE_TOKENS.includes(n as never))
+    const missingSurfaces = surfaces.filter(n => n !== '--selection-bg' && !isSpecializedToken(n) && !SURFACE_TOKENS.includes(n as never))
     // --text-inverse is excluded by design: it exists to sit on a solid accent/tone fill, not on any
     // token in SURFACE_TOKENS, so including it would assert 12 pairs nobody writes.
     const missingTexts = [...texts, ...tones]
-      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
+      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !isSpecializedToken(n) && !TEXT_TOKENS.includes(n as never))
     expect({ missingSurfaces, missingTexts }).toEqual({ missingSurfaces: [], missingTexts: [] })
+  })
+
+  it.each(themes)('%s selected controls keep their explicit inverse pairing at AA', (_name, tokens) => {
+    expect(contrast(resolve(tokens, '--text-inverse'), resolve(tokens, '--selection-bg'))).toBeGreaterThanOrEqual(AA)
   })
 
   // Ported from the light-theme guard #9788 added, which this file subsumes: if the arithmetic is

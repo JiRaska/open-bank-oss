@@ -624,7 +624,7 @@ export default function ApiCatalogPage() {
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
               border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
               background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
-              color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
+              color: groupFilter === g ? 'var(--text-inverse)' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
         ))}
