@@ -10,6 +10,9 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.everyItem
+import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -62,11 +65,12 @@ class ReferralRestContractIT {
             .When { get("/api/v1/referrals/programs") }
             .Then {
                 statusCode(200)
-                body("size()", equalTo(1))
-                body("[0].id", equalTo(programId.toString()))
-                body("[0].status", equalTo("PUBLISHED"))
-                body("[0].name", notNullValue())
-                body("[0].version", equalTo(1))
+                // Other lifecycle tests share the database and may publish their own programs.
+                body("status", everyItem(equalTo("PUBLISHED")))
+                body("id", not(hasItem(selfApprovalId)))
+                body("findAll { it.id == '$programId' }.size()", equalTo(1))
+                body("find { it.id == '$programId' }.name", notNullValue())
+                body("find { it.id == '$programId' }.version", equalTo(1))
             }
 
         Given { contentType("application/json") }
