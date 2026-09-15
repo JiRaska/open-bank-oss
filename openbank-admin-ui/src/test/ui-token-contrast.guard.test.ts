@@ -47,6 +47,7 @@ const SURFACE_TOKENS = [
 // Their source guards and browser Axe suites own the exact foreground/background combinations.
 const SPECIALIZED_TOKEN_PREFIXES = [
   '--privacy-', '--login-', '--recovery-', '--iaops-crew-', '--dashboard-',
+  '--explorer-',
 ] as const
 
 const isSpecializedToken = (name: string) => SPECIALIZED_TOKEN_PREFIXES.some(prefix => name.startsWith(prefix))

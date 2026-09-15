@@ -259,6 +259,19 @@
   --agent-body-shadow: 0 6px 12px rgba(15, 23, 42, .11);
   --agent-visor-shadow: inset 0 2px 4px rgba(0, 0, 0, .4);
 
+  /* Explorer is a fixed brand canvas in both app themes. Its smallest 10px label
+   * is measured against both gradient endpoints in explorer-guide.test.tsx. */
+  --explorer-bg-start: #071b43;
+  --explorer-bg-mid: #0a3d91;
+  --explorer-bg-end: #1262b7;
+  --explorer-glow: rgba(0, 209, 255, .2);
+  --explorer-border: rgba(0, 209, 255, .24);
+  --explorer-grid: rgba(255, 255, 255, .18);
+  --explorer-text: #ffffff;
+  --explorer-body-text: rgba(255, 255, 255, .8);
+  --explorer-eyebrow: #a5f3fc;
+  --explorer-portrait-bg: #06152f;
+
   /* Public privacy notice: an independent pre-auth brand surface. Keeping its
    * palette tokenized here preserves its identity without coupling it to the
    * authenticated console theme. */

@@ -3,19 +3,19 @@
   min-height: 176px;
   margin-bottom: 20px;
   overflow: hidden;
-  border: 1px solid rgba(0, 209, 255, 0.24);
+  border: 1px solid var(--explorer-border);
   border-radius: var(--r-xl);
   background:
-    radial-gradient(circle at 82% 12%, rgba(0, 209, 255, 0.2), transparent 30%),
-    linear-gradient(118deg, #071b43 0%, #0a3d91 60%, #1262b7 100%);
+    radial-gradient(circle at 82% 12%, var(--explorer-glow), transparent 30%),
+    linear-gradient(118deg, var(--explorer-bg-start) 0%, var(--explorer-bg-mid) 60%, var(--explorer-bg-end) 100%);
   box-shadow: 0 16px 36px rgba(10, 61, 145, 0.14);
-  color: #fff;
+  color: var(--explorer-text);
 }
 
 .guide::before {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-image: radial-gradient(var(--explorer-grid) 1px, transparent 1px);
   background-size: 18px 18px;
   content: '';
   opacity: 0.14;
@@ -32,7 +32,7 @@
 .eyebrow {
   display: inline-flex;
   margin-bottom: 8px;
-  color: #63e7ff;
+  color: var(--explorer-eyebrow);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -41,14 +41,14 @@
 
 .title {
   margin: 0 0 7px;
-  color: #fff;
+  color: var(--explorer-text);
   font-size: 19px;
   line-height: 1.25;
 }
 
 .body {
   max-width: 640px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--explorer-body-text);
   font-size: 12px;
   line-height: 1.65;
 }
@@ -59,7 +59,7 @@
 
 .action a,
 .action button {
-  color: #fff;
+  color: var(--explorer-text);
 }
 
 .portrait {
@@ -71,7 +71,7 @@
   height: 450px;
   overflow: hidden;
   border-radius: 48% 0 0 0;
-  background: #06152f;
+  background: var(--explorer-portrait-bg);
   box-shadow: -18px 0 45px rgba(0, 0, 0, 0.16);
 }
 
