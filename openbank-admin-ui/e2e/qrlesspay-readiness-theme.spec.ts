@@ -4,6 +4,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -13,10 +14,7 @@ test.describe('/docs/qrlesspay-readiness — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme preserves candid verdicts and WCAG A/AA`, async ({ page }) => {
       await page.goto('/docs/qrlesspay-readiness')
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
       await page.waitForTimeout(300)
 
       await expect(page.getByRole('heading', { level: 1, name: /QRlessPay.*readiness assessment|QRlessPay.*posouzení připravenosti/i })).toBeVisible()

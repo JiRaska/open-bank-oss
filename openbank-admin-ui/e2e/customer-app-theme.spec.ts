@@ -5,6 +5,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 const appStatus = {
   app: { name: 'openbank-app' },
@@ -28,10 +29,7 @@ test.describe('/docs/customer-app — semantic theme', () => {
       await page.goto('/docs/customer-app')
       await expect(page.getByRole('heading', { level: 1, name: /Customer App — plan vs reality|Aplikace — plán vs realita/i })).toBeVisible()
 
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
       await page.waitForTimeout(300)
 
       await expect(page.getByText(/Live \(running today\)|Live \(běží dnes\)/i).first()).toBeVisible()

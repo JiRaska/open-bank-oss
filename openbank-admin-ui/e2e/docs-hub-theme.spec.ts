@@ -4,6 +4,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -15,10 +16,7 @@ test.describe('/docs — educational hub theme', () => {
       await page.goto('/docs')
       await expect(page.getByRole('heading', { level: 1, name: /OpenBank Documentation Portal|Dokumentační portál OpenBank/i })).toBeVisible()
 
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
       await page.waitForTimeout(300)
 
       await expect(page.getByRole('link', { name: /Identity & Deduplication|Identita a deduplikace/i })).toBeVisible()

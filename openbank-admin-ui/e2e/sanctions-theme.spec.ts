@@ -4,6 +4,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 const check = {
   id: 'check-theme-1',
@@ -40,10 +41,7 @@ test.describe('/sanctions — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme preserves compliance evidence and WCAG A/AA`, async ({ page }) => {
       await page.goto('/sanctions')
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
       await page.waitForTimeout(300)
 
       await expect(page.getByRole('heading', { name: /Sanctions Screening|Prověření sankcí/ })).toBeVisible()

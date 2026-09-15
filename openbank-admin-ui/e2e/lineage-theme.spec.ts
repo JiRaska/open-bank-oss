@@ -4,6 +4,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 const services = [
   {
@@ -33,10 +34,7 @@ test.describe('/docs/lineage — semantic theme', () => {
       await page.goto('/docs/lineage')
       await expect(page.getByRole('heading', { level: 1, name: /Data Lineage Flow|Tok datové lineage/i })).toBeVisible()
 
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
       await page.waitForTimeout(300)
 
       await expect(page.getByText('account', { exact: true })).toBeVisible()

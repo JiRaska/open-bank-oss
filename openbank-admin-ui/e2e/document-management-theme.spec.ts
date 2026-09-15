@@ -5,6 +5,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -16,10 +17,7 @@ test.describe('/docs/document-management — semantic theme', () => {
       await page.goto('/docs/document-management')
       await expect(page.getByRole('heading', { level: 1, name: /Document Management|Správa dokumentů/i })).toBeVisible()
 
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
+      await applyOperatorTheme(page, theme)
 
       // Global theme variables transition deliberately; audit the settled visual state.
       await page.waitForTimeout(300)
