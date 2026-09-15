@@ -60,6 +60,10 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText(/Compliance gate failed — payment processing BLOCKED|Compliance gate selhala — platební zpracování BLOKOVÁNO/)).toBeVisible()
     await expect(page.getByText(/BLOCKED|BLOKOVÁNO/, { exact: true }).first()).toBeVisible()
     await expect(page.getByText('1/6', { exact: true }).or(page.getByText('5/6', { exact: true }))).toBeVisible()
+    const testingSchedule = page.getByRole('region', { name: /Posuvný plán testování BCP|Scrollable BCP testing schedule/ })
+    await testingSchedule.focus()
+    await expect(testingSchedule).toBeFocused()
+    await expect(page.getByText(/Posuňte tabulku vodorovně pro rozsah|Scroll horizontally for the scope/)).toBeVisible()
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.waitForTimeout(300)
 

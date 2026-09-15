@@ -85,6 +85,7 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await historyChart.focus()
   await expect(historyChart).toBeFocused()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  await expect(page.getByRole('region', { name: /Posuvná tabulka neměnných pokusů služeb|Scrollable immutable service-attempt table/ })).toBeVisible()
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByRole('button', { name: /^(Syntetika|Synthetics)$/ }).click()
   await expect(page.getByText('Public edge reachability')).toBeVisible()

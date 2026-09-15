@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { TableViewport } from '@/components/ui'
 import styles from './page.module.css'
 
 type Bilingual = [cs: string, en: string]
@@ -558,12 +559,11 @@ export default function BcpPage() {
           <BookOpen size={15} style={{ color: 'var(--accent)' }} />
           {t('Plán testování BCP (DORA Art. 11)', 'BCP testing schedule (DORA Art. 11)')}
         </h2>
-        <div
-          style={{ overflowX: 'auto' }}
-          tabIndex={0}
-          aria-label={t('Posuvný plán testování BCP', 'Scrollable BCP testing schedule')}
+        <TableViewport
+          label={t('Posuvný plán testování BCP', 'Scrollable BCP testing schedule')}
+          hint={t('Posuňte tabulku vodorovně pro rozsah a vlastníka každého testu.', 'Scroll horizontally for the scope and owner of every test.')}
         >
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>
                 {[t('Typ testu', 'Test type'), t('Frekvence', 'Frequency'), t('Rozsah', 'Scope'), t('Vlastník', 'Owner')].map(h => (
@@ -588,7 +588,7 @@ export default function BcpPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
         <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '8px' }}>
           {t('Záznamy z testů musí být uchovávány ', 'Test records must be retained for ')}<strong>{t('5 let', '5 years')}</strong>{t(' (DORA Art. 11(6)).', ' (DORA Art. 11(6)).')}
         </div>

@@ -12,8 +12,8 @@ describe('responsive operations evidence layouts', () => {
     const styles = read('../app/docs/bcp/page.module.css')
     expect(page).toContain('className={styles.incidentClassification}')
     expect(page).toContain("data-label={t('Závažnost', 'Severity')}")
-    expect(page).toContain("aria-label={t('Posuvný plán testování BCP', 'Scrollable BCP testing schedule')}")
-    expect(page).toContain('tabIndex={0}')
+    expect(page).toContain("label={t('Posuvný plán testování BCP', 'Scrollable BCP testing schedule')}")
+    expect(page).toContain("hint={t('Posuňte tabulku vodorovně pro rozsah a vlastníka každého testu.', 'Scroll horizontally for the scope and owner of every test.')}")
     expect(styles).toMatch(/@media \(max-width: 640px\)[\s\S]*\.incidentClassification[\s\S]*grid-template-columns: 1fr/)
   })
 
@@ -21,7 +21,8 @@ describe('responsive operations evidence layouts', () => {
     const page = read('../app/security/incidents/page.tsx')
     const styles = read('../app/security/incidents/page.module.css')
     expect(page).toContain('className={styles.incidentFilters}')
-    expect(page).toContain("aria-label={t('Posuvný registr ICT incidentů', 'Scrollable ICT incident register')}")
+    expect(page).toContain("label={t('Posuvný registr ICT incidentů', 'Scrollable ICT incident register')}")
+    expect(page).toContain("hint={t('Posuňte registr vodorovně pro čas, regulatorní hlášení a odpovědnost.', 'Scroll horizontally for timing, regulatory reporting, and ownership.')}")
     expect(styles).toMatch(/@media \(max-width: 720px\)[\s\S]*\.incidentFilters[\s\S]*grid-template-columns: 1fr/)
   })
 
