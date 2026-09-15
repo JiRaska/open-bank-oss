@@ -34,4 +34,12 @@ describe('Test Intelligence fixed-canvas contrast', () => {
     expect(source.match(/color:var\(--muted\)/g)).toHaveLength(5)
     expect(source).not.toContain('#71849a')
   })
+
+  it('does not shrink operational copy below a readable compact size', () => {
+    expect(source).toContain('.ti-stage-copy small{font-size:9px')
+    expect(source).toContain('.ti-stage-copy em{font-size:10px')
+    expect(source).toContain('.ti-proof span,.ti-boundary span{font-size:11px')
+    expect(source).toContain('.ti-signals span{font-size:9px')
+    expect(source).not.toMatch(/font-size:[78]px/)
+  })
 })
