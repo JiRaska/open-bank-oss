@@ -28,7 +28,9 @@ describe('Test Agent governance evidence', () => {
     render(<TestAgentPanel />)
 
     expect(await screen.findByText('system.v2')).toBeVisible()
-    expect(screen.getByText('missing-suite')).toBeVisible()
+    const missingEvidence = screen.getByText('missing-suite')
+    expect(missingEvidence).toBeVisible()
+    expect(missingEvidence.parentElement).toHaveStyle({ color: 'var(--warning-text)' })
     expect(screen.getByText('No eval suite is registered for this charter. The agent remains advisory, never an automation authority.')).toBeVisible()
     expect(screen.getByRole('link', { name: /Open evaluation backlog/ })).toHaveAttribute('href', 'https://github.com/JiRaska/open-bank-oss/issues/7040')
     expect(screen.getByText(/agent is unavailable/i)).toBeVisible()
@@ -93,6 +95,7 @@ describe('Test Agent governance evidence', () => {
 
     render(<TestAgentPanel />)
     expect(await screen.findByText(/Current critical finding/)).toBeVisible()
+    expect(screen.getByText('recorded').parentElement).toHaveStyle({ color: 'var(--success-text)' })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze current evidence' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('last successfully loaded evidence remains below')

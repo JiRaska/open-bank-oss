@@ -52,7 +52,7 @@ export function TestAgentPanel() {
     <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
       {governance && <div aria-label={t('Evidence správy AI agenta', 'AI agent governance evidence')} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, fontSize: 11 }}>
         <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: 'var(--text-secondary)' }}>{t('Aktivní prompt', 'Active prompt')}: <strong>{governance.activePrompt ?? t('neověřený', 'unverified')}</strong></span>
-        <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: governance.evalEvidence === 'recorded' ? '#16a34a' : '#d97706' }}>{t('Eval evidence', 'Eval evidence')}: <strong>{governance.evalEvidence}</strong></span>
+        <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: governance.evalEvidence === 'recorded' ? 'var(--success-text)' : 'var(--warning-text)' }}>{t('Eval evidence', 'Eval evidence')}: <strong>{governance.evalEvidence}</strong></span>
         <span style={{ flexBasis: '100%', color: 'var(--text-secondary)' }}>{evalEvidenceDetail(governance.evalEvidence, t)}</span>
         {governance.evalEvidence !== 'recorded' && governance.evalEvidence !== 'unavailable' && <a href={FLAKY_HUNTER_EVAL_BACKLOG_URL} target="_blank" rel="noreferrer" style={{ color: persona.accent, fontWeight: 650 }}>
           {t('Otevřít backlog evalů', 'Open evaluation backlog')} <ExternalLink size={12} aria-hidden="true" />

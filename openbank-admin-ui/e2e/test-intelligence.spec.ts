@@ -2,6 +2,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
@@ -20,8 +21,24 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     testImpact: { schemaVersion: 1, mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable', declaredByAllRetainedRuns: true, detail: 'Every retained run explicitly reports that no verified test-to-production mapping was collected. Full suites remain authoritative.' },
     totals: { components: 1, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0, requiredControls: 1, requiredControlGaps: 1 }, warnings: [],
   }) }))
-  await page.route('**/api/test-intelligence/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ findings: [], available: true }) }))
+  await page.route('**/api/test-intelligence/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ findings: [], available: true, governance: { activePrompt: 'system.v2', evalEvidence: 'missing-suite' } }) }))
 })
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`keeps advisory agent governance evidence accessible in ${theme} mode`, async ({ page }) => {
+    await setOperatorTheme(page, theme)
+    await page.goto('/system/tests')
+    const agent = page.getByRole('region', { name: 'Advisory test agent' })
+    await agent.scrollIntoViewIfNeeded()
+    await expect(agent.getByText('missing-suite')).toBeVisible()
+
+    const scan = await new AxeBuilder({ page })
+      .include('section[aria-label="Advisory test agent"]')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations).toEqual([])
+  })
+}
 
 test('renders the animated evidence system and consolidates test dimensions', async ({ page }) => {
   await page.goto('/dashboard')
