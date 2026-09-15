@@ -12,10 +12,9 @@
 // data does not. Adding a process = adding a YAML manifest, not a new page.
 // ---------------------------------------------------------------------------
 
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import type { ElementType } from 'react'
 import { ShieldCheck, Info, X } from 'lucide-react'
-import { Mermaid } from '@/components/docs/Mermaid'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { TONE_BORDER_LEFT_CLASS, TONE_TEXT_CLASS } from '@/components/ui/tone'
@@ -23,6 +22,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
 import { STATUS_META, StatusDot } from '@/lib/docs/status'
 import styles from './ProcessView.module.css'
+
+const Mermaid = lazy(() => import('@/components/docs/Mermaid').then(module => ({ default: module.Mermaid })))
 
 type Mode = 'reality' | 'target'
 type Lens = 'story' | 'token' | 'tech'
@@ -113,7 +114,9 @@ export function ProcessView({ proc }: { proc: Process }) {
 
           {lens === 'token' && (
             <div>
-              <Mermaid chart={mode === 'reality' ? proc.token.reality : proc.token.target} />
+              <Suspense fallback={<div role="status" style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Načítám diagram…', 'Loading diagram…')}</div>}>
+                <Mermaid chart={mode === 'reality' ? proc.token.reality : proc.token.target} />
+              </Suspense>
               <div style={{ marginTop: '20px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                   Anatomie access tokenu (JWT)

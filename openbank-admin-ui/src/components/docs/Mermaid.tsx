@@ -5,11 +5,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import mermaid from 'mermaid'
 import DOMPurify from 'dompurify'
-import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
-
-mermaid.initialize(MERMAID_CONFIG)
+import { getMermaid } from '@/lib/docs/mermaidClient'
 
 let seq = 0
 
@@ -24,8 +21,8 @@ export function Mermaid({ chart }: { chart: string }) {
   useEffect(() => {
     let cancelled = false
     const id = `mermaid-${++seq}`
-    mermaid
-      .render(id, chart)
+    void getMermaid()
+      .then(mermaid => mermaid.render(id, chart))
       .then(({ svg }) => {
         if (!cancelled && ref.current) {
           // Same sanitize contract as MermaidEnhancer — never innerHTML a
@@ -55,5 +52,5 @@ export function Mermaid({ chart }: { chart: string }) {
     )
   }
 
-  return <div ref={ref} style={{ width: '100%' }} />
+  return <div ref={ref} data-mermaid-diagram style={{ width: '100%' }} />
 }

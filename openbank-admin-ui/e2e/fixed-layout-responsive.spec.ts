@@ -41,10 +41,17 @@ test('security evidence stacks while its wide table remains locally scrollable',
 })
 
 test('process education keeps its three lenses readable on mobile', async ({ page }) => {
+  const mermaidRuntimeRequests: string[] = []
+  page.on('request', request => {
+    if (/node_modules_mermaid/i.test(request.url())) mermaidRuntimeRequests.push(request.url())
+  })
   await page.goto('/docs/auth-flow')
   const layout = page.getByTestId('process-view-layout')
   await expect(layout).toBeVisible()
   expect(await layout.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(mermaidRuntimeRequests).toEqual([])
   await page.getByRole('button', { name: /Tokeny/ }).click()
+  await expect(page.locator('[data-mermaid-diagram] svg')).toBeVisible()
+  expect(mermaidRuntimeRequests.length).toBeGreaterThan(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
