@@ -124,4 +124,25 @@ for (const theme of ['light', 'dark'] as const satisfies readonly OperatorTheme[
       .analyze()
     expect(results.violations).toEqual([])
   })
+
+  test(`validates the audience composer in the ${theme} theme`, async ({ page }) => {
+    await setOperatorTheme(page, theme)
+    await page.goto('/segments/new')
+    const form = page.locator('[data-audience-create-form]')
+    await expect(form).toBeVisible()
+
+    await page.getByLabel(/Name|Název/).fill('Not valid')
+    await page.getByLabel(/Name|Název/).blur()
+    await expect(page.locator('#segment-name-error')).not.toBeEmpty()
+    await page.getByLabel(/Minimum relationship age|Minimální délka vztahu/).fill('-1')
+    await page.getByLabel(/Minimum relationship age|Minimální délka vztahu/).blur()
+    await expect(page.locator('#segment-tenure-error')).not.toBeEmpty()
+
+    const results = await new AxeBuilder({ page })
+      .include('[data-audience-create-form]')
+      .include('[data-audience-create-guidance]')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(results.violations).toEqual([])
+  })
 }
