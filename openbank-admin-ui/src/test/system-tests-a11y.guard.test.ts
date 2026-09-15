@@ -36,7 +36,7 @@ describe('system code quality accessibility', () => {
   it('uses the shared semantic badge vocabulary for evidence states', () => {
     const source = read()
 
-    expect(source).toContain("import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'")
+    expect(source).toMatch(/import \{[^}]*\bStatusBadge as SharedStatusBadge\b[^}]*\bTONE_TEXT_CLASS\b[^}]*\btype Tone\b[^}]*\} from '@\/components\/ui'/)
     expect(source).toContain('function evidenceTone(state: EvidenceState): Tone')
     expect(source).toContain("case 'passed': return 'success'")
     expect(source).toContain("case 'failed': return 'danger'")

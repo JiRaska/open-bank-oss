@@ -19,7 +19,7 @@ describe('sanctions checker decision review', () => {
 
   it('preserves the dialog on failure and only closes after a successful decision', () => {
     expect(page).toContain('const succeeded = await decideApproval')
-    expect(page).toContain('if (succeeded) setDecisionIntent(null)')
+    expect(page).toMatch(/if \(succeeded\)\s*\{\s*setDecisionIntent\(null\)/)
     expect(dialog).toContain('onEscapeKeyDown={event => { if (busy) event.preventDefault() }}')
     expect(dialog).toContain('onInteractOutside={event => event.preventDefault()}')
   })

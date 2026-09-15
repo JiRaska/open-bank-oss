@@ -6,7 +6,7 @@ const source = readFileSync(path.resolve(__dirname, '../app/iaops/page.tsx'), 'u
 
 describe('IA Ops status presentation', () => {
   it('uses the shared semantic status badge for localized governance states', () => {
-    expect(source).toContain("import { StatusBadge, type Tone } from '@/components/ui'")
+    expect(source).toMatch(/import \{[^}]*\bStatusBadge\b[^}]*\btype Tone\b[^}]*\} from '@\/components\/ui'/)
     expect(source).toContain("built: { tone: 'success', en: 'Built', cs: 'Hotovo' }")
     expect(source).toContain("partial: { tone: 'warning', en: 'Partial', cs: 'Částečně' }")
     expect(source).toContain("planned: { tone: 'accent', en: 'Planned', cs: 'Plánováno' }")

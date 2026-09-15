@@ -10,7 +10,7 @@ describe('FinOps semantic status presentation', () => {
 
   it('renders support tiers through the shared semantic status badge', () => {
     expect(source).toContain("import { PageHeader } from '@/components/ui/PageHeader'")
-    expect(source).toContain("import { StatusBadge, type Tone } from '@/components/ui'")
+    expect(source).toMatch(/import \{[^}]*\bStatusBadge\b[^}]*\btype Tone\b[^}]*\} from '@\/components\/ui'/)
     expect(source).toContain('return <StatusBadge status={tier} label={c.label} tone={c.tone} />')
   })
 

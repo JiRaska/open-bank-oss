@@ -9,7 +9,7 @@ describe('party detail status presentation', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'src/app/parties/[id]/page.tsx'), 'utf8')
 
   it('uses the shared semantic status badge for party, KYC and message states', () => {
-    expect(source).toContain("import { PageHeader, StatusBadge } from '@/components/ui'")
+    expect(source).toMatch(/import \{[^}]*\bStatusBadge\b[^}]*\} from '@\/components\/ui'/)
     expect(source.match(/<StatusBadge status=/g)).toHaveLength(4)
     expect(source).not.toMatch(/(?:STATUS_COLOR|KYC_COLOR|MSG_STATUS_COLOR)/)
   })

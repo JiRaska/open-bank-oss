@@ -24,11 +24,16 @@ import { TableViewport } from '@/components/ui/TableViewport'
 import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
 import { parseReportCatalogue, parseReportResult, type CatalogueColumn, type CatalogueReport, type ReportResult } from '@/lib/reporting/clientContract'
 
+function ReportTrendLoading() {
+  const { t } = useLanguage()
+  return <div role="status" aria-label={t('Načítání trendu reportu', 'Loading report trend')} className="mb-6 rounded-xl border border-[var(--border)]" style={{ minHeight: 310 }} />
+}
+
 const ReportTrend = dynamic(
   () => import('@/components/reporting/ReportTrend').then(module => module.ReportTrend),
   {
     ssr: false,
-    loading: () => <div role="status" aria-label="Loading report trend" className="mb-6 rounded-xl border border-[var(--border)]" style={{ minHeight: 310 }} />,
+    loading: () => <ReportTrendLoading />,
   },
 )
 
