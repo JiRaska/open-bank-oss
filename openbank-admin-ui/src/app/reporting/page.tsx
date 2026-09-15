@@ -14,15 +14,23 @@
 // operator explores comes from Grafana.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { WarehouseDashboard } from '@/components/reporting/WarehouseDashboard'
-import { ReportTrend } from '@/components/reporting/ReportTrend'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { LoadingState } from '@/components/ui/LoadingState'
 import { TableViewport } from '@/components/ui/TableViewport'
 import { BarChart3, Play, RefreshCw, ShieldCheck, Table as TableIcon } from 'lucide-react'
 import { parseReportCatalogue, parseReportResult, type CatalogueColumn, type CatalogueReport, type ReportResult } from '@/lib/reporting/clientContract'
+
+const ReportTrend = dynamic(
+  () => import('@/components/reporting/ReportTrend').then(module => module.ReportTrend),
+  {
+    ssr: false,
+    loading: () => <div role="status" aria-label="Loading report trend" className="mb-6 rounded-xl border border-[var(--border)]" style={{ minHeight: 310 }} />,
+  },
+)
 
 // Shapes mirrored from /api/reporting/route.ts and /api/reporting/[queryId]/route.ts. The page
 // deliberately does NOT import the registry module: its SQL builders stay server-side.
