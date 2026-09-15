@@ -1139,6 +1139,17 @@ main {
   outline-offset: 2px;
 }
 
+/* Preserve the dense desktop console while giving touch and hybrid-device operators
+ * targets that meet the platform's 44px usability standard. `any-pointer` matters for
+ * convertible laptops: a connected mouse must not disable the safer touch geometry. */
+@media (any-pointer: coarse) {
+  :where(button, [role='button'], summary, a.btn, input[type='button'], input[type='submit'], input[type='reset']) {
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    touch-action: manipulation;
+  }
+}
+
 .page-header {
   gap: 20px;
   margin-bottom: 24px;
