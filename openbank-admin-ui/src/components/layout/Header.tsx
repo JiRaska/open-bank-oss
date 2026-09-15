@@ -6,21 +6,31 @@
 
 import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X, Moon, Sun } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useTheme } from '@/lib/theme/useTheme'
-import { CommandPalette } from '@/components/search/CommandPalette'
 import styles from './Header.module.css'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
+
+const CommandPalette = dynamic(
+  () => import('@/components/search/CommandPalette').then(module => module.CommandPalette),
+  { ssr: false },
+)
+
+function warmCommandPalette() {
+  void import('@/components/search/CommandPalette')
+}
 
 export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
   const { data: session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteActivated, setPaletteActivated] = useState(false)
   const mobileMenuRef = useRef<HTMLButtonElement>(null)
   const userMenuButtonRef = useRef<HTMLButtonElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
@@ -76,6 +86,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        setPaletteActivated(true)
         setPaletteOpen(o => !o)
       }
     }
@@ -111,7 +122,12 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
       {/* Search — ADR-0228 D3: the painted placeholder is now a real palette. */}
       <button
         type="button"
-        onClick={() => setPaletteOpen(true)}
+        onMouseEnter={warmCommandPalette}
+        onFocus={warmCommandPalette}
+        onClick={() => {
+          setPaletteActivated(true)
+          setPaletteOpen(true)
+        }}
         aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
         className={styles.searchTrigger}
       >
@@ -123,7 +139,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
           borderRadius: '4px', color: 'var(--text-secondary)', fontFamily: 'inherit',
         }}>⌘K</kbd>
       </button>
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      {paletteActivated && <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />}
 
       {/* Actions */}
       <div className={styles.actions}>
