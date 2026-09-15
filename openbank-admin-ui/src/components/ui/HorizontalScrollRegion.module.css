@@ -1,0 +1,29 @@
+.frame { min-width: 0; }
+
+.hint {
+  display: none;
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--text-tertiary);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.viewport {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.viewport:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -2px;
+}
+
+@media (max-width: 860px) {
+  .hint { display: block; }
+}

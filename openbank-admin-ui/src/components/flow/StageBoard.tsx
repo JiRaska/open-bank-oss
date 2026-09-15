@@ -26,6 +26,7 @@
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { NodeShadow } from '@/components/topology/TopologyDefs'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
+import { HorizontalScrollRegion } from '@/components/ui'
 
 export type StageTone = 'ok' | 'warn' | 'bad' | 'done'
 
@@ -138,12 +139,17 @@ export function StageBoard({
         </button>
       </div>
 
-      <div className="card" style={{ padding: 12, overflowX: 'auto' }}>
+      <HorizontalScrollRegion
+        className="card"
+        style={{ padding: 12 }}
+        label={t('Posuvný přehled životního cyklu', 'Scrollable lifecycle overview')}
+        hint={t('Posuňte diagram vodorovně pro všechny fáze.', 'Scroll the diagram horizontally to see every stage.')}
+      >
         {/* Capped at its natural width: with a short lifecycle (campaigns have five states) a
             stretched-to-100% viewBox letterboxes the drawing into the middle of a very wide card
             and the board reads as a lonely strip. Long lifecycles still fill the width and scroll. */}
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={ariaLabel}
-             preserveAspectRatio="xMinYMid meet" style={{ maxWidth: W, display: 'block' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label={ariaLabel}
+             preserveAspectRatio="xMinYMid meet" style={{ maxWidth: 'none', display: 'block' }}>
           <defs>
             <NodeShadow id="stage-shadow" />
             {stages.slice(0, -1).map((s, i) => (
@@ -202,7 +208,7 @@ export function StageBoard({
             )
           })}
         </svg>
-      </div>
+      </HorizontalScrollRegion>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 11, alignItems: 'center' }}>
         <span style={{ color: 'var(--text-tertiary)' }}>{t('Stáří nejstarší položky ve stavu:', 'Age of the oldest item in a stage:')}</span>

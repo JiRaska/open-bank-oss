@@ -18,7 +18,7 @@ import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
-import { PageHeader, StatusBadge as SharedStatusBadge, TableViewport, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
+import { HorizontalScrollRegion, PageHeader, StatusBadge as SharedStatusBadge, TableViewport, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
@@ -356,7 +356,11 @@ function History({ report }: { report: TestIntelligenceReport }) {
   return <div style={{ display: 'grid', gap: 18 }}><div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
     <div style={{ marginBottom: 16 }}><strong>{t('Historie fleet evidence', 'Fleet evidence history')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Neměnné deployment snapshoty uchované jako CI artefakty. Sloupce nikdy neodvozují chybějící běhy.', 'Immutable deployment snapshots retained as CI artifacts. Bars never infer missing runs.')}</div></div>
     {report.history.length < 2 && <div style={{ color: 'var(--warning-text)', fontSize: 12, marginBottom: 12 }}><TriangleAlert size={13} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} />{t('První snapshot je dostupný; trend se zobrazí po dalším nasazení admin UI.', 'The first snapshot is present; a trend appears after the next admin deployment.')}</div>}
-    <div style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 190, overflowX: 'auto', paddingTop: 12 }}>
+    <HorizontalScrollRegion
+      label={t('Posuvný graf historie fleet evidence', 'Scrollable fleet evidence history chart')}
+      hint={t('Posuňte graf vodorovně pro starší deployment snapshoty.', 'Scroll the chart horizontally for earlier deployment snapshots.')}
+      style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 190, paddingTop: 12 }}
+    >
       {report.history.map(point => <div key={point.collectedAt} title={`${formatTimestamp(point.collectedAt, language)} · ${point.componentsWithExecutionEvidence}/${point.components} evidenced · ${point.failingEvidence} failing · ${point.unresolvedEvidence ?? point.unknownEvidence ?? 0} unresolved`} style={{ minWidth: 38, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'end', gap: 3, height: 170 }}>
         <div style={{ height: `${Math.max(2, point.failingEvidence / max * 150)}px`, background: 'var(--danger-text)', borderRadius: '4px 4px 0 0' }} />
         <div style={{ height: `${Math.max(2, (point.unresolvedEvidence ?? point.unknownEvidence ?? 0) / max * 150)}px`, background: 'var(--text-tertiary)' }} />
@@ -364,7 +368,7 @@ function History({ report }: { report: TestIntelligenceReport }) {
         <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: 'var(--success-text)', borderRadius: '0 0 4px 4px' }} />
         <span style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'center' }}>{formatTimestamp(point.collectedAt, language, { month: 'short', day: 'numeric' })}</span>
       </div>)}
-    </div>
+    </HorizontalScrollRegion>
     <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: 'var(--success-text)' }}>● evidenced</span><span style={{ color: 'var(--text-tertiary)' }}>● unresolved</span><span style={{ color: 'var(--warning-text)' }}>● missing</span><span style={{ color: 'var(--danger-text)' }}>● failing</span></div>
   </div><div style={{ border: '1px solid var(--border)', borderRadius: 10, overflowX: 'auto' }}>
     <div style={{ padding: '16px 18px 8px' }}><strong>{t('Neměnné pokusy služeb', 'Immutable service attempts')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Nejnovější verzované CI obálky; opakované běhy zůstávají samostatnými pokusy.', 'Latest versioned CI envelopes; reruns remain separate attempts.')}</div></div>

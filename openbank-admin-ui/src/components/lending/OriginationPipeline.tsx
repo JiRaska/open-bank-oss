@@ -25,6 +25,7 @@ import { useMemo } from 'react'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { NodeShadow } from '@/components/topology/TopologyDefs'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
+import { HorizontalScrollRegion } from '@/components/ui'
 import { ORIGINATION_GRAPH, STATE_LABELS, happyPath, exitStates } from './OriginationFlow'
 
 export type PipelineItem = {
@@ -159,8 +160,13 @@ export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, se
         </button>
       </div>
 
-      <div className="card" style={{ padding: 12, overflowX: 'auto' }}>
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
+      <HorizontalScrollRegion
+        className="card"
+        style={{ padding: 12 }}
+        label={t('Posuvná pipeline úvěrových žádostí', 'Scrollable loan application pipeline')}
+        hint={t('Posuňte diagram vodorovně pro všechny fáze žádosti.', 'Scroll the diagram horizontally to see every application stage.')}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" style={{ minWidth: W }}
              aria-label={t('Pipeline úvěrových žádostí po stavech', 'Loan application pipeline by stage')}>
           <defs>
             <NodeShadow id="pipe-shadow" />
@@ -222,7 +228,7 @@ export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, se
             )
           })}
         </svg>
-      </div>
+      </HorizontalScrollRegion>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 11, alignItems: 'center' }}>
         <span style={{ color: 'var(--text-tertiary)' }}>{t('Stáří nejstarší žádosti ve stavu:', 'Age of the oldest application in a stage:')}</span>
