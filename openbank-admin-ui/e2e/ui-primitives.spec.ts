@@ -255,6 +255,12 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await themeToggle.click()
     await expect(page.locator('html')).toHaveClass(/\bdark\b/)
     await expect(page.getByRole('button', { name: 'Switch to the light theme' })).toBeVisible()
+    await expect.poll(async () => (await page.context().cookies()).find(cookie => cookie.name === 'ob-admin-theme')?.value).toBe('dark')
+    const serverResponse = await page.request.get('/system/readiness')
+    expect(await serverResponse.text()).toMatch(/<html[^>]*class="dark"/)
+    await page.reload()
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+    await expect(page.getByRole('button', { name: 'Switch to the light theme' })).toBeVisible()
     await page.waitForFunction(
       light => getComputedStyle(document.body).backgroundColor !== light,
       lightBackground,
