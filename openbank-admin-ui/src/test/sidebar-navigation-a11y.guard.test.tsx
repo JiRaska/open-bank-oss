@@ -2,13 +2,17 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Sidebar } from '@/components/layout/Sidebar'
 
-const { usePathname } = vi.hoisted(() => ({ usePathname: vi.fn() }))
+const { prefetch, usePathname, useRouter } = vi.hoisted(() => ({
+  prefetch: vi.fn(),
+  usePathname: vi.fn(),
+  useRouter: vi.fn(() => ({ prefetch })),
+}))
 
-vi.mock('next/navigation', () => ({ usePathname }))
+vi.mock('next/navigation', () => ({ usePathname, useRouter }))
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } } }),
 }))
@@ -30,5 +34,33 @@ describe('sidebar navigation accessibility', () => {
     const current = screen.getAllByRole('link', { current: 'page' })
     expect(current).toHaveLength(1)
     expect(current[0]).toHaveAccessibleName(currentLabel)
+  })
+
+  it('prefetches internal routes only after the operator signals intent', () => {
+    usePathname.mockReturnValue('/dashboard')
+
+    render(<Sidebar />)
+
+    expect(prefetch).not.toHaveBeenCalled()
+
+    const accounts = screen.getByRole('link', { name: 'Accounts' })
+    fireEvent.mouseEnter(accounts)
+    expect(prefetch).toHaveBeenLastCalledWith('/accounts')
+
+    const transactions = screen.getByRole('link', { name: 'Transactions' })
+    fireEvent.focus(transactions)
+    expect(prefetch).toHaveBeenLastCalledWith('/transactions')
+  })
+
+  it('keeps independently served tools outside the App Router prefetch path', () => {
+    usePathname.mockReturnValue('/dashboard')
+
+    render(<Sidebar />)
+
+    const grafana = screen.getByRole('link', { name: 'Grafana' })
+    fireEvent.mouseEnter(grafana)
+    fireEvent.focus(grafana)
+
+    expect(prefetch).not.toHaveBeenCalled()
   })
 })

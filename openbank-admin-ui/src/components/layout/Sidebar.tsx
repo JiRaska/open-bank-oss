@@ -6,7 +6,7 @@
 
 import { useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
   Activity,
@@ -330,6 +330,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { items: NavItem[]; currentHref?: string; announceCurrent?: boolean; isLocked?: (item: NavItem) => boolean }) {
   const { language } = useLanguage()
+  const router = useRouter()
 
   if (!items.length) return null
   return (
@@ -366,7 +367,17 @@ function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { 
         return item.external ? (
           <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</a>
         ) : (
-          <Link key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</Link>
+          <Link
+            key={item.href}
+            href={item.href}
+            prefetch={false}
+            onMouseEnter={() => router.prefetch(item.href)}
+            onFocus={() => router.prefetch(item.href)}
+            aria-current={active ? 'page' : undefined}
+            style={{ textDecoration: 'none' }}
+          >
+            {row}
+          </Link>
         )
       })}
     </>
