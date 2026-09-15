@@ -30,3 +30,17 @@ test('Product Studio remains understandable and accessible in both themes', asyn
     ).join('\n')).toEqual([])
   }
 })
+
+test('Product Studio remains readable without horizontal overflow on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/product-studio')
+
+  await expect(page.getByRole('heading', { level: 1, name: /Od nápadu k důvěryhodné nabídce|From product idea to a trusted offer/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
+  const compactLabels = page.locator('[class*="marketGrid"] label, [class*="previewContextGrid"] label')
+  await expect(compactLabels.first()).toBeVisible()
+  const sizes = await compactLabels.evaluateAll(elements => elements.map(element => Number.parseFloat(getComputedStyle(element).fontSize)))
+  expect(sizes.length).toBeGreaterThan(0)
+  expect(sizes.every(size => size >= 10)).toBe(true)
+})
