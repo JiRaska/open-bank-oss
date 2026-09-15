@@ -30,10 +30,15 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   INVESTMENT:   <Layers size={13} />,
 }
 
-const TYPE_COLOR: Record<string, string> = {
-  SAVINGS: 'var(--success)', CURRENT: 'var(--accent)', LOAN: 'var(--warning)',
-  MORTGAGE: 'var(--info)', CREDIT_CARD: 'var(--accent)', TERM_DEPOSIT: 'var(--success)',
-  OVERDRAFT: 'var(--warning)', INVESTMENT: 'var(--info)',
+const TYPE_TONE: Record<string, { color: string; background: string; border: string }> = {
+  SAVINGS: { color: 'var(--success-text)', background: 'var(--success-bg)', border: 'var(--success-border)' },
+  CURRENT: { color: 'var(--accent-text)', background: 'var(--accent-bg)', border: 'var(--accent-border)' },
+  LOAN: { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  MORTGAGE: { color: 'var(--info-text)', background: 'var(--info-bg)', border: 'var(--info-border)' },
+  CREDIT_CARD: { color: 'var(--accent-text)', background: 'var(--accent-bg)', border: 'var(--accent-border)' },
+  TERM_DEPOSIT: { color: 'var(--success-text)', background: 'var(--success-bg)', border: 'var(--success-border)' },
+  OVERDRAFT: { color: 'var(--warning-text)', background: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  INVESTMENT: { color: 'var(--info-text)', background: 'var(--info-bg)', border: 'var(--info-border)' },
 }
 
 interface Fee { id: string; name: string; type: string; amount: number; currency: string; frequency: string; description?: string; waivable?: boolean; waiveCondition?: string }
@@ -85,9 +90,9 @@ async function apiFetch(path: string, opts?: RequestInit) {
 }
 
 function TypeBadge({ type }: { type: string }) {
-  const color = TYPE_COLOR[type] ?? 'var(--accent)'
+  const tone = TYPE_TONE[type] ?? { color: 'var(--accent-text)', background: 'var(--accent-bg)', border: 'var(--accent-border)' }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: `${color}18`, color, border: `1px solid ${color}30` }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: tone.background, color: tone.color, border: `1px solid ${tone.border}` }}>
       {TYPE_ICON[type] ?? <Package size={11} />}
       {type.replace('_', ' ')}
     </span>
@@ -224,17 +229,17 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                 <SectionHeader icon={<Users size={13} />} label={t('Cílové segmenty', 'Target segments')} />
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
                   {product.eligibilitySegments!.map(seg => (
-                    <span key={seg} style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{seg}</span>
+                    <span key={seg} style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: 'var(--accent-bg)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{seg}</span>
                   ))}
                 </div>
               </div>
             )}
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {product.cardConfig?.enabled && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--info)18', color: 'var(--info)', border: '1px solid var(--info)30' }}><CreditCard size={11} /> {product.cardConfig.minCards}–{product.cardConfig.maxCards} {t('karet', 'cards')}</span>}
-              {product.multiCurrencyConfig?.enabled && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--success)18', color: 'var(--success)', border: '1px solid var(--success)30' }}><Globe size={11} /> {product.multiCurrencyConfig.supportedCurrencies.length} {t('měn', 'currencies')}</span>}
-              {product.overdraftConfig && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--warning)18', color: 'var(--warning)', border: '1px solid var(--warning)30' }}><TrendingDown size={11} /> {t('Debet', 'Overdraft')} {(product.overdraftConfig.interestRateAnnual * 100).toFixed(2)} %</span>}
-              {product.termDepositConfig && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--success)18', color: 'var(--success)', border: '1px solid var(--success)30' }}><Clock size={11} /> {product.termDepositConfig.termMonths}M · {(product.termDepositConfig.interestRateAnnual * 100).toFixed(2)} %</span>}
+              {product.cardConfig?.enabled && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)' }}><CreditCard size={11} /> {product.cardConfig.minCards}–{product.cardConfig.maxCards} {t('karet', 'cards')}</span>}
+              {product.multiCurrencyConfig?.enabled && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)' }}><Globe size={11} /> {product.multiCurrencyConfig.supportedCurrencies.length} {t('měn', 'currencies')}</span>}
+              {product.overdraftConfig && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)' }}><TrendingDown size={11} /> {t('Debet', 'Overdraft')} {(product.overdraftConfig.interestRateAnnual * 100).toFixed(2)} %</span>}
+              {product.termDepositConfig && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '8px', fontSize: '11px', fontWeight: 600, background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)' }}><Clock size={11} /> {product.termDepositConfig.termMonths}M · {(product.termDepositConfig.interestRateAnnual * 100).toFixed(2)} %</span>}
             </div>
 
             {product.description && (
@@ -295,7 +300,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{t('Podporované měny', 'Supported currencies')}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {product.multiCurrencyConfig.supportedCurrencies.map(c => (
-                  <span key={c} style={{ padding: '2px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{c}</span>
+                  <span key={c} style={{ padding: '2px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)', background: 'var(--accent-bg)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{c}</span>
                 ))}
               </div>
             </div>
@@ -402,7 +407,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
               {product.versionHistory?.map((v, i) => {
                 const isCurrent = i === 0
                 return (
-                  <div key={v.version} style={{ display: 'flex', gap: '10px', padding: '8px 12px', borderRadius: '6px', background: isCurrent ? 'var(--accent)0d' : 'var(--surface-2)', border: `1px solid ${isCurrent ? 'var(--accent)30' : 'var(--border)'}` }}>
+                  <div key={v.version} style={{ display: 'flex', gap: '10px', padding: '8px 12px', borderRadius: '6px', background: isCurrent ? 'color-mix(in srgb, var(--accent) 5%, var(--surface))' : 'var(--surface-2)', border: `1px solid ${isCurrent ? 'color-mix(in srgb, var(--accent) 19%, var(--border))' : 'var(--border)'}` }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                       <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isCurrent ? 'var(--accent)' : 'var(--border)', border: `2px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'}` }} />
                       {i < (product.versionHistory?.length ?? 0) - 1 && <div style={{ width: '1px', flex: 1, background: 'var(--border)', minHeight: '16px' }} />}
@@ -410,8 +415,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 700, color: isCurrent ? 'var(--accent)' : 'var(--text-primary)' }}>v{v.version}</span>
-                        {!v.isPublic && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
-                        {isCurrent && <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent)18', color: 'var(--accent)', border: '1px solid var(--accent)30' }}>{t('Aktuální', 'Current')}</span>}
+                        {!v.isPublic && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--surface-3)', color: 'var(--text-tertiary)', border: '1px solid var(--border)' }}>{t('Interní', 'Internal')}</span>}
+                        {isCurrent && <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'var(--accent-bg)', color: 'var(--accent-text)', border: '1px solid var(--accent-border)' }}>{t('Aktuální', 'Current')}</span>}
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                         {v.validFrom}{v.validTo ? ` → ${v.validTo}` : ` → ${t('dosud', 'present')}`}
@@ -696,7 +701,7 @@ export default function ProductCatalogPage() {
                     }}
                     tabIndex={0}
                     aria-label={t(`Otevřít detail produktu ${p.name}`, `Open product details for ${p.name}`)}
-                    style={{ cursor: 'pointer', background: selectedProduct?.id === p.id ? 'var(--accent)0d' : undefined, borderLeft: selectedProduct?.id === p.id ? '3px solid var(--accent)' : '3px solid transparent' }}>
+                    style={{ cursor: 'pointer', background: selectedProduct?.id === p.id ? 'color-mix(in srgb, var(--accent) 5%, var(--surface))' : undefined, borderLeft: selectedProduct?.id === p.id ? '3px solid var(--accent)' : '3px solid transparent' }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px', color: 'var(--text-primary)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         {!p.isPublic && <span title={t('Interní produkt', 'Internal product')}><EyeOff size={10} aria-hidden="true" style={{ color: 'var(--text-tertiary)' }} /></span>}
