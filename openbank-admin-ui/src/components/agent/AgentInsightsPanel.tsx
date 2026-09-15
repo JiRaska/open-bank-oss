@@ -6,6 +6,7 @@
 
 import { Bot, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { safeExternalUrl } from '@/lib/security/safeExternalUrl'
 
 // ── AgentInsightsPanel — the canonical surface for AI-agent output ─────────────
 //
@@ -147,6 +148,7 @@ export function AgentInsightsPanel({
           {findings.map(f => {
             const sev = f.severity ? SEVERITY_CFG[f.severity] : null
             const sc = f.status ? (STATUS_CFG[f.status.toUpperCase()] ?? STATUS_CFG['OPEN']) : null
+            const proposalUrl = safeExternalUrl(f.proposalUrl)
             return (
               <div key={f.id} style={{ padding: '12px 14px', borderRadius: '10px',
                 border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -191,11 +193,16 @@ export function AgentInsightsPanel({
 
                 {(f.proposalUrl || f.detectedAt || showHitl) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    {f.proposalUrl && (
-                      <a href={f.proposalUrl} target="_blank" rel="noopener noreferrer"
+                    {proposalUrl && (
+                      <a href={proposalUrl} target="_blank" rel="noopener noreferrer"
                         style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
                         {f.proposalLabel ?? 'View proposal →'}
                       </a>
+                    )}
+                    {f.proposalUrl && !proposalUrl && (
+                      <span role="status" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                        {language === 'cs' ? 'Odkaz na návrh není bezpečně dostupný' : 'Proposal link is not safely available'}
+                      </span>
                     )}
                     {f.detectedAt && (
                       <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>

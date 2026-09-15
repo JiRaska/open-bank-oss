@@ -18,6 +18,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { CodeViewport, PageHeader, StatusBadge } from '@/components/ui'
 import type { FlakyTestFinding } from '@/app/api/flaky-test-hunter/findings/route'
+import { safeExternalUrl } from '@/lib/security/safeExternalUrl'
 
 function FlakyTestFindingDetailContent() {
   const params = useParams<{ id: string }>()
@@ -45,6 +46,7 @@ function FlakyTestFindingDetailContent() {
   useEffect(() => { load() }, [load])
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-US'
+  const proposalUrl = safeExternalUrl(finding?.proposalUrl)
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1000px', animation: 'fadeIn 0.2s ease-out' }}>
@@ -114,10 +116,15 @@ function FlakyTestFindingDetailContent() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                 <GitPullRequest size={14} style={{ color: '#6366f1' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Navržená oprava', 'Proposed fix')}</span>
-                {finding.proposalUrl && (
-                  <a href={finding.proposalUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textDecoration: 'none', marginLeft: 'auto' }}>
+                {proposalUrl && (
+                  <a href={proposalUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textDecoration: 'none', marginLeft: 'auto' }}>
                     {t('Zobrazit PR →', 'View PR →')}
                   </a>
+                )}
+                {finding.proposalUrl && !proposalUrl && (
+                  <span role="status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
+                    {t('Odkaz na návrh není bezpečně dostupný', 'Proposal link is not safely available')}
+                  </span>
                 )}
               </div>
               <CodeViewport label={t('Navržený diff opravy flaky testu', 'Proposed flaky-test fix diff')} style={{ fontSize: '11px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px',

@@ -65,4 +65,19 @@ describe('AgentInsightsPanel', () => {
       expect(button).toHaveAttribute('aria-busy', 'true')
     }
   })
+
+  it('never turns an untrusted proposal scheme into a clickable action', () => {
+    render(
+      <LanguageProvider initialLanguage="en">
+        <AgentInsightsPanel
+          title="Cost insights"
+          findings={[{ ...findings[0], proposalUrl: 'javascript:alert(document.domain)' }]}
+          emptyMessage="No findings"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(screen.queryByRole('link', { name: 'Review proposal' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Proposal link is not safely available')
+  })
 })
