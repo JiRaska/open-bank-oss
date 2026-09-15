@@ -457,6 +457,13 @@ jobs:
             --slot "$REVIEW_SLOT" --output "$REVIEW_SLOT.json" \
             --cli .github/scripts/agent-review-claude-cli/node_modules/.bin/claude
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: review-usage-${{ matrix.slot }}-1
+          path: ${{ matrix.slot }}.json.usage.json
+          if-no-files-found: warn
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: solo-report-${{ matrix.slot }}-1
           path: ${{ matrix.slot }}.json

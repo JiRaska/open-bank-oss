@@ -34,6 +34,60 @@ def stream(*, content=None, error=False, result=None):
 
 
 class DriverTest(unittest.TestCase):
+    def test_usage_is_numeric_allowlisted_and_unknown_is_not_zero(self):
+        event = dict(type="result", is_error=True, total_cost_usd=1.25,
+                     usage=dict(input_tokens=120, output_tokens=30, cache_read_input_tokens=0,
+                                cache_creation_input_tokens=9, secret="private-fixture"),
+                     result="private-fixture", errors=["private-fixture"])
+        summary = runner.usage_summary(json.dumps(event))
+        self.assertEqual(summary["tokens"]["input_tokens"], 120)
+        self.assertEqual(summary["tokens"]["cache_read_input_tokens"], 0)
+        self.assertEqual(summary["cost_usd"], 1.25)
+        self.assertNotIn("private-fixture", json.dumps(summary))
+        for raw in (None, "partial {", "[]", json.dumps(event) + "\n" + json.dumps(event)):
+            unknown = runner.usage_summary(raw)
+            self.assertIsNone(unknown["cost_usd"])
+            self.assertTrue(all(value is None for value in unknown["tokens"].values()))
+        for invalid in (True, -1, "private-fixture", float("nan"), float("inf"), 10 ** 400):
+            event["total_cost_usd"] = invalid
+            event["usage"]["input_tokens"] = invalid
+            summary = runner.usage_summary(json.dumps(event))
+            self.assertIsNone(summary["cost_usd"])
+            if type(invalid) is not int or invalid < 0:
+                self.assertIsNone(summary["tokens"]["input_tokens"])
+
+    def test_failed_invocations_preserve_accounting_without_admission(self):
+        data = dict(payload={}, subject=dict(repo="example/bank", pr=12,
+                    input_digest=runner.proof.digest({})))
+        raw = json.dumps(dict(type="result", is_error=True, total_cost_usd=0.5,
+                              usage=dict(input_tokens=100)))
+        outcomes = [subprocess.CompletedProcess([], 1, stdout=raw, stderr="private-fixture"),
+                    subprocess.CompletedProcess([], 0, stdout="invalid", stderr=""),
+                    subprocess.TimeoutExpired("cli", 900, output=raw.encode()),
+                    OSError("private-fixture")]
+        for outcome in outcomes:
+            with self.subTest(outcome=type(outcome).__name__), tempfile.TemporaryDirectory() as directory:
+                source, output = Path(directory) / "in.json", Path(directory) / "out.json"
+                source.write_text(json.dumps(data))
+                with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                        patch.object(runner, "public_subject", return_value=pull()), \
+                        patch.object(runner.proof, "validate_subject"), \
+                        patch.object(runner.proof, "validate_policy_snapshot"), \
+                        patch.object(runner.subprocess, "run") as invoke:
+                    if isinstance(outcome, Exception):
+                        invoke.side_effect = outcome
+                    else:
+                        invoke.return_value = outcome
+                    with self.assertRaises((ValueError, subprocess.TimeoutExpired, OSError)):
+                        runner.review(source, output, "correctness", "/trusted/cli")
+                self.assertFalse(output.exists())
+                accounting = json.loads(Path(str(output) + ".usage.json").read_text())
+                self.assertNotIn("private-fixture", json.dumps(accounting))
+                if isinstance(outcome, subprocess.TimeoutExpired) or getattr(outcome, "returncode", None) == 1:
+                    self.assertEqual(accounting["cost_usd"], 0.5)
+                else:
+                    self.assertIsNone(accounting["cost_usd"])
+
     def test_policy_failures_are_classified_without_exposing_details(self):
         for error in (runner.guard.Undetermined("private fixture"), ImportError("private fixture")):
             with patch.object(sys, "argv", ["runner", "prepare", "--pr", "12", "--output", "unused"]), \
@@ -142,6 +196,20 @@ class DriverTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "last structured output"):
             runner.parse_stream(stream(content=[block], result=wrong), "correctness", {})
 
+    def test_oversized_valid_input_stops_before_provider_call(self):
+        payload = {"diff": "x" * runner.MAX_INPUT}
+        data = dict(payload=payload, subject=dict(input_digest=runner.proof.digest(payload)))
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "input.json"
+            source.write_text(json.dumps(data))
+            with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                    patch.object(runner, "public_subject") as api, \
+                    patch.object(runner.subprocess, "run") as invoke:
+                with self.assertRaisesRegex(ValueError, "input exceeds budget"):
+                    runner.review(source, Path(directory) / "out.json", "correctness", "/never/call")
+                api.assert_not_called()
+                invoke.assert_not_called()
+
     def test_input_tampering_stops_before_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json"
@@ -211,6 +279,8 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(args[args.index("--tools") + 1], "")
             self.assertIn("--strict-mcp-config", args)
             self.assertIn("--safe-mode", args)
+            self.assertEqual(args[args.index("--max-budget-usd") + 1], "1.00")
+            self.assertEqual(kwargs["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], "16384")
             self.assertEqual(json.loads(args[args.index("--json-schema") + 1]), runner.RESPONSE_SCHEMA)
             self.assertEqual(args[args.index("--setting-sources") + 1], "")
             self.assertNotIn("GH_TOKEN", kwargs["env"])

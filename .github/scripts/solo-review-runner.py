@@ -10,6 +10,7 @@ outside that scope. This producer requires an externally anchored controller rev
 import argparse
 import importlib.util
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -28,7 +29,9 @@ def load(name, filename):
 proof = load("proof", "solo-review-proof.py")
 guard = load("guard", "check-agent-pr-guard.py")
 require = proof.require
-MAX_INPUT = 4_000_000
+MAX_INPUT = 1_000_000
+CLI_BUDGET_USD = "1.00"
+MAX_OUTPUT_TOKENS = "16384"
 RESPONSE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["verdict", "findings", "coverage"],
@@ -176,6 +179,31 @@ def parse_stream(raw, slot, subject):
                 response=response)
 
 
+def usage_summary(raw):
+    """CLI-reported accounting only; never copy provider text or invent zero usage."""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    results = []
+    for line in (raw or "").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            results.append(event)
+    result = results[0] if len(results) == 1 else {}
+    usage = result.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    counters = {}
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+        value = usage.get(key)
+        counters[key] = value if type(value) is int and value >= 0 else None
+    cost = result.get("total_cost_usd")
+    valid_cost = type(cost) in (int, float) and 0 <= cost <= 1_000_000 and math.isfinite(cost)
+    return dict(tokens=counters, cost_usd=cost if valid_cost else None,
+                cost_basis="cli_reported_not_invoice" if valid_cost else "unknown")
+
+
 def invocation_failure(proc):
     """Only fixed categories escape; provider output may contain source or secrets."""
     errors = [proc.stderr or ""]
@@ -204,6 +232,9 @@ def review(input_path, output, slot, cli):
     repo, anchor = anchored()
     data = json.loads(Path(input_path).read_text())
     require(proof.digest(data["payload"]) == data["subject"]["input_digest"], "input digest mismatch")
+    serialized_input = json.dumps(data)
+    require(len(serialized_input.encode()) <= MAX_INPUT,
+            "review input exceeds budget; split the PR without truncating coverage")
     # Independently recheck public provenance in each review job before provider egress.
     require(data["subject"].get("repo") == repo, "review subject repository differs from anchored controller")
     pull = public_subject(repo, data["subject"]["pr"])
@@ -227,13 +258,30 @@ def review(input_path, output, slot, cli):
     allowed_env = ("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
                    "CLAUDE_CODE_OAUTH_TOKEN")
     env = {key: os.environ[key] for key in allowed_env if key in os.environ}
-    with tempfile.TemporaryDirectory(prefix="solo-review-") as directory:
-        proc = subprocess.run(
-            [str(Path(cli).resolve()), "--safe-mode", "-p", "--model", model, "--tools", "", "--strict-mcp-config",
-             "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--no-session-persistence",
-             "--max-turns", "3", "--output-format", "stream-json", "--verbose",
-             "--json-schema", json.dumps(RESPONSE_SCHEMA), "--system-prompt", system],
-            input=json.dumps(data), text=True, capture_output=True, cwd=directory, env=env, timeout=900)
+    env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = MAX_OUTPUT_TOKENS
+    # Persist an unknown record before egress so interruption cannot look like zero spend.
+    accounting = dict(schema=1, slot=slot, subject_digest=proof.digest(data["subject"]),
+                      execution="started", **usage_summary(None))
+    usage_path = str(output) + ".usage.json"
+    write(usage_path, accounting)
+    try:
+        with tempfile.TemporaryDirectory(prefix="solo-review-") as directory:
+            proc = subprocess.run(
+                [str(Path(cli).resolve()), "--safe-mode", "-p", "--model", model, "--tools", "", "--strict-mcp-config",
+                 "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--no-session-persistence",
+                 "--max-turns", "3", "--max-budget-usd", CLI_BUDGET_USD, "--output-format", "stream-json", "--verbose",
+                 "--json-schema", json.dumps(RESPONSE_SCHEMA), "--system-prompt", system],
+                input=serialized_input, text=True, capture_output=True, cwd=directory, env=env, timeout=900)
+    except subprocess.TimeoutExpired as exc:
+        accounting.update(execution="timeout", **usage_summary(exc.stdout))
+        write(usage_path, accounting)
+        raise
+    except OSError:
+        accounting.update(execution="launch_error")
+        write(usage_path, accounting)
+        raise
+    accounting.update(execution="exited", exit_code=proc.returncode, **usage_summary(proc.stdout))
+    write(usage_path, accounting)
     if proc.returncode != 0:
         raise ValueError(invocation_failure(proc))
     write(output, parse_stream(proc.stdout, slot, data["subject"]))

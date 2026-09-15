@@ -175,3 +175,22 @@ recovery from arbitrary model text, and never substitutes for the final structur
 result. The last carrier must still match that result exactly. The regression was
 reproduced and corrected against both unchanged hosted reports from the pilot;
 a fresh complete hosted run is still required for admission.
+
+## Usage accounting
+
+Each solo model invocation writes a separate `review-usage-<slot>-1` artifact,
+including on invocation failure. It contains allowlisted numeric CLI usage and cost,
+the subject digest, and process status. Missing values are null (unknown), never
+inferred as zero. CLI cost is not an invoice or evidence of subscription charges.
+A timeout can leave incomplete accounting; reconcile against provider billing.
+The record is written before invocation so an interrupted process may leave a
+`started` record. Runner loss can still prevent artifact upload.
+
+Accounting is not an admission report and cannot make a failed review pass. It
+does not enforce an account-wide spend cap. The runner rejects serialized input
+above 1 MB without truncation, sets a 16,384 output-token limit and passes
+`--max-budget-usd 1.00` to the CLI for each slot. The CLI budget is a secondary
+stop condition, not a prepaid reservation or an invoice-level guarantee; an
+in-flight request may already have incurred cost. Shared budget reservation and
+provider reconciliation are required before unattended retries can be enabled.
+Limits also mean a large PR must be split; exceeding one never counts as approval.
