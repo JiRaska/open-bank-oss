@@ -35,8 +35,12 @@ test('resumes BankID sync without creating the party again', async ({ page }) =>
     })
   })
 
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/pid')
   await page.getByRole('button', { name: 'Open PID quick create' }).click()
+  await expect(page.locator('#pid-quick-create-guidance')).toBeVisible()
+  expect(await page.locator('#pid-given-name').evaluate(element => getComputedStyle(element.parentElement!.parentElement!).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.locator('#pid-given-name').fill('Ada')
   await page.locator('#pid-family-name').fill('Lovelace')
   await page.locator('#pid-birthdate').fill('1985-04-12')

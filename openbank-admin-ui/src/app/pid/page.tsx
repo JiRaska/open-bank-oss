@@ -13,6 +13,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader, StatusBadge, TableViewport, statusTone, type Tone } from '@/components/ui'
 import { parsePidRecords, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
+import styles from './page.module.css'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -311,7 +312,10 @@ export default function PidPage() {
               <AlertTriangle size={14} style={{ display: 'inline-block', verticalAlign: 'text-bottom', marginRight: '6px' }} />
               <strong>{t('Rychlé vytvoření je pouze předvyplnění. Právně závazná AML identifikace vyžaduje plný onboarding a ověření.', 'Quick create is only pre-filling. Legally binding AML identification requires full onboarding and verification.')}</strong>
             </div>
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleSubmit} aria-busy={formSubmitting} aria-describedby="pid-quick-create-guidance" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <p id="pid-quick-create-guidance" className={styles.formGuidance}>
+                {t('Pole označená * jsou povinná. Po vytvoření strany proběhne samostatná synchronizace BankID, kterou lze bezpečně zopakovat.', 'Fields marked * are required. Creating the party is followed by a separate BankID sync that can be retried safely.')}
+              </p>
               {pendingBankIdSync && (
                 <div role="status" style={{ padding: '12px', background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)', borderRadius: '6px', fontSize: '13px' }}>
                   {t(
@@ -321,7 +325,7 @@ export default function PidPage() {
                 </div>
               )}
               <fieldset disabled={formSubmitting || pendingBankIdSync !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className={styles.quickCreateGrid}>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Základní údaje', 'Basic Info')}</h4>
                 </div>
@@ -500,7 +504,7 @@ export default function PidPage() {
                 </div>
               </div>
               </fieldset>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <div className={styles.formActions}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(false)} disabled={formSubmitting}>
                   {t('Zrušit', 'Cancel')}
                 </button>
@@ -519,7 +523,7 @@ export default function PidPage() {
         )}
 
         {successMsg && (
-          <div className="card" style={{ padding: '16px', color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="card" role="status" style={{ padding: '16px', color: 'var(--success-text)', background: 'var(--success-bg)', border: '1px solid var(--success-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckCircle2 size={16} /> {successMsg}
           </div>
         )}
@@ -539,7 +543,7 @@ export default function PidPage() {
         </div>
 
         {error && (
-          <div className="card" style={{ padding: '16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px' }}>
+          <div className="card" role="alert" style={{ padding: '16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px' }}>
             {error}
           </div>
         )}

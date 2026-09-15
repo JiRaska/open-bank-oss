@@ -1,0 +1,36 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.formGuidance {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.quickCreateGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .quickCreateGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .formActions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .formActions > * {
+    justify-content: center;
+    width: 100%;
+  }
+}
