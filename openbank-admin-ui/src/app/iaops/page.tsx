@@ -289,19 +289,19 @@ function IAOpsContent() {
         <>
           {/* A human-first introduction. The generated illustration is an original OpenBank asset;
               the governed capabilities below still come from agents.yaml. */}
-          <div className={styles.crewHero} style={{ borderRadius: '22px', marginBottom: '20px',
-            background: 'linear-gradient(135deg, #111827 0%, #172554 55%, #0f766e 150%)', color: 'white',
-            border: '1px solid rgba(148,163,184,0.25)', boxShadow: '0 18px 42px rgba(15,23,42,0.16)' }}>
+          <section id="iaops-crew" aria-labelledby="iaops-crew-title" className={styles.crewHero} style={{ borderRadius: '22px', marginBottom: '20px',
+            background: 'linear-gradient(135deg, var(--iaops-crew-start) 0%, var(--iaops-crew-mid) 55%, var(--iaops-crew-end) 150%)', color: 'var(--iaops-crew-heading)',
+            border: '1px solid var(--iaops-crew-border)', boxShadow: 'var(--iaops-crew-shadow)' }}>
             <div className={styles.crewCopy}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', alignSelf: 'flex-start',
-                padding: '4px 9px', borderRadius: '20px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.14)',
-                fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#a5f3fc' }}>
+                padding: '4px 9px', borderRadius: '20px', background: 'var(--iaops-crew-chip-bg)', border: '1px solid var(--iaops-crew-chip-border)',
+                fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--iaops-crew-accent)' }}>
                 <Sparkles size={12} /> {t('AI posádka OpenBank', 'The OpenBank AI crew')}
               </span>
-              <h2 style={{ fontSize: '27px', lineHeight: 1.12, letterSpacing: '-0.035em', margin: '14px 0 10px', maxWidth: '470px' }}>
+              <h2 id="iaops-crew-title" style={{ fontSize: '27px', lineHeight: 1.12, letterSpacing: '-0.035em', margin: '14px 0 10px', maxWidth: '470px' }}>
                 {t('Seznamte se s kolegy, kteří nikdy nerozhodují za vás.', 'Meet the colleagues who never decide for you.')}
               </h2>
-              <p style={{ fontSize: '13px', lineHeight: 1.65, color: '#cbd5e1', margin: 0, maxWidth: '470px' }}>
+              <p style={{ fontSize: '13px', lineHeight: 1.65, color: 'var(--iaops-crew-text)', margin: 0, maxWidth: '470px' }}>
                 {t(
                   'Každý robot představuje jednoho skutečného agenta. Má jasnou práci, omezený přístup a okamžik, kdy musí předat rozhodnutí člověku.',
                   'Each robot represents a real agent. It has a clear job, limited access and a defined moment when a human must take over.',
@@ -314,7 +314,7 @@ function IAOpsContent() {
                   { icon: <ScrollText size={13} />, label: t('Audit vše zaznamená', 'Audit records everything') },
                 ].map(item => (
                   <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 9px',
-                    borderRadius: '9px', background: 'rgba(255,255,255,0.08)', color: '#e2e8f0', fontSize: '10px', fontWeight: 700 }}>
+                    borderRadius: '9px', background: 'var(--iaops-crew-chip-bg)', color: 'var(--iaops-crew-chip-text)', fontSize: '10px', fontWeight: 700 }}>
                     {item.icon}{item.label}
                   </span>
                 ))}
@@ -324,12 +324,12 @@ function IAOpsContent() {
               <Image src="/aiops-agent-crew.webp" alt={t('Originální tým pěti robotických AI agentů OpenBank', 'Original team of five OpenBank AI agent robots')}
                 fill priority unoptimized sizes="(max-width: 900px) 100vw, 55vw"
                 style={{ objectFit: 'cover', objectPosition: '52% 48%', opacity: 0.96 }} />
-              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #172554 0%, transparent 32%)' }} />
-              <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '8px', color: 'rgba(226,232,240,.7)', letterSpacing: '0.04em' }}>
+              <div style={{ position: 'absolute', inset: 0, background: 'var(--iaops-crew-art-wash)' }} />
+              <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '8px', color: 'var(--iaops-crew-caption)', letterSpacing: '0.04em' }}>
                 {t('Vlastní vizuální koncept · bez postav třetích stran', 'Original visual concept · no third-party characters')}
               </span>
             </div>
-          </div>
+          </section>
 
           <AgentMeshExplainer language={language} />
 

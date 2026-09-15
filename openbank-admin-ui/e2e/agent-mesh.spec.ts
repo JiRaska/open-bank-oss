@@ -16,6 +16,15 @@ test.describe('AI collaboration education', () => {
       }, theme)
       await page.goto('/iaops')
 
+      const crew = page.getByRole('region', { name: /Meet the colleagues|Seznamte se s kolegy/i })
+      await expect(crew).toBeVisible()
+      await expect(crew.getByText(/Human decides|Člověk rozhodne/i)).toBeVisible()
+      const crewResults = await new AxeBuilder({ page })
+        .include('#iaops-crew')
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+      expect(crewResults.violations).toEqual([])
+
       const mesh = page.locator('#ai-swarm')
       await expect(mesh.getByRole('heading', { name: /What is the AI swarm|Co je AI swarm/i })).toBeVisible()
       await expect(mesh.getByText(/A human has the final say|Člověk má poslední slovo/i)).toBeVisible()

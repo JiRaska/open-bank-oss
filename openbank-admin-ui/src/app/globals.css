@@ -159,6 +159,21 @@
   --loyalty-brand-wash:   rgba(255, 255, 255, .09);
   --loyalty-card-shadow:  0 5px 20px rgba(15, 62, 53, .08);
 
+  /* IAOps educational crew hero is a stable night-sky canvas in both themes. */
+  --iaops-crew-start:     #111827;
+  --iaops-crew-mid:       #172554;
+  --iaops-crew-end:       #0f766e;
+  --iaops-crew-heading:   #ffffff;
+  --iaops-crew-accent:    #a5f3fc;
+  --iaops-crew-text:      #cbd5e1;
+  --iaops-crew-chip-text: #e2e8f0;
+  --iaops-crew-border:    rgba(148, 163, 184, .25);
+  --iaops-crew-shadow:    0 18px 42px rgba(15, 23, 42, .16);
+  --iaops-crew-chip-bg:   rgba(255, 255, 255, .08);
+  --iaops-crew-chip-border: rgba(255, 255, 255, .14);
+  --iaops-crew-art-wash:  linear-gradient(90deg, var(--iaops-crew-mid) 0%, transparent 32%);
+  --iaops-crew-caption:   rgba(226, 232, 240, .7);
+
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
   --dashboard-hero-start: #111a35;
