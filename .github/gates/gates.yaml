@@ -1267,6 +1267,20 @@ gates:
       # had no enforcement behind it.
       .github/scripts/check-fleet-attestations.sh --check-placeholders
 
+  - id: no-handrolled-cosign
+    name: "workflows sign through the shared cosign library (issue #9805, enforced)"
+    group: supplychain
+    mode: enforced
+    # 81 workflows measured 2026-09-13; half, so the estate can shrink without a false red.
+    min_subjects: 40
+    rationale: "A workflow that signs and attests by hand emits whatever predicates its author knew about, so a new admission policy silently outruns it. That is how runner-image.yml shipped an SBOM with no SLSA provenance and deadlocked every ARC runner pool twice in two months (#9805, #887/#8847) — with the rule already written in root CLAUDE.md the whole time."
+    review_after: "2027-03-13"
+    selftest_inputs: [".github/scripts/check-no-handrolled-cosign.py"]
+    selftest: python3 .github/scripts/check-no-handrolled-cosign.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-no-handrolled-cosign.py
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
