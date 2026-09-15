@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { readFile } from 'node:fs/promises'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
@@ -91,8 +92,18 @@ for (const language of ['en', 'cs']) {
     // A regression for the unlayered global reset that erased Tailwind padding.
     expect(await nav.getByRole('button').first().evaluate(el => parseFloat(getComputedStyle(el).paddingTop))).toBeGreaterThan(0)
     await page.screenshot({ path: test.info().outputPath('lipa-overview.png'), fullPage: true, animations: 'disabled' })
+    const lightScan = await new AxeBuilder({ page })
+      .include('#main-content')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(lightScan.violations).toEqual([])
     await page.evaluate(() => document.documentElement.classList.add('dark'))
     await page.screenshot({ path: test.info().outputPath('lipa-dark.png'), fullPage: true, animations: 'disabled' })
+    const darkScan = await new AxeBuilder({ page })
+      .include('#main-content')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(darkScan.violations).toEqual([])
     await page.setViewportSize({ width: 390, height: 844 })
     for (const button of await nav.getByRole('button').all()) {
       await button.click()

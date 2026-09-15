@@ -146,6 +146,19 @@
   --graph-device:         #4f46e5;
   --graph-document:       #15803d;
 
+  /* Lípa keeps one evergreen programme identity across themes. Only the hero and primary
+   * programme actions use these tokens; workspace content continues to follow shared surfaces. */
+  --loyalty-hero-start:   #103e35;
+  --loyalty-hero-end:     #1d5c4e;
+  --loyalty-action:       #174d40;
+  --loyalty-on-brand:     #ffffff;
+  --loyalty-brand-accent: #bbebc7;
+  --loyalty-brand-muted:  #d2e8df;
+  --loyalty-brand-soft:   #e0f4e8;
+  --loyalty-brand-border: rgba(255, 255, 255, .19);
+  --loyalty-brand-wash:   rgba(255, 255, 255, .09);
+  --loyalty-card-shadow:  0 5px 20px rgba(15, 62, 53, .08);
+
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
   --dashboard-hero-start: #111a35;
