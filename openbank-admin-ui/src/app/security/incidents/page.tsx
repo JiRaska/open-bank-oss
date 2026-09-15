@@ -10,6 +10,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { IncidentImpactInvestigation } from '@/components/context/IncidentImpactInvestigation'
 import type { Tone } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -158,14 +159,14 @@ export default function IncidentsPage() {
 
           {incidents.length === 0 ? <DataUnavailable kind="no_data" feature={t('ICT incidenty', 'ICT incidents')} lang={language} detail={t('Registr byl ověřen a neobsahuje žádný incident.', 'The register was verified and contains no incidents.')} />
             : filtered.length === 0 ? <div style={{ padding: 28 }}><DataUnavailable kind="no_data" feature={t('Výsledky filtru', 'Filtered results')} lang={language} detail={t('Žádný incident neodpovídá zvoleným filtrům.', 'No incident matches the selected filters.')} /><button type="button" className="btn btn-secondary" onClick={clearFilters}>{t('Zobrazit celý registr', 'Show full register')}</button></div>
-              : <div style={{ overflowX: 'auto' }} tabIndex={0} aria-label={t('Posuvný registr ICT incidentů', 'Scrollable ICT incident register')}><table className="data-table" aria-busy={loading} style={{ minWidth: 980 }}><caption className="sr-only">{t('DORA registr ICT incidentů', 'DORA ICT incident register')}</caption><thead><tr><th>{t('Incident', 'Incident')}</th><th>{t('Závažnost', 'Severity')}</th><th>{t('Stav', 'Status')}</th><th>{t('Zjištěno', 'Detected')}</th><th>{t('Regulátor', 'Regulator')}</th><th>{t('Odpovědnost', 'Ownership')}</th></tr></thead><tbody>{filtered.map(item => <tr key={item.id}>
+              : <TableViewport label={t('Posuvný registr ICT incidentů', 'Scrollable ICT incident register')} hint={t('Posuňte registr vodorovně pro čas, regulatorní hlášení a odpovědnost.', 'Scroll horizontally for timing, regulatory reporting, and ownership.')}><table className="data-table" aria-busy={loading} style={{ minWidth: 980 }}><caption className="sr-only">{t('DORA registr ICT incidentů', 'DORA ICT incident register')}</caption><thead><tr><th>{t('Incident', 'Incident')}</th><th>{t('Závažnost', 'Severity')}</th><th>{t('Stav', 'Status')}</th><th>{t('Zjištěno', 'Detected')}</th><th>{t('Regulátor', 'Regulator')}</th><th>{t('Odpovědnost', 'Ownership')}</th></tr></thead><tbody>{filtered.map(item => <tr key={item.id}>
                 <td style={{ minWidth: 280 }}><strong>{item.title}</strong><div style={{ marginTop: 5 }}><StatusBadge status={item.category} tone="neutral" label={item.category.replaceAll('_', ' ')} /></div><details style={{ marginTop: 7 }}><summary style={{ cursor: 'pointer', color: 'var(--accent-text)', fontSize: 12 }}>{t('Co se stalo', 'What happened')}</summary><p style={{ maxWidth: 460, margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 12 }}>{item.description}</p></details></td>
                 <td><StatusBadge status={item.severity} tone={SEVERITY_TONE[item.severity]} label={severityLabel(item.severity)} withDot /></td>
                 <td><StatusBadge status={item.status} label={statusLabel(item.status)} withDot /></td>
                 <td><time dateTime={item.detectedAt}>{new Date(item.detectedAt).toLocaleString(dateLocale)}</time></td>
                 <td>{item.reportedToRegulator ? <div><StatusBadge status="REPORTED" tone="success" label={t('Oznámeno', 'Reported')} withDot /><div style={{ marginTop: 5, fontFamily: 'var(--font-mono)', fontSize: 11 }}>{item.regulatoryReportId}</div></div> : <StatusBadge status="NOT_REPORTED" tone="warning" label={t('Bez ID hlášení', 'No report ID')} withDot />}</td>
                 <td><div style={{ fontSize: 12, fontWeight: 650 }}>{item.assignedTo ?? t('Nepřiřazeno', 'Unassigned')}</div><div style={{ marginTop: 5, color: 'var(--text-tertiary)', fontSize: 11 }}>{item.affectedServices.length ? item.affectedServices.join(', ') : t('Bez uvedené služby', 'No service listed')}</div></td>
-              </tr>)}</tbody></table></div>}
+              </tr>)}</tbody></table></TableViewport>}
         </section>}
   </div></AuthGuard>
 }

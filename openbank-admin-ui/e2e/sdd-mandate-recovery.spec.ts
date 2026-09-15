@@ -51,6 +51,12 @@ test.describe('SDD mandate recovery', () => {
     await expect(page.getByText('Verified Utilities SE')).toBeVisible()
     await expect(page.getByText(/B2B potvrzeno|B2B confirmed/)).toBeVisible()
     await expect(page.getByText('B2B · RCUR')).toBeVisible()
+    await page.setViewportSize({ width: 320, height: 720 })
+    const mandates = page.getByRole('region', { name: /Posuvná tabulka mandátů|Scrollable mandate table/ })
+    await mandates.focus()
+    await expect(mandates).toBeFocused()
+    await expect(page.getByText(/Posuňte tabulku vodorovně pro schéma|Scroll horizontally for scheme/)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
     const initialRequests = requests
     failRefresh = true

@@ -14,7 +14,7 @@ import { RefreshCw, Repeat } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { parseSddMandates, type SddMandate } from '@/lib/sdd/sddMandateContract'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 
@@ -118,7 +118,7 @@ export default function SddPage() {
         </select>
       </div>}
 
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }} tabIndex={0} role="region" aria-label={t('Posuvná tabulka mandátů', 'Scrollable mandate table')}>
+      <div className="card" style={{ padding: 0 }}>
         {unavailable && <>
           <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense={rows.length > 0} />
           {rows.length > 0 && <p role="status" aria-live="polite" style={{ margin: '6px 14px 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
@@ -126,6 +126,10 @@ export default function SddPage() {
           </p>}
         </>}
         {(!unavailable || rows.length > 0) && (
+        <TableViewport
+          label={t('Posuvná tabulka mandátů', 'Scrollable mandate table')}
+          hint={t('Posuňte tabulku vodorovně pro schéma, stav a poslední aktivitu.', 'Scroll horizontally for scheme, status, and latest activity.')}
+        >
         <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
           <caption className="sr-only">{t('Přehled mandátů inkas', 'Direct debit mandate overview')}</caption>
           <thead>
@@ -174,6 +178,7 @@ export default function SddPage() {
             )}
           </tbody>
         </table>
+        </TableViewport>
         )}
       </div>
     </div>

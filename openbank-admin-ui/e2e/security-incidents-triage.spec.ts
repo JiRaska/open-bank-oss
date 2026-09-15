@@ -52,6 +52,9 @@ test('triages verified DORA incidents and preserves the snapshot after malformed
     })).toBe(true)
   }
   const register = page.getByLabel('Scrollable ICT incident register')
+  await register.focus()
+  await expect(register).toBeFocused()
+  await expect(page.getByText('Scroll horizontally for timing, regulatory reporting, and ownership.')).toBeVisible()
   await expect(register.getByText('Payment dependency outage', { exact: true })).toBeVisible()
   await expect(page.getByText('3', { exact: true }).first()).toBeVisible()
   await expect(register.getByText('P1 · Critical')).toBeVisible()
