@@ -3,6 +3,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 import { waitForSettledShell } from './helpers/shell'
 
 const CORE_WORKFLOWS = [
@@ -36,7 +37,7 @@ for (const { route, heading } of CORE_WORKFLOWS) {
     await waitForSettledShell(page)
     await expect(page.locator('#main-content')).toBeVisible()
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-    await page.locator('html').evaluate(element => element.classList.add('dark'))
+    await applyOperatorTheme(page, 'dark')
     await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     if (route === '/approvals') {
       await expect(page.getByRole('status').filter({ hasText: /AI proposal queue|Fronta AI návrhů/ })).toBeVisible()

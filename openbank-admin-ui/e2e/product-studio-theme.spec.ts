@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
@@ -19,7 +20,7 @@ test('Product Studio remains understandable and accessible in both themes', asyn
   await expect(page.getByText(/Inteligence radí, člověk rozhoduje|Intelligence advises; people decide/)).toBeVisible()
 
   for (const dark of [false, true]) {
-    await page.locator('html').evaluate((element, enabled) => element.classList.toggle('dark', enabled), dark)
+    await applyOperatorTheme(page, dark ? 'dark' : 'light')
     if (dark) await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     const scan = await new AxeBuilder({ page })
       .include('#main-content')

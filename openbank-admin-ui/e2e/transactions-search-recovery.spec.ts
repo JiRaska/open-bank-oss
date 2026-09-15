@@ -4,6 +4,7 @@
 
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.describe('Transaction ledger search recovery', () => {
   test.beforeEach(async ({ context, baseURL }) => {
@@ -94,7 +95,7 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(page.getByLabel('Filter by IBAN')).toHaveValue('')
     await expect(clear).toHaveCount(0)
 
-    await page.locator('html').evaluate(element => element.classList.add('dark'))
+    await applyOperatorTheme(page, 'dark')
     const background = await page.locator('.ui-empty-state').evaluate(element => getComputedStyle(element).backgroundImage)
     expect(background).not.toBe('none')
   })

@@ -17,7 +17,11 @@ describe('E2E theme preference contract', () => {
         if (relative === path.join('helpers', 'theme.ts')) {
           return keys.filter(key => key !== 'ob-admin-theme').map(key => `${relative}: wrong key ${key}`)
         }
-        return keys.map(key => `${relative}: direct write ${key}`)
+        const directClassMutation = /classList\.(?:add|toggle)\(['"]dark['"]/u.test(source)
+        return [
+          ...keys.map(key => `${relative}: direct write ${key}`),
+          ...(directClassMutation ? [`${relative}: direct .dark mutation`] : []),
+        ]
       })
 
     expect(offenders).toEqual([])

@@ -17,6 +17,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 const PARTY = '018f4a3c-1b2d-7e00-9a11-000000000001'
 const PARTY_B = '018f4a3c-1b2d-7e00-9a11-00000000000b'
@@ -220,7 +221,7 @@ test('the educational model remains operable at a 320px reflow width', async ({ 
   expect(lightScan.violations).toEqual([])
   const lightGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()
   expect(lightGuideScan.violations).toEqual([])
-  await page.locator('html').evaluate(element => element.classList.add('dark'))
+  await applyOperatorTheme(page, 'dark')
   const darkScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
   expect(darkScan.violations).toEqual([])
   const darkGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 const PARTY_ID = '11111111-1111-4111-8111-111111111111'
 
@@ -97,7 +98,7 @@ for (const language of ['en', 'cs']) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze()
     expect(lightScan.violations).toEqual([])
-    await page.evaluate(() => document.documentElement.classList.add('dark'))
+    await applyOperatorTheme(page, 'dark')
     await page.screenshot({ path: test.info().outputPath('lipa-dark.png'), fullPage: true, animations: 'disabled' })
     const darkScan = await new AxeBuilder({ page })
       .include('#main-content')

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -59,9 +60,7 @@ for (const theme of ['light', 'dark'] as const) {
       body: JSON.stringify({ error: 'unreachable' }),
     }))
     await page.goto('/system/agent')
-    await page.locator('html').evaluate((element, selectedTheme) => {
-      element.classList.toggle('dark', selectedTheme === 'dark')
-    }, theme)
+    await applyOperatorTheme(page, theme)
     await expect(page.getByText('Agent-service (MCP) is not responding', { exact: true })).toBeVisible()
     await page.waitForTimeout(450)
 

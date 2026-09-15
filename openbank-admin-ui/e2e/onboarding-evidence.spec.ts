@@ -4,6 +4,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Route } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -46,7 +47,7 @@ test('shows every onboarding stage and purges customer evidence after authorizat
   await row.click()
   await expect(page.getByRole('dialog')).toContainText('customer@example.test')
   for (const theme of ['light', 'dark'] as const) {
-    await page.evaluate(selectedTheme => document.documentElement.classList.toggle('dark', selectedTheme === 'dark'), theme)
+    await applyOperatorTheme(page, theme)
     await page.waitForTimeout(300)
     const scan = await new AxeBuilder({ page })
       .include('#main-content')

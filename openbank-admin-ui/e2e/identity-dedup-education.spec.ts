@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { applyOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -17,7 +18,7 @@ test('identity deduplication remains understandable and accessible in both theme
   await expect(page.getByText('NEEDS_MANUAL_VERIFICATION', { exact: true }).first()).toBeVisible()
 
   for (const dark of [false, true]) {
-    await page.locator('html').evaluate((element, enabled) => element.classList.toggle('dark', enabled), dark)
+    await applyOperatorTheme(page, dark ? 'dark' : 'light')
     if (dark) {
       await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     } else {
