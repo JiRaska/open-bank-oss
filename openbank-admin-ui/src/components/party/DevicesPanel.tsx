@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { Smartphone, HelpCircle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { StatusBadge } from '@/components/ui'
+import { StatusBadge, TableViewport } from '@/components/ui'
 import type { BffFailure } from '@/lib/services/bff'
 import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
 import type { DeviceFact } from '@/lib/context/customerGraph'
@@ -80,7 +80,10 @@ export function DevicesPanel({ partyId }: { partyId: string }) {
       )}
 
       {state.kind === 'ok' && state.devices.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
+        <TableViewport
+          label={t('Posuvná tabulka klientských zařízení', 'Scrollable customer devices table')}
+          hint={t('Posuňte tabulku vodorovně pro stav a čas poslední aktivity.', 'Scroll horizontally to see device status and last activity.')}
+        >
           <table className="table">
             <thead>
               <tr>
@@ -105,7 +108,7 @@ export function DevicesPanel({ partyId }: { partyId: string }) {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
 
       {state.kind === 'unknown' && (

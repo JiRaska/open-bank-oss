@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth/useAuth'
 import { CAPABILITIES_BY_RESOURCE, assignablePresetCapabilities, capabilityIntent, capabilityLabel, isAssignablePresetCapability, isReservedOwnershipPresetName, truthfulPresetName, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
 import { useSingleFlight } from '@/lib/mutations/singleFlight'
 import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
+import { TableViewport } from '@/components/ui'
 
 const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resourceType: 'ACCOUNT', capabilities: [] })
 
@@ -137,11 +138,11 @@ export function RoleCatalog() {
         </div>
       </div>
       {view === 'overview' && <RoleOverview roles={visibleRoles} canManage={canManage} edit={openEditor} remove={requestRemoval} />}
-      {view === 'matrix' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
+      {view === 'matrix' && <TableViewport label={t('Posuvná matice rolí', 'Scrollable role matrix')} hint={t('Posuňte matici vodorovně pro porovnání všech oprávnění.', 'Scroll horizontally to compare every permission.')}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
         {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
       <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{truthfulPresetName(role)}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div><LegacyOwnershipNameEvidence rolePreset={role} /><LegacyCapabilityEvidence capabilities={role.capabilities} /></td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Součást šablony', 'Included in preset')} /> : <><span className="sr-only">{t('Není součástí šablony', 'Not included in preset')}</span><span aria-hidden="true">—</span></>}</td>)}
-        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={event => openEditor({ ...role, capabilities: [...role.capabilities] }, event.currentTarget)} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
+        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={event => openEditor({ ...role, capabilities: [...role.capabilities] }, event.currentTarget)} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></TableViewport>
       }
     </>}
     {editing && <RoleEditor value={editing} busy={saving} failed={saveError} cancel={closeEditor} save={save} returnFocusRef={editorReturnFocusRef} fallbackFocusRef={catalogTitleRef} />}

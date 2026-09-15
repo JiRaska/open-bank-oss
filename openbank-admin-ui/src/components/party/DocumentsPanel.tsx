@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { Download, FileText, HelpCircle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { StatusBadge } from '@/components/ui'
+import { StatusBadge, TableViewport } from '@/components/ui'
 import { svcUrl, type BffFailure } from '@/lib/services/bff'
 import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
 import type { DocumentFact } from '@/lib/context/customerGraph'
@@ -42,7 +42,10 @@ export function DocumentsPanel({ partyId }: { partyId: string }) {
     </p>
     {state.kind === 'loading' && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</span>}
     {state.kind === 'ok' && state.documents.length === 0 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-secondary)', fontSize: 13 }}><FileText size={16} /> {t('Klient nemá žádné dokumenty', 'No documents for this customer')}</div>}
-    {state.kind === 'ok' && state.documents.length > 0 && <div style={{ overflowX: 'auto' }}><table className="table">
+    {state.kind === 'ok' && state.documents.length > 0 && <TableViewport
+      label={t('Posuvná tabulka klientských dokumentů', 'Scrollable customer documents table')}
+      hint={t('Posuňte tabulku vodorovně pro retenci, vazbu a bezpečné stažení.', 'Scroll horizontally to see retention, references, and secure download actions.')}
+    ><table className="table">
       <thead><tr><th>{t('Dokument', 'Document')}</th><th>{t('Stav', 'Status')}</th><th>{t('Vytvořeno', 'Created')}</th><th>{t('Vazba', 'Reference')}</th><th>{t('Retence do', 'Retain until')}</th><th /></tr></thead>
       <tbody>{state.documents.map(doc => <tr key={doc.id}>
         <td><div style={{ fontWeight: 600 }}>{doc.templateCode}</div><div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>v{doc.templateVersion} · {Math.ceil(doc.sizeBytes / 1024)} kB</div></td>
@@ -50,7 +53,7 @@ export function DocumentsPanel({ partyId }: { partyId: string }) {
         <td className="mono" style={{ fontSize: 10 }}>{doc.caseRef ?? doc.productRef ?? '—'}</td><td>{doc.retainUntil ?? '—'}</td>
         <td style={{ textAlign: 'right' }}><a className="btn btn-secondary btn-sm" href={svcUrl('document-service', `/api/v1/documents/${doc.id}/content`)} download><Download size={12} /> {t('Stáhnout', 'Download')}</a></td>
       </tr>)}</tbody>
-    </table></div>}
+    </table></TableViewport>}
     {state.kind === 'unknown' && <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-secondary)', fontSize: 13 }}><HelpCircle size={16} /> {t(`Dokumenty nelze zjistit (document-service: ${state.why}).`, `Documents unavailable (document-service: ${state.why}).`)}</div>}
   </div>
 }

@@ -21,6 +21,7 @@ import {
 } from '@/components/delegations/GrantView'
 import { capabilityLabel, isAssignablePresetCapability } from '@/lib/delegations/rolePresets'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { TableViewport } from '@/components/ui'
 
 type DirectionState = 'ok' | 'forbidden' | 'unavailable'
 
@@ -52,7 +53,10 @@ export function GrantTable({
           {t('Žádné delegace.', 'No delegations.')}
         </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
+        <TableViewport
+          label={t('Posuvná tabulka delegovaných oprávnění', 'Scrollable delegated-access table')}
+          hint={t('Posuňte tabulku vodorovně pro zdroj, podmínky a úplný rozsah práv.', 'Scroll horizontally to see resources, conditions, and the full permission scope.')}
+        >
           <table className="table" style={{ width: '100%' }}>
             <thead>
               <tr>
@@ -88,7 +92,7 @@ export function GrantTable({
               })}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       )}
     </div>
   )
