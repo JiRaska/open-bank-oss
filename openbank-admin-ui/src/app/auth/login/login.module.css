@@ -32,9 +32,11 @@
 .benefits svg { flex: none; color: var(--login-story-check); }
 .storyFooter { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .storyFootnote { margin: 0; color: var(--login-story-footnote); font-size: .72rem; letter-spacing: .06em; }
-.sceneControls { display: flex; gap: 8px; }
-.sceneControls button { width: 24px; height: 7px; padding: 0; border: 0; border-radius: 999px; background: var(--login-story-control); cursor: pointer; transition: width .2s ease, background .2s ease; }
-.sceneControls button[aria-pressed="true"] { width: 42px; background: var(--login-story-accent); }
+.sceneControls { display: flex; gap: 4px; }
+.sceneControls button { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+.sceneControls button::before { width: 24px; height: 7px; border-radius: 999px; background: var(--login-story-control); content: ''; transition: width .2s ease, background .2s ease; }
+.sceneControls button[aria-pressed="true"] { width: 42px; }
+.sceneControls button[aria-pressed="true"]::before { width: 34px; background: var(--login-story-accent); }
 .sceneControls button:focus-visible { outline: 3px solid var(--login-story-control-focus); outline-offset: 4px; }
 
 .access { display: flex; min-height: 100%; flex-direction: column; padding: clamp(24px, 4vw, 56px) clamp(28px, 7vw, 104px); }
@@ -88,6 +90,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .skipLink, .languageButton, .signInButton { transition: none; }
-  .scene, .sceneControls button { transition: none; }
+  .scene, .sceneControls button::before { transition: none; }
   .spinner { animation-duration: 1.6s; }
 }

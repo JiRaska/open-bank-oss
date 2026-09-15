@@ -16,6 +16,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(page.getByRole('alert').filter({ hasText: 'Your session expired' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Continue with Keycloak SSO' })).toBeVisible()
     await expect(page.getByText('Role-based access, four-eyes approvals and audit evidence remain active throughout your session.')).toBeVisible()
+    const sceneTargets = await page.getByRole('group', { name: 'Explorer scenes' }).getByRole('button').evaluateAll(elements =>
+      elements.map(element => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })),
+    )
+    expect(sceneTargets.every(target => target.width >= 32 && target.height >= 32)).toBe(true)
     const palette = await page.locator('main').evaluate(element => {
       const style = getComputedStyle(element)
       return { background: style.getPropertyValue('--privacy-bg').trim(), text: style.getPropertyValue('--privacy-text').trim() }
