@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
 import { OperationalEvidence } from '@/components/observability/OperationalEvidence'
+import styles from './page.module.css'
 
 const POLL = 15_000
 
@@ -111,7 +112,7 @@ export default function SystemHealthPage() {
         />
 
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+      <div className={styles.summaryGrid} data-testid="health-summary">
         <SummaryCard label={t('V pořádku', 'Healthy')}     count={up}       total={snapshots.length} icon={<CheckCircle2 size={16}/>} color="var(--success)" bg="var(--success-bg)" border="var(--success-border)" />
         <SummaryCard label={t('Zhoršené', 'Degraded')}    count={degraded} total={snapshots.length} icon={<AlertTriangle size={16}/>} color="var(--warning)" bg="var(--warning-bg)" border="var(--warning-border)" />
         <SummaryCard label={t('Nedostupné', 'Unreachable')} count={down}     total={snapshots.length} icon={<XCircle size={16}/>}      color="var(--danger)"  bg="var(--danger-bg)"  border="var(--danger-border)" />
@@ -136,18 +137,13 @@ function SummaryCard({ label, count, total, icon, color, bg, border }: {
   label: string; count: number; total: number; icon: React.ReactNode; color: string; bg: string; border: string
 }) {
   return (
-    <div style={{
-      background: 'var(--surface)', border: `1px solid ${border}`,
-      borderRadius: 'var(--r-lg)', padding: '16px 18px',
-      display: 'flex', alignItems: 'center', gap: '14px',
-      boxShadow: 'var(--shadow-xs)',
-    }}>
-      <div style={{ padding: '10px', borderRadius: 'var(--r-md)', background: bg, color }}>{icon}</div>
-      <div>
+    <div className={styles.summaryCard} data-testid="health-summary-card" style={{ border: `1px solid ${border}` }}>
+      <div className={styles.summaryIcon} style={{ background: bg, color }}>{icon}</div>
+      <div className={styles.summaryCopy}>
         <div style={{ fontSize: '24px', fontWeight: 300, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
           {count}<span style={{ fontSize: '14px', color: 'var(--text-tertiary)', fontWeight: 400 }}>/{total}</span>
         </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>{label}</div>
+        <div className={styles.summaryLabel} style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '1px' }}>{label}</div>
       </div>
     </div>
   )

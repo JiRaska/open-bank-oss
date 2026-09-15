@@ -1,0 +1,39 @@
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.summaryCard {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.summaryIcon {
+  flex: 0 0 auto;
+  padding: 10px;
+  border-radius: var(--r-md);
+}
+
+.summaryCopy { min-width: 0; }
+.summaryLabel { overflow-wrap: anywhere; }
+
+@media (max-width: 600px) {
+  .summaryGrid { gap: 8px; }
+
+  .summaryCard {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .summaryIcon { padding: 7px; }
+}
