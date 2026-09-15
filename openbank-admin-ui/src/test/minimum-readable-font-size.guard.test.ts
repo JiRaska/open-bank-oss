@@ -19,12 +19,12 @@ describe('minimum readable font-size contract', () => {
     const violations = productionStyleSources(sourceRoot).flatMap(path => {
       const source = readFileSync(path, 'utf8')
       const declarations = [
-        ...source.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px\b/g),
-        ...source.matchAll(/fontSize:\s*['"](\d+(?:\.\d+)?)px['"]/g),
+        ...source.matchAll(/font-size:\s*((?:\d+(?:\.\d+)?|\.\d+))(px|rem)\b/g),
+        ...source.matchAll(/fontSize:\s*['"]((?:\d+(?:\.\d+)?|\.\d+))(px|rem)['"]/g),
         ...source.matchAll(/fontSize:\s*(\d+(?:\.\d+)?)\b/g),
       ]
       return declarations
-        .filter(match => Number(match[1]) < 10)
+        .filter(match => Number(match[1]) * (match[2] === 'rem' ? 16 : 1) < 10)
         .map(match => `${relative(process.cwd(), path)}:${source.slice(0, match.index).split('\n').length} (${match[0]})`)
     })
 
