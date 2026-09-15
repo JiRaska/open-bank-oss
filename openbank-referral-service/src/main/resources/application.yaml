@@ -42,6 +42,42 @@ quarkus:
     root-path: /q
   shutdown:
     timeout: 30S
+openbank:
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      referral-qualified-out:
+        connector: smallrye-kafka
+        client.id: referral-service-${quarkus.uuid}
+        topic: openbank.referral.qualified.v1
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      referral-reward-requested-out:
+        connector: smallrye-kafka
+        client.id: referral-service-${quarkus.uuid}
+        topic: openbank.referral.reward-requested.v1
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      referral-reward-outcome-out:
+        connector: smallrye-kafka
+        client.id: referral-service-${quarkus.uuid}
+        topic: openbank.referral.reward-outcome.v1
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%test":
   quarkus:

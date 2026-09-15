@@ -64,6 +64,42 @@ spec:
                   key: OIDC_CLIENT_SECRET
             - name: QUARKUS_MANAGEMENT_PORT
               value: "8086"
+            # Kafka producer -> Strimzi bootstrap (ADR-0137: mTLS on :9093). Both
+            # KAFKA_BOOTSTRAP_SERVERS and the QUARKUS_-prefixed form are set — application.yaml
+            # declares quarkus.smallrye-reactive-messaging.kafka.bootstrap-servers
+            # (-> QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS), and
+            # KAFKA_BOOTSTRAP_SERVERS is kept alongside it for parity with every other
+            # producer/consumer in the fleet (document-service, lending-service,
+            # notification-service — all set both). Without this, SmallRye's connector falls
+            # through to localhost:9092 and every publish fails silently (#4701).
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137). Authenticates as the KafkaUser 'referral-service';
+            # keystore/truststore PKCS#12 are projected from messaging by External Secrets
+            # (kafka-referral-service-mtls.yaml) and mounted below. The app reads these env
+            # vars via ${...} in application.yaml (mp.messaging.connector.smallrye-kafka.*).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: referral-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
           resources:
             requests:
               cpu: 100m
@@ -95,12 +131,30 @@ spec:
             - name: referral-tls
               mountPath: /mnt/referral-tls
               readOnly: true
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
         - name: referral-tls
           secret:
             secretName: referral-service-internal-tls
+        - name: kafka-keystore
+          secret:
+            secretName: referral-service-kafka-keystore
+            items:
+              - key: user.p12
+                path: user.p12
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+            items:
+              - key: ca.p12
+                path: ca.p12
 ---
 apiVersion: v1
 kind: Service
