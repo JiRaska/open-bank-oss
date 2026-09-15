@@ -10,12 +10,14 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('identity deduplication remains understandable and accessible in both themes', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   await page.goto('/docs/identity-dedup')
 
   await expect(page.getByRole('heading', { level: 1, name: /Identita a deduplikace|Identity & Deduplication/ })).toBeVisible()
   await expect(page.locator('#main-content').getByText(/Tok rozhodnutí při onboardingu|Onboarding resolution flow/).first()).toBeVisible()
   await expect(page.getByText('MATCH_EXISTING', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('NEEDS_MANUAL_VERIFICATION', { exact: true }).first()).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   for (const dark of [false, true]) {
     await applyOperatorTheme(page, dark ? 'dark' : 'light')

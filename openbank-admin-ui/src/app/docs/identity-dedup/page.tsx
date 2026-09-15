@@ -8,13 +8,16 @@ import { Fingerprint, ShieldCheck, GitMerge, KeyRound, Layers, AlertTriangle, Lo
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { TableViewport } from '@/components/ui'
+
+const readableTone = (tone: string) => tone.replace(/\)$/, '-text)')
 
 const fade = (color: string, amount: number) => `color-mix(in srgb, ${color} ${amount}%, transparent)`
 
 // Status pill mirrored from the docs status vocabulary (live / partial / planned).
 function Status({ kind, t }: { kind: 'live' | 'partial' | 'planned'; t: (cs: string, en: string) => string }) {
   const map = {
-    live: { bg: 'var(--success-bg)', fg: 'var(--success)', br: 'var(--success-border)', label: t('ŽIVÉ', 'LIVE') },
+    live: { bg: 'var(--success-bg)', fg: 'var(--success-text)', br: 'var(--success-border)', label: t('ŽIVÉ', 'LIVE') },
     partial: { bg: 'var(--warning-bg)', fg: 'var(--warning)', br: 'var(--warning-border)', label: t('ČÁSTEČNÉ', 'PARTIAL') },
     planned: { bg: 'var(--surface-3)', fg: 'var(--text-tertiary)', br: 'var(--border-strong)', label: t('PLÁNOVÁNO', 'PLANNED') },
   }[kind]
@@ -164,7 +167,7 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Tok rozhodnutí při onboardingu', 'Onboarding resolution flow')}
       </div>
-      <div className="card" style={{ padding: '20px', marginBottom: '28px', overflowX: 'auto' }}>
+      <div className="card" style={{ padding: '20px', marginBottom: '28px', overflowX: 'auto' }} role="region" tabIndex={0} aria-label={t('Posuvný tok rozhodnutí při onboardingu', 'Scrollable onboarding resolution flow')}>
         <ResolutionFlow t={t} />
       </div>
 
@@ -172,7 +175,7 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Jak funguje blind index (privacy by design)', 'How the blind index works (privacy by design)')}
       </div>
-      <div className="card" style={{ padding: '20px', marginBottom: '12px', overflowX: 'auto' }}>
+      <div className="card" style={{ padding: '20px', marginBottom: '12px', overflowX: 'auto' }} role="region" tabIndex={0} aria-label={t('Posuvný diagram blind indexu', 'Scrollable blind-index diagram')}>
         <BlindIndexPipeline t={t} />
       </div>
       <p style={{ fontSize: '12.5px', color: sub, lineHeight: 1.6, marginBottom: '28px' }}>
@@ -186,7 +189,11 @@ export default function IdentityDedupPage() {
       <div style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.04em', color: sub, textTransform: 'uppercase', margin: '8px 0 12px' }}>
         {t('Tříúrovňový resolver (žebřík od nejtvrdšího klíče)', 'Three-tier resolver (ladder from the hardest key)')}
       </div>
-      <div className="card" style={{ padding: '0', marginBottom: '28px', overflowX: 'auto' }}>
+      <div className="card" style={{ padding: 0, marginBottom: '28px', overflow: 'hidden' }}>
+        <TableViewport
+          label={t('Posuvná tabulka úrovní identity resolveru', 'Scrollable identity resolver tiers table')}
+          hint={t('Posuňte tabulku vodorovně pro techniku, pravidlo sloučení a stav.', 'Scroll horizontally to see the technique, merge rule, and status.')}
+        >
         <table className="table" style={{ width: '100%', minWidth: '720px' }}>
           <thead>
             <tr>
@@ -201,7 +208,7 @@ export default function IdentityDedupPage() {
             {tiers.map((tr, i) => (
               <tr key={i}>
                 <td>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '8px', background: fade(tr.color, 8), color: tr.color, fontWeight: 800, fontSize: '13px' }}>{tr.tier}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '8px', background: fade(tr.color, 8), color: readableTone(tr.color), fontWeight: 800, fontSize: '13px' }}>{tr.tier}</span>
                 </td>
                 <td style={{ fontWeight: 600, color: ink }}>{t(...tr.signal)}</td>
                 <td style={{ color: sub, fontSize: '12.5px', lineHeight: 1.5 }}>{t(...tr.technique)}</td>
@@ -211,6 +218,7 @@ export default function IdentityDedupPage() {
             ))}
           </tbody>
         </table>
+        </TableViewport>
       </div>
 
       {/* ---- Worked example ---- */}
@@ -357,7 +365,7 @@ function TierChip({ x, y, color, label, tag, dashed }: { x: number; y: number; c
   return (
     <g>
       <rect x={x} y={y} width={190} height={40} rx={8} fill={fade(color, 7)} stroke={color} strokeWidth={1.3} strokeDasharray={dashed ? '5 3' : undefined} />
-      <text x={x + 95} y={y + 17} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={color}>{label}</text>
+      <text x={x + 95} y={y + 17} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={readableTone(color)}>{label}</text>
       <text x={x + 95} y={y + 31} textAnchor="middle" fontSize={10} fill="var(--text-tertiary)">{tag}</text>
     </g>
   )
@@ -369,7 +377,7 @@ function OutcomeBox({ cx, y, fill, verdict, action }: { cx: number; y: number; f
   return (
     <g>
       <rect x={x} y={y} width={w} height={40} rx={8} fill={fade(fill, 8)} stroke={fill} strokeWidth={1.5} />
-      <text x={cx} y={y + 17} textAnchor="middle" fontSize={11} fontWeight={800} fill={fill}>{verdict}</text>
+      <text x={cx} y={y + 17} textAnchor="middle" fontSize={11} fontWeight={800} fill={readableTone(fill)}>{verdict}</text>
       <text x={cx} y={y + 31} textAnchor="middle" fontSize={10.5} fill="var(--text-secondary)">{action}</text>
     </g>
   )
@@ -428,7 +436,7 @@ function PipeBox({ x, y, w, fill, stroke, top, mono, foot, footColor }: {
   return (
     <g>
       <rect x={x} y={y} width={w} height={50} rx={9} fill={fill} stroke={stroke} strokeWidth={1.4} />
-      <text x={x + w / 2} y={y + 16} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={stroke}>{top}</text>
+      <text x={x + w / 2} y={y + 16} textAnchor="middle" fontSize={11.5} fontWeight={700} fill={readableTone(stroke)}>{top}</text>
       <text x={x + w / 2} y={y + 34} textAnchor="middle" fontSize={12} fontWeight={700} fill="var(--text-primary)" fontFamily="ui-monospace, monospace">{mono}</text>
       <text x={x + w / 2} y={y + 66} textAnchor="middle" fontSize={10} fill={footColor || 'var(--text-tertiary)'}>{foot}</text>
     </g>
@@ -454,8 +462,8 @@ function WorkedCase({ t, accent, title, steps, verdict, verdictColor }: {
         ))}
       </ol>
       <div style={{ marginTop: '12px', padding: '9px 11px', borderRadius: '8px', background: fade(verdictColor, 7), border: `1px solid ${fade(verdictColor, 19)}`, display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
-        <ArrowRight size={14} style={{ color: verdictColor, flexShrink: 0, marginTop: '2px' }} />
-        <span style={{ fontSize: '12px', fontWeight: 600, color: verdictColor, lineHeight: 1.45 }}>{t(...verdict)}</span>
+        <ArrowRight size={14} style={{ color: readableTone(verdictColor), flexShrink: 0, marginTop: '2px' }} />
+        <span style={{ fontSize: '12px', fontWeight: 600, color: readableTone(verdictColor), lineHeight: 1.45 }}>{t(...verdict)}</span>
       </div>
     </div>
   )

@@ -50,6 +50,9 @@ const migratedTables = [
   'src/components/party/DocumentsPanel.tsx',
   'src/components/delegations/GrantTable.tsx',
   'src/components/delegations/RoleCatalog.tsx',
+  'src/app/docs/document-management/page.tsx',
+  'src/app/docs/qrlesspay/page.tsx',
+  'src/app/docs/identity-dedup/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

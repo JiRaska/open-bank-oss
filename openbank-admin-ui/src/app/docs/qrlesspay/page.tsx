@@ -7,12 +7,14 @@ import Link from 'next/link'
 import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText, Printer } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { TableViewport } from '@/components/ui'
 
 const ACCENT = 'var(--accent)'
 const ACCENT_TEXT = 'var(--accent-text)'
 const RECV = 'var(--accent)' // payee / bank A
 const PAYER = 'var(--success)' // payer / bank B
 const NEUTRAL = 'var(--text-secondary)'
+const readableTone = (tone: string) => tone === RECV ? 'var(--accent-text)' : 'var(--success-text)'
 const INK = 'var(--text-primary)'
 const SUB = 'var(--text-secondary)'
 
@@ -106,7 +108,10 @@ export default function QrlessPayPage() {
         title={t('Srovnání bezpečnosti s optickým QR', 'Security comparison vs optical QR scan')}
         subtitle={t('Identita je remíza (obojí stojí na potvrzení). QR vyhrává fyzické zacílení, QRlessPay soukromí a UX.', 'Identity is a tie (both rest on confirmation). QR wins physical targeting; QRlessPay wins privacy and UX.')}
       >
-        <div style={{ overflowX: 'auto' }}>
+        <TableViewport
+          label={t('Posuvné bezpečnostní srovnání QR plateb', 'Scrollable QR payment security comparison')}
+          hint={t('Posuňte tabulku vodorovně pro úplné srovnání obou technologií.', 'Scroll horizontally to compare both technologies completely.')}
+        >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: SUB, background: 'var(--surface-2)' }}>
@@ -131,7 +136,7 @@ export default function QrlessPayPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
         <div className="card" style={{ marginTop: 12, padding: 14, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', gap: 10 }}>
           <Info size={16} style={{ color: ACCENT, flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13, color: INK, lineHeight: 1.55 }}>
@@ -177,7 +182,7 @@ export default function QrlessPayPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {card.stepsCs.map((s, j) => (
                   <div key={j} style={{ display: 'flex', gap: 7, fontSize: 12, color: SUB }}>
-                    <span style={{ color: card.color, fontWeight: 700, flexShrink: 0 }}>{j + 1}.</span>
+                    <span style={{ color: readableTone(card.color), fontWeight: 700, flexShrink: 0 }}>{j + 1}.</span>
                     {t(s, card.stepsEn[j])}
                   </div>
                 ))}
@@ -195,7 +200,10 @@ export default function QrlessPayPage() {
               'The repository is public under Apache-2.0, tagged v0.1.0, CI green. A family of native SDKs rather than one KMP core with thin wrappers: a bank with a pure-Swift app will not add a Kotlin runtime to its binary to accept payments, and a profile with a single real implementation is not a standard. The shared artifact is the conformance suite, not the code — and it paid for itself immediately: the second implementation found that the reference CBOR encoding did not match the spec (326 B against 197 B, and mutually unreadable), which a round-trip test structurally cannot see. Reaching 1.0 needs independent cryptographic review, fuzzing, a DPIA and ADR-0030 approval — and above all a two-device run on real hardware, which has not happened.',
             )}
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <TableViewport
+            label={t('Posuvná tabulka QRlessPay SDK', 'Scrollable QRlessPay SDK table')}
+            hint={t('Posuňte tabulku vodorovně pro implementaci a stav každé platformy.', 'Scroll horizontally to see each platform implementation and status.')}
+          >
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 460 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: SUB }}>
@@ -216,7 +224,7 @@ export default function QrlessPayPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableViewport>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
               'Součástí je i ukázková iOS aplikace — obě role na jedné obrazovce, zároveň nosič pro test na dvou zařízeních. Banky doplní jen svůj platební rail a vlastní potvrzovací UI + SCA; SDK končí u ověřeného návrhu platby a peníze nehýbe.',

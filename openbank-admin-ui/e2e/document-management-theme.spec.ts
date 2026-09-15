@@ -14,6 +14,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 test.describe('/docs/document-management — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme preserves the educational model and WCAG A/AA`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 800 })
       await page.goto('/docs/document-management')
       await expect(page.getByRole('heading', { level: 1, name: /Document Management|Správa dokumentů/i })).toBeVisible()
 
@@ -27,6 +28,7 @@ test.describe('/docs/document-management — semantic theme', () => {
       await expect(page.getByText(/non-money-path|mimo peněžní cestu/i).first()).toBeVisible()
       await expect(page.getByRole('link', { name: /ADR-0161/ }).first()).toBeVisible()
       await expect(page.getByRole('link', { name: /ADR-0162/ }).first()).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

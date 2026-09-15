@@ -11,6 +11,7 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { TableViewport } from '@/components/ui'
 
 const ACCENT = 'var(--accent)'
 const ACCENT_TEXT = 'var(--accent-text)'
@@ -152,7 +153,10 @@ export default function DocumentManagementDocsPage() {
         title={t('Fázovaný rozjezd kryptografického zapečetění', 'Phased cryptographic sealing rollout')}
         subtitle={t('Ceremonie (kdo podepisuje co, v jakém pořadí) je hotová od fáze 1 — mění se jen úroveň kryptografické záruky.', 'The ceremony (who signs what, in what order) is built from phase 1 — only the cryptographic assurance level changes.')}
       >
-        <div style={{ overflowX: 'auto' }}>
+        <TableViewport
+          label={t('Posuvná tabulka fází kryptografického zapečetění', 'Scrollable cryptographic sealing phases table')}
+          hint={t('Posuňte tabulku vodorovně pro mechanismus a úroveň podpisu.', 'Scroll horizontally to see the signature level and sealing mechanism.')}
+        >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
             <thead>
               <tr style={{ textAlign: 'left', color: SUB, background: 'var(--surface-2)' }}>
@@ -177,7 +181,7 @@ export default function DocumentManagementDocsPage() {
               </tr>
             </tbody>
           </table>
-        </div>
+        </TableViewport>
       </Section>
 
       {/* Docs / references */}
@@ -232,7 +236,12 @@ function ArchitectureFlowDiagram() {
   const right = (n: Node) => ({ x: n.x + n.w, y: n.y + n.h / 2 })
 
   return (
-    <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
+    <div
+      style={{ position: 'relative', width: '100%', overflowX: 'auto' }}
+      role="region"
+      tabIndex={0}
+      aria-label={t('Posuvný diagram toku správy dokumentů', 'Scrollable document-management flow diagram')}
+    >
       <div style={{ position: 'relative', width: W, height: H, margin: '0 auto' }}>
         <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
           <title>{t('Diagram toku správy dokumentů', 'Document management flow diagram')}</title>

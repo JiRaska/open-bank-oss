@@ -14,6 +14,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 test.describe('/docs/qrlesspay — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme keeps the payment safety model understandable and WCAG A/AA`, async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 800 })
       await page.goto('/docs/qrlesspay')
       await expect(page.getByRole('heading', { level: 1, name: /QRlessPay/ })).toBeVisible()
 
@@ -24,6 +25,7 @@ test.describe('/docs/qrlesspay — semantic theme', () => {
       await expect(page.getByText(/No money moves without payer confirmation|Žádné peníze se nehnou bez potvrzení plátce/i)).toBeVisible()
       await expect(page.getByRole('img', { name: /QRlessPay handshake sequence|Sekvence QRlessPay handshaku/i })).toBeVisible()
       await expect(page.getByRole('link', { name: /ADR-0095/ }).first()).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
