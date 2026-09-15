@@ -11,7 +11,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { JourneyCanvas, type DecisionPathSelection, type JourneyDecision, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
@@ -990,6 +990,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               <p className="text-sm text-muted-foreground">{t('Zatím nic odesláno ani pokusem.', 'Nothing sent or attempted yet.')}</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border">
+                <TableViewport
+                  label={t('Posuvná tabulka doručení kampaně', 'Scrollable campaign delivery table')}
+                  hint={t('Posuňte tabulku vodorovně pro stav handoffu a pozorovaný výsledek.', 'Scroll horizontally to see handoff state and observed outcome.')}
+                >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1049,6 +1053,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                     ))}
                   </tbody>
                 </table>
+                </TableViewport>
               </div>
             )}
           </section>

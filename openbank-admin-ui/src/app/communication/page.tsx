@@ -19,6 +19,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 interface PersonaRow {
   id: string
@@ -146,6 +147,10 @@ export default function CommunicationStudioPage() {
             </div>
 
             <div className="card">
+              <TableViewport
+                label={t('Posuvná tabulka komunikačních person', 'Scrollable communication personas table')}
+                hint={t('Posuňte tabulku vodorovně pro pokrytí, odpovědnost a publikovanou verzi.', 'Scroll horizontally to see coverage, ownership, and published version.')}
+              >
               <table className="table">
                 <thead>
                   <tr>
@@ -183,6 +188,7 @@ export default function CommunicationStudioPage() {
                   ))}
                 </tbody>
               </table>
+              </TableViewport>
             </div>
           </>
         )}

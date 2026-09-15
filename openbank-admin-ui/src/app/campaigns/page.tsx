@@ -43,7 +43,7 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { StageBoard, summariseBy, type StageDef } from '@/components/flow/StageBoard'
 import { CampaignPlanningBoard, type CampaignPlan } from '@/components/campaigns/CampaignPlanningBoard'
@@ -538,6 +538,10 @@ export default function CampaignsPage() {
 
           {filtered.length > 0 && (
             <div className="overflow-x-auto rounded-lg border">
+              <TableViewport
+                label={t('Posuvná tabulka kampaní', 'Scrollable campaigns table')}
+                hint={t('Posuňte tabulku vodorovně pro segment, vlastníka a aktuální stav.', 'Scroll horizontally to see segment, owner, and current state.')}
+              >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -603,6 +607,7 @@ export default function CampaignsPage() {
                   ))}
                 </tbody>
               </table>
+              </TableViewport>
             </div>
           )}
         </>

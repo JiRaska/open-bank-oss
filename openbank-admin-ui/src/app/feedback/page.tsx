@@ -20,6 +20,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { MessageSquare, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
@@ -126,6 +127,10 @@ export default function ScreenFeedbackPage() {
 
       <section>
         <h2>{cs ? 'Poslední hlášení' : 'Recent reports'}</h2>
+        <TableViewport
+          label={cs ? 'Posuvná tabulka posledních hlášení' : 'Scrollable recent feedback reports table'}
+          hint={cs ? 'Posuňte tabulku vodorovně pro komentář, kontext a stav snímku.' : 'Scroll horizontally to see comment, context, and screenshot status.'}
+        >
         <table className="table">
           <thead>
             <tr>
@@ -151,6 +156,7 @@ export default function ScreenFeedbackPage() {
             ))}
           </tbody>
         </table>
+        </TableViewport>
       </section>
 
       <section>
@@ -160,6 +166,10 @@ export default function ScreenFeedbackPage() {
             ? 'Kombinace prostředí seřazené podle počtu chybových hlášení. Když se hlásí jen jedna kombinace, jde o chybu vykreslení, ne o produktový problém.'
             : 'Context combinations ranked by bug reports. A fault confined to one combination is a rendering regression, not a product problem.'}
         </p>
+        <TableViewport
+          label={cs ? 'Posuvná tabulka kontextů selhání' : 'Scrollable failure contexts table'}
+          hint={cs ? 'Posuňte tabulku vodorovně pro platformu, motiv, jazyk a četnost.' : 'Scroll horizontally to see platform, theme, locale, and frequency.'}
+        >
         <table className="table">
           <thead>
             <tr>
@@ -186,6 +196,7 @@ export default function ScreenFeedbackPage() {
             ))}
           </tbody>
         </table>
+        </TableViewport>
       </section>
     </div>
   )

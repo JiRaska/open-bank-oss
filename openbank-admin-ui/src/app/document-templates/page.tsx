@@ -18,7 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport, Tabs, type TabItem, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -559,6 +559,10 @@ export default function DocumentTemplatesPage() {
             </div>
 
             <div className="card" style={{ overflow: 'hidden' }}>
+              <TableViewport
+                label={t('Posuvná tabulka šablon dokumentů', 'Scrollable document templates table')}
+                hint={t('Posuňte tabulku vodorovně pro verzi, jazyk, stav a řízené akce.', 'Scroll horizontally to see version, language, status, and governed actions.')}
+              >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -611,6 +615,7 @@ export default function DocumentTemplatesPage() {
                   ))}
                 </tbody>
               </table>
+              </TableViewport>
               {!loading && filtered.length > visibleCount && (
                 <div style={{ padding: '12px', textAlign: 'center', borderTop: '1px solid var(--border)' }}>
                   <button className="btn btn-secondary btn-sm" type="button" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>

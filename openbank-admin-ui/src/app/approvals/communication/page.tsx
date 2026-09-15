@@ -18,6 +18,7 @@ import { ArrowLeft, Check, Clock3, RefreshCw, X } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 
@@ -124,6 +125,10 @@ export default function CommunicationApprovalsPage() {
 
         {!loading && !unavailable && items.length > 0 && (
           <div className="card" style={{ marginTop: 16, overflow: 'hidden' }}>
+            <TableViewport
+              label={t('Posuvná tabulka čekajících komunikačních schválení', 'Scrollable pending communication approvals table')}
+              hint={t('Posuňte tabulku vodorovně pro autora, zdroj a checker rozhodnutí.', 'Scroll horizontally to see maker, source, and checker decision.')}
+            >
             <table className="table">
               <thead>
                 <tr>
@@ -155,6 +160,7 @@ export default function CommunicationApprovalsPage() {
                 ))}
               </tbody>
             </table>
+            </TableViewport>
           </div>
         )}
 
