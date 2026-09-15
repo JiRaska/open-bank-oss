@@ -53,3 +53,23 @@ test('keeps the last sanctions-list configuration visible when status refresh fa
   await expect(stale).toBeHidden()
   await expect(page.getByText(SANCTIONS_LIST.displayName)).toBeVisible()
 })
+
+test('distinguishes an empty sanctions register from a failed read', async ({ page }) => {
+  await page.route('**/api/sanctions/checks', route => route.fulfill({ json: [] }))
+  await page.route('**/api/sanctions/approvals', route => route.fulfill({ json: [] }))
+  let listSourceAvailable = true
+  await page.route('**/api/sanctions/lists', route => listSourceAvailable
+    ? route.fulfill({ json: [] })
+    : route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"sanctions service unavailable"}' }))
+
+  await page.goto('/sanctions')
+  await page.getByRole('button', { name: /Správa listů|List Management/ }).click()
+  await expect(page.getByText('No data yet: sanctions lists')).toBeVisible()
+  await expect(page.getByText(/Screening therefore cannot be considered covered/)).toBeVisible()
+
+  listSourceAvailable = false
+  await page.getByRole('button', { name: /Obnovit stav sankčních listů|Refresh sanctions-list status/ }).click()
+  await expect(page.getByText('Failed to load sanctions lists')).toBeVisible()
+  await expect(page.getByText(/Do not interpret this as an empty register/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry loading sanctions lists' })).toBeVisible()
+})

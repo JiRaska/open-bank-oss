@@ -353,6 +353,7 @@ function FinOpsContent() {
   const [rightSizing, setRightSizing] = useState<RightSizingReport | null>(null)
   const [aiCosts, setAiCosts] = useState<AiCostsData | null>(null)
   const [anomalies, setAnomalies] = useState<FinOpsAnomaly[]>([])
+  const [anomaliesUnavailable, setAnomaliesUnavailable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -383,7 +384,8 @@ function FinOpsContent() {
       if (anomalyRes.ok) {
         const aj = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
         setAnomalies(aj.anomalies ?? [])
-      }
+        setAnomaliesUnavailable(false)
+      } else setAnomaliesUnavailable(true)
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally {
@@ -505,7 +507,24 @@ function FinOpsContent() {
           </div>
 
           {/* ── FinOps agent findings (AI) — directly below the KPIs (admin-ui agent-output rule) ── */}
-          <AgentInsightsPanel
+          {anomaliesUnavailable && (
+            <div className="card" style={{ marginBottom: 16, borderLeft: '3px solid var(--warning)' }}>
+              <DataUnavailable
+                kind="unreachable"
+                service="Alertmanager"
+                feature={t('FinOps cost anomálie', 'FinOps cost anomalies')}
+                lang={language}
+                dense
+                title={anomalies.length > 0
+                  ? t('Zobrazuji poslední ověřené FinOps nálezy', 'Showing the last verified FinOps findings')
+                  : undefined}
+                detail={anomalies.length > 0
+                  ? t('Nové načtení selhalo. Nálezy níže jsou zachované z poslední úspěšné odpovědi a jejich aktuálnost není potvrzena.', 'The refresh failed. Findings below are retained from the last successful response and are not confirmed current.')
+                  : t('Stav detektorů nelze ověřit. Prázdný panel by nebyl důkaz, že žádná cost anomálie neběží.', 'Detector state cannot be verified. An empty panel would not prove that no cost anomaly is firing.')}
+              />
+            </div>
+          )}
+          {(!anomaliesUnavailable || anomalies.length > 0) && <AgentInsightsPanel
             title={t('FinOps náhledy (AI)', 'FinOps Insights (AI)')}
             subtitle={t(
               'Aktivní cost anomálie z finops-agenta (D1–D5 detektory z Alertmanageru — ADR-0112). Tento přehled je pouze pro čtení: alerty zatím nevytvářejí návrhy ve schvalovací frontě.',
@@ -513,11 +532,11 @@ function FinOpsContent() {
             )}
             findings={anomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(
-              'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
-              'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
+              'Alertmanager odpověděl úspěšně a nevrátil žádný aktivní finops-agent alert.',
+              'Alertmanager answered successfully and returned no active finops-agent alerts.',
             )}
             sourceLabel={t('Zdroj: Alertmanager (finops-agent)', 'Source: Alertmanager (finops-agent)')}
-          />
+          />}
 
           {/* Cloud Cost (AWS Cost Explorer snapshot) */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>

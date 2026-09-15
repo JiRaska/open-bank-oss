@@ -26,7 +26,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
+import { LoadingState, PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
 
@@ -1137,19 +1137,21 @@ export default function SanctionsPage() {
                 </div>
               </div>
               {listsLoading ? (
-                <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-                  <Loader2 size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
-                </div>
+                <LoadingState label={t('Načítám sankční listy', 'Loading sanctions lists')} description={t('Ověřuji zdroj, stav, plán aktualizace a rozsah ručního screeningu.', 'Checking source, state, refresh schedule and manual-screening scope.')} />
               ) : lists.length === 0 ? (
-                <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-                  <div>{listsError || t('Žádné sankční listy nenalezeny. Zkontrolujte připojení ke službě.', 'No sanctions lists found. Check service connection.')}</div>
-                  {listsError && (
-                    <button type="button" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}
-                      style={{ marginTop: '12px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
-                      {t('Zkusit znovu', 'Try again')}
-                    </button>
-                  )}
-                </div>
+                <DataUnavailable
+                  kind={listsError ? 'error' : 'no_data'}
+                  service="sanctions-service"
+                  feature={t('sankční listy', 'sanctions lists')}
+                  lang={language}
+                  dense
+                  title={listsError ? t('Sankční listy se nepodařilo načíst', 'Failed to load sanctions lists') : undefined}
+                  detail={listsError
+                    ? t(`Zdroj neodpověděl úspěšně: ${listsError}. Nezaměňujte tento stav s prázdným registrem.`, `The source did not answer successfully: ${listsError}. Do not interpret this as an empty register.`)
+                    : t('sanctions-service odpověděl úspěšně, ale nemá evidovaný žádný sankční list. Screening proto nelze považovat za pokrytý.', 'sanctions-service answered successfully but has no registered sanctions list. Screening therefore cannot be considered covered.')}
+                >
+                  {listsError && <button type="button" className="btn btn-secondary" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}>{t('Zkusit znovu', 'Try again')}</button>}
+                </DataUnavailable>
               ) : (
                 <>
                   {listsError && (
