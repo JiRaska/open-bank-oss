@@ -29,5 +29,7 @@ describe('campaign action state accessibility guard', () => {
     expect(portfolio).toContain('<button type="button" className="btn btn-secondary"')
     expect(portfolio).toContain('data-testid="clear-state"')
     expect(stepEditor).toMatch(/<button type="button" onClick=\{onClose\}/)
+    expect(stepEditor).not.toContain('text-amber-600')
+    expect(stepEditor.match(/tone-text-warning/g)).toHaveLength(2)
   })
 })

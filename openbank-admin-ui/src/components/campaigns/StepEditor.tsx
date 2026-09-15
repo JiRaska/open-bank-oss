@@ -421,7 +421,7 @@ export function StepEditor({
             ))}
         </div>
         {index === 0 && step.condition && (
-          <p className="text-xs text-amber-600">
+          <p className="text-xs tone-text-warning">
             {t(
               'První krok nemá co předcházet — „dorazil" tu nikdy neplatí, „nedorazil" vždy.',
               'The first step has no predecessor — "arrived" never holds here, "did not" always does.',
@@ -467,7 +467,7 @@ export function StepEditor({
       </div>
 
       {missing.length > 0 && (
-        <p className="text-xs text-amber-600">
+        <p className="text-xs tone-text-warning">
           {t('Ještě chybí', 'Still missing')}:{' '}
           {missing.map(v => variableLabels[v]?.label ?? v).join(', ')}
         </p>
