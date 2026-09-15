@@ -7,10 +7,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { ArrowRight, Clock3, Inbox, Plus, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui'
+import { EmptyState, LoadingState, PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { parseAudiencePreview, type AudiencePreview } from '@/lib/audiences/previewContract'
@@ -45,7 +45,11 @@ export default function SegmentsPage() {
   const audienceWorkspaceRef = useRef<HTMLElement>(null)
   const lifecycleFlight = useSingleFlight()
 
-  const loadAudiences = useCallback(async (keepExistingOnFailure = false) => {
+  const loadAudiences = useCallback(async (keepExistingOnFailure = false, showLoading = true) => {
+    if (!keepExistingOnFailure && showLoading) {
+      setLoading(true)
+      setUnavailable(null)
+    }
     try {
       const response = await fetch('/api/audiences')
       const d = await response.json() as { items: Segment[]; state: string }
@@ -67,7 +71,8 @@ export default function SegmentsPage() {
   }, [])
 
   useEffect(() => {
-    loadAudiences()
+    const timer = window.setTimeout(() => void loadAudiences(false, false), 0)
+    return () => window.clearTimeout(timer)
   }, [loadAudiences])
 
   const lifecycle = async (s: Segment, action: 'submit' | 'approve'): Promise<boolean> => {
@@ -218,10 +223,28 @@ export default function SegmentsPage() {
         actions={<Can permission="campaign:create"><Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link></Can>}
       />
 
-      {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
+      {loading && (
+        <LoadingState
+          label={t('Načítám katalog publik', 'Loading audience catalogue')}
+          description={t(
+            'Ověřuji verzovaná pravidla, stav schválení a oprávnění pro bezpečné použití.',
+            'Checking versioned rules, approval state and permissions for safe use.',
+          )}
+        />
+      )}
 
       {!loading && unavailable && (
-        <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Segmenty', 'Segments')} />
+        <DataUnavailable
+          kind={unavailable}
+          service="Campaign-service"
+          feature={t('katalog publik', 'audience catalogue')}
+          lang={language}
+        >
+          <button type="button" className="btn btn-secondary" onClick={() => void loadAudiences()}>
+            <RefreshCw size={14} aria-hidden="true" />
+            {t('Zkusit načíst znovu', 'Try loading again')}
+          </button>
+        </DataUnavailable>
       )}
 
       {!loading && !unavailable && lifecycleError && !approvalIntent && (
@@ -231,7 +254,22 @@ export default function SegmentsPage() {
       )}
 
       {!loading && !unavailable && items.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t('Katalog je prázdný.', 'The catalogue is empty.')}</p>
+        <EmptyState
+          icon={<Inbox size={24} />}
+          title={t('Katalog je prázdný', 'The catalogue is empty')}
+          description={t(
+            'Zatím nebylo vytvořeno žádné verzované publikum. Začněte jasným účelem a pravidly, která může nezávisle schválit další člověk.',
+            'No versioned audience exists yet. Start with a clear purpose and rules another person can independently approve.',
+          )}
+          action={(
+            <Can permission="campaign:create">
+              <Link href="/segments/new" className="btn btn-primary">
+                <Plus size={14} aria-hidden="true" />
+                {t('Vytvořit první publikum', 'Create the first audience')}
+              </Link>
+            </Can>
+          )}
+        />
       )}
 
       {!loading && !unavailable && items.length > 0 && (

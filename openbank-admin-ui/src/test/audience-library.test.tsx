@@ -2,14 +2,44 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import React from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import SegmentsPage from '@/app/segments/page'
 import { SessionProvider } from 'next-auth/react'
 
+afterEach(() => {
+  localStorage.removeItem('openbank-admin-lang')
+  document.cookie = 'openbank-admin-lang=; path=/; max-age=0; SameSite=Lax'
+  document.documentElement.lang = 'en'
+})
+
 describe('audience library', () => {
+  it('explains a Czech catalogue outage and recovers through an explicit retry', async () => {
+    let attempts = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      attempts += 1
+      return attempts === 1
+        ? { ok: true, json: async () => ({ state: 'unreachable', items: [] }) }
+        : { ok: true, json: async () => ({ state: 'ok', items: [] }) }
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(
+      SessionProvider,
+      { session },
+      React.createElement(LanguageProvider, { initialLanguage: 'cs' }, React.createElement(SegmentsPage)),
+    ))
+
+    expect(await screen.findByText('Campaign-service neodpovídá')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Zkusit načíst znovu' }))
+
+    expect(await screen.findByText('Katalog je prázdný')).toBeVisible()
+    expect(screen.getByText(/nezávisle schválit další člověk/)).toBeVisible()
+    expect(attempts).toBe(2)
+  })
+
   it('uses the real segment preview and carries its version into campaign authoring', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/preview')) return { ok: true, json: async () => ({ state: 'ok', name: 'actives', version: 1, size: 1240, asOf: '2026-08-13T10:00:00Z' }) }

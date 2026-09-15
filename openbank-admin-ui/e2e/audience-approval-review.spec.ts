@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const audience = {
@@ -51,4 +52,40 @@ test('reviews exact audience evidence and retains a failed approval for retry', 
   await expect(dialog).toBeHidden()
   await expect(page.getByText(/catalogue is empty|Katalog je prázdný/i)).toBeVisible()
   expect(decisions).toBe(2)
+})
+
+test('explains a Czech catalogue outage and recovers on a narrow screen', async ({ page, baseURL }) => {
+  await page.context().addCookies([{
+    name: 'openbank-admin-lang',
+    value: 'cs',
+    url: baseURL!,
+  }])
+  await page.setViewportSize({ width: 320, height: 760 })
+  let attempts = 0
+  await page.route(/\/api\/audiences$/, route => {
+    attempts += 1
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(attempts === 1
+        ? { state: 'unreachable', items: [] }
+        : { state: 'ok', items: [] }),
+    })
+  })
+
+  await page.goto('/segments')
+  await expect(page.getByText('Campaign-service neodpovídá')).toBeVisible()
+  await page.getByRole('button', { name: 'Zkusit načíst znovu' }).click()
+  await expect(page.getByText('Katalog je prázdný')).toBeVisible()
+  await expect(page.getByText(/nezávisle schválit další člověk/)).toBeVisible()
+
+  const width = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }))
+  expect(width.scroll).toBeLessThanOrEqual(width.client)
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+  expect(results.violations).toEqual([])
+  expect(attempts).toBe(2)
 })
