@@ -174,6 +174,14 @@
   --iaops-crew-art-wash:  linear-gradient(90deg, var(--iaops-crew-mid) 0%, transparent 32%);
   --iaops-crew-caption:   rgba(226, 232, 240, .7);
 
+  /* FinOps business-domain categories; every bar is also labelled with name, amount and share. */
+  --finops-domain-platform:      #4f46e5;
+  --finops-domain-governance:    #b45309;
+  --finops-domain-security:      #dc2626;
+  --finops-domain-observability: #0e7490;
+  --finops-domain-finops:        #15803d;
+  --finops-domain-tax:           #64748b;
+
   /* Dashboard keeps a deliberate night-sky operational identity in both themes. Content cards
    * remain adaptive; only the hero and fleet-health canvas use this stable brand palette. */
   --dashboard-hero-start: #111a35;
@@ -455,6 +463,12 @@
   --graph-case: #fda4af;
   --graph-device: #a5b4fc;
   --graph-document: #86efac;
+  --finops-domain-platform: #a5b4fc;
+  --finops-domain-governance: #fcd34d;
+  --finops-domain-security: #fca5a5;
+  --finops-domain-observability: #67e8f9;
+  --finops-domain-finops: #86efac;
+  --finops-domain-tax: #cbd5e1;
   --agent-shell-strength: 18%;
   --agent-glow-strength: 22%;
   --agent-frame: #64748b;

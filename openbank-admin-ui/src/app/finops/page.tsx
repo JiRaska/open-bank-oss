@@ -392,10 +392,15 @@ function FinOpsContent() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
   useEffect(() => {
-    const id = setInterval(load, 60_000)
-    return () => clearInterval(id)
+    // Schedule the initial load outside the effect body so its loading-state transition cannot
+    // cascade through the mounting render. Both timers are cancelled during Strict Mode replay.
+    const initialId = window.setTimeout(load, 0)
+    const refreshId = window.setInterval(load, 60_000)
+    return () => {
+      window.clearTimeout(initialId)
+      window.clearInterval(refreshId)
+    }
   }, [load])
 
   if (unavailable) {
@@ -563,8 +568,8 @@ function FinOpsContent() {
               </div>
             ) : (() => {
               const DOMAIN_COLOR: Record<string, string> = {
-                Platform: '#6366f1', Governance: '#d97706', Security: '#dc2626',
-                Observability: '#0891b2', FinOps: '#16a34a', Tax: '#94a3b8',
+                Platform: 'var(--finops-domain-platform)', Governance: 'var(--finops-domain-governance)', Security: 'var(--finops-domain-security)',
+                Observability: 'var(--finops-domain-observability)', FinOps: 'var(--finops-domain-finops)', Tax: 'var(--finops-domain-tax)',
               }
               const domainTotals: Record<string, number> = {}
               for (const s of costs.services) {
@@ -634,10 +639,10 @@ function FinOpsContent() {
                   <DailySpendTrend daily={costs.daily} currency={costs.currency} />
 
                   {/* BY DOMAIN — process/business view */}
-                  <div style={{ marginBottom: '20px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                  <section aria-labelledby="finops-domain-spend-title" style={{ marginBottom: '20px' }}>
+                    <h3 id="finops-domain-spend-title" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '10px' }}>
                       {t('Rozpad po doménách (procesní pohled)', 'By domain (process / business view)')}
-                    </div>
+                    </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                       {domains.map(({ domain, amount }) => {
                         const pct = costs.total > 0 ? (amount / costs.total) * 100 : 0
@@ -656,7 +661,7 @@ function FinOpsContent() {
                         )
                       })}
                     </div>
-                  </div>
+                  </section>
 
                   {/* BY AWS SERVICE — detail, collapsible */}
                   <details>
