@@ -11,6 +11,7 @@ import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { ArrowMarker } from '@/components/topology/TopologyDefs'
 import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 // ---------------------------------------------------------------------------
 // Temporal workflow flow (ADR-0100). The third animated topology view: each
@@ -116,9 +117,14 @@ export default function TemporalFlowPage() {
       {deployed && (
         <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 18 }}>
           <div className="section-title" style={{ padding: '14px 16px 8px' }}>{t('Živé workflow typy', 'Live workflow types')}</div>
+          <TableViewport
+            label={t('Živé typy Temporal workflow', 'Live Temporal workflow types')}
+            hint={t('Posuňte tabulku vodorovně pro namespace, typ workflow a hodinový průtok.', 'Scroll horizontally for namespace, workflow type and hourly throughput.')}
+          >
           <table className="table"><thead><tr><th>Namespace</th><th>{t('Workflow typ', 'Workflow type')}</th><th>{t('Dokončeno za 1 h', 'Completed in 1h')}</th></tr></thead>
             <tbody>{(m?.workflowTypes ?? []).map(row => <tr key={`${row.namespace}:${row.workflowType}`}><td className="mono">{row.namespace}</td><td className="mono">{row.workflowType}</td><td>{row.completed1h}</td></tr>)}</tbody>
           </table>
+          </TableViewport>
           {(m?.workflowTypes ?? []).length === 0 && <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 12 }}>{t('Temporal je scrapeován, ale za poslední hodinu nebyl dokončen žádný workflow.', 'Temporal is scraped, but no workflow completed in the last hour.')}</div>}
         </div>
       )}

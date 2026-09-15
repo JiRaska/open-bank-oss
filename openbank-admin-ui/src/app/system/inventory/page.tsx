@@ -11,6 +11,7 @@ import type { ServiceSnapshot, ServiceStack } from '@/types'
 import { Package, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldAlert } from 'lucide-react'
 import { SbomViewer } from '@/components/sbom/SbomViewer'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { fetchCves, osvCoordinates, type CveEvidence, type CveSummary } from '@/lib/inventory/cveEvidence'
 
@@ -248,6 +249,10 @@ export default function TechInventoryPage() {
             }}>
               {t('Stack komponenty', 'Stack components')}
             </div>
+            <TableViewport
+              label={t('Inventář technologického stacku', 'Technology stack inventory')}
+              hint={t('Posuňte tabulku vodorovně pro verzi, pokrytí služeb, bezpečnostní stav a poznámku.', 'Scroll horizontally for version, service coverage, security status and note.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -269,6 +274,7 @@ export default function TechInventoryPage() {
                 ))}
               </tbody>
             </table>
+            </TableViewport>
           </div>
 
           {/* Drift detail */}

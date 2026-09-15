@@ -12,7 +12,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi } from '@/lib/api'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { readApprovalId } from '@/lib/approvals/triage'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
@@ -262,6 +262,10 @@ export function NotificationsContent() {
       )}
 
       <div className="card" style={{ overflow: 'hidden' }}>
+        <TableViewport
+          label={t('Log oznámení a stav odeslání', 'Notification log and send status')}
+          hint={t('Posuňte tabulku vodorovně pro příjemce, předmět, stav a čas odeslání.', 'Scroll horizontally for recipient, subject, status and send time.')}
+        >
         <table className="data-table">
           <thead>
             <tr>
@@ -305,6 +309,7 @@ export function NotificationsContent() {
             })}
           </tbody>
         </table>
+        </TableViewport>
         {pagination && pagination.total > 0 && !unavailable && (
           <nav
             aria-label={t('Stránkování oznámení', 'Notifications pagination')}

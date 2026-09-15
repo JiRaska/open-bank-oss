@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { StatusBadge } from '@/components/ui'
+import { StatusBadge, TableViewport } from '@/components/ui'
 import type { Policy, PolicyRule } from './model'
 
 const OPERATOR_GLYPH: Record<string, string> = {
@@ -62,6 +62,10 @@ export function PolicyTables({ policy, hits, sample }: Props) {
               {table.effectiveTo ? ` — ${new Date(table.effectiveTo).toLocaleDateString(numberLocale)}` : ''}
             </span>
           </div>
+          <TableViewport
+            label={t(`Pravidla ${kindLabel(table.kind)}`, `${kindLabel(table.kind)} rules`)}
+            hint={t('Posuňte tabulku vodorovně pro podmínku, důvod či pásmo a počet zásahů.', 'Scroll horizontally for condition, reason or band and hit count.')}
+          >
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>
@@ -92,6 +96,7 @@ export function PolicyTables({ policy, hits, sample }: Props) {
               })}
             </tbody>
           </table>
+          </TableViewport>
         </div>
       ))}
     </div>

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
-import { PageHeader, StatusBadge, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
@@ -334,6 +334,10 @@ export default function InfrastructurePage() {
             </div>
           ) : (
             <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+              <TableViewport
+                label={t('Kafka topicy a jejich kapacita', 'Kafka topics and their capacity')}
+                hint={t('Posuňte tabulku vodorovně pro počet partition, replik a velikost segmentu.', 'Scroll horizontally for partition count, replicas and segment size.')}
+              >
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
@@ -362,6 +366,7 @@ export default function InfrastructurePage() {
                   ))}
                 </tbody>
               </table>
+              </TableViewport>
             </div>
           )}
         </>

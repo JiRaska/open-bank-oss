@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { ChevronRight, ChevronDown, Download, Package, Scale, Layers, Loader2, GitCompareArrows } from 'lucide-react'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 interface SbomSummary {
   service: string
@@ -253,6 +254,10 @@ export function SbomViewer({ serviceName }: Props) {
                   border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
                   background: 'var(--surface)',
                 }}>
+                  <TableViewport
+                    label={t('Komponenty softwarového kusovníku', 'Software bill of materials components')}
+                    hint={t('Posuňte tabulku vodorovně pro skupinu, název, verzi a licenci.', 'Scroll horizontally for group, name, version and license.')}
+                  >
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
                     <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-2)', zIndex: 1 }}>
                       <tr>
@@ -278,6 +283,7 @@ export function SbomViewer({ serviceName }: Props) {
                       )}
                     </tbody>
                   </table>
+                  </TableViewport>
                 </div>
               </div>
 
