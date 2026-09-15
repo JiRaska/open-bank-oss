@@ -140,7 +140,7 @@ export default function AgentPage() {
             <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('Model brána', 'Model Gateway')}</span>
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>· {t('přidejte libovolný model přes konfiguraci, bez změny kódu', 'add any model via config, no code change')}</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))', gap: '12px' }}>
             {gateway.models.map(m => (
               <div key={m.id} className="card" style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -194,7 +194,7 @@ export default function AgentPage() {
               {t('Pokrytí služeb', 'Service Coverage')}
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '12px' }}>
             {(() => {
               // #744: group the live tools by the service agent-service tagged them with, so every
               // reachable service gets a card with its real tool count — no name-prefix heuristic,

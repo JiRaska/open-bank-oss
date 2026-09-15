@@ -498,7 +498,7 @@ export default function BcpPage() {
                         {tier.id === 3 && t(' (výjimka: psd2-service čeká na consent-service healthy)', ' (exception: psd2-service waits for consent-service healthy)')}
                       </div>
                     )}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '8px' }}>
                       {tier.services.map(svc => {
                         const svcStatus = health[svc.name] ?? 'unknown'
                         return (

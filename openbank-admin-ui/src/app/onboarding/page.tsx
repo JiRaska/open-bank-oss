@@ -198,7 +198,7 @@ export default function OnboardingPage() {
           aria-live="polite"
           aria-busy="true"
           aria-label={t('Načítání počtů funnelu…', 'Loading funnel counts…')}
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 112px), 1fr))', gap: '10px', marginBottom: '20px' }}
         >
           {STAGES.map(s => (
             <div key={s} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px 8px', textAlign: 'center' }}>
@@ -215,7 +215,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={countsUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Funnel počty', 'Funnel counts')} lang={language} dense />
         </div>
       ) : (
-        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(112px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 112px), 1fr))', gap: '10px', marginBottom: '20px' }}>
           {STAGES.map(s => {
             const count = counts?.[s] ?? 0
             const isActive = stage === s

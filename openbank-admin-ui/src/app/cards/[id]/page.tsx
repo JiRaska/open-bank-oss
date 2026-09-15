@@ -364,7 +364,7 @@ export default function CardDetailPage() {
             {entitlements && (
               <div style={{ marginTop: '16px' }}>
                 <Panel icon={<Landmark size={15} style={{ color: 'var(--accent)' }} />} title={t('Nárok na karty', 'Card entitlement')} span>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0 20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '0 20px' }}>
                     <Row label={t('Produkt', 'Product')} value={entitlements.productCode} mono />
                     <Row label={t('Vydáno / maximum', 'Issued / cap')} value={quota.known ? `${quota.issued} / ${quota.max}` : t('neznámo', 'unknown')} />
                     <Row label={t('Virtuální karty', 'Virtual cards')} value={entitlements.virtualCardAllowed ? t('povoleny', 'allowed') : t('nepovoleny', 'not allowed')} />

@@ -71,7 +71,7 @@ function FlakyTestFindingDetailContent() {
               <StatusBadge status={finding.status} />
               <span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)', alignSelf: 'center' }}>{finding.checkType}</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', fontSize: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '14px', fontSize: '12px' }}>
               <div>
                 <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Soubor', 'File')}</div>
                 <div className="mono" style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{finding.filePath}</div>

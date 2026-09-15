@@ -157,7 +157,7 @@ export default function QrlessPayPage() {
         title={t('SDK a integrace pro banky třetích stran', 'SDK & third-party bank integration')}
         subtitle={t('QRlessPay je otevřený protokol — každá banka může implementovat roli plátce i příjemce nezávisle na OpenBank. SDK plánujeme publikovat pod Apache-2.0.', 'QRlessPay is an open protocol — any bank can implement both payer and payee roles independently of OpenBank. We plan to publish the SDK under Apache-2.0.')}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(295px, 1fr))', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 295px), 1fr))', gap: 12, marginBottom: 14 }}>
           {[
             {
               titleCs: 'Minimální integrace — příjemce', titleEn: 'Minimal integration — payee',

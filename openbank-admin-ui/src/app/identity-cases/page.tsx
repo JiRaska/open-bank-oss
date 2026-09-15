@@ -431,7 +431,7 @@ export default function IdentityCasesPage() {
               <strong>{activeCaseLabel(cases.length)}</strong>
               <span style={{ color: 'var(--text-secondary)' }}>· {awaitingLabel(awaitingCount)}</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 10 }}>
               <label style={{ display: 'grid', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
                 {t('Hledat osobu nebo případ', 'Find a person or case')}
                 <span style={{ position: 'relative' }}>

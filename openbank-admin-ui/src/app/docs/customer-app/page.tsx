@@ -187,7 +187,7 @@ export default function CustomerAppDossierPage() {
 
           {/* Derived-from-code facts */}
           {d && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: 12, marginBottom: 20 }}>
               <Fact label={t('Verze', 'Version')} value={d.version ?? '—'} mono />
               <Fact
                 label={t('Zdroj dat', 'Data source')}

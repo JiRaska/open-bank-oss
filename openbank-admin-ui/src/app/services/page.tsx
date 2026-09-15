@@ -318,7 +318,7 @@ export default function ServicesDocsOverviewPage() {
           <h2 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: '12px' }}>
             {t('Služby s dokumentací', 'Documented services')}
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '10px' }}>
             {withDocs.map(svc => (
               <Link key={svc.id} href={`/services/${svc.id}/docs`}
                 style={{

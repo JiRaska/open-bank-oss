@@ -200,7 +200,7 @@ export default function ClusterDossierPage() {
       />
 
       {/* derived counts */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 12, marginBottom: 26 }}>
         {[
           { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: 'var(--success-text)' },
           { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: 'var(--warning-text)' },
@@ -238,7 +238,7 @@ export default function ClusterDossierPage() {
                 <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>· {items.length}</span>
               </div>
               <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 8px 34px' }}>{g.blurb}</p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8, paddingLeft: 34 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 180px), 1fr))', gap: 8, paddingLeft: 34 }}>
                 {items.map(nsItem => {
                   const on = openNs === nsItem.name
                   const panelId = `cluster-ns-panel-${nsItem.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`

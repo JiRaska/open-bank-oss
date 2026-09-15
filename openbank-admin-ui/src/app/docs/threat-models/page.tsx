@@ -89,7 +89,7 @@ export default async function ThreatModelRegistryPage() {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '12px' }}>
           {models.map(m => (
             <Link key={m.slug} href={`/docs/threat-models/${m.service}`} style={{ textDecoration: 'none' }}>
               <div className="card docs-link-hover" style={{ padding: '16px', height: '100%' }}>

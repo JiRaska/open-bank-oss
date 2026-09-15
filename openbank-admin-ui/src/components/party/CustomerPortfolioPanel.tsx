@@ -56,7 +56,7 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
   return <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
     <h2 className="section-title" style={{ marginBottom: 4 }}>{t('Autoritativní portfolio a riziko', 'Authoritative portfolio and risk')}</h2>
     <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--text-secondary)' }}>{t('Každá karta se načítá přímo z vlastnící služby a degraduje nezávisle; nejde o analytickou projekci.', 'Each card loads from its owning service and degrades independently; this is not an analytics projection.')}</p>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: 12 }}>
       {cards.map(({ source, title, href, Icon }) => {
         const value = state[source]
         return <Link href={href} key={source} className="card" style={{ padding: 14, textDecoration: 'none', color: 'inherit' }}>

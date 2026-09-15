@@ -100,7 +100,7 @@ export default function TemporalFlowPage() {
       </div>
 
       {/* Live metrics strip (aggregate) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '8px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: '12px', marginBottom: '8px' }}>
         {metricCards.map((c, i) => (
           <div key={i} className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{c.label}</div>

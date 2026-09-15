@@ -610,7 +610,7 @@ export default function TemporalPage() {
               <h2 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
                 {t('Workflowy (posledních 60 minut)', 'Workflows (last 60 minutes)')}
               </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: '12px' }}>
                 <MetricCard
                   label={t('Spuštěno', 'Scheduled')}
                   value={m?.workflows.scheduled1h ?? null}
@@ -639,7 +639,7 @@ export default function TemporalPage() {
               <h2 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
                 {t('Latence (p50)', 'Latency (p50)')}
               </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: '12px' }}>
                 <MetricCard
                   label={t('Aktivita (schedule→start)', 'Activity (schedule→start)')}
                   value={m?.latency.activityScheduleToStartMs ?? null}
@@ -672,7 +672,7 @@ export default function TemporalPage() {
               <h2 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
                 {t('Workers & persistence', 'Workers & persistence')}
               </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: '12px' }}>
                 <MetricCard
                   label={t('Worker sloty (využití %)', 'Worker slots (utilisation %)')}
                   value={workerUtilPct}
@@ -726,7 +726,7 @@ export default function TemporalPage() {
                 {t('Komponenty', 'Components')}
               </h2>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: '12px' }}>
                 {[
                   {
                     titleCs: 'Temporal Server',

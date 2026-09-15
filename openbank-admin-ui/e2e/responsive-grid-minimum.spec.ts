@@ -2,7 +2,18 @@
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-for (const route of ['/docs', '/docs/sensors', '/docs/identity-dedup', '/docs/qrlesspay']) {
+for (const route of [
+  '/docs',
+  '/docs/sensors',
+  '/docs/identity-dedup',
+  '/docs/qrlesspay',
+  '/services',
+  '/system/tests',
+  '/day-end',
+  '/iaops',
+  '/transactions',
+  '/customer-360',
+]) {
   test(`${route} keeps responsive card grids inside a 320px viewport`, async ({ page, context, baseURL }) => {
     await page.setViewportSize({ width: 320, height: 760 })
     await signInAsOperator(context, baseURL!)

@@ -332,7 +332,7 @@ export default function TechInventoryPage() {
             </div>
             <div style={{
               padding: '12px 16px',
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px',
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '8px',
             }}>
               {snapshots.map(s => (
                 <SbomViewer key={s.name} serviceName={s.name} />

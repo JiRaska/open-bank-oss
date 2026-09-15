@@ -232,7 +232,7 @@ export default function TransactionsPage() {
         {/* Extended filters */}
         {showFilters && (
           <div id="transaction-search-filters" style={{ padding: '16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 200px), 1fr))', gap: '10px' }}>
               <div>
                 <label htmlFor="transaction-reference" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Referenční číslo', 'Reference number')}</label>
                 <input id="transaction-reference" className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => updateSearchField(setReferenceNumber, e.target.value)} />

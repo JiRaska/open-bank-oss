@@ -198,7 +198,7 @@ export default function ConsentsPage() {
       )}
 
       {rows && rows.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '12px', marginBottom: '20px' }}>
           <StatCard label={t('Nalezeno', 'Found')} value={rows.length} />
           <StatCard label={t('Aktivních', 'Active')} value={active} tone="success" />
           <StatCard label={t('Marketingových', 'Marketing')} value={marketing} tone="info" />

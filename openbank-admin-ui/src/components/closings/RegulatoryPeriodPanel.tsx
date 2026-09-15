@@ -195,7 +195,7 @@ export function RegulatoryPeriodPanel() {
             </div>
             {reportReady && <Link className="btn btn-primary" href="/regulatory">{t('Otevřít FINREP/COREP náhled', 'Open FINREP/COREP preview')}</Link>}
           </div>
-          <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginTop: '18px' }}>
+          <dl style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '12px', marginTop: '18px' }}>
             <div><dt style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Maker', 'Maker')}</dt><dd style={{ fontSize: '13px', fontWeight: 600 }}>{period.draftedBy ?? '—'}</dd></div>
             <div><dt style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Checker', 'Checker')}</dt><dd style={{ fontSize: '13px', fontWeight: 600 }}>{period.frozenBy ?? '—'}</dd></div>
             <div><dt style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Počet GL řádků', 'GL line count')}</dt><dd style={{ fontSize: '13px', fontWeight: 600 }}>{period.accountCount}</dd></div>

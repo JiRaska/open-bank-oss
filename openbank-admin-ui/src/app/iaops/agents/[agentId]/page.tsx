@@ -223,7 +223,7 @@ function AgentDetailContent() {
           )}
 
           <Card>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: '18px' }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: 'var(--text-secondary)', marginBottom: '7px' }}>
                   <Sparkles size={14} style={{ color: persona.accent }} />
@@ -295,7 +295,7 @@ function AgentDetailContent() {
                 <Lock size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Nástroje a provoz (agents.yaml)', 'Tools and operation (agents.yaml)')}</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '11px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '14px', fontSize: '11px' }}>
                 <div>
                   <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Smí', 'Allowed')}</div>
                   <Chips items={data.charter.toolsAllow} tone="allow" />
@@ -347,7 +347,7 @@ function AgentDetailContent() {
                 <Users size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Datový přístup a dohled', 'Data access and oversight')}</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '14px' }}>
                 <div>
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{t('Čte (PII', 'Reads (PII')} {data.charter.pii})</div>
                   <Chips items={data.charter.dataRead} tone="neutral" />

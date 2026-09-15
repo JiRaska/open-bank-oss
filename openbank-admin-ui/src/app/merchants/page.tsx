@@ -437,7 +437,7 @@ export default function MerchantsPage() {
           <h2 style={{ fontSize: 14, margin: '0 0 10px' }}>
             {t('Zápis do katalogu', 'Catalogue entry')} — <span style={{ fontFamily: 'var(--font-mono)' }}>{draft.descriptorKey || '—'}</span>
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 8 }}>
             <Field label={t('Descriptor', 'Descriptor')} value={draft.descriptorKey} onChange={v => setDraft({ ...draft, descriptorKey: v })} mono />
             <Field label={t('Obchodní jméno', 'Trading name')} value={draft.cleanName} onChange={v => setDraft({ ...draft, cleanName: v })} />
             <Field label={t('Kategorie', 'Category')} value={draft.category} onChange={v => setDraft({ ...draft, category: v })} />
@@ -945,7 +945,7 @@ function LocationsPanel({ merchant, locations, draft, setDraft, onSave, onRemove
       </table>}
 
       {draft && <div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: 8 }}>
           <Field label={t('Token města', 'Town token')} value={draft.cityToken} onChange={v => setDraft({ ...draft, cityToken: v })} mono />
           <Field label={t('Šířka', 'Latitude')} value={draft.lat} onChange={v => setDraft({ ...draft, lat: v })} mono />
           <Field label={t('Délka', 'Longitude')} value={draft.lon} onChange={v => setDraft({ ...draft, lon: v })} mono />

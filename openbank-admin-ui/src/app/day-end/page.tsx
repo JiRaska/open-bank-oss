@@ -205,7 +205,7 @@ function EodPanel() {
       </div>
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: '12px' }}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton" style={{ height: '96px' }} />)}
         </div>
       ) : unavailable && unavailable.kind === 'no_data' ? (
@@ -288,7 +288,7 @@ function EodPanel() {
           </div>
 
           {/* KPI row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: '12px', marginBottom: '16px' }}>
             <Kpi icon={<CalendarClock size={16} />} label={t('Účetní den', 'Accounting date')} value={fmtDate(report.asOf)} />
             <Kpi icon={<Clock size={16} />} label={t('Poslední běh', 'Last run')} value={fmtDateTime(report.generatedAt)} />
             <Kpi icon={<Coins size={16} />} label={t('Měn vyrovnáno', 'Currencies tied out')} value={String(report.currencies.length)} />
@@ -350,7 +350,7 @@ function EodPanel() {
         <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
           {t('Závěrkový cyklus', 'Close cycle')}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '12px' }}>
           <CycleCard
             tag="EoD"
             status="live"
@@ -672,7 +672,7 @@ function EomPanel() {
       {excludedRuns > 0 && <EvidenceWarning count={excludedRuns} subject={t('běhů uzávěrky', 'close runs')} />}
 
       {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))', gap: '12px' }}>
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton" style={{ height: '96px' }} />)}
         </div>
       ) : unavailable ? (
@@ -716,7 +716,7 @@ function EomPanel() {
                 {t('Období', 'Period')}: {fmtPeriod(latest)}
               </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 160px), 1fr))', gap: '12px' }}>
               <Kpi icon={<CheckCircle2 size={16} />} label={t('Uzavřeno kapes', 'Pockets closed')} value={String(latest.pocketsClosed)} />
               <Kpi icon={<AlertTriangle size={16} />} label={t('Selhalo', 'Failed')} value={String(latest.pocketsFailed)} />
               <Kpi icon={<CalendarClock size={16} />} label={t('Přeskočeno', 'Skipped')} value={String(latest.pocketsSkipped)} />

@@ -144,7 +144,7 @@ export default function ReadinessPage() {
       )}
 
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '12px', marginBottom: '20px' }}>
         <StatCard label={t('Služeb', 'Services')} value={services.length} />
         <StatCard label="GO" value={go} tone="success" icon={<CheckCircle2 size={16} />} />
         <StatCard label="NO-GO" value={nogo} tone="danger" icon={<XCircle size={16} />} />

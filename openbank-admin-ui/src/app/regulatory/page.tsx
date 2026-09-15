@@ -439,7 +439,7 @@ export default function RegulatoryPage() {
       />
 
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 150px), 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
           { label: t('Katalog výkazů', 'Report catalogue'), value: REPORTS.length, color: 'var(--accent)' },
           { label: t('Implementovaný náhled', 'Implemented preview'), value: implementedPreviewCount, color: 'var(--info-text)' },

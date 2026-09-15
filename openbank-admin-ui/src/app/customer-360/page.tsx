@@ -195,7 +195,7 @@ export default function Customer360Page() {
             </h2>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '12px', marginBottom: '20px' }}>
             <StatCard label={t('Domén', 'Domains')} value={data.domains.length} />
             <StatCard label={t('Událostí', 'Events')} value={totalEvents} />
             <StatCard label={t('Účtů', 'Accounts')} value={data.accountIds.length} tone="info" />

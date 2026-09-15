@@ -154,7 +154,7 @@ export default function CompliancePage() {
       />
 
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 180px), 1fr))', gap: '12px', marginBottom: '24px' }}>
         {([
           { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
           { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },

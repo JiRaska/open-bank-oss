@@ -384,7 +384,7 @@ function IAOpsContent() {
             </div>
 
             {/* What / Why / How */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginTop: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '14px', marginTop: '16px' }}>
               {[
                 { h: t('Co děláme', 'What we run'), b: t('Dohledové agenty a frontu pro lidské rozhodnutí. Vývojové PR workflow je další řízený krok — jeho stav ukazuje roadmapa níže.', 'Oversight agents and a queue for human decisions. Development PR workflow is the next governed step — its status is shown in the roadmap below.') },
                 { h: t('Proč', 'Why'), b: t('Regulace (EU AI Act, DORA, GDPR, PCI) vyžaduje human oversight, záznamy a logování. Tyto kontroly nejsou ergonomie, jsou to compliance.', 'Regulation (EU AI Act, DORA, GDPR, PCI) mandates human oversight, record-keeping and logging. These controls are not ergonomics — they are the compliance surface.') },
@@ -403,7 +403,7 @@ function IAOpsContent() {
               sub={t('Schválená governance roadmapa: změna fáze vyžaduje nezávisle ověřené provozní důkazy. Tato stránka je transparentní plán, ne živá runtime atestace.', 'Governance-approved roadmap: a phase change requires independently verified operational evidence. This page is a transparent plan, not a live runtime attestation.')}>
               {t('Jak bezpečně roste autonomie', 'How autonomy safely grows')}
             </SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '10px' }}>
               {(data.phaseRoadmap ?? []).map(item => {
                 const tone: Record<PhaseStatus, { bg: string; border: string; text: string }> = {
                   complete: { bg: 'var(--success-bg)', border: 'var(--success-border)', text: 'var(--success-text)' },
@@ -435,7 +435,7 @@ function IAOpsContent() {
                 sub={t('Tiery MCP nástrojů (agents.yaml). „deny" je hard-forbidden pro všechny agenty a nikdy se neregistruje.', 'MCP tool tiers (agents.yaml). The "deny" tier is hard-forbidden for all agents and never registered.')}>
                 {t('Co MCP a bot smí — tiery nástrojů', 'What MCP & the bot can do — tool tiers')}
               </SectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '12px' }}>
                 {([['read', 'neutral'], ['write_proposal', 'allow'], ['deny', 'deny']] as const).map(([tier, tone]) => (
                   data.toolTiers[tier] ? (
                     <div key={tier} style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -682,7 +682,7 @@ function IAOpsContent() {
               sub={t('Jak je za AI auditní stopa (ADR-0031 D5). Každá akce agenta = AuditEvent (actorType=AI_AGENT).', 'How AI is audited (ADR-0031 D5). Every agent action = an AuditEvent (actorType=AI_AGENT).')}>
               {t('Auditní stopa AI', 'AI audit trail')}
             </SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '14px' }}>
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>{t('Co se zachytí', 'What is captured')}</div>
                 <Chips items={data.auditTrail.capture} tone="neutral" />

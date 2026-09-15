@@ -97,7 +97,7 @@ export default async function ControlTowerPage() {
       />
 
       {/* Per-framework coverage */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 180px), 1fr))', gap: '10px', marginBottom: '24px' }}>
         {catalog.frameworks.filter(f => catalog.coverage[f.id]).map(f => {
           const cov = catalog.coverage[f.id]
           const pct = Math.round((cov.enforced / cov.total) * 100)

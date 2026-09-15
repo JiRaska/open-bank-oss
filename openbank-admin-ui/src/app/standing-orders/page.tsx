@@ -82,7 +82,7 @@ export default function StandingOrdersPage() {
             </span>
           </div>} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: '12px', marginBottom: '24px' }}>
           {[
             { label: t('Celkem příkazů', 'Total orders'), value: orders.length, icon: <Repeat size={16} aria-hidden="true" />, color: 'var(--accent)' },
             { label: t('Aktivní', 'Active'), value: orders.filter(o => o.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },

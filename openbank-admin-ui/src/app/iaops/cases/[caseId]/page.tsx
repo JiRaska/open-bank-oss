@@ -224,7 +224,7 @@ export default function IaopsCaseThreadPage() {
                   )}
                 </div>
                 <p style={{ margin: '8px 0 14px', color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.5 }}>{stage.detail}</p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '8px' }}>
                   <div style={{ padding: '9px 10px', borderRadius: '10px', background: stage.bg, border: `1px solid ${stage.border}` }}>
                     <div style={{ color: 'var(--text-tertiary)', fontSize: '10px', fontWeight: 700 }}>{t('Další krok', 'Next step')}</div>
                     <div style={{ marginTop: '3px', color: stage.tone, fontSize: '11px', fontWeight: 800 }}>{stage.title}</div>
