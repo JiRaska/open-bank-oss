@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 function snapshot(from: string, to: string) {
   return {
@@ -36,7 +37,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} onboarding funnel is educational, adaptive and accessible`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => window.localStorage.setItem('ob-admin-theme', selectedTheme), theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/onboarding/analytics')
 
     await expect(page.getByRole('heading', { level: 1, name: 'Onboarding Conversion' })).toBeVisible()

@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 const dora = {
   overall: 'high',
@@ -26,7 +27,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} DORA cockpit communicates every performance level accessibly`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => window.localStorage.setItem('ob-admin-theme', selectedTheme), theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/devops')
 
     const overview = page.getByTestId('dora-overview')

@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 const STATUS = {
   argocd: { status: 'UP', latencyMs: 12, checkedAt: '2026-08-31T12:00:00Z' },
@@ -50,9 +51,7 @@ test('filters the live infrastructure map and keeps a DOWN state semantically ex
 
 for (const theme of ['light', 'dark'] as const) {
   test(`keeps the semantic topology legible and accessible in ${theme} mode`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => {
-      window.localStorage.setItem('ob-admin-theme', selectedTheme)
-    }, theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/infrastructure/topology')
     await expect(page.getByRole('heading', { name: 'Infrastructure Topology' })).toBeVisible()
 

@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
@@ -27,9 +28,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} API catalog uses accessible themed method surfaces`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => {
-      window.localStorage.setItem('ob-admin-theme', selectedTheme)
-    }, theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/docs/api')
 
     await expect(page.getByRole('heading', { name: /API Catalog|API Katalog/i })).toBeVisible()

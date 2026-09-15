@@ -24,6 +24,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -245,7 +246,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
-    await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'light'))
+    await setOperatorTheme(page, 'light')
     await page.goto('/system/readiness')
 
     const body = page.locator('body')

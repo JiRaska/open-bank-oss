@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 const diagnostics = [
   { key: 'data', value: 3, fleetMax: 6, percent: 50 },
@@ -49,9 +50,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 test.describe('agent diagnostic education', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme explains limits and human control accessibly`, async ({ page }) => {
-      await page.addInitScript(selectedTheme => {
-        window.localStorage.setItem('ob-admin-theme', selectedTheme)
-      }, theme)
+      await setOperatorTheme(page, theme)
       await page.goto('/iaops/agents/finops-agent')
 
       const analysis = page.locator('section[aria-labelledby="agent-body-analysis-title"]')

@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 const approval = {
   id: 'approval-1',
@@ -28,7 +29,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} delegation evidence remains clear, read-only and accessible`, async ({ page }) => {
-    await page.addInitScript(selectedTheme => window.localStorage.setItem('ob-admin-theme', selectedTheme), theme)
+    await setOperatorTheme(page, theme)
     await page.goto('/approvals/delegation/approval-1')
 
     await expect(page.getByRole('heading', { level: 1, name: 'Delegation approval detail' })).toBeVisible()

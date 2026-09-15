@@ -3,6 +3,7 @@
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 const serviceHealth = {
   services: [
@@ -49,7 +50,7 @@ for (const theme of ['light', 'dark'] as const) {
     if (theme === 'dark') {
       // Set the operator preference before hydration. Mutating the class after navigation races
       // useTheme(), which correctly reapplies the stored preference on mount.
-      await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'dark'))
+      await setOperatorTheme(page, 'dark')
     }
     await page.goto('/docs/bcp')
     if (theme === 'dark') await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
