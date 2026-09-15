@@ -53,8 +53,15 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
 
     await expect(page.getByText('Jan Novák')).toBeVisible()
+    await page.setViewportSize({ width: 320, height: 720 })
+    const matchingCustomers = page.getByRole('region', { name: /Posuvná tabulka nalezených klientů|Scrollable matching-customer table/ })
+    await matchingCustomers.focus()
+    await expect(matchingCustomers).toBeFocused()
+    await expect(page.getByText(/Posuňte tabulku vodorovně pro kontaktní údaje|Scroll horizontally for contact details/)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.getByRole('button', { name: /Vybrat|Select/ }).first().click()
     await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toBeVisible()
+    await expect(page.getByRole('region', { name: /Posuvná tabulka domén a aktuálnosti|Scrollable domains and recency table/ })).toBeVisible()
   })
 
   test('a party with no events says so, and never that the source is empty', async ({ page }) => {

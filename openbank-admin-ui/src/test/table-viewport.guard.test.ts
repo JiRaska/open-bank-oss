@@ -57,6 +57,8 @@ const migratedTables = [
   'src/app/iaops/page.tsx',
   'src/app/iaops/flaky-test-hunter/page.tsx',
   'src/app/system/tests/page.tsx',
+  'src/components/party/PartySearch.tsx',
+  'src/app/customer-360/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

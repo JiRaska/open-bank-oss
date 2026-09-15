@@ -23,7 +23,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { StatusBadge } from '@/components/ui'
+import { StatusBadge, TableViewport } from '@/components/ui'
 
 const PARTY_SERVICE = '/api/svc/party-service'
 const SEARCH_TIMEOUT_MS = 8_000
@@ -188,11 +188,15 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
         )}
 
         {!searching && hits && hits.length > 0 && (
-          <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
+          <div className="card" style={{ marginBottom: '20px', padding: '20px' }}>
           <h2 className="section-title" style={{ marginBottom: '12px' }}>
             {t('Nalezené party', 'Matching parties')} ({hits.length})
           </h2>
-          <table className="table">
+          <TableViewport
+            label={t('Posuvná tabulka nalezených klientů', 'Scrollable matching-customer table')}
+            hint={t('Posuňte tabulku vodorovně pro kontaktní údaje, stav a výběr klienta.', 'Scroll horizontally for contact details, status, and customer selection.')}
+          >
+          <table className="table" style={{ minWidth: 680 }}>
             <thead>
               <tr>
                 <th>{t('Jméno', 'Name')}</th>
@@ -229,6 +233,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
               ))}
             </tbody>
           </table>
+          </TableViewport>
           </div>
         )}
       </div>

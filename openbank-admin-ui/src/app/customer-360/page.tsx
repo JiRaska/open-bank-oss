@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport } from '@/components/ui'
 import { parseCustomer360Evidence, type Customer360Evidence } from '@/lib/customer360/evidence'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
@@ -215,11 +215,15 @@ export default function Customer360Page() {
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
+          <div className="card" style={{ marginBottom: '20px', padding: '20px' }}>
             <h2 className="section-title" style={{ marginBottom: '12px' }}>
               {t('Domény a aktuálnost', 'Domains and recency')}
             </h2>
-            <table className="table">
+            <TableViewport
+              label={t('Posuvná tabulka domén a aktuálnosti', 'Scrollable domains and recency table')}
+              hint={t('Posuňte tabulku vodorovně pro poslední událost a čas pozorování.', 'Scroll horizontally for the latest event and observation time.')}
+            >
+            <table className="table" style={{ minWidth: 620 }}>
               <thead>
                 <tr>
                   <th>{t('Doména', 'Domain')}</th>
@@ -239,14 +243,19 @@ export default function Customer360Page() {
                 ))}
               </tbody>
             </table>
+            </TableViewport>
           </div>
 
           {data.consents.length > 0 && (
-            <div className="card" style={{ overflowX: 'auto', padding: '20px' }}>
+            <div className="card" style={{ padding: '20px' }}>
               <h2 className="section-title" style={{ marginBottom: '12px' }}>
                 {t('Souhlasy (consent-service zůstává autoritativní)', 'Consents (consent-service stays authoritative)')}
               </h2>
-              <table className="table">
+              <TableViewport
+                label={t('Posuvná tabulka souhlasů klienta', 'Scrollable customer-consent table')}
+                hint={t('Posuňte tabulku vodorovně pro stav a všechny rozsahy souhlasu.', 'Scroll horizontally for status and every consent scope.')}
+              >
+              <table className="table" style={{ minWidth: 620 }}>
                 <thead>
                   <tr>
                     <th>{t('Souhlas', 'Consent')}</th>
@@ -270,6 +279,7 @@ export default function Customer360Page() {
                   ))}
                 </tbody>
               </table>
+              </TableViewport>
             </div>
           )}
         </>
