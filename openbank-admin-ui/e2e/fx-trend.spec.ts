@@ -9,7 +9,7 @@ const aggregate = {
     error: null,
   },
   ecb: { rates: [], syncedAt: '2026-08-31T12:00:00Z', error: null },
-  fxService: { status: 'up', rates: [], conversions: [] },
+  fxService: { status: 'up', rates: [], conversions: [{ id: 'conversion-1', fromCurrency: 'EUR', toCurrency: 'CZK', fromAmount: 100, toAmount: 2500, rate: 25, status: 'COMPLETED', createdAt: '2026-08-31T11:00:00Z' }] },
 }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -107,6 +107,10 @@ test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page
   const scheduleEditor = page.getByRole('button', { name: /Upravit plán CNB|Edit CNB schedule/ })
   await expect(scheduleEditor).toBeVisible()
   await expect(scheduleEditor).toHaveAttribute('aria-expanded', 'false')
+  const conversions = page.getByRole('region', { name: /Posuvná tabulka posledních FX konverzí|Scrollable recent FX conversions table/ })
+  await conversions.focus()
+  await expect(conversions).toBeFocused()
+  await expect(page.getByText(/Posuňte tabulku vodorovně pro částky|Scroll horizontally for conversion amounts/)).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
   const scan = await new AxeBuilder({ page })

@@ -64,6 +64,7 @@ const migratedTables = [
   'src/app/sdd/page.tsx',
   'src/app/security/incidents/page.tsx',
   'src/app/docs/bcp/page.tsx',
+  'src/app/fx/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

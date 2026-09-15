@@ -16,6 +16,7 @@ import { CURRENCY_META } from '@/lib/currency-meta'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { FxTrendChart } from '@/components/fx/FxTrendChart'
 import styles from './page.module.css'
 
@@ -802,12 +803,12 @@ export default function FxPage() {
                 {t('Žádné konverze v interním systému.', 'No conversions in internal system.')}
               </div>
             ) : (
-              <div
-                style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}
-                tabIndex={0}
-                aria-label={t('Posuvná tabulka posledních FX konverzí', 'Scrollable recent FX conversions table')}
+              <TableViewport
+                style={{ maxHeight: '220px', overflowY: 'auto' }}
+                label={t('Posuvná tabulka posledních FX konverzí', 'Scrollable recent FX conversions table')}
+                hint={t('Posuňte tabulku vodorovně pro částky a stav konverze.', 'Scroll horizontally for conversion amounts and status.')}
               >
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Datum', 'Date'), t('Z → Na', 'From → To'), t('Částka Z', 'From'), t('Částka Na', 'To'), t('Status', 'Status')].map(h => (
                       <th key={h} style={{ padding: '8px 16px', position: 'sticky', top: 0, background: 'var(--surface-1)', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{h}</th>
@@ -838,7 +839,7 @@ export default function FxPage() {
                     </tr>
                   ))}</tbody>
                 </table>
-              </div>
+              </TableViewport>
             )}
           </div>
         </div>

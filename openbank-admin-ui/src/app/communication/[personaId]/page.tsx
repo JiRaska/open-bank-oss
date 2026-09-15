@@ -186,7 +186,7 @@ export default function CommunicationPersonaPage() {
                       style={{
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '13px',
                         background: 'var(--surface-2)', border: '1px solid var(--border)',
-                        borderRadius: '10px', padding: '14px', margin: 0, overflowX: 'auto',
+                        borderRadius: '10px', padding: '14px', margin: 0,
                       }}
                     >{active.text}</pre>
                   </>

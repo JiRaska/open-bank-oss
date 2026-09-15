@@ -204,7 +204,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
           </div>
 
           <div className="section-title">{t('Stavový průběh', 'Lifecycle')}</div>
-          <div className="card" style={{ padding: 14, marginBottom: 16, overflowX: 'auto' }}>
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
             <OriginationFlow current={app.status} history={history} lang={language} />
           </div>
 
