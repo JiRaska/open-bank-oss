@@ -162,12 +162,14 @@ test('defers advisory agent code and network work until the panel approaches vie
 })
 
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 320, height: 844 })
   await page.goto('/system/tests')
   await expect(page.getByRole('group', { name: /Seven Test Intelligence layers/ })).toBeVisible()
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /CI breaks assumptions/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Výkon|Performance/ })).toBeVisible()
+  await expect(page.getByRole('region', { name: /Posuvná matice důkazů komponent|Scrollable component evidence matrix/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
 
 test('meets WCAG A and AA rules in the rendered Test Intelligence workspace', async ({ page }) => {

@@ -18,7 +18,7 @@ import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
-import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge as SharedStatusBadge, TableViewport, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
@@ -230,7 +230,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
       <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
-        <div tabIndex={0} style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <TableViewport label={t('Posuvná matice důkazů komponent', 'Scrollable component evidence matrix')} hint={t('Posuňte matici vodorovně pro všechny druhy testů a pokrytí.', 'Scroll horizontally to see every test kind and coverage.')}>
           <table style={tableStyle}>
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
@@ -241,23 +241,23 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
               </tr>
             ))}</tbody>
           </table>
-        </div>
+        </TableViewport>
       </section>
       <section aria-label={t('Deterministické povinné kontroly', 'Deterministic required controls')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Deterministické povinné kontroly', 'Deterministic required controls')}</h2>
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+        <TableViewport label={t('Posuvná tabulka povinných kontrol', 'Scrollable required-controls table')} hint={t('Posuňte tabulku vodorovně pro důvod, blokátor a čas pozorování.', 'Scroll horizontally to see the reason, blocker, and observation time.')}><table style={tableStyle}>
           <thead><tr><th style={thStyle}>Control</th><th style={thStyle}>State</th><th style={thStyle}>Reason</th><th style={thStyle}>Observed</th></tr></thead>
           <tbody>{(report.requiredControls ?? []).map(control => <tr key={control.id}>
             <td style={{ ...tdStyle, fontWeight: 650 }}>{control.id}</td><td style={tdStyle}><StateBadge state={control.state} /></td>
             <td style={{ ...tdStyle, minWidth: 320 }}>{control.reason}{control.blocker && <div style={{ color: 'var(--accent-text)', fontSize: 10, marginTop: 3 }}>{control.blocker}</div>}</td>
             <td style={tdStyle}>{control.observedAt ? formatTimestamp(control.observedAt, language) : '—'}</td>
           </tr>)}</tbody>
-        </table></div>
+        </table></TableViewport>
       </section>
       <section aria-label={t('Hranice schopností platformy', 'Platform capability boundaries')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice hranic schopností', 'Platform capability boundary matrix')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jedna schopnost na řádek: stav, skutečný blokátor a ověřitelný zdroj jsou vedle sebe. Blokovaný stav není roadmapa ani skrytě hotová funkce.', 'One capability per row: state, actual blocker and verifiable source stay side by side. A blocked state is neither a roadmap nor a silently completed feature.')}</p>
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+        <TableViewport label={t('Posuvná matice hranic schopností', 'Scrollable capability-boundary matrix')} hint={t('Posuňte tabulku vodorovně pro skutečný blokátor a ověřitelnou evidenci.', 'Scroll horizontally to see the actual blocker and verifiable evidence.')}><table style={tableStyle}>
           <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
           <tbody>{(report.platformCapabilities ?? []).length ? (report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
             <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
@@ -265,19 +265,19 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
             <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
             <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
           </tr>) : <tr><td colSpan={4} style={{ ...tdStyle, color: 'var(--text-secondary)' }}><StateBadge state="unknown" /> {t('Registr schopností není v tomto snapshotu dostupný; přesný důvod je ve varování snapshotu.', 'The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')}</td></tr>}</tbody>
-        </table></div>
+        </table></TableViewport>
       </section>
     </>
   )
 }
 
 function Execution({ report }: { report: TestIntelligenceReport }) {
-  const { language } = useLanguage()
+  const { t, language } = useLanguage()
   const rows = report.components.flatMap(component => component.evidence
     .filter(item => ['unit', 'integration', 'e2e', 'trace', 'simulation'].includes(item.kind))
     .map(item => ({ component: component.component, ...item })))
   return (
-    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+    <TableViewport label={t('Posuvná tabulka evidence běhů', 'Scrollable execution-evidence table')} hint={t('Posuňte tabulku vodorovně pro počty, diagnostiku a provenance běhu.', 'Scroll horizontally to see counts, diagnostics, and run provenance.')}>
       <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Evidence', 'Diagnostics', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={`${row.component}-${row.kind}-${index}`}>
           <td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.kind}</td><td style={tdStyle}><StateBadge state={row.state} /></td>
@@ -288,7 +288,7 @@ function Execution({ report }: { report: TestIntelligenceReport }) {
           <td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt, language) : '—'}</td>
         </tr>)}</tbody>
       </table>
-    </div>
+    </TableViewport>
   )
 }
 
@@ -331,7 +331,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
       </label>
     </div>
     <div aria-live="polite" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t(`${visibleTests.length}/${report.testCases.length} testových definic odpovídá aktuální triage.`, `${visibleTests.length}/${report.testCases.length} test definitions match the active triage.`)}</div>
-    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+    <TableViewport label={t('Posuvná tabulka testovací triage', 'Scrollable test-triage table')} hint={t('Posuňte tabulku vodorovně pro vlastníka, stabilitu, dobu běhu a fingerprint.', 'Scroll horizontally to see ownership, stability, runtime, and fingerprint.')}><table style={tableStyle}>
       <thead><tr>{[
         t('Stav', 'State'), t('Definice testu', 'Test definition'), t('Zdroj testu', 'Test source'),
         t('Komponenta', 'Component'), t('Druh', 'Kind'), t('Vlastník', 'Owner'), t('Běhy', 'Runs'),
@@ -346,7 +346,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>{item.fingerprint}</td>
       </tr>)}</tbody>
-    </table>{report.testCases.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div> : visibleTests.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Žádná testová definice neodpovídá vybrané triage. Filtr neznamená změnu CI verdiktu.', 'No test definition matches the selected triage. Filtering does not change the CI verdict.')}</div> : null}</div>
+    </table>{report.testCases.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div> : visibleTests.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Žádná testová definice neodpovídá vybrané triage. Filtr neznamená změnu CI verdiktu.', 'No test definition matches the selected triage. Filtering does not change the CI verdict.')}</div> : null}</TableViewport>
   </div>
 }
 
@@ -378,7 +378,7 @@ function History({ report }: { report: TestIntelligenceReport }) {
 function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
   const { t, language } = useLanguage()
   const rows = report.components.filter(component => component.testInfrastructure.declared.length > 0 || component.testInfrastructure.observed.length > 0)
-  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+  return <TableViewport label={t('Posuvná tabulka testovací infrastruktury', 'Scrollable test-infrastructure table')} hint={t('Posuňte tabulku vodorovně pro runtime důkaz, lifecycle a čas pozorování.', 'Scroll horizontally to see runtime proof, lifecycle, and observation time.')}><table style={tableStyle}>
     <thead><tr><th style={thStyle}>Component</th><th style={thStyle}>{t('Deklarovaná topologie', 'Declared topology')}</th><th style={thStyle}>{t('Důkaz runtime', 'Runtime proof')}</th><th style={thStyle}>Lifecycle</th><th style={thStyle}>Observed</th></tr></thead>
     <tbody>{rows.map(row => {
       const started = row.testInfrastructure.observed.filter(item => item.lifecycle === 'started')
@@ -399,17 +399,17 @@ function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
       const latest = row.testInfrastructure.observed.at(-1)?.observedAt
       return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || t('žádná', 'none')}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{scopes.length > 0 && <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`${scopes.length} neprůhledných scopeů resource manageru · ${incompleteScopes.length} s neúplným lifecycle záznamem`, `${scopes.length} opaque resource-manager scopes · ${incompleteScopes.length} with incomplete lifecycle records`)}</div>}{unmatchedStarts > 0 && <div role="status" style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? formatTimestamp(latest, language) : t('tento běh nevydal', 'not emitted by this run')}</td></tr>
     })}</tbody>
-  </table></div>
+  </table></TableViewport>
 }
 
 function Coverage({ report }: { report: TestIntelligenceReport }) {
-  const { language } = useLanguage()
-  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+  const { t, language } = useLanguage()
+  return <TableViewport label={t('Posuvná tabulka pokrytí', 'Scrollable coverage table')} hint={t('Posuňte tabulku vodorovně pro řádky, větve a zdroj měření.', 'Scroll horizontally to see lines, branches, and measurement source.')}><table style={tableStyle}>
     <thead><tr><th style={thStyle}>Component</th><th style={thStyle}>State</th><th style={thStyle}>Lines</th><th style={thStyle}>Branches</th><th style={thStyle}>Observed</th><th style={thStyle}>Source</th></tr></thead>
     <tbody>{report.components.map(row => <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}><StateBadge state={row.coverage.state} /></td>
       <td style={tdStyle}>{row.coverage.lines.percentage === null ? '—' : `${row.coverage.lines.percentage}%`}</td><td style={tdStyle}>{row.coverage.branches.percentage === null ? '—' : `${row.coverage.branches.percentage}%`}</td>
       <td style={tdStyle}>{row.coverage.observedAt ? formatTimestamp(row.coverage.observedAt, language) : '—'}</td><td style={tdStyle}>{row.coverage.source ?? '—'}</td></tr>)}</tbody>
-  </table></div>
+  </table></TableViewport>
 }
 
 function Contracts({ report }: { report: TestIntelligenceReport }) {
@@ -428,10 +428,10 @@ function Contracts({ report }: { report: TestIntelligenceReport }) {
       <div style={{ marginTop: 7 }}>{suiteSummary}</div>
       {unknown.length > 0 && <div style={{ marginTop: 7, color: 'var(--text-tertiary)' }}>{t(`${unknown.length} Pactů má neznámý broker verdikt v tomto snapshotu; otevři detail řádku pro přesný důvod.`, `${unknown.length} Pacts have an unavailable broker verdict in this snapshot; open a row detail for the precise reason.`)}</div>}
     </div>
-    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+    <TableViewport label={t('Posuvná tabulka kontraktů', 'Scrollable contracts table')} hint={t('Posuňte tabulku vodorovně pro Pact, ověření a přesný evidence basis.', 'Scroll horizontally to see the Pact, verification, and exact evidence basis.')}><table style={tableStyle}>
       <thead><tr><th style={thStyle}>Consumer</th><th style={thStyle}>Provider</th><th style={thStyle}>{t('Broker verdict', 'Broker verdict')}</th><th style={thStyle}>Interactions</th><th style={thStyle}>Pact</th><th style={thStyle}>Verified</th><th style={thStyle}>{t('Evidence basis', 'Evidence basis')}</th></tr></thead>
       <tbody>{report.contracts.map(row => <tr key={row.pactFile}><td style={tdStyle}>{row.consumer}</td><td style={tdStyle}>{row.provider}</td><td style={tdStyle}><StateBadge state={row.state} /></td><td style={tdStyle}>{row.interactions}</td><td style={tdStyle}>{row.pactFile}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt, language) : '—'}</td><td style={{ ...tdStyle, minWidth: 300, color: 'var(--text-secondary)', fontSize: 11 }}>{row.verificationDetail ?? t('Snapshot neposkytuje vysvětlení ověření.', 'The snapshot does not provide a verification explanation.')}</td></tr>)}</tbody>
-    </table></div>
+    </table></TableViewport>
   </div>
 }
 
