@@ -54,7 +54,14 @@ test.describe('term-deposit account opening', () => {
       })
     })
 
+    await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/accounts/new')
+    await expect(page.locator('#account-opening-guidance')).toBeVisible()
+    expect(await page.locator('#account-type').evaluate(element => getComputedStyle(element.parentElement!.parentElement!).gridTemplateColumns.split(' ').length)).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    const openAccountButton = page.getByRole('button', { name: /Otevřít účet|Open Account/ })
+    await expect(openAccountButton).toBeVisible()
+    expect((await openAccountButton.boundingBox())?.width).toBeGreaterThan(300)
     await page.locator('#account-party-id').fill(partyId)
     await page.locator('#account-product-id').selectOption(productId)
 

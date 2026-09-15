@@ -6,34 +6,25 @@
   line-height: 1.5;
 }
 
-.fieldError {
-  color: var(--danger);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.formGrid {
+.accountAttributes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-}
-
-.addressGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 14px;
 }
 
 .actions {
+  align-items: center;
+  background: var(--surface-2);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  border-top: 1px solid var(--border);
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
+  padding: 14px 20px;
 }
 
-@media (max-width: 720px) {
-  .formGrid,
-  .addressGrid {
+@media (max-width: 560px) {
+  .accountAttributes {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -16,6 +16,7 @@ import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 import { accountPartySelection } from '@/lib/accounts/partySelection'
 import { AccountOpeningContractError, parseAccountOpeningProducts, parseOpenedAccount, type AccountOpeningProduct } from '@/lib/accounts/openingContract'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
+import styles from './page.module.css'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'TERM_DEPOSIT', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
@@ -64,6 +65,7 @@ export default function NewAccountPage() {
   }, [])
 
   function selectProduct(productId: string) {
+    idempotencyKey.current = null
     const product = products.find(item => item.id === productId)
     setForm(current => ({
       ...current,
@@ -95,6 +97,7 @@ export default function NewAccountPage() {
   }
 
   function selectParty(party: PartyHit) {
+    idempotencyKey.current = null
     const selection = accountPartySelection(party)
     setForm(prev => ({
       ...prev,
@@ -146,8 +149,10 @@ export default function NewAccountPage() {
     }
   }
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    idempotencyKey.current = null
     setForm(p => ({ ...p, [k]: e.target.value }))
+  }
 
   return (
     <AuthGuard permission="accounts:create">
@@ -166,19 +171,22 @@ export default function NewAccountPage() {
           busy={submitting}
           placeholder={t('Vyhledejte existující party podle jména nebo UUID', 'Find an existing party by name or UUID')}
         />
-        <form onSubmit={submit}>
+        <form onSubmit={submit} aria-busy={submitting} aria-describedby="account-opening-guidance">
+          <p id="account-opening-guidance" className={styles.guidance}>
+            {t('Pole označená * jsou povinná. Vyberte existujícího klienta a aktivní produkt; měna a typ účtu se doplní z katalogu.', 'Fields marked * are required. Select an existing customer and active product; currency and account type follow the catalogue.')}
+          </p>
           <div className="card">
             <div className="card-header"><span className="card-header-title">{t('Detaily účtu', 'Account Details')}</span></div>
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
               {apiError && (
-                <div style={{
+                <div role="alert" style={{
                   padding: '10px 14px',
                   background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
                   borderRadius: 'var(--r-md)', display: 'flex', gap: '8px', alignItems: 'flex-start',
                 }}>
                   <AlertCircle size={14} aria-hidden="true" style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '1px' }}/>
-                  <span role="alert" style={{ fontSize: '13px', color: 'var(--danger)' }}>{apiError}</span>
+                  <span style={{ fontSize: '13px', color: 'var(--danger)' }}>{apiError}</span>
                 </div>
               )}
 
@@ -244,7 +252,7 @@ export default function NewAccountPage() {
                 }
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div className={styles.accountAttributes}>
                 <div className="field">
                   <label htmlFor="account-type">{t('Typ účtu', 'Account type')}</label>
                   <select id="account-type" className="input" value={form.accountType} onChange={set('accountType')} disabled={Boolean(form.productId && !productsUnavailable)}>
@@ -279,11 +287,7 @@ export default function NewAccountPage() {
               </div>
             </div>
 
-            <div style={{
-              padding: '14px 20px', borderTop: '1px solid var(--border)',
-              display: 'flex', justifyContent: 'flex-end', gap: '8px',
-              background: 'var(--surface-2)', borderRadius: '0 0 var(--r-lg) var(--r-lg)',
-            }}>
+            <div className={styles.actions}>
               <Link href="/accounts" className="btn btn-secondary">{t('Zrušit', 'Cancel')}</Link>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
                 <Save size={13} aria-hidden="true"/>

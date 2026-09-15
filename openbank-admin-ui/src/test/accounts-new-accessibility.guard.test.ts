@@ -49,4 +49,11 @@ describe('new account form accessibility', () => {
     expect(page).toContain('request,\n      )')
     expect(page).toContain('openingInFlight.current = false')
   })
+
+  it('starts a new idempotent command after the operator changes its payload', () => {
+    expect(page.match(/idempotencyKey\.current = null/g)).toHaveLength(3)
+    expect(page).toContain('function selectProduct(productId: string)')
+    expect(page).toContain('function selectParty(party: PartyHit)')
+    expect(page).toContain('const set = (k: keyof typeof form)')
+  })
 })

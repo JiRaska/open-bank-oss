@@ -21,6 +21,7 @@ export default function NewPartyPage() {
   const { t } = useLanguage()
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<'legalName' | 'email', string>>({ legalName: '', email: '' })
   // State updates are asynchronous, so `saving` alone cannot stop two submit events in the
   // same event turn. Creating a party is externally visible and the current service only
   // de-duplicates by email, so take a synchronous client-side single-flight lock as well.
@@ -38,10 +39,27 @@ export default function NewPartyPage() {
   const set = (k: string, v: string) => {
     idempotencyKeyRef.current = null
     setForm(f => ({ ...f, [k]: v }))
+    if (k === 'legalName' || k === 'email') {
+      setFieldErrors(current => ({ ...current, [k]: '' }))
+    }
   }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const nextFieldErrors = {
+      legalName: form.legalName.trim() ? '' : t('Právní jméno je povinné.', 'Legal name is required.'),
+      email: !form.email.trim()
+        ? t('E-mail je povinný.', 'Email is required.')
+        : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+          ? ''
+          : t('Zadejte platnou e-mailovou adresu.', 'Enter a valid email address.'),
+    }
+    if (nextFieldErrors.legalName || nextFieldErrors.email) {
+      setFieldErrors(nextFieldErrors)
+      const firstInvalidId = nextFieldErrors.legalName ? 'party-legal-name' : 'party-email'
+      requestAnimationFrame(() => document.getElementById(firstInvalidId)?.focus())
+      return
+    }
     if (createInFlight.current) return
     createInFlight.current = true
     setSaving(true); setError(null)
@@ -103,7 +121,7 @@ export default function NewPartyPage() {
         actions={<Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>}
       />
 
-      <form onSubmit={submit} aria-busy={saving} aria-describedby="party-form-guidance">
+      <form onSubmit={submit} noValidate aria-busy={saving} aria-describedby="party-form-guidance">
         <p id="party-form-guidance" className={styles.guidance}>
           {t('Pole označená * jsou povinná. Údaje před uložením zkontrolujte — stanou se součástí klientského profilu.', 'Fields marked * are required. Review the details before saving — they become part of the customer profile.')}
         </p>
@@ -121,7 +139,8 @@ export default function NewPartyPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="party-legal-name">{t('Obchodní jméno *', 'Legal Name *')}</label>
-              <input id="party-legal-name" className="input" required autoComplete="name" value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} />
+              <input id="party-legal-name" className="input" required autoComplete="name" value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} aria-invalid={Boolean(fieldErrors.legalName)} aria-describedby={fieldErrors.legalName ? 'party-legal-name-error' : undefined} />
+              {fieldErrors.legalName && <span id="party-legal-name-error" role="alert" className={styles.fieldError}>{fieldErrors.legalName}</span>}
             </div>
             <div className="field">
               <label className="field-label" htmlFor="party-trading-name">{t('Obchodní název', 'Trading Name')}</label>
@@ -153,7 +172,8 @@ export default function NewPartyPage() {
               <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Kontakt', 'Contact')}</div>
               <div className="field">
                 <label className="field-label" htmlFor="party-email">{t('E-mail *', 'Email *')}</label>
-                <input id="party-email" className="input" type="email" required autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" />
+                <input id="party-email" className="input" type="email" required autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'party-email-error' : undefined} />
+                {fieldErrors.email && <span id="party-email-error" role="alert" className={styles.fieldError}>{fieldErrors.email}</span>}
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="party-phone">{t('Telefon', 'Phone')}</label>
