@@ -269,7 +269,9 @@ describe('admin UI token contrast', () => {
   })
 
   it.each(themes)('%s sidebar navigation text remains legible', (_name, tokens) => {
+    expect(contrast(resolve(tokens, '--sidebar-text'), resolve(tokens, '--sidebar-bg'))).toBeGreaterThanOrEqual(AA)
     expect(contrast(resolve(tokens, '--sidebar-text-muted'), resolve(tokens, '--sidebar-bg'))).toBeGreaterThanOrEqual(AA)
+    expect(contrast(resolve(tokens, '--sidebar-active-text'), resolve(tokens, '--sidebar-bg'))).toBeGreaterThanOrEqual(AA)
   })
 
   it('declares a complete dark token surface and the shared foundation scales', () => {
