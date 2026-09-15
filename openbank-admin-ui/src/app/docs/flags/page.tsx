@@ -13,6 +13,7 @@ import { cookies } from 'next/headers'
 import { ChevronLeft, Flag, ShieldAlert } from 'lucide-react'
 import { loadFlagCatalog, type FlagMeta } from '@/lib/governance/flags'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +89,10 @@ export default async function FlagsRegistryPage() {
                   {isMoneyPath && <span className="badge badge-danger" style={{ textTransform: 'none' }}>money-path · four-eyes</span>}
                 </h2>
                 <div className="card" style={{ overflow: 'hidden' }}>
+                  <TableViewport
+                    label={t(`Feature flagy služby ${service}`, `Feature flags for ${service}`)}
+                    hint={t('Posuňte tabulku vodorovně pro výchozí variantu, dostupné varianty a targeting.', 'Scroll horizontally for default variant, available variants and targeting.')}
+                  >
                   <table className="table" style={{ margin: 0 }}>
                     <thead>
                       <tr>
@@ -112,6 +117,7 @@ export default async function FlagsRegistryPage() {
                       ))}
                     </tbody>
                   </table>
+                  </TableViewport>
                 </div>
               </section>
             )

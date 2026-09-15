@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { StatusBadge, type Tone } from '@/components/ui'
+import { StatusBadge, TableViewport, type Tone } from '@/components/ui'
 
 /**
  * Where the people in a campaign currently are, counted by state.
@@ -97,7 +97,11 @@ export function PeopleSummary({
         <summary className="cursor-pointer px-4 py-2 text-sm text-muted-foreground">
           {t('Jednotliví lidé (pro ladění)', 'Individual people (for debugging)')} — {n(rows.length)}
         </summary>
-        <div className="overflow-x-auto border-t">
+        <div className="border-t">
+          <TableViewport
+            label={t('Jednotliví účastníci kampaně pro ladění', 'Individual campaign participants for debugging')}
+            hint={t('Posuňte tabulku vodorovně pro identitu účastníka, stav a aktuální krok.', 'Scroll horizontally for participant identity, state and current step.')}
+          >
           <table className="data-table">
             <thead>
               <tr>
@@ -122,6 +126,7 @@ export function PeopleSummary({
               ))}
             </tbody>
           </table>
+          </TableViewport>
         </div>
       </details>
     </div>

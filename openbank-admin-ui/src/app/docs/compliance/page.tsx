@@ -7,6 +7,7 @@ import { Shield, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -213,6 +214,10 @@ export default function CompliancePage() {
 
               {/* Items */}
               <div style={{ padding: '0 20px 16px' }}>
+                <TableViewport
+                  label={t(`${area.title[0]} — požadavky a důkazy`, `${area.title[1]} — requirements and evidence`)}
+                  hint={t('Posuňte tabulku vodorovně pro požadavek, implementační důkaz a jeho stav.', 'Scroll horizontally for the requirement, implementation evidence and its status.')}
+                >
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <tbody>
                     {area.items.map((item, i) => {
@@ -233,6 +238,7 @@ export default function CompliancePage() {
                     })}
                   </tbody>
                 </table>
+                </TableViewport>
               </div>
             </div>
           )

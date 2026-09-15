@@ -7,6 +7,7 @@
 import Link from 'next/link'
 import { Layers, ExternalLink } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 // From `capability-registry`, NOT from `capabilities`: the latter imports `fs` and a client
 // component that reaches it fails the build with `Module not found: Can't resolve 'fs'`.
@@ -125,7 +126,11 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded border border-slate-200">
+      <div className="rounded border border-slate-200">
+        <TableViewport
+          label={t('Matice karetních schopností podle sítě', 'Card capability matrix by network')}
+          hint={t('Posuňte tabulku vodorovně pro dostupnost v jednotlivých sítích a místní implementaci.', 'Scroll horizontally for availability by network and local implementation.')}
+        >
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50">
             <tr>
@@ -191,6 +196,7 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
             ))}
           </tbody>
         </table>
+        </TableViewport>
       </div>
 
       <div className="rounded border border-slate-200 p-4">

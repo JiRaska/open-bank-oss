@@ -23,6 +23,7 @@ import {
   ShieldCheck, Cpu, Scale, AlertTriangle, RefreshCw, FileWarning,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 type Status = 'live' | 'partial' | 'planned'
 type Lens = 'governance' | 'technology' | 'security'
@@ -281,6 +282,10 @@ export default function CustomerAppDossierPage() {
             {t('Matice plán vs realita', 'Plan-vs-reality matrix')}
           </h2>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <TableViewport
+              label={t('Matice plánu a skutečného stavu klientské aplikace', 'Customer application plan-versus-reality matrix')}
+              hint={t('Posuňte tabulku vodorovně pro pohled, skutečný stav a rozhodující ADR.', 'Scroll horizontally for lens, actual state and governing ADR.')}
+            >
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2)' }}>
@@ -312,6 +317,7 @@ export default function CustomerAppDossierPage() {
                 })}
               </tbody>
             </table>
+            </TableViewport>
           </div>
 
           <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 14 }}>
