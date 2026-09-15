@@ -29,6 +29,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} delegation evidence remains clear, read-only and accessible`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 760 })
     await setOperatorTheme(page, theme)
     await page.goto('/approvals/delegation/approval-1')
 
@@ -37,6 +38,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.getByText('Waiting for a different person')).toBeVisible()
     await expect(page.getByText('This screen is read-only.', { exact: false })).toBeVisible()
     await expect(page.getByRole('button', { name: /Approve|Reject/i })).toHaveCount(0)
+    const facts = page.getByTestId('delegation-approval-facts')
+    expect(await facts.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
 
     const results = await new AxeBuilder({ page })

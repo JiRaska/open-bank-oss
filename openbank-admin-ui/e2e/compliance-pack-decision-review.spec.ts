@@ -26,6 +26,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('checker reviews exact pack, retains a refusal, and retries the unchanged decision', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 760 })
   await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'en'))
   await page.route('**/api/svc/lending-service/api/v1/lending/compliance-packs/active', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
@@ -53,6 +54,8 @@ test('checker reviews exact pack, retains a refusal, and retries the unchanged d
   await approve.click()
 
   const dialog = page.getByRole('alertdialog', { name: 'Review pack activation' })
+  expect(await page.getByTestId('compliance-pack-review-details').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await expect(dialog.getByRole('button', { name: 'Back' })).toBeFocused()
   await expect(dialog).toContainText('immediately governs new lending applications')
   await expect(dialog).toContainText(proposal.contentHash)

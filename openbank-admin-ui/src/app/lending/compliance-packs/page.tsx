@@ -26,6 +26,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { TableViewport } from '@/components/ui/TableViewport'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import styles from './page.module.css'
 
 /** Mirrors lending-service `PackActivationView`. `listActive()` synthesises id = all-zero UUID for
  *  every row (it projects the in-memory registry, not a workflow row) — never key a list on it. */
@@ -391,7 +392,7 @@ export default function CompliancePacksPage() {
                 ? t('Po potvrzení začne tento pack okamžitě řídit nové úvěrové žádosti. Není potřeba restart ani release služby.', 'Once confirmed, this pack immediately governs new lending applications. No service restart or release is required.')
                 : t('Po potvrzení bude návrh definitivně zamítnut a nebude ovlivňovat nové úvěrové žádosti.', 'Once confirmed, the proposal is rejected and will not affect new lending applications.')}
             </Dialog.Description>
-            <dl style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: '8px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+            <dl className={styles.reviewDetails} data-testid="compliance-pack-review-details">
               <dt>{t('Jurisdikce', 'Jurisdiction')}</dt><dd>{review.proposal.jurisdiction}</dd>
               <dt>{t('Produkt', 'Product')}</dt><dd>{review.proposal.productType}</dd>
               <dt>{t('Verze', 'Version')}</dt><dd>v{review.proposal.packVersion}</dd>
@@ -404,8 +405,8 @@ export default function CompliancePacksPage() {
             <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               {t('Four-eyes kontrolu vynucuje lending-service: checker musí být jiný principál než maker.', 'The lending service enforces four-eyes: the checker must be a different principal from the maker.')}
             </p>
-            {error && <div data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+            {error && <div role="alert" data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+            <div className={styles.reviewActions}>
               <button ref={reviewCancelRef} type="button" className="btn btn-secondary" disabled={busyId === review.proposal.id} onClick={closeReview}>
                 {t('Zpět', 'Back')}
               </button>
@@ -430,8 +431,8 @@ export default function CompliancePacksPage() {
           }}
           style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 48px)', maxWidth: 820, maxHeight: '88vh', overflow: 'auto', padding: 20 }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><Dialog.Title style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</Dialog.Title><Dialog.Description className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</Dialog.Description></div><Dialog.Close asChild><button type="button" className="btn btn-secondary">{t('Zavřít', 'Close')}</button></Dialog.Close></div>
-          <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px 12px', fontSize: 12, margin: '18px 0' }}>
+          <div className={styles.detailHeader}><div><Dialog.Title style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</Dialog.Title><Dialog.Description className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, overflowWrap: 'anywhere' }}>{detail.contentHash}</Dialog.Description></div><Dialog.Close asChild><button type="button" className="btn btn-secondary">{t('Zavřít', 'Close')}</button></Dialog.Close></div>
+          <dl className={styles.detailFacts}>
             <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{detail.proposedBy || '—'} · {detail.proposedAt || '—'}</dd>
             <dt>{t('Rozhodl', 'Decided by')}</dt><dd>{detail.decidedBy || '—'} · {detail.decidedAt || '—'}</dd>
             <dt>{t('Důvod rozhodnutí', 'Decision reason')}</dt><dd>{detail.decisionReason || '—'}</dd>

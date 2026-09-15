@@ -13,6 +13,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
+import styles from './page.module.css'
 
 type LifecycleApproval = {
   id: string
@@ -124,7 +125,7 @@ export default function DelegationApprovalDetailPage() {
               'This record alone does not prove delivery to product projections; verify their state in the delegation audit timeline.',
             )}
           </p>
-          <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) 1fr', gap: '10px 16px', margin: '18px 0 0', fontSize: 13 }}>
+          <dl className={styles.approvalFacts} data-testid="delegation-approval-facts">
             <dt style={{ color: 'var(--text-tertiary)' }}>{t('Delegace', 'Delegation')}</dt>
             <dd><Link href={`/delegations/${approval.delegationId}`} className="mono">{approval.delegationId}</Link></dd>
             <dt style={{ color: 'var(--text-tertiary)' }}>{t('Důvod zásahu', 'Action reason')}</dt>
