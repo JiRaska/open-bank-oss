@@ -36,6 +36,7 @@ describe('account opening response contracts', () => {
     ['non-customer product', [{ id: expected.productId, code: 'LOAN', name: 'Loan', type: 'LOAN', currency: 'CZK', status: 'ACTIVE', termsAndConditions: [] }]],
     ['invalid currency', [{ id: expected.productId, code: 'X', name: 'X', type: 'CURRENT', currency: 'czk', status: 'ACTIVE', termsAndConditions: [] }]],
     ['term deposit without current terms', [{ id: expected.productId, code: 'TD', name: 'Deposit', type: 'TERM_DEPOSIT', currency: 'CZK', status: 'ACTIVE', termsAndConditions: [] }]],
+    ['insecure terms document', [{ id: expected.productId, code: 'TD', name: 'Deposit', type: 'TERM_DEPOSIT', currency: 'CZK', status: 'ACTIVE', termsAndConditions: [{ version: '2.1', url: 'http://example.test/terms/2.1', effectiveFrom: '2026-01-01', effectiveTo: null }] }]],
   ])('rejects %s', (_label, raw) => {
     expect(() => parseAccountOpeningProducts(raw)).toThrow()
   })

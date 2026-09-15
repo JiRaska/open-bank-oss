@@ -84,7 +84,7 @@ function webUrl(value: unknown, field: string): string {
   } catch {
     throw new AccountOpeningContractError(`invalid ${field}`)
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+  if (url.protocol !== 'https:') {
     throw new AccountOpeningContractError(`invalid ${field}`)
   }
   return parsed
