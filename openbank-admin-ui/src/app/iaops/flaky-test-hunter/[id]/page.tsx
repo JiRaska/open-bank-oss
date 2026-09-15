@@ -104,7 +104,7 @@ function FlakyTestFindingDetailContent() {
           {finding.rootCause && (
             <div className="card" style={{ marginBottom: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <FileText size={14} style={{ color: '#6366f1' }} />
+                <FileText size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Příčina', 'Root cause')}</span>
               </div>
               <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>{finding.rootCause}</p>
@@ -114,10 +114,10 @@ function FlakyTestFindingDetailContent() {
           {finding.proposedFixDiff && (
             <div className="card" style={{ marginBottom: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <GitPullRequest size={14} style={{ color: '#6366f1' }} />
+                <GitPullRequest size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Navržená oprava', 'Proposed fix')}</span>
                 {proposalUrl && (
-                  <a href={proposalUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', fontWeight: 700, color: '#6366f1', textDecoration: 'none', marginLeft: 'auto' }}>
+                  <a href={proposalUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'underline', textUnderlineOffset: '2px', marginLeft: 'auto' }}>
                     {t('Zobrazit PR →', 'View PR →')}
                   </a>
                 )}

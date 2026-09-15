@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { setOperatorTheme } from './helpers/theme'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
@@ -11,6 +13,43 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     contentType: 'application/json',
     body: JSON.stringify({ findings: [], available: true }),
   }))
+})
+
+test('keeps flaky-test evidence safe and adaptive in dark mode', async ({ page }) => {
+  await setOperatorTheme(page, 'dark')
+  await page.route('**/api/flaky-test-hunter/findings/finding-theme', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      id: 'finding-theme', checkType: 'TEST_COUNT_DRIFT', severity: 'WARNING', detectedAt: '2026-09-15T08:00:00Z',
+      title: 'Test evidence needs review', component: 'openbank-admin-ui', filePath: 'e2e/example.spec.ts',
+      rawMetricValue: 8, threshold: 10, rootCause: 'The observed suite count is below its declared floor.',
+      proposalUrl: 'javascript:alert(document.domain)', proposedFixDiff: '+ add regression coverage', status: 'PROPOSED',
+      diagnosedAt: '2026-09-15T08:01:00Z', proposedAt: '2026-09-15T08:02:00Z',
+    }),
+  }))
+
+  await page.goto('/iaops/flaky-test-hunter/finding-theme')
+  const proposedFix = page.getByText(/Proposed fix|Navržená oprava/, { exact: true }).locator('..')
+  await expect(proposedFix).toBeVisible()
+  await expect(proposedFix.getByRole('link')).toHaveCount(0)
+  await expect(proposedFix.getByRole('status')).toContainText(/not safely available|není bezpečně dostupný/)
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
+  const usesAccentToken = await proposedFix.locator('svg').evaluate(icon => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--accent-text)'
+    document.body.append(probe)
+    const expected = getComputedStyle(probe).color
+    probe.remove()
+    return getComputedStyle(icon).color === expected
+  })
+  expect(usesAccentToken).toBe(true)
+
+  const results = await new AxeBuilder({ page })
+    .include('main')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+  expect(results.violations).toEqual([])
 })
 
 test('keeps test-agent findings discoverable in a mobile keyboard viewport', async ({ page }) => {
