@@ -4,11 +4,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Landmark, ShieldAlert, WalletCards } from 'lucide-react'
+import { Landmark, RefreshCw, ShieldAlert, WalletCards } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { BffFailure } from '@/lib/services/bff'
 import type { PortfolioSummary } from '@/lib/party/portfolioContract'
-import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
+import { clearSelectedCustomerGraphFacts, loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
 
 type Source = 'accounts' | 'lending' | 'aml'
 type SourceState = { kind: 'loading' } | ({ kind: 'ok' } & PortfolioSummary) | { kind: 'unknown'; why: BffFailure }
@@ -18,6 +18,7 @@ const initial = (): State => ({ accounts: { kind: 'loading' }, lending: { kind: 
 export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
   const { t } = useLanguage()
   const [state, setState] = useState<State>(initial)
+  const [retryKey, setRetryKey] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -45,7 +46,7 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
       })
     })
     return () => { live = false }
-  }, [partyId])
+  }, [partyId, retryKey])
 
   const cards: { source: Source; title: string; href: string; Icon: typeof WalletCards }[] = [
     { source: 'accounts', title: t('Účty', 'Accounts'), href: '/accounts', Icon: WalletCards },
@@ -53,8 +54,22 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
     { source: 'aml', title: t('AML případy', 'AML cases'), href: '/aml', Icon: ShieldAlert },
   ]
 
-  return <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
-    <h2 className="section-title" style={{ marginBottom: 4 }}>{t('Autoritativní portfolio a riziko', 'Authoritative portfolio and risk')}</h2>
+  const hasUnavailable = Object.values(state).some(value => value.kind === 'unknown')
+
+  return <div className="card" data-customer-portfolio style={{ padding: '16px 20px', marginBottom: 20 }}>
+    <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: 12 }}>
+      <h2 className="section-title" style={{ marginBottom: 4 }}>{t('Autoritativní portfolio a riziko', 'Authoritative portfolio and risk')}</h2>
+      {hasUnavailable && (
+        <button type="button" className="btn btn-secondary" onClick={() => {
+          clearSelectedCustomerGraphFacts(partyId)
+          setState(initial())
+          setRetryKey(key => key + 1)
+        }}>
+          <RefreshCw size={13} aria-hidden="true" />
+          {t('Načíst znovu', 'Retry')}
+        </button>
+      )}
+    </div>
     <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--text-secondary)' }}>{t('Každá karta se načítá přímo z vlastnící služby a degraduje nezávisle; nejde o analytickou projekci.', 'Each card loads from its owning service and degrades independently; this is not an analytics projection.')}</p>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: 12 }}>
       {cards.map(({ source, title, href, Icon }) => {
@@ -67,7 +82,7 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
             <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{value.statuses.join(' · ') || t('bez stavů', 'no statuses')}</div>
             {value.lowerBound && <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-tertiary)' }}>{t('Nejméně tento počet; služba vrátila plné stránkované okno.', 'At least this many; the service returned a full paginated window.')}</div>}
           </>}
-          {value.kind === 'unknown' && <div style={{ marginTop: 8, fontSize: 11, color: '#b45309' }}>{t('Nelze zjistit', 'Unavailable')} · {value.why}</div>}
+          {value.kind === 'unknown' && <div role="status" style={{ marginTop: 8, fontSize: 11, color: 'var(--warning-text)' }}>{t('Nelze zjistit', 'Unavailable')} · {value.why}</div>}
         </Link>
       })}
     </div>

@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
 
@@ -36,6 +37,24 @@ describe('Customer 360 authoritative portfolio', () => {
 
     await waitFor(() => expect(screen.getByText(/Unavailable · unreachable/i)).toBeInTheDocument())
     expect(screen.getAllByText('0')).toHaveLength(2)
+  })
+
+  it('retries the whole authoritative graph after a partial outage', async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(json({
+        accounts: [], lendingApplications: [], amlCases: [], unavailable: ['lending'],
+      }))
+      .mockResolvedValueOnce(json({
+        accounts: [], lendingApplications: [{ id: 'l1', status: 'APPROVED' }], amlCases: [], unavailable: [],
+      }))
+    vi.stubGlobal('fetch', f)
+    render(<LanguageProvider><CustomerPortfolioPanel partyId={PARTY} /></LanguageProvider>)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.getByText('APPROVED')).toBeInTheDocument())
+    expect(f).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
   it('marks capped owning-service windows as lower bounds', async () => {
