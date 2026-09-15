@@ -15,7 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
 import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
@@ -557,6 +557,10 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
       )}
 
       {(!unavailable || unavailable.kind === 'no_data') && (
+        <TableViewport
+          label={t('Posuvná tabulka historie zpráv klienta', 'Scrollable customer message history table')}
+          hint={t('Posuňte tabulku vodorovně pro příjemce, stav a čas přečtení.', 'Scroll horizontally to see recipient, state, and read time.')}
+        >
         <table className="data-table">
           <thead>
             <tr>
@@ -601,6 +605,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
             ))}
           </tbody>
         </table>
+        </TableViewport>
       )}
 
       {hasNextPage && !loadingMore && (

@@ -23,6 +23,12 @@ const migratedTables = [
   'src/app/approvals/communication/page.tsx',
   'src/app/document-templates/page.tsx',
   'src/app/feedback/page.tsx',
+  'src/app/delegations/page.tsx',
+  'src/app/lending/compliance-packs/page.tsx',
+  'src/app/loyalty/page.tsx',
+  'src/app/parties/[id]/page.tsx',
+  'src/app/pid/page.tsx',
+  'src/app/regulatory/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

@@ -24,6 +24,7 @@ import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 /** Mirrors lending-service `PackActivationView`. `listActive()` synthesises id = all-zero UUID for
@@ -259,6 +260,10 @@ export default function CompliancePacksPage() {
         <CheckCircle2 aria-hidden="true" size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+        <TableViewport
+          label={t('Posuvná tabulka aktivních compliance packů', 'Scrollable active compliance packs table')}
+          hint={t('Posuňte tabulku vodorovně pro jurisdikci, verzi, autora a platnost.', 'Scroll horizontally to see jurisdiction, version, author, and validity.')}
+        >
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -296,6 +301,7 @@ export default function CompliancePacksPage() {
             )}
           </tbody>
         </table>
+        </TableViewport>
       </div>
 
       <div

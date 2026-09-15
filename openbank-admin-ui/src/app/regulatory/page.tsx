@@ -14,6 +14,7 @@ import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@
 import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 
 type Report = (typeof REPORTS)[number]
 
@@ -694,6 +695,10 @@ export default function RegulatoryPage() {
                     {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
                   </div>
                 )}
+                <TableViewport
+                  label={t('Posuvná tabulka regulatorního pracovního náhledu', 'Scrollable regulatory working preview table')}
+                  hint={t('Posuňte tabulku vodorovně pro celý regulatorní údaj a jeho hodnotu.', 'Scroll horizontally to see each complete regulatory field and value.')}
+                >
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
@@ -710,6 +715,7 @@ export default function RegulatoryPage() {
                     ))}
                   </tbody>
                 </table>
+                </TableViewport>
                 </>
               )}
             </div>

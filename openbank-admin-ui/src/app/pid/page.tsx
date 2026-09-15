@@ -11,7 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
+import { PageHeader, StatusBadge, TableViewport, statusTone, type Tone } from '@/components/ui'
 import { parsePidRecords, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
 
 const PID_SERVICE = '/api/svc/pid-service'
@@ -558,6 +558,10 @@ export default function PidPage() {
 
         {!unavailable && (
         <div className="card" style={{ overflow: 'hidden' }}>
+          <TableViewport
+            label={t('Posuvná tabulka identifikátorů PID', 'Scrollable PID identifiers table')}
+            hint={t('Posuňte tabulku vodorovně pro zemi, stav, zdroj a bezpečné akce.', 'Scroll horizontally to see country, state, source, and governed actions.')}
+          >
           <table className="data-table">
             <thead>
               <tr>
@@ -620,6 +624,7 @@ export default function PidPage() {
               ))}
             </tbody>
           </table>
+          </TableViewport>
         </div>
         )}
       </div>

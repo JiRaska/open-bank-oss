@@ -24,6 +24,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { DelegationEducation } from '@/components/delegations/DelegationEducation'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
 import {
@@ -359,6 +360,10 @@ function ProjectionHealth({ consumers, known, loading }: { consumers: Projection
           {t('Toto téma zatím nemá žádnou konzumentskou skupinu.', 'This topic has no consumer group yet.')}
         </div>
       ) : (
+        <TableViewport
+          label={t('Posuvná tabulka zdraví projekcí oprávnění', 'Scrollable entitlement projection health table')}
+          hint={t('Posuňte tabulku vodorovně pro stav konzumenta a zpoždění odvolaných práv.', 'Scroll horizontally to see consumer state and revoked-rights lag.')}
+        >
         <table className="table" style={{ width: '100%' }}>
           <thead>
             <tr>
@@ -377,6 +382,7 @@ function ProjectionHealth({ consumers, known, loading }: { consumers: Projection
             ))}
           </tbody>
         </table>
+        </TableViewport>
       )}
     </div>
   )

@@ -15,6 +15,7 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { TableViewport } from '@/components/ui/TableViewport'
 import styles from './loyalty.module.css'
 import {
   AI_RED_LINES, AI_ROLES, CONNECTIONS, LEGAL, PRINCIPLES, type Bilingual,
@@ -282,6 +283,10 @@ export default function LoyaltyPage() {
                       'The catalogue lists earning rules. Before a campaign, confirm with the programme owner that the activity is actually tracked and rewarded.',
                     )}
                   </p>
+                  <TableViewport
+                    label={t('Posuvná tabulka pravidel získávání Lístků', 'Scrollable Lípa earning rules table')}
+                    hint={t('Posuňte tabulku vodorovně pro počet Lístků a dobu platnosti.', 'Scroll horizontally to see the Lístky amount and validity.')}
+                  >
                   <table className="mt-4 w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -302,6 +307,7 @@ export default function LoyaltyPage() {
                       ))}
                     </tbody>
                   </table>
+                  </TableViewport>
                   {catalogue.earnSources.filter(s => s.id.toLowerCase().includes(filter.toLowerCase())).length === 0 && <p role="status">{t('Žádné odpovídající způsoby získání.', 'No matching earning sources.')}</p>}
                 </div>
 
@@ -316,6 +322,10 @@ export default function LoyaltyPage() {
                       'Prices are in Lístky. The responsible team must confirm fulfilment readiness; Lípa records a benefit grant but does not fulfil it itself.',
                     )}
                   </p>
+                  <TableViewport
+                    label={t('Posuvná tabulka benefitů Lípy', 'Scrollable Lípa benefits table')}
+                    hint={t('Posuňte tabulku vodorovně pro vlastníka plnění, cenu a platnost.', 'Scroll horizontally to see fulfilment owner, price, and validity.')}
+                  >
                   <table className="mt-4 w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -341,6 +351,7 @@ export default function LoyaltyPage() {
                       ))}
                     </tbody>
                   </table>
+                  </TableViewport>
                   {catalogue.benefits.filter(b => `${b.id} ${b.description} ${b.engine}`.toLowerCase().includes(filter.toLowerCase())).length === 0 && <p role="status">{t('Žádné odpovídající benefity.', 'No matching benefits.')}</p>}
                 </div>
               </>
@@ -441,6 +452,10 @@ export default function LoyaltyPage() {
                     </p>
                   )}
                   {party.history.length > 0 && (
+                    <TableViewport
+                      label={t('Posuvná tabulka historie Lístků klienta', 'Scrollable customer Lípa history table')}
+                      hint={t('Posuňte tabulku vodorovně pro zůstatek a expiraci každého pohybu.', 'Scroll horizontally to see balance and expiry for every entry.')}
+                    >
                     <table className="mt-3 w-full text-sm">
                       <thead>
                         <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -467,6 +482,7 @@ export default function LoyaltyPage() {
                         ))}
                       </tbody>
                     </table>
+                    </TableViewport>
                   )}
                 </div>
               </>
