@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.1...lending-service-v0.33.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **lending:** preserve credit risk evidence and reconcile allowances ([#9466](https://github.com/JiRaska/open-bank-oss/issues/9466)) ([1f8b96c](https://github.com/JiRaska/open-bank-oss/commit/1f8b96c7d7f00c3900392dd080b1c9d34e886179)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.0...lending-service-v0.33.1) (2026-09-13)
 
 
