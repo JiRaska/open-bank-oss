@@ -7,9 +7,9 @@
   justify-content: space-between;
   height: 60px;
   padding: 0 28px;
-  background: rgba(255, 255, 255, 0.9);
-  border-bottom: 1px solid rgba(203, 213, 225, 0.78);
-  box-shadow: 0 2px 14px rgba(15, 23, 42, 0.025);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   backdrop-filter: blur(14px);
 }
 
@@ -28,12 +28,32 @@
   transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .searchTrigger:hover,
-.searchTrigger:focus-visible { background: var(--surface); border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); outline: none; }
+.searchTrigger:focus-visible { background: var(--surface); border-color: var(--accent-border); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); outline: none; }
 
 .actions { display: flex; align-items: center; gap: 5px; }
 .headerLink { display: grid; width: 34px; height: 34px; place-items: center; color: var(--text-secondary); text-decoration: none; background: transparent; border-radius: 9px; transition: background 0.12s ease, color 0.12s ease; }
 .headerLink:hover,
 .headerLink:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
+
+.logoutButton {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--danger-text);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.logoutButton:hover { background: var(--danger-bg); }
+.logoutButton:focus-visible { background: var(--danger-bg); box-shadow: 0 0 0 2px var(--danger-border); outline: none; }
 
 .mobileMenu { display: none; }
 
