@@ -576,7 +576,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       />}
 
       {!loading && !unavailable && c && (
-        <aside className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm" data-testid="campaign-reuse-draft">
+        <aside className="rounded-xl border border-[var(--accent-border)] bg-[var(--accent-bg)] p-3 text-sm" data-testid="campaign-reuse-draft">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="font-semibold text-foreground">{t('Použít cestu jako výchozí bod', 'Use this journey as a starting point')}</p>
@@ -602,7 +602,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </aside>
       )}
 
-      {actionError && !actionIntent && <p role="alert" className="text-sm text-red-600">{actionError}</p>}
+      {actionError && !actionIntent && <p role="alert" className="text-sm text-[var(--danger-text)]">{actionError}</p>}
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
       {!loading && unavailable && (
@@ -1094,7 +1094,7 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, closeFocusO
 
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-[1200] bg-slate-950/70" />
+      <Dialog.Overlay className="fixed inset-0 z-[1200] bg-black/70" />
       <Dialog.Content
         role="alertdialog"
         aria-busy={busy}
@@ -1110,27 +1110,25 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, closeFocusO
         onInteractOutside={event => event.preventDefault()}
         className="fixed inset-0 z-[1200] grid place-items-center p-5"
       >
-        <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+        <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }} data-campaign-action-panel>
       <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><Megaphone className="h-5 w-5" aria-hidden="true" /></span>
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--accent-bg)] text-[var(--accent-text)]"><Megaphone className="h-5 w-5" aria-hidden="true" /></span>
         <div>
-          <Dialog.Title className="text-lg font-semibold text-slate-950">{label}</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm leading-6 text-slate-600">{impact}</Dialog.Description>
+          <Dialog.Title className="text-lg font-semibold text-[var(--text-primary)]">{label}</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{impact}</Dialog.Description>
         </div>
       </div>
-      <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Kampaň', 'Campaign')}</dt><dd className="mt-1 font-semibold text-slate-900">{campaign.name}</dd></div>
-        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Cíl', 'Goal')}</dt><dd className="mt-1 text-slate-700">{campaign.goal}</dd></div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{campaign.createdBy}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 text-slate-700">{campaign.segmentRef.name} · v{campaign.segmentRef.version}</dd></div>
-          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Kroků', 'Steps')}</dt><dd className="mt-1 text-slate-700">{campaign.steps.length}</dd></div>
-        </div>
+      <dl className="mt-5 grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-4 text-sm sm:grid-cols-3">
+        <div className="sm:col-span-3"><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Kampaň', 'Campaign')}</dt><dd className="mt-1 font-semibold text-[var(--text-primary)]">{campaign.name}</dd></div>
+        <div className="sm:col-span-3"><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Cíl', 'Goal')}</dt><dd className="mt-1 text-[var(--text-secondary)]">{campaign.goal}</dd></div>
+        <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-[var(--text-secondary)]">{campaign.createdBy}</dd></div>
+        <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Publikum', 'Audience')}</dt><dd className="mt-1 text-[var(--text-secondary)]">{campaign.segmentRef.name} · v{campaign.segmentRef.version}</dd></div>
+        <div><dt className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">{t('Kroků', 'Steps')}</dt><dd className="mt-1 text-[var(--text-secondary)]">{campaign.steps.length}</dd></div>
       </dl>
-      {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+      {error && <p role="alert" className="mt-4 rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-[var(--danger-text)]">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
-        <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
-        <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Provádím změnu…', 'Applying change…') : t('Potvrdit akci', 'Confirm action')}</button>
+        <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="btn btn-secondary">{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="btn btn-primary">{busy ? t('Provádím změnu…', 'Applying change…') : t('Potvrdit akci', 'Confirm action')}</button>
       </div>
         </div>
       </Dialog.Content>
