@@ -141,6 +141,21 @@ describe('devops remediation review dialog (#7895)', () => {
     expect(within(dialog).queryByRole('link', { name: /View proposal/ })).not.toBeInTheDocument()
   })
 
+  it('does not expose a non-HTTPS proposal as an executable link', () => {
+    render(
+      <LanguageProvider>
+        <RemediationReviewDialog
+          finding={{ ...FINDING, proposalPrUrl: 'javascript:alert(document.domain)' }}
+          approve busy={false} failed={false} onCancel={vi.fn()} onConfirm={vi.fn()}
+        />
+      </LanguageProvider>,
+    )
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).queryByRole('link', { name: /View proposal/ })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('status')).toHaveTextContent('link hidden for security')
+  })
+
   it('confirms only after the operator clicks the primary action', async () => {
     const user = userEvent.setup()
     const onConfirm = vi.fn()

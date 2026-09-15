@@ -20,8 +20,8 @@ import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
 
 const SEVERITY_LABEL: Record<DevOpsFinding['severity'], { cs: string; en: string; color: string }> = {
-  WARNING: { cs: 'Varování', en: 'Warning', color: '#d97706' },
-  CRITICAL: { cs: 'Kritické', en: 'Critical', color: '#dc2626' },
+  WARNING: { cs: 'Varování', en: 'Warning', color: 'var(--warning-text)' },
+  CRITICAL: { cs: 'Kritické', en: 'Critical', color: 'var(--danger-text)' },
 }
 
 const REMEDIATION_KIND_LABEL: Record<DevOpsFinding['remediationKind'], { cs: string; en: string }> = {
@@ -29,6 +29,16 @@ const REMEDIATION_KIND_LABEL: Record<DevOpsFinding['remediationKind'], { cs: str
   RUNBOOK_UPDATE: { cs: 'Aktualizace runbooku', en: 'Runbook update' },
   TICKET: { cs: 'Tiket', en: 'Ticket' },
   NONE: { cs: 'Žádná', en: 'None' },
+}
+
+function safeProposalUrl(value: string | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
 }
 
 export function RemediationReviewDialog({
@@ -50,6 +60,7 @@ export function RemediationReviewDialog({
   const sev = SEVERITY_LABEL[finding.severity]
   const remediation = REMEDIATION_KIND_LABEL[finding.remediationKind]
   const dora = finding.doraMetricImpacted ? DORA_METRIC_LABEL[finding.doraMetricImpacted] : null
+  const proposalUrl = safeProposalUrl(finding.proposalPrUrl)
 
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
@@ -70,6 +81,7 @@ export function RemediationReviewDialog({
             onRestoreFocus?.()
           }}
           className="card"
+          data-remediation-review
           style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(560px, calc(100vw - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
         >
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -102,12 +114,18 @@ export function RemediationReviewDialog({
           {dora && (
             <div><strong>{t('Dopad na DORA', 'DORA impact')}:</strong> {t(dora.cs, dora.en)}</div>
           )}
-          {finding.proposalPrUrl && (
+          {proposalUrl && (
             <div>
               <strong>{t('Návrh', 'Proposal')}:</strong>{' '}
-              <a href={finding.proposalPrUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>
+              <a href={proposalUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-text)' }}>
                 {t('Zobrazit návrh →', 'View proposal →')}
               </a>
+            </div>
+          )}
+          {finding.proposalPrUrl && !proposalUrl && (
+            <div role="status" style={{ color: 'var(--warning-text)' }}>
+              <strong>{t('Návrh', 'Proposal')}:</strong>{' '}
+              {t('odkaz byl z bezpečnostních důvodů skryt', 'link hidden for security')}
             </div>
           )}
         </div>
