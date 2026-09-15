@@ -45,6 +45,7 @@ describe('notification approval dialog', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(screen.getByRole('status')).toHaveTextContent('Decision recorded: APPROVED')
     expect(screen.getByRole('textbox', { name: 'Notification approval ID' })).toHaveValue('')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Notification approval ID' })).toHaveFocus())
   })
 
   it('keeps a failed rejection bound to the same id and permits a safe retry', async () => {
@@ -63,5 +64,16 @@ describe('notification approval dialog', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(decide).toHaveBeenNthCalledWith(2, 'approval-9', false)
     expect(screen.getByRole('status')).toHaveTextContent('Decision recorded: REJECTED')
+  })
+
+  it('returns cancel focus to the exact decision trigger', async () => {
+    renderApprovals()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Notification approval ID' }), { target: { value: 'approval-7' } })
+    const reject = screen.getByRole('button', { name: 'Reject' })
+    fireEvent.click(reject)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to review' }))
+
+    await waitFor(() => expect(reject).toHaveFocus())
   })
 })

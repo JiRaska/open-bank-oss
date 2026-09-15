@@ -41,6 +41,7 @@ test('reviews the exact notification approval before one privileged write', asyn
   await expect(page.getByRole('status')).toContainText(/Rozhodnutí uloženo: APPROVED|Decision recorded: APPROVED/)
   expect(decisions).toBe(1)
   await expect(approvalId).toHaveValue('')
+  await expect(approvalId).toBeFocused()
 })
 
 test('keeps a rejected decision bound to its id for a safe retry', async ({ page }) => {

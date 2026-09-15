@@ -365,6 +365,8 @@ export function OperatorMessageApprovals() {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const decisionRequestRef = useRef(false)
+  const approvalIdRef = useRef<HTMLInputElement>(null)
+  const decisionTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     const linkedApprovalId = readApprovalId(window.location.search)
@@ -373,9 +375,25 @@ export function OperatorMessageApprovals() {
     return () => cancelAnimationFrame(frame)
   }, [])
 
-  const reviewDecision = (approve: boolean) => {
+  const restoreDecisionFocus = () => {
+    requestAnimationFrame(() => {
+      const trigger = decisionTriggerRef.current
+      const target = trigger?.isConnected && !trigger.disabled ? trigger : approvalIdRef.current
+      target?.focus()
+    })
+  }
+
+  const closeDecision = () => {
+    if (busy) return
+    setPendingDecision(null)
+    setResult(null)
+    restoreDecisionFocus()
+  }
+
+  const reviewDecision = (approve: boolean, trigger: HTMLButtonElement) => {
     const id = approvalId.trim()
     if (id) {
+      decisionTriggerRef.current = trigger
       setResult(null)
       setPendingDecision({ id, approve })
     }
@@ -390,6 +408,7 @@ export function OperatorMessageApprovals() {
       setResult({ ok: true, text: `${t('Rozhodnutí uloženo', 'Decision recorded')}: ${decision.status}` })
       setApprovalId('')
       setPendingDecision(null)
+      restoreDecisionFocus()
     } catch {
       // Most often SelfApprovalNotAllowedException / already-decided — never surface the raw
       // backend message for a user-initiated write (graceful-state rule).
@@ -420,6 +439,7 @@ export function OperatorMessageApprovals() {
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
+            ref={approvalIdRef}
             id="notification-approval-id"
             aria-label={t('ID schválení notifikace', 'Notification approval ID')}
             className="input"
@@ -432,7 +452,7 @@ export function OperatorMessageApprovals() {
             type="button"
             className="btn btn-secondary"
             style={{ color: 'var(--green)' }}
-            onClick={() => reviewDecision(true)}
+            onClick={event => reviewDecision(true, event.currentTarget)}
             disabled={busy || !approvalId.trim()}
             aria-haspopup="dialog"
           >
@@ -442,7 +462,7 @@ export function OperatorMessageApprovals() {
             type="button"
             className="btn btn-secondary"
             style={{ color: 'var(--red)' }}
-            onClick={() => reviewDecision(false)}
+            onClick={event => reviewDecision(false, event.currentTarget)}
             disabled={busy || !approvalId.trim()}
             aria-haspopup="dialog"
           >
@@ -461,7 +481,7 @@ export function OperatorMessageApprovals() {
         aria-describedby="notification-decision-impact notification-decision-governance"
         aria-busy={busy}
         onKeyDown={event => {
-          if (event.key === 'Escape' && !busy) setPendingDecision(null)
+          if (event.key === 'Escape' && !busy) closeDecision()
           trapDialogFocus(event, dialogRef.current)
         }}
         style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
@@ -490,7 +510,7 @@ export function OperatorMessageApprovals() {
         </p>
         {result && !result.ok && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12, lineHeight: 1.5 }}>{result.text}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
-          <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={() => { setPendingDecision(null); setResult(null) }}>
+          <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={closeDecision}>
             {t('Zpět ke kontrole', 'Back to review')}
           </button>
           <button
