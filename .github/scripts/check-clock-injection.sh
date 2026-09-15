@@ -38,7 +38,7 @@ if [ "${1:-}" = "--self-test" ]; then
     out=$(run); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — expected rc=$want, got rc=$rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && [[ "$out" != *"$sub"* ]]; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }
@@ -48,6 +48,11 @@ if [ "${1:-}" = "--self-test" ]; then
   # THE DEFECT, in the domain layer.
   reset; put "$K/domain/Money.kt" 'class Money { fun at() = Instant.now() }\n'
   expect "Instant.now() in domain is FLAGGED" 1 "VIOLATION"
+
+  # Quoting "$sub" makes its glob metacharacters literal inside [[ ... ]].
+  # Exercise the actual reason assertion with a filename that contains them.
+  reset; put "$K/domain/Clock[*?].kt" 'class Money { fun at() = Instant.now() }\n'
+  expect "reason matching preserves literal glob characters" 1 'Clock[*?].kt'
 
   # ...and in application, the other watched layer.
   reset; put "$K/application/Svc.kt" 'class Svc { fun at() = LocalDate.now() }\n'
@@ -83,7 +88,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'money_path_services:\n  - openbank-fixture-service\n' > "$td/openbank-libs/governance/rules.yaml"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: clock-injection gate is falsifiable (7 cases, scope derived from rules.yaml)"
+  echo "self-test ok: clock-injection gate is falsifiable (8 cases, scope derived from rules.yaml)"
   exit 0
 fi
 

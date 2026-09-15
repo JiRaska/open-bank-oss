@@ -4850,7 +4850,10 @@ gates:
     group: lint
     mode: enforced
     run: |
+      set -e
       bash .github/scripts/check-agent-review-happened.sh --self-test
+      python3 .github/scripts/test-solo-review-proof.py
+      python3 .github/scripts/test-solo-review-runner.py
 
   # ADR-0251's other half: WHICH PRs get reviewed. Both of this rule's clauses were wrong in
   # the first draft, and both failed silently toward reviewing LESS than the ADR claimed —
