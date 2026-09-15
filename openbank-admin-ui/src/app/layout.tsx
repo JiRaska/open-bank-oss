@@ -7,6 +7,7 @@ import './globals.css'
 import { cookies, headers } from 'next/headers'
 import { AppProviders } from '@/components/layout/AppProviders'
 import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
+import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme/bootstrap'
 
 export const metadata: Metadata = {
   title: 'OpenBank Admin',
@@ -23,12 +24,16 @@ export const metadata: Metadata = {
 // no nonce, 'strict-dynamic' blocks them all, and the page renders blank.
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Calling headers() opts the layout out of static pre-rendering (side-effect only).
-  await headers()
+  const requestHeaders = await headers()
+  const nonce = requestHeaders.get('x-nonce') ?? undefined
   const persistedLanguage = parseLanguage((await cookies()).get(LANG_COOKIE)?.value)
   const initialLanguage = persistedLanguage ?? 'en'
 
   return (
     <html lang={initialLanguage} suppressHydrationWarning>
+      <head>
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body>
         <AppProviders initialLanguage={persistedLanguage}>{children}</AppProviders>
       </body>

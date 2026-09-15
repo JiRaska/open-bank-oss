@@ -10,8 +10,8 @@ import { scriptSourceDirective } from "@/lib/security/contentSecurityPolicy"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
-// CSP is built here. The app has no inline <script>/dangerouslySetInnerHTML; only Next's own
-// bootstrap scripts run, and they pick up the nonce automatically from this header.
+// CSP is built here. Next's scripts and the static, value-allowlisted theme bootstrap in the root
+// layout receive this nonce; no request or user data is interpolated into that inline script.
 const KC_URL = process.env.NEXT_PUBLIC_KEYCLOAK_URL || "https://kc.open-bank.tech"
 // GlitchTip crash/error ingest origin (ADR-0075). The browser SDK POSTs events here,
 // so it must be allowed in connect-src or the CSP blocks every error report. Derived
