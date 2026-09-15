@@ -31,6 +31,7 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { TableViewport } from '@/components/ui/TableViewport'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 import {
@@ -307,7 +308,10 @@ function EodPanel() {
                 {t('Vyrovnání po měnách (EoD)', 'Per-currency tie-out (EoD)')}
               </span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport
+              label={t('Posuvná tabulka vyrovnání po měnách', 'Scrollable per-currency tie-out table')}
+              hint={t('Posuňte tabulku vodorovně pro pipeline, rozdíl a stav vyrovnání.', 'Scroll horizontally to see the value-date pipeline, difference, and tie-out status.')}
+            >
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', textAlign: 'right', color: 'var(--text-tertiary)' }}>
@@ -340,7 +344,7 @@ function EodPanel() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
           </div>
         </>
       ) : null}
@@ -736,7 +740,10 @@ function EomPanel() {
                 {t(`posledních ${runs.length}`, `last ${runs.length}`)}
               </span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport
+              label={t('Posuvná historie závěrkových běhů', 'Scrollable close-run history')}
+              hint={t('Posuňte tabulku vodorovně pro výsledky kapes a dobu běhu.', 'Scroll horizontally to see pocket outcomes and run duration.')}
+            >
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', textAlign: 'left', color: 'var(--text-tertiary)' }}>
@@ -775,7 +782,7 @@ function EomPanel() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableViewport>
           </div>
         </>
       )}

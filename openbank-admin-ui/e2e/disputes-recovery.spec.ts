@@ -32,6 +32,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 })
 
 test('keeps dispute and SLA evidence visible after a failed refresh', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   let unavailable = false
   await page.route('**/api/disputes', route => unavailable
     ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }) })
@@ -40,6 +41,8 @@ test('keeps dispute and SLA evidence visible after a failed refresh', async ({ p
   await page.goto('/disputes')
 
   await expect(page.getByText('DSP-2026-0042')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('region', { name: /Posuvná tabulka sporů|Scrollable disputes table/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await expect(page.getByText(/PORUŠENÍ SLA|SLA BREACH/).first()).toBeVisible()
 
   unavailable = true

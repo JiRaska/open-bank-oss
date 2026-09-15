@@ -43,6 +43,9 @@ const migratedTables = [
   'src/app/lending/risk/page.tsx',
   'src/app/system/readiness/page.tsx',
   'src/app/reporting/page.tsx',
+  'src/app/day-end/page.tsx',
+  'src/app/disputes/page.tsx',
+  'src/app/ledger/page.tsx',
 ]
 
 describe('responsive banking table viewport', () => {

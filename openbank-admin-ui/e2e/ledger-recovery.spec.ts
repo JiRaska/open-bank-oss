@@ -25,6 +25,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('keeps balanced journal evidence visible after a repeated search fails', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   let unavailable = false
   await page.route('**/api/svc/ledger-service/api/v1/journals**', route => unavailable
     ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }) })
@@ -34,6 +35,8 @@ test('keeps balanced journal evidence visible after a repeated search fails', as
   await page.getByRole('button', { name: /Načíst záznamy|Load Entries/ }).click()
 
   await expect(page.getByText('Customer transfer settlement')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('region', { name: /Posuvná tabulka deníku hlavní knihy|Scrollable general-ledger journal table/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await page.getByRole('button', { name: /Zobrazit řádky deníku|Show journal lines/ }).click()
   await expect(page.getByText('DEBIT', { exact: true })).toBeVisible()
   await expect(page.getByText('CREDIT', { exact: true })).toBeVisible()

@@ -11,7 +11,7 @@ import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge } from '@/components/ui'
+import { StatusBadge, TableViewport } from '@/components/ui'
 import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
@@ -208,7 +208,10 @@ export default function LedgerPage() {
         </p>}
 
         {(!unavailable || result) && (
-        <div style={{ overflowX: 'auto' }}>
+        <TableViewport
+          label={t('Posuvná tabulka deníku hlavní knihy', 'Scrollable general-ledger journal table')}
+          hint={t('Posuňte tabulku vodorovně pro původ, řádky a popis účetního záznamu.', 'Scroll horizontally to see journal origin, lines, and description.')}
+        >
           <table className="data-table">
             <thead>
               <tr>
@@ -322,7 +325,7 @@ export default function LedgerPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </TableViewport>
         )}
 
         {result?.pagination.hasNextPage && (

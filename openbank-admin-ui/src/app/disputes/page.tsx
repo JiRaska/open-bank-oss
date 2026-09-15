@@ -10,7 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, TableViewport, type Tone } from '@/components/ui'
 import {
   disputeDaysRemaining,
   isDisputeSlaBreached,
@@ -134,7 +134,10 @@ export default function DisputesPage() {
                 ? t('Služba běží, zatím žádné spory.', 'The service is running; no disputes yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <TableViewport
+              label={t('Posuvná tabulka sporů', 'Scrollable disputes table')}
+              hint={t('Posuňte tabulku vodorovně pro SLA a úplný kontext sporu.', 'Scroll horizontally to see the SLA and complete dispute context.')}
+            >
               <table className="table">
                 <thead><tr>
                   {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created')].map(h => (
@@ -157,7 +160,7 @@ export default function DisputesPage() {
                   </tr>
                 ))}</tbody>
               </table>
-            </div>
+            </TableViewport>
           )}
         </div>
       </div>

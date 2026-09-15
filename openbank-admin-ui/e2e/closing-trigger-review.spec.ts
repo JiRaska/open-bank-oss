@@ -36,6 +36,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('reviews the latest close evidence and retains a failed catch-up trigger for retry', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
   let attempts = 0
   let history: Array<typeof previous | typeof accepted> = [previous]
   await page.route(/\/api\/closings\/runs\?limit=/, route => route.fulfill({
@@ -56,6 +57,8 @@ test('reviews the latest close evidence and retains a failed catch-up trigger fo
   })
 
   await page.goto('/day-end?tab=eom')
+  await expect(page.getByRole('region', { name: /Posuvná historie závěrkových běhů|Scrollable close-run history/ })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   const trigger = page.getByRole('button', { name: /Review catch-up close|Zkontrolovat catch-up uzávěrku/ })
   await trigger.click()
   const dialog = page.getByRole('alertdialog')
