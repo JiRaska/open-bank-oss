@@ -59,14 +59,14 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
             'Co která karetní síť nabízí a co z toho platforma implementuje',
             'What each card network offers, and what this platform binds',
           )}
-          icon={<Layers className="h-6 w-6 text-slate-500" />}
+          icon={<Layers className="h-6 w-6 text-[var(--text-tertiary)]" />}
         />
-        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="rounded border border-[var(--warning-border)] bg-[var(--warning-bg)] p-4 text-sm text-[var(--warning-text)]">
           {t(
             'Registr schopností nebyl zabudován do tohoto buildu, takže není co zobrazit. Nejde o prázdnou matici, ale o chybu buildu: spusťte',
             'The capability registry was not baked into this build, so there is nothing to show. This is a build problem, not an empty matrix: run',
           )}{' '}
-          <code className="rounded bg-amber-100 px-1">{GENERATE_COMMAND}</code>{' '}
+          <code className="rounded bg-[var(--warning-bg)] px-1">{GENERATE_COMMAND}</code>{' '}
           {t('a build zopakujte.', 'and rebuild.')}
         </div>
       </div>
@@ -84,22 +84,22 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-card-capability-matrix>
       <PageHeader
         title={title}
         subtitle={t(
           'Co která síť nabízí, který port to modeluje a co platforma dnes skutečně implementuje',
           'What each card network offers, which port models it, and what this platform binds today',
         )}
-        icon={<Layers className="h-6 w-6 text-slate-500" />}
+        icon={<Layers className="h-6 w-6 text-[var(--text-tertiary)]" />}
         breadcrumb={
-          <Link href="/cards" className="text-xs text-slate-500 hover:text-slate-700">
+          <Link href="/cards" className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
             {t('Karty', 'Cards')}
           </Link>
         }
       />
 
-      <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+      <div className="rounded border border-[var(--border)] bg-[var(--surface-2)] p-4 text-sm text-[var(--text-secondary)]">
         <p>
           <strong>
             {t('Toto není přehled stavu integrací.', 'This is not an integration status page.')}
@@ -126,44 +126,44 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
         </p>
       </div>
 
-      <div className="rounded border border-slate-200">
+      <div className="rounded border border-[var(--border)]">
         <TableViewport
           label={t('Matice karetních schopností podle sítě', 'Card capability matrix by network')}
           hint={t('Posuňte tabulku vodorovně pro dostupnost v jednotlivých sítích a místní implementaci.', 'Scroll horizontally for availability by network and local implementation.')}
         >
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
+        <table className="min-w-full divide-y divide-[var(--border)] text-sm">
+          <thead className="bg-[var(--surface-2)]">
             <tr>
-              <th className="px-4 py-3 text-left font-medium text-slate-700">
+              <th className="px-4 py-3 text-left font-medium text-[var(--text-secondary)]">
                 {t('Schopnost', 'Capability')}
               </th>
-              <th className="px-4 py-3 text-left font-medium text-slate-700">{t('Port', 'Port')}</th>
+              <th className="px-4 py-3 text-left font-medium text-[var(--text-secondary)]">{t('Port', 'Port')}</th>
               {registry.networks.map(network => (
-                <th key={network.id} className="px-4 py-3 text-left font-medium text-slate-700">
+                <th key={network.id} className="px-4 py-3 text-left font-medium text-[var(--text-secondary)]">
                   {network.label}
                 </th>
               ))}
-              <th className="px-4 py-3 text-left font-medium text-slate-700">
+              <th className="px-4 py-3 text-left font-medium text-[var(--text-secondary)]">
                 {t('Implementace zde', 'Bindings here')}
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
+          <tbody className="divide-y divide-[var(--border)] bg-[var(--surface)]">
             {registry.capabilities.map(capability => (
               <tr key={capability.id}>
                 <td className="px-4 py-3 align-top">
-                  <div className="font-medium text-slate-900">{capability.label}</div>
-                  <p className="mt-1 max-w-xl text-xs text-slate-600">{capability.why}</p>
+                  <div className="font-medium text-[var(--text-primary)]">{capability.label}</div>
+                  <p className="mt-1 max-w-xl text-xs text-[var(--text-secondary)]">{capability.why}</p>
                 </td>
                 <td className="px-4 py-3 align-top">
                   {capability.port ? (
-                    <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">
+                    <code className="rounded bg-[var(--surface-3)] px-1.5 py-0.5 text-xs text-[var(--text-primary)]">
                       {capability.port}
                     </code>
                   ) : (
                     // A portless capability is a DECISION, with its reason in the cell to the left
                     // — never an oversight, so it says so rather than showing an empty cell.
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-[var(--text-tertiary)]">
                       {t('bez portu, záměrně', 'no port, by design')}
                     </span>
                   )}
@@ -179,7 +179,7 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
                           product={entry.product}
                         />
                       ) : (
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-[var(--text-tertiary)]">
                           {t('neevidováno', 'not registered')}
                         </span>
                       )}
@@ -199,27 +199,27 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
         </TableViewport>
       </div>
 
-      <div className="rounded border border-slate-200 p-4">
-        <h2 className="text-sm font-medium text-slate-900">
+      <div className="rounded border border-[var(--border)] p-4">
+        <h2 className="text-sm font-medium text-[var(--text-primary)]">
           {t('Jak se dostat do sandboxu každé sítě', "Getting into each network's sandbox")}
         </h2>
-        <ul className="mt-2 space-y-2 text-sm text-slate-700">
+        <ul className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
           {registry.networks.map(network => (
             <li key={network.id} className="flex flex-col gap-0.5">
               <a
                 href={network.developerPortal}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex w-fit items-center gap-1 font-medium text-slate-900 hover:underline"
+                className="inline-flex w-fit items-center gap-1 font-medium text-[var(--text-primary)] hover:underline"
               >
                 {network.label}
                 <ExternalLink className="h-3 w-3" />
               </a>
-              <span className="text-xs text-slate-600">{network.sandboxAuth}</span>
+              <span className="text-xs text-[var(--text-secondary)]">{network.sandboxAuth}</span>
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-xs text-slate-600">
+        <p className="mt-3 text-xs text-[var(--text-secondary)]">
           {t(
             'Přihlašovací údaje jsou v OpenBao a čte je jen ten adaptér, který je potřebuje. Žádná služba mimo adaptér údaje sítě nevidí a žádné nejsou v repozitáři.',
             'Credentials live in OpenBao and are read only by the adapter module that needs them. No service outside an adapter sees a network credential, and none is committed here.',
@@ -238,9 +238,9 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
 const GENERATE_COMMAND = 'node scripts/generate-card-capabilities.mjs'
 
 const AVAILABILITY_TONE: Record<Availability, string> = {
-  sandbox: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  contract: 'bg-amber-50 text-amber-700 border-amber-200',
-  none: 'bg-slate-100 text-slate-600 border-slate-200',
+  sandbox: 'bg-[var(--success-bg)] text-[var(--success-text)] border-[var(--success-border)]',
+  contract: 'bg-[var(--warning-bg)] text-[var(--warning-text)] border-[var(--warning-border)]',
+  none: 'bg-[var(--surface-3)] text-[var(--text-secondary)] border-[var(--border)]',
 }
 
 function AvailabilityChip({
@@ -254,7 +254,7 @@ function AvailabilityChip({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm text-slate-800">{product}</span>
+      <span className="text-sm text-[var(--text-primary)]">{product}</span>
       <span
         className={`inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-xs ${AVAILABILITY_TONE[availability]}`}
       >
@@ -266,14 +266,14 @@ function AvailabilityChip({
 
 function BindingsCell({ capability, emptyLabel }: { capability: CardCapability; emptyLabel: string }) {
   if (capability.bindings.length === 0) {
-    return <span className="text-xs text-slate-500">{emptyLabel}</span>
+    return <span className="text-xs text-[var(--text-tertiary)]">{emptyLabel}</span>
   }
   return (
     <div className="flex flex-wrap gap-1">
       {capability.bindings.map(binding => (
         <span
           key={binding}
-          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs text-slate-700"
+          className="inline-flex items-center rounded border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]"
         >
           {binding}
         </span>
