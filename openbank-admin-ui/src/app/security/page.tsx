@@ -10,6 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { parseSecurityEnvelope, summarizeReachable, serviceVerdict, type PlatformSecurityReport, type SecurityEnvelope, type ServiceScanResult } from '@/lib/security/summary'
 import { PageHeader } from '@/components/ui/PageHeader'
+import styles from './page.module.css'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
@@ -278,7 +279,7 @@ export default function SecurityPage() {
             />
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(500px, 1.2fr) 1fr', gap: '20px' }}>
+          <div className={styles.resultsLayout} data-testid="security-results-layout">
             <div className="card" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -297,7 +298,7 @@ export default function SecurityPage() {
                 </div>
               </div>
               
-              <div style={{ overflowY: 'auto', maxHeight: '600px' }}>
+              <div className={styles.resultsTableViewport} tabIndex={0} aria-label={t('Posuvné výsledky bezpečnostního skenu', 'Scrollable security scan results')}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead style={{ position: 'sticky', top: 0, background: 'var(--surface-1)', zIndex: 1 }}>
                     <tr style={{ borderBottom: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>

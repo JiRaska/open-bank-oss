@@ -22,6 +22,7 @@ import { TONE_BORDER_LEFT_CLASS, TONE_TEXT_CLASS } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
 import { STATUS_META, StatusDot } from '@/lib/docs/status'
+import styles from './ProcessView.module.css'
 
 type Mode = 'reality' | 'target'
 type Lens = 'story' | 'token' | 'tech'
@@ -96,7 +97,7 @@ export function ProcessView({ proc }: { proc: Process }) {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: '16px', alignItems: 'start' }}>
+      <div className={styles.processLayout} data-testid="process-view-layout">
         {/* Lens content */}
         <div className="card" style={{ padding: '24px' }}>
           {lens === 'story' && (
@@ -119,8 +120,8 @@ export function ProcessView({ proc }: { proc: Process }) {
                 </div>
                 <div style={{ display: 'grid', gap: '6px' }}>
                   {proc.token.claims.map(c => (
-                    <div key={c.claim} style={{ display: 'flex', gap: '10px', fontSize: '12px', alignItems: 'baseline' }}>
-                      <code style={{ fontFamily: 'JetBrains Mono, monospace', background: 'var(--surface-2)', padding: '2px 6px', borderRadius: '4px', color: 'var(--text-primary)', minWidth: '160px' }}>{c.claim}</code>
+                    <div key={c.claim} className={styles.claimRow}>
+                      <code className={styles.claimCode}>{c.claim}</code>
                       <span style={{ color: 'var(--text-secondary)' }}>{c.desc}</span>
                     </div>
                   ))}
