@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.2...lending-service-v0.33.3) (2026-09-16)
+
+
+### Bug Fixes
+
+* **lending:** bind risk model environment flag ([#10125](https://github.com/JiRaska/open-bank-oss/issues/10125)) ([7dd034b](https://github.com/JiRaska/open-bank-oss/commit/7dd034b322e48d44c4a8f88f18bc2a969f326c68)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
 ## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.1...lending-service-v0.33.2) (2026-09-16)
 
 
