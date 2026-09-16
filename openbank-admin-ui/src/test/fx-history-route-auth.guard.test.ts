@@ -23,10 +23,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
  */
 
 const mockAuth = vi.fn()
+const fxAvailability = vi.hoisted(() => ({ ready: true }))
 vi.mock('@/auth', () => ({ auth: () => mockAuth() }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => true,
-  discoverServices: async () => ([{ name: 'fx-service', namespace: 'fx', ready: true, scaledToZero: false }]),
+  discoverServices: async () => ([{ name: 'fx-service', namespace: 'fx', ready: fxAvailability.ready, scaledToZero: false }]),
   resolveInClusterBaseUrl: async () => 'http://fx-service.fx.svc:8119',
 }))
 
@@ -44,6 +45,7 @@ describe('GET /api/fx/history relays the operator bearer', () => {
 
   beforeEach(() => {
     vi.resetModules()
+    fxAvailability.ready = true
     fetchSpy = vi.fn(async (url: string) => new Response(JSON.stringify([]), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
   })
@@ -69,6 +71,16 @@ describe('GET /api/fx/history relays the operator bearer', () => {
     expect(status).toBe(401)
     expect(body.error).toMatch(/unauthenticated/i)
     expect(fetchSpy.mock.calls.filter(c => String(c[0]).includes(HISTORY))).toHaveLength(0)
+  })
+
+  it('does not expose service availability before authenticating the operator', async () => {
+    fxAvailability.ready = false
+    mockAuth.mockResolvedValue(null)
+    const { status, body } = await callRoute()
+
+    expect(status).toBe(401)
+    expect(body.error).toMatch(/unauthenticated/i)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('still answers 502 for a genuine upstream failure', async () => {

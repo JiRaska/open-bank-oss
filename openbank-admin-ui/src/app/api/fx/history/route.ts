@@ -73,19 +73,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_currency' }, { status: 400 })
   }
 
-  const baseUrl = await resolveFxServiceBaseUrl()
-  if (!baseUrl) {
-    return NextResponse.json({ indicative: true, base, quote, points: [], unavailable: true } satisfies FxTrend & {
-      unavailable: boolean
-    })
-  }
-
   // Relay the operator's own bearer — fx-service's history route is role-guarded. Answered as 401
   // rather than folded into the 502 below: "you are not authenticated" and "the upstream failed" are
   // different problems with different fixes, and collapsing them makes the first one unreportable.
   const accessToken = (await auth())?.user?.accessToken
   if (!accessToken) {
     return NextResponse.json({ error: 'unauthenticated: no operator bearer to relay' }, { status: 401 })
+  }
+
+  const baseUrl = await resolveFxServiceBaseUrl()
+  if (!baseUrl) {
+    return NextResponse.json({ indicative: true, base, quote, points: [], unavailable: true } satisfies FxTrend & {
+      unavailable: boolean
+    })
   }
 
   const { from, to } = defaultTrendWindow()
