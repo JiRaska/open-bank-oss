@@ -17,6 +17,11 @@ describe('defaultTrendWindow', () => {
     expect(toOut).toBe(to.toISOString())
     expect(from).toBe('2026-03-15T12:00:00.000Z')
   })
+  it('clamps end-of-month dates like customer-edge, including leap years', () => {
+    expect(defaultTrendWindow(new Date('2026-05-31T12:00:00Z')).from).toBe('2026-02-28T12:00:00.000Z')
+    expect(defaultTrendWindow(new Date('2024-05-31T12:00:00Z')).from).toBe('2024-02-29T12:00:00.000Z')
+    expect(defaultTrendWindow(new Date('2026-01-31T12:00:00Z')).from).toBe('2025-10-31T12:00:00.000Z')
+  })
 })
 
 describe('buildCnbTrend', () => {
@@ -69,6 +74,10 @@ describe('buildCnbTrend', () => {
     expect(trend.base).toBe('CZK')
     expect(trend.quote).toBe('EUR')
     expect(trend.points[0].rate).toBe(String(1 / 25))
+  })
+  it('does not invert an unrelated upstream pair', () => {
+    const rows = [{ baseCurrency: 'USD', quoteCurrency: 'CZK', midRate: '21.00', validFrom: '2026-06-14T00:00:00Z' }]
+    expect(buildCnbTrend(rows, 'CZK', 'EUR', true).points).toEqual([])
   })
 
   it('returns an empty, still-indicative trend for no rows', () => {

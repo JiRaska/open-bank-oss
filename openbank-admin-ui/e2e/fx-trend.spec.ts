@@ -35,13 +35,13 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 })
 
 test('renders one chronological, educational three-month CNB trend', async ({ page }) => {
-  await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
+  await page.route('**/api/fx/history?*', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify([
-      { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
-      { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
-    ]),
+    body: JSON.stringify({ indicative: true, base: new URL(route.request().url()).searchParams.get('base'), quote: 'CZK', points: [
+      { date: '2026-08-29', timestamp: '2026-08-29T00:00:00Z', rate: '25.5' },
+      { date: '2026-05-29', timestamp: '2026-05-29T00:00:00Z', rate: '25' },
+    ] }),
   }))
 
   await page.goto('/fx')
@@ -71,14 +71,14 @@ test('renders one chronological, educational three-month CNB trend', async ({ pa
 test('does not mislabel an outage as missing fixings and can retry', async ({ page }) => {
   let attempts = 0
   let recovered = false
-  await page.route('**/api/fx/history/EUR/CZK', route => {
+  await page.route('**/api/fx/history?*', route => {
     attempts += 1
     return recovered
-      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
-        { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
-        { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
-      ]) })
-      : route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }) })
+      ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ indicative: true, base: 'EUR', quote: 'CZK', points: [
+        { date: '2026-05-29', timestamp: '2026-05-29T00:00:00Z', rate: '25' },
+        { date: '2026-08-29', timestamp: '2026-08-29T00:00:00Z', rate: '25.5' },
+      ] }) })
+      : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ indicative: true, base: 'EUR', quote: 'CZK', points: [], unavailable: true }) })
   })
 
   await page.goto('/fx')
@@ -92,13 +92,13 @@ test('does not mislabel an outage as missing fixings and can retry', async ({ pa
 })
 
 test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page }) => {
-  await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
+  await page.route('**/api/fx/history?*', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify([
-      { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
-      { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
-    ]),
+    body: JSON.stringify({ indicative: true, base: 'EUR', quote: 'CZK', points: [
+      { date: '2026-05-29', timestamp: '2026-05-29T00:00:00Z', rate: '25' },
+      { date: '2026-08-29', timestamp: '2026-08-29T00:00:00Z', rate: '25.5' },
+    ] }),
   }))
   await page.goto('/fx')
   await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })

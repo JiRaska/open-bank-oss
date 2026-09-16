@@ -49,7 +49,11 @@ function midOf(bid: number | null, ask: number | null): number | null {
 /** Three calendar months before `to` (by DATE, not a row-count approximation), through `to`. */
 export function defaultTrendWindow(to: Date = new Date()): { from: string; to: string } {
   const from = new Date(to)
+  const day = from.getUTCDate()
+  from.setUTCDate(1)
   from.setUTCMonth(from.getUTCMonth() - 3)
+  const lastDay = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0)).getUTCDate()
+  from.setUTCDate(Math.min(day, lastDay))
   return { from: from.toISOString(), to: to.toISOString() }
 }
 
@@ -75,7 +79,7 @@ export function buildCnbTrend(
     const rowBase = row.baseCurrency
     const rowQuote = row.quoteCurrency
     if (!rowBase || !rowQuote) continue
-    if (!inverted && (rowBase !== base || rowQuote !== quote)) continue
+    if (rowBase !== (inverted ? quote : base) || rowQuote !== (inverted ? base : quote)) continue
 
     let rate = toNumber(row.midRate) ?? midOf(toNumber(row.bidRate), toNumber(row.askRate)) ?? toNumber(row.rate)
     if (rate === null || rate <= 0) continue

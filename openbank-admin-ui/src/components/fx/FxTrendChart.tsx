@@ -46,13 +46,16 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
 
   useEffect(() => {
     const controller = new AbortController()
-    fetch(`/api/fx/history/${base}/${quote}`, { cache: 'no-store', signal: controller.signal })
+    fetch(`/api/fx/history?base=${encodeURIComponent(base)}&quote=${encodeURIComponent(quote)}`, { cache: 'no-store', signal: controller.signal })
       .then(response => {
         if (!response.ok) throw new Error(`FX history HTTP ${response.status}`)
         return response.json()
       })
-      .then(rows => {
-        if (!controller.signal.aborted) setPoints(normaliseFxTrend(Array.isArray(rows) ? rows : []))
+      .then(data => {
+        if (!data || data.unavailable || data.base !== base || data.quote !== quote || !Array.isArray(data.points)) {
+          throw new Error('Invalid or unavailable FX trend')
+        }
+        if (!controller.signal.aborted) setPoints(normaliseFxTrend(data.points))
       })
       .catch(() => {
         if (!controller.signal.aborted) {

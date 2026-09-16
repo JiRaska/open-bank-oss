@@ -13,7 +13,7 @@ describe('FX trend ownership', () => {
     expect(page.match(/<FxTrendChart\b/g)).toHaveLength(1)
     expect(page).not.toContain('/api/fx/history?')
     expect(page).not.toContain('trendPair')
-    expect(chart).toContain('`/api/fx/history/${base}/${quote}`')
+    expect(chart).toContain('`/api/fx/history?base=${encodeURIComponent(base)}&quote=${encodeURIComponent(quote)}`')
   })
 
   it('keeps the operator action log separate from historical market data', () => {
