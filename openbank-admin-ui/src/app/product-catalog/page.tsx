@@ -474,18 +474,21 @@ export default function ProductCatalogPage() {
         return a.code.localeCompare(b.code)
       })
       setProducts(items)
-      if (selectedProduct) {
-        const refreshed = items.find(p => p.id === selectedProduct.id)
-        if (refreshed) setSelectedProduct(refreshed)
-      }
+      // Resolve against the state current when the response commits, not the
+      // selection captured when this request started. This keeps a newly made
+      // selection from being replaced by stale closure data and lets `load`
+      // remain stable for the mount effect and manual refresh button.
+      setSelectedProduct(current => current
+        ? items.find(product => product.id === current.id) ?? current
+        : null)
     } catch (e) {
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
     }
-  }, [selectedProduct])
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const filtered = useMemo(() => products.filter(p => {
     if (typeFilter !== 'ALL' && p.type !== typeFilter) return false
