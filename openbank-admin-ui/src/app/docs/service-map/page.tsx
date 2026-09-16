@@ -941,7 +941,7 @@ export default function ServiceMapPage() {
                 href={`/services/${selectedSvc.id}/docs`}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                  padding: '8px 12px', background: 'var(--accent-bg)', color: 'var(--accent)',
+                  padding: '8px 12px', background: 'var(--accent-bg)', color: 'var(--accent-text)',
                   borderRadius: 'var(--r-md)', fontSize: '12px', fontWeight: 600,
                   textDecoration: 'none', marginTop: '4px',
                   border: '1px solid var(--accent-border, transparent)',
@@ -952,7 +952,7 @@ export default function ServiceMapPage() {
 
               {govEntry && (
                 <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ padding: '12px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}>
+                  <div data-testid="service-map-governance" style={{ padding: '12px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-primary)', marginBottom: '8px' }}>
                       <Database size={12} />
                       {t('Data Governance MVP', 'Data Governance MVP')}
@@ -980,13 +980,13 @@ export default function ServiceMapPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Drift', 'Drift')}</div>
-                        <div style={{ 
-                          fontWeight: 500, 
-                          color: govEntry.flywayDrift === true 
-                            ? 'var(--danger)' 
-                            : govEntry.flywayDrift === false 
-                              ? 'var(--success)' 
-                              : 'var(--warning)' 
+                        <div data-testid="service-map-drift" style={{
+                          fontWeight: 500,
+                          color: govEntry.flywayDrift === true
+                            ? 'var(--danger-text)'
+                            : govEntry.flywayDrift === false
+                              ? 'var(--success-text)'
+                              : 'var(--warning-text)'
                         }}>
                           {govEntry.flywayDrift === true ? t('Ano', 'Yes') : govEntry.flywayDrift === false ? t('Ne', 'No') : t('Neznámé', 'Unknown')}
                         </div>
@@ -1005,7 +1005,7 @@ export default function ServiceMapPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Evidence exportována', 'Evidence Exported')}</div>
-                        <div style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success)' : 'var(--warning)' }}>
+                        <div data-testid="service-map-evidence-exported" style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success-text)' : 'var(--warning-text)' }}>
                           {govEntry.evidenceExported ? t('Ano', 'Yes') : t('Ne', 'No')}
                         </div>
                       </div>
