@@ -18,7 +18,10 @@ prose the whole time, which is exactly the point: prose is not a control.
 WHAT IT ASSERTS
 
 For every file under `.github/workflows/`: a workflow that invokes cosign's sign or attest
-subcommands must also reference the shared library and call `cosign_sign_and_attest`.
+subcommands must source the shared library and invoke `cosign_sign_and_attest` or both
+attestation primitives in the same job.
+Comments and calls in another job do not establish this convention. This is a static
+convention check, not proof of shell execution or image-to-attestation binding.
 Verification (`verify`, `verify-attestation`) is deliberately NOT restricted -- reading back what
 a producer made is a legitimate thing for a workflow to do on its own.
 
@@ -30,6 +33,8 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
+
+import yaml
 
 WORKFLOW_DIR = pathlib.Path(".github/workflows")
 LIB_CALL = "cosign_sign_and_attest"
@@ -44,15 +49,39 @@ def violations(root: pathlib.Path) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for path in sorted((root / WORKFLOW_DIR).glob("*.y*ml")):
         text = path.read_text(encoding="utf-8", errors="replace")
-        m = HANDROLLED.search(text)
-        if not m:
-            continue
-        # Both halves are required. Naming the library in a comment while still running the
-        # commands by hand is the case that must NOT pass, and the self-test pins it.
-        if LIB_CALL in text and LIB_FILE in text:
-            continue
-        line = text[: m.start()].count("\n") + 1
-        out.append((f"{WORKFLOW_DIR}/{path.name}", str(line)))
+        document = yaml.safe_load(text)
+        if not isinstance(document, dict):
+            raise ValueError(f"workflow is not a mapping: {path}")
+        jobs = document.get("jobs", {"fixture": {"steps": [document]}})
+        if not isinstance(jobs, dict):
+            raise ValueError(f"workflow jobs are not a mapping: {path}")
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                raise ValueError(f"workflow job is not a mapping: {path}")
+            scripts = [step["run"] for step in job.get("steps", [])
+                       if isinstance(step, dict) and isinstance(step.get("run"), str)]
+            executable = "\n".join(
+                line for script in scripts for line in script.splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            m = HANDROLLED.search(executable)
+            if not m:
+                continue
+            # Enforce this convention per job: a different image-producing job
+            # cannot supply evidence for this one. Only command lines count,
+            # not comments or echo strings naming the library.
+            sourced = re.search(r"(?m)^\s*(?:source|\.)\s+[^\n]*cosign-attest\.sh(?:[\s\"']|$)", executable)
+            called = re.search(r"(?m)^\s*cosign_sign_and_attest(?:\s|$)", executable)
+            # The deploy job signs before its vulnerability scan, then invokes
+            # both attestation primitives for the deployable set. Preserve that
+            # split pipeline without granting an exemption to unrelated jobs.
+            sbom = re.search(r"(?m)^\s*(?:if\s+!\s+)?cosign_attest_sbom(?:\s|$)", executable)
+            provenance = re.search(r"(?m)^\s*(?:if\s+!\s+)?cosign_attest_slsa_provenance(?:\s|$)", executable)
+            if sourced and (called or (sbom and provenance)):
+                continue
+            matching_line = next((i for i, line in enumerate(text.splitlines(), 1)
+                                  if m.group(0) in line and not line.lstrip().startswith("#")), 1)
+            out.append((f"{WORKFLOW_DIR}/{path.name}", str(matching_line)))
     return out
 
 
@@ -75,6 +104,24 @@ def self_test() -> int:
         ("sign-blob is a different operation", "run: cosign sign-blob --key x file\n", 0),
         ("naming the library without calling it does NOT excuse a hand-rolled sign -- MUST fire",
          f"run: |\n  # {lib} exists but we do it ourselves\n  cosign sign --key x $IMAGE\n", 1),
+        ("both library names in a comment do not authorize signing",
+         f"run: |\n  # TODO {lib} and {LIB_CALL}\n  cosign sign --key x $IMAGE\n", 1),
+        ("one library caller does not exempt another hand-rolled step",
+         f"jobs:\n  good:\n    steps:\n      - run: |\n          source {lib}\n"
+         f"          {LIB_CALL} $FIRST_IMAGE\n  bad:\n    steps:\n"
+         "      - run: cosign attest --predicate sbom.json $SECOND_IMAGE\n", 1),
+        ("a standalone explanatory comment is not a command",
+         "run: |\n  # cosign sign was replaced\n  echo ready\n", 0),
+        ("split signing and both shared attestations preserve deploy ordering",
+         f"run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n"
+         "  if ! cosign_attest_sbom $IMAGE linux/arm64; then exit 1; fi\n"
+         "  if ! cosign_attest_slsa_provenance $IMAGE; then exit 1; fi\n", 0),
+        ("a split pipeline missing provenance still fails",
+         f"run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n"
+         "  cosign_attest_sbom $IMAGE linux/arm64\n", 1),
+        ("echoing library invocations is not invoking them",
+         f"run: |\n  echo 'source {lib}'\n  echo '{LIB_CALL} $IMAGE'\n"
+         "  cosign sign --key x $IMAGE\n", 1),
         ("a workflow with no cosign at all", "run: echo hello\n", 0),
     ]
     failures = 0
@@ -104,11 +151,12 @@ def main() -> int:
             f"it emits every predicate the Kyverno policies require, so a caller cannot fall "
             f"behind a new policy the way runner-image.yml did (#9805)."
         )
+    print(f"SUBJECTS={total}")
     verb = "workflow" if total == 1 else "workflows"
     if found:
         print(f"FAIL: {len(found)} of {total} {verb} hand-roll cosign signing.")
         return 1
-    print(f"OK: none of {total} {verb} hand-roll signing; every signer uses the shared library.")
+    print(f"OK: {total} {verb} checked; no unaccompanied literal cosign sign/attest invocation found.")
     return 0
 
 
