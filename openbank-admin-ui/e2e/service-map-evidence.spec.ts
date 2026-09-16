@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { test, expect } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const graph = {
@@ -41,4 +42,36 @@ test('Service Map verifies independent evidence then purges it at the authorizat
   await expect(page.getByTestId('map-evidence-topology').first()).toContainText('Session expired')
   await expect(page.getByText('PostgreSQL')).toHaveCount(0)
   await expect(page.getByText(/CONNECTED SERVICES/i)).toHaveCount(0)
+})
+
+test('verified and unavailable map evidence remains readable in both themes', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.route('**/api/services/health', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ services: [{ port: 8100, status: 'UP' }] }),
+  }))
+  await page.route('**/api/services/governance', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unavailable' }),
+  }))
+  await page.route('**/api/catalog/graph', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify(graph),
+  }))
+
+  await page.goto('/docs/service-map', { waitUntil: 'domcontentloaded' })
+  const verified = page.getByTestId('map-evidence-health').first()
+  const unavailable = page.getByTestId('map-evidence-governance').first()
+  await expect(verified).toContainText(/Verified|Ověřeno/)
+  await expect(unavailable).toHaveAttribute('role', 'status')
+
+  for (const dark of [false, true]) {
+    const activeTheme = await page.evaluate(enabled => {
+      document.documentElement.classList.toggle('dark', enabled)
+      return getComputedStyle(document.documentElement).getPropertyValue('--warning-text').trim()
+    }, dark)
+    expect(activeTheme).toBe(dark ? '#fcd34d' : '#a64c08')
+    const scan = await new AxeBuilder({ page }).include('[aria-label="Map evidence status"]').withTags(['wcag2aa', 'wcag21aa']).analyze()
+    expect(scan.violations, JSON.stringify(scan.violations)).toEqual([])
+    await expect(verified.locator('div').last()).toHaveCSS('color', dark ? 'rgb(110, 231, 183)' : 'rgb(3, 116, 84)')
+    await expect(unavailable.locator('div').last()).toHaveCSS('color', dark ? 'rgb(252, 211, 77)' : 'rgb(166, 76, 8)')
+  }
 })

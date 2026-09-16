@@ -637,10 +637,11 @@ export default function ServiceMapPage() {
         {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {
           const state = evidence[key]
           const tone = state === 'ok' ? 'var(--success)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning)'
+          const textTone = state === 'ok' ? 'var(--success-text)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning-text)'
           return (
             <div key={key} data-testid={`map-evidence-${key}`} role={state === 'ok' || state === 'loading' ? undefined : 'status'} aria-live={state === 'ok' || state === 'loading' ? undefined : 'polite'} style={{ minWidth: 0, padding: '8px 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>{evidenceLabels[key]}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: tone, fontSize: 11 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: textTone, fontSize: 11 }}>
                 <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
                 <span>{evidenceCopy(key, state)}</span>
               </div>
@@ -983,10 +984,10 @@ export default function ServiceMapPage() {
                         <div style={{ 
                           fontWeight: 500, 
                           color: govEntry.flywayDrift === true 
-                            ? 'var(--danger)' 
-                            : govEntry.flywayDrift === false 
-                              ? 'var(--success)' 
-                              : 'var(--warning)' 
+                            ? 'var(--danger-text)'
+                            : govEntry.flywayDrift === false
+                              ? 'var(--success-text)'
+                              : 'var(--warning-text)'
                         }}>
                           {govEntry.flywayDrift === true ? t('Ano', 'Yes') : govEntry.flywayDrift === false ? t('Ne', 'No') : t('Neznámé', 'Unknown')}
                         </div>
@@ -1005,7 +1006,7 @@ export default function ServiceMapPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Evidence exportována', 'Evidence Exported')}</div>
-                        <div style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success)' : 'var(--warning)' }}>
+                        <div style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success-text)' : 'var(--warning-text)' }}>
                           {govEntry.evidenceExported ? t('Ano', 'Yes') : t('Ne', 'No')}
                         </div>
                       </div>
