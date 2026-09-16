@@ -59,4 +59,28 @@ describe('EntityChip (ADR-0231 D3)', () => {
     renderChip(<EntityChip type="party" id={PARTY_ID} />)
     await waitFor(() => expect(screen.getByRole('link').textContent).toContain('b7c1a2d3…'))
   })
+
+  it('never shows the previous entity label while a new identity is resolving', async () => {
+    const secondId = 'd9e3c4f5-3333-4000-8000-0000000000cc'
+    let resolveSecond!: (response: Response) => void
+    const secondResponse = new Promise<Response>(resolve => { resolveSecond = resolve })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ legalName: 'Jan Novák' }), { status: 200 }))
+      .mockReturnValueOnce(secondResponse))
+
+    const view = renderChip(<EntityChip type="party" id={PARTY_ID} />)
+    await screen.findByText('Jan Novák')
+
+    view.rerender(
+      <SessionProvider session={{ user: { roles: [ROLES.VIEWER] } } as never}>
+        <EntityChip type="party" id={secondId} />
+      </SessionProvider>,
+    )
+
+    expect(screen.queryByText('Jan Novák')).toBeNull()
+    expect(screen.getByText('d9e3c4f5…')).toBeTruthy()
+
+    resolveSecond(new Response(JSON.stringify({ legalName: 'Marie Nová' }), { status: 200 }))
+    await screen.findByText('Marie Nová')
+  })
 })
