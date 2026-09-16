@@ -12,6 +12,7 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { LanguageProvider, type Language } from '@/lib/i18n/LanguageContext'
+import { ThemeBootstrap } from '@/lib/theme/useTheme'
 
 /**
  * Keeps authenticated-only infrastructure off public entry and policy surfaces.
@@ -30,6 +31,7 @@ export function AppProviders({
   const publicSurface = isPublicSurface(pathname)
   const shared = (
     <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
+      {!publicSurface && <ThemeBootstrap />}
       {children}
       {!publicSurface && <AgentDock />}
       <Toaster richColors position="top-right" />

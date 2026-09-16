@@ -49,6 +49,15 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('dark', theme === 'dark')
 }
 
+/** Applies the operator choice while an App Router loading boundary is still on screen. */
+export function ThemeBootstrap() {
+  useEffect(() => {
+    applyTheme(initialTheme())
+    return () => document.documentElement.classList.remove('dark')
+  }, [])
+  return null
+}
+
 export function useTheme(): { theme: Theme; setTheme: (next: Theme) => void; toggle: () => void } {
   // Starts light on the server AND on the first client render: reading localStorage during render
   // would make the two disagree, which React resolves by discarding the server HTML. The stored

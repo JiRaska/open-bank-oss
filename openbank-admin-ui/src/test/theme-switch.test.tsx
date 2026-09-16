@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { THEME_STORAGE_KEY, initialTheme, useTheme } from '@/lib/theme/useTheme'
+import { THEME_STORAGE_KEY, ThemeBootstrap, initialTheme, useTheme } from '@/lib/theme/useTheme'
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -43,6 +43,14 @@ describe('theme switch', () => {
     document.documentElement.classList.remove('dark')
     renderHook(() => useTheme())
     expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
+  it('restores the operator choice before a route Header mounts, then clears it on the public boundary', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark')
+    const { unmount } = render(React.createElement(ThemeBootstrap))
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    unmount()
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 
   it('survives a localStorage that throws — a blocked store must not blank the console', () => {
