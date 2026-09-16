@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -38,4 +39,29 @@ test('keeps vertical settings tabs wrapping and automatically activated', async 
   await expect(language).toBeFocused()
   await expect(language).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('#settings-panel-regional')).toBeVisible()
+})
+
+test('selected settings tab remains readable in both verified themes', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/settings', { waitUntil: 'domcontentloaded' })
+  const tabs = page.getByRole('tablist', { name: /Settings sections|Sekce nastavení/ })
+  const selected = tabs.getByRole('tab', { selected: true })
+  await expect(selected).toBeVisible()
+
+  for (const dark of [false, true]) {
+    const colours = await page.evaluate(enabled => {
+      document.documentElement.classList.toggle('dark', enabled)
+      const root = getComputedStyle(document.documentElement)
+      return {
+        text: root.getPropertyValue('--accent-text').trim(),
+        surface: root.getPropertyValue('--accent-light').trim(),
+      }
+    }, dark)
+    expect(colours.text).toBe(dark ? '#c7d2fe' : '#4338ca')
+    expect(colours.surface).toBe(dark ? '#1e1b4b' : '#eef2ff')
+
+    const scan = await new AxeBuilder({ page }).include('[role="tablist"]').withTags(['wcag2aa', 'wcag21aa']).analyze()
+    expect(scan.violations, JSON.stringify(scan.violations)).toEqual([])
+    await expect(selected).toHaveCSS('color', dark ? 'rgb(199, 210, 254)' : 'rgb(67, 56, 202)')
+  }
 })
