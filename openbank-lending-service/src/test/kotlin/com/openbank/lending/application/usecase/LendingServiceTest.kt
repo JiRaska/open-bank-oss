@@ -134,6 +134,7 @@ class LendingServiceTest {
         borrowerAccounts,
         borrowerCredit,
         catalogLoanProfiles,
+        provisioningMaxBatches = 40,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -338,6 +339,7 @@ class LendingServiceTest {
             ),
             borrowerAccounts,
             borrowerCredit,
+            provisioningMaxBatches = 40,
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }

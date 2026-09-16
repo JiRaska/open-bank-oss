@@ -117,7 +117,7 @@ class LendingService @Inject constructor(
     private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
     private val catalogLoanProfiles: CatalogLoanProfilePort = UnusedCatalogLoanProfilePort,
     @ConfigProperty(name = "lending.provisioning.cycle.max-batches", defaultValue = "40")
-    private val provisioningMaxBatches: Int = 40,
+    private val provisioningMaxBatches: Int,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,

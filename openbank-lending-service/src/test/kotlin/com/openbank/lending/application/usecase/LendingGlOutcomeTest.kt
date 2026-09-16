@@ -124,6 +124,7 @@ class LendingGlOutcomeTest {
         ),
         borrowerAccounts,
         borrowerCredit,
+        provisioningMaxBatches = 40,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
