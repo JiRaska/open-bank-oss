@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
+import dynamic from 'next/dynamic'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
   Info, CheckCircle2, CircleDashed, Lock, Users, Search, Loader2,
@@ -16,15 +16,24 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
-import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { AI_INSIGHTS } from '@/components/insights/catalog'
+
+// Both panels depend on validated governance data. Keep their implementation out of the initial
+// auth/loading bundle and reserve their final footprint while the post-data chunks arrive.
+const AgentMeshExplainer = dynamic(
+  () => import('@/components/agent/AgentMeshExplainer').then(module => module.AgentMeshExplainer),
+  { loading: () => <div style={{ minHeight: 420 }} aria-hidden="true" /> },
+)
+const AgentInsightsPanel = dynamic(
+  () => import('@/components/agent/AgentInsightsPanel').then(module => module.AgentInsightsPanel),
+  { loading: () => <div style={{ minHeight: 160 }} aria-hidden="true" /> },
+)
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
@@ -321,9 +330,12 @@ function IAOpsContent() {
               </div>
             </div>
             <div className={styles.crewArt}>
-              <Image src="/aiops-agent-crew.webp" alt={t('Originální tým pěti robotických AI agentů OpenBank', 'Original team of five OpenBank AI agent robots')}
-                fill priority unoptimized sizes="(max-width: 900px) 100vw, 55vw"
-                style={{ objectFit: 'cover', objectPosition: '52% 48%', opacity: 0.96 }} />
+              {/* The hero cannot render before governance data exists. Native lazy loading avoids
+                  preloading 207 kB during auth/loading while preserving the local immutable asset. */}
+              {/* eslint-disable-next-line @next/next/no-img-element -- deliberate data-gated local asset */}
+              <img src="/aiops-agent-crew.webp" alt={t('Originální tým pěti robotických AI agentů OpenBank', 'Original team of five OpenBank AI agent robots')}
+                width={1200} height={800} loading="lazy" decoding="async"
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '52% 48%', opacity: 0.96 }} />
               <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #172554 0%, transparent 32%)' }} />
               <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '10px', color: 'rgba(226,232,240,.7)', letterSpacing: '0.04em' }}>
                 {t('Vlastní vizuální koncept · bez postav třetích stran', 'Original visual concept · no third-party characters')}
