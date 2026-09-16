@@ -25,6 +25,7 @@ interface Layer { id: string; label: string; icon: string; status: Status; analo
 interface AnatomyStep { id: string; label: string; status: Status; detail: string; adr: string[] }
 interface PvR { item: string; plan: string; reality: string; status: Status }
 interface Topology {
+  source?: string
   generatedAt: string | null
   counts: { namespaces?: number; networkPolicies?: number; externalSecrets?: number; clusterPolicies?: number }
   groups: Group[]
@@ -162,6 +163,7 @@ export default function ClusterDossierPage() {
     setLoading(true)
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
+      if (!r.ok) throw new Error(`Topology snapshot request failed: ${r.status}`)
       const d = await r.json()
       setTopo(d)
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)
@@ -179,6 +181,10 @@ export default function ClusterDossierPage() {
   }, [topo])
 
   const c = topo?.counts ?? {}
+  const snapshotUnavailable = !loading && (!topo || topo.source === 'unavailable')
+  const sourceDate = topo?.generatedAt
+    ? new Date(topo.generatedAt).toLocaleString(dateLocale)
+    : t('neznámé', 'unknown')
 
   return (
     <div>
@@ -195,9 +201,27 @@ export default function ClusterDossierPage() {
             )}
         icon={<Boxes aria-hidden="true" size={20} style={{ color: K8S_BLUE }} />}
         actions={<button onClick={load} disabled={loading} type="button" aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Načíst snímek znovu', 'Reload snapshot')}
         </button>}
       />
+
+      {snapshotUnavailable ? (
+        <div role="alert" className="card" style={{ padding: 16, marginBottom: 20, borderColor: 'var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
+          <strong>{t('Snímek není dostupný', 'Snapshot unavailable')}</strong>
+          <div style={{ marginTop: 4, fontSize: 13 }}>
+            {t('Snímek GitOps zabalený v tomto buildu se nepodařilo načíst. Chybějící hodnoty níže nejsou důkazem prázdného ani živého clusteru.', 'The GitOps snapshot included in this build could not be loaded. Missing values below are no live cluster evidence and do not mean the cluster is empty.')}
+          </div>
+        </div>
+      ) : topo ? (
+        <div role="status" aria-label={t('Původ snímku GitOps', 'GitOps snapshot provenance')} className="card" style={{ padding: 16, marginBottom: 20, borderColor: 'var(--info-border)', background: 'var(--info-bg)', color: 'var(--info-text)' }}>
+          <strong>{t('Snímek GitOps z buildu', 'GitOps build snapshot')}</strong>
+          <div style={{ marginTop: 4, fontSize: 13 }}>
+            {t('Zdrojové vstupy k datu ', 'Source inputs as of ')}{sourceDate}. {t('Načíst snímek znovu znamená znovu přečíst artefakt tohoto buildu; nejde o živý dotaz na cluster.', 'Reload snapshot re-reads the artifact included in this build; it is not a live cluster query.')}
+          </div>
+        </div>
+      ) : (
+        <div role="status" style={{ marginBottom: 20, color: 'var(--text-secondary)' }}>{t('Načítám snímek GitOps…', 'Loading GitOps snapshot…')}</div>
+      )}
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>

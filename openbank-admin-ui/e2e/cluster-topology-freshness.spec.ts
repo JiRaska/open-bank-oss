@@ -2,8 +2,10 @@
 
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { waitForSettledShell } from './helpers/shell'
 import { LANG_COOKIE } from '../src/lib/i18n/language'
 
 test('cluster dossier shows the generated GitOps snapshot and its source date', async ({ page, context, baseURL }) => {
@@ -19,6 +21,23 @@ test('cluster dossier shows the generated GitOps snapshot and its source date', 
   expect(response.ok()).toBe(true)
   expect(await response.json()).toMatchObject({ generatedAt: snapshot.generatedAt, counts: snapshot.counts })
 
+  const provenance = page.getByRole('status', { name: 'GitOps snapshot provenance' })
+  await expect(provenance).toContainText('Source inputs as of')
+  await expect(provenance).toContainText(String(new Date(snapshot.generatedAt).getFullYear()))
+  await expect(provenance).toContainText('not a live cluster query')
+  const reload = page.getByRole('button', { name: 'Reload snapshot' })
+  await expect(reload).toBeVisible()
+  const reloadedResponse = page.waitForResponse((next) => next.url().endsWith('/api/cluster/topology'))
+  await reload.click()
+  expect((await (await reloadedResponse).json()).generatedAt).toBe(snapshot.generatedAt)
+  await waitForSettledShell(page)
+  await page.locator('#main-content').evaluate(async (main) => {
+    await Promise.all(main.getAnimations().map((animation) => animation.finished.catch(() => undefined)))
+  })
+  const provenanceScan = await new AxeBuilder({ page }).include('[aria-label="GitOps snapshot provenance"]')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  expect(provenanceScan.violations).toEqual([])
+
   for (const [label, count] of [
     ['Namespaces', snapshot.counts.namespaces],
     ['NetworkPolicies', snapshot.counts.networkPolicies],
@@ -32,6 +51,28 @@ test('cluster dossier shows the generated GitOps snapshot and its source date', 
     .toContainText('declared in GitOps')
   await expect(page.locator('p').filter({ hasText: /GitOps/ }).last())
     .toContainText(String(new Date(snapshot.generatedAt).getFullYear()))
+})
+
+test('unavailable topology is labeled as missing evidence rather than a live empty cluster', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  await context.addCookies([{ name: LANG_COOKIE, value: 'en', url: baseURL! }])
+  await page.route('**/api/cluster/topology', (route) => route.fulfill({
+    json: {
+      schema: 'openbank.cluster-topology/v1', source: 'unavailable', generatedAt: null,
+      counts: {}, groups: [], namespaces: [], securityLayers: [], imageAnatomy: { steps: [] }, planVsReality: [],
+    },
+  }))
+  await page.goto('/docs/cluster')
+
+  await expect(page.locator('#main-content').getByRole('alert')).toContainText('Snapshot unavailable')
+  await expect(page.locator('#main-content').getByRole('alert')).toContainText('no live cluster evidence')
+  await waitForSettledShell(page)
+  await page.locator('#main-content').evaluate(async (main) => {
+    await Promise.all(main.getAnimations().map((animation) => animation.finished.catch(() => undefined)))
+  })
+  const unavailableScan = await new AxeBuilder({ page }).include('#main-content [role="alert"]')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  expect(unavailableScan.violations).toEqual([])
 })
 
 test('namespace guidance is understandable and does not mistake a fleet-wide policy count for local isolation', async ({ page, context, baseURL }) => {
