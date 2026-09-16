@@ -111,12 +111,12 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
       <div className={styles.metrics}>
         {[
           { label: lang === 'cs' ? 'Začátek' : 'Start', point: summary.first },
-          { label: lang === 'cs' ? 'Aktuálně' : 'Latest', point: summary.last },
+          { label: lang === 'cs' ? 'Poslední fixing' : 'Last fixing', point: summary.last },
           { label: lang === 'cs' ? 'Minimum' : 'Minimum', point: summary.minimum },
           { label: lang === 'cs' ? 'Maximum' : 'Maximum', point: summary.maximum },
         ].map(metric => <div className={styles.metric} key={metric.label}><span className={styles.metricLabel}>{metric.label}</span><span className={styles.metricValue}>{formatRate(metric.point.rate)} {quote}</span><span className={styles.metricDate}>{formatDate(metric.point.timestamp)}</span></div>)}
       </div>
     </>}
-    <p className={styles.note}><strong>{lang === 'cs' ? 'Jak číst graf:' : 'How to read this:'}</strong> {lang === 'cs' ? `kladná změna znamená, že za jednu jednotku ${base} je nyní potřeba více ${quote}. Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku.` : `a positive change means one unit of ${base} now costs more ${quote}. Indicative CNB mid-rate; not a binding historical customer quote.`}</p>
+    <p className={styles.note}><strong>{lang === 'cs' ? 'Jak číst graf:' : 'How to read this:'}</strong> {lang === 'cs' ? `kladná změna znamená, že za jednu jednotku ${base} bylo při posledním fixingu potřeba více ${quote} než při prvním. Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku.` : `a positive change means one unit of ${base} cost more ${quote} at the last fixing than at the first. Indicative CNB mid-rate; not a binding historical customer quote.`}</p>
   </section>
 }

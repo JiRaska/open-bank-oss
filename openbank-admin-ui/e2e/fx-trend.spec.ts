@@ -49,11 +49,12 @@ test('renders one chronological, educational three-month CNB trend', async ({ pa
   await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('+2.00 %')).toBeVisible()
   await expect(page.getByText(/Začátek|Start/, { exact: true })).toBeVisible()
-  await expect(page.getByText(/Aktuálně|Latest/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Poslední fixing|Last fixing/, { exact: true })).toBeVisible()
   await expect(page.getByText(/Minimum/, { exact: true })).toBeVisible()
   await expect(page.getByText(/Maximum/, { exact: true })).toBeVisible()
   await expect(page.getByText(/Jak číst graf:|How to read this:/)).toBeVisible()
   await expect(page.getByText(/Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku|Indicative CNB mid-rate; not a binding historical customer quote/)).toBeVisible()
+  await expect(page.getByText(/při posledním fixingu|at the last fixing/)).toBeVisible()
 
   const scan = await new AxeBuilder({ page })
     .include('[data-testid="fx-trend-chart"]')
