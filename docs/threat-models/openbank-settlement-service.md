@@ -358,3 +358,31 @@ replacing the former in-memory stub), so settlement state is durable across rest
   **No new trust boundary**: this restores the M2M identity the ports were always meant to
   present, on the existing edges, against the existing confidential client. Enforced fleet-wide by
   `check-oidc-client-configured.py` (six services fixed; ledger and settlement money-path).
+
+- **2026-09-13** (#8673) — the `balance-port` response binding was narrowed, and the edge it sits on
+  is unchanged. `BalanceResponse` bound `availableBalance` and `currentBalance` as non-nullable
+  `BigDecimal`; neither name has ever been on the wire, because `BalanceResource.credit/debit`
+  serialises the domain `Balance` (`bookedAmount`, `availableAmount`, `reservedAmount`,
+  `pendingAmount`). A missing non-nullable Kotlin property is a deserialisation failure, so **every
+  real credit and debit failed on the way back — after the money had moved**, and the workflow saw
+  a failed activity for a movement that had in fact been applied.
+
+  Threat-model consequence, stated precisely because the failure looks worse than it is: the money
+  movement itself was never at risk of duplication. The reference-id idempotency in T1 is what made
+  the Temporal retry of a "failed" debit a no-op at balance-service (`applied = false`), so the
+  realised harm was a settlement stalling and entering compensation, not a double debit. This is
+  the same lesson as R2 one layer out — a status that disagrees with what the counterparty actually
+  did.
+
+  **No new trust boundary.** The two fields are removed rather than renamed: nothing in
+  settlement-service reads a balance off this response, Jackson ignores the unknown remainder, and
+  the request side, the destination, the OIDC client-credentials identity and the idempotency keys
+  are all untouched. The binding is strictly narrower than before, so the client now depends on two
+  fields (`accountId`, `currency`) instead of four.
+
+  Why no test caught it: the WireMock stub's body was copied from settlement's own DTO and the
+  adapter unit tests construct `BalanceResponse` in Kotlin, so both sides of every assertion came
+  from the same wrong shape. The stub now carries balance-service's real wire shape, and with the
+  old DTO against it `SettlementReversalIT` fails 3 of 7 with `value failed for JSON property
+  availableBalance` — the production failure, reproduced in CI.
+

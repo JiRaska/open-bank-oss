@@ -157,6 +157,25 @@ jobs:
             echo "Dependency-diff API unavailable; retrying after bounded backoff."
           done
           cat /tmp/dependency-diff.error >&2
+          # Say WHICH failure this is. The step stays red either way — that is a deliberate
+          # decision recorded above, and this does not reverse it — but "could not run" and
+          # "found something" must not render identically, which is the distinction #4162 cost
+          # this repo to learn. An installation-quota 403 is an environmental answer about the
+          # API, not a statement about this PR's dependencies, and on 2026-09-13 it was red on
+          # 11 open PRs at once: a red that is never about the diff is how a real finding gets
+          # scrolled past.
+          if grep -qi "rate limit exceeded for installation" /tmp/dependency-diff.error; then
+            echo "::error title=dependency-review: could not run::The dependency-diff API answered" \
+                 "HTTP 403 rate-limit for the whole bounded wait (${#delays[@]} attempts). This is" \
+                 "the INSTALLATION API quota, exhausted fleet-wide — NOT a dependency finding and" \
+                 "not a fault in this PR. Re-run once the quota window resets; if it is red again," \
+                 "the quota is the thing to fix (#8690 measures the per-build API cost), not this" \
+                 "PR's dependencies."
+          else
+            echo "::error title=dependency-review: could not run::The dependency-diff API was" \
+                 "unreadable for the whole bounded wait and the error is NOT a rate limit — see the" \
+                 "text above. This is still not a dependency finding; it is a failure to measure."
+          fi
           exit 1
 
       - name: Dependency Review retry

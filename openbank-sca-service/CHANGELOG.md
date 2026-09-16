@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.1...sca-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+* **sca:** guard sca_outbox created_at plausibility at INSERT ([#9320](https://github.com/JiRaska/open-bank-oss/issues/9320)) ([3681a5b](https://github.com/JiRaska/open-bank-oss/commit/3681a5b69efe87c467eead0cad921bda64e62a07))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.0...sca-service-v0.15.1) (2026-09-08)
 
 

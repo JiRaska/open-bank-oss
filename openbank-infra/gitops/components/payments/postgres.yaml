@@ -551,6 +551,10 @@ metadata:
   name: sepa-payment-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 19 2 * * *"
   backupOwnerReference: self
   cluster:
@@ -717,6 +721,10 @@ metadata:
   name: transaction-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 25 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -729,6 +737,10 @@ metadata:
   name: sepa-instant-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 35 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -741,6 +753,10 @@ metadata:
   name: domestic-payment-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 45 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -753,6 +769,10 @@ metadata:
   name: clearing-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 55 3 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -765,6 +785,10 @@ metadata:
   name: swift-service-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 5 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -777,6 +801,10 @@ metadata:
   name: settlement-service-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 15 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -789,6 +817,10 @@ metadata:
   name: standing-order-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 25 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore
@@ -801,6 +833,10 @@ metadata:
   name: card-issuance-db-daily
   namespace: payments
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 35 4 * * *"
   backupOwnerReference: self
   method: barmanObjectStore

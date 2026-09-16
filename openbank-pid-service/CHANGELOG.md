@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.2...pid-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** publish the NATURAL_PERSON party type the service actually accepts ([#9932](https://github.com/JiRaska/open-bank-oss/issues/9932)) ([3c3e479](https://github.com/JiRaska/open-bank-oss/commit/3c3e4791bd9e35c39167f56eef0f539995314dbb)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.1...pid-service-v0.10.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **pid:** guard pid_outbox created_at plausibility at INSERT ([#9317](https://github.com/JiRaska/open-bank-oss/issues/9317)) ([b9fbed5](https://github.com/JiRaska/open-bank-oss/commit/b9fbed5f5716b2940487af2a182c33afee7c3900))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.0...pid-service-v0.10.1) (2026-09-01)
 
 

@@ -138,6 +138,18 @@ def run(root: Path, body: str, base: str, enforce: bool) -> int:
     if res is None:
         print("::error::PR touches money-path code but the body has no '## Security checklist' "
               "section — restore it from the template and tick every box (or state why in the PR).")
+        # Name the remediation, including the part that used to make it fail silently. A PR opened
+        # with `gh pr create --body-file` NEVER carries the template (GitHub applies it only when no
+        # body is supplied), and CLAUDE.md mandates that flag — so for an agent-opened PR this error
+        # is the normal path, not an oversight, and the fix is two steps whose ORDER used to matter.
+        # Since #8940 the gate reads the LIVE body, so editing the description and re-running is
+        # enough; before that the gate saw `github.event.pull_request.body`, frozen at the last
+        # synchronize, and an edit-then-rerun reproduced the identical failure with no signal why
+        # (#8757). Saying it here is the difference between a 30-second fix and a hunt.
+        print("::notice::How to fix: copy the '## Security checklist' block from "
+              ".github/PULL_REQUEST_TEMPLATE.md into the PR body, answer each line, then RE-RUN "
+              "this check — this gate reads the live PR body (#8940), so no empty commit is needed. "
+              "A PR created with `gh pr create --body-file` never gets the template automatically.")
         return 1 if enforce else 0
     _, missing = res
     if missing:

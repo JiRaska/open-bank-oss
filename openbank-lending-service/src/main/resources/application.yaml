@@ -248,13 +248,17 @@ lending:
     accrual:
       every: ${LENDING_ACCRUAL_EVERY:24h}
       batch-size: ${LENDING_ACCRUAL_BATCH_SIZE:500}
+  risk:
+    # Declaring the dotted key gives SmallRye an unambiguous reverse mapping for the environment
+    # variable. Keep the default fail-closed; the sandbox manifest is the only explicit opt-in.
+    allow-demonstration-model: ${LENDING_RISK_ALLOW_DEMONSTRATION_MODEL:false}
   # IFRS 9 provisioning cycle (ADR-0028 Phase 3): scheduled stage/ECL re-bucketing over the live book,
   # posting only the delta versus the last cycle's ECL per loan. PD/LGD are the conservative
   # placeholders from RiskParameterSource (ConservativeRiskParameterSource) until a real risk-parameter
   # adapter is bound — see the ADR for the explicit "not production-calibrated" caveat.
   provisioning:
     cycle:
-      every: ${LENDING_PROVISIONING_EVERY:720h} # ~30 days; a monthly-cadence batch, not calendar-month aware
+      every: ${LENDING_PROVISIONING_EVERY:24h} # immutable daily reporting snapshots
       batch-size: ${LENDING_PROVISIONING_BATCH_SIZE:500}
 
 # Build-time adapter selection for the PACKAGED IMAGE. `quarkusBuild` augments with the `prod`

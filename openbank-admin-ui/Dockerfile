@@ -102,11 +102,13 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
-    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-bundle/prompts /governance-src/openbank-libs/governance; \
+    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-bundle/prompts /governance-src/openbank-libs; \
     cp /repo/docs/adr/*.md /governance-bundle/adr/ 2>/dev/null || true; \
     cp /repo/docs/threat-models/*.md /governance-bundle/threat-models/ 2>/dev/null || true; \
     cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
-    cp /repo/openbank-libs/governance/rules.yaml /governance-src/openbank-libs/governance/rules.yaml; \
+    cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
+    test -s /governance-src/openbank-libs/governance/rules.yaml; \
+    test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
@@ -235,10 +237,10 @@ COPY --from=origination-collector /origination-src/openbank-libs-domain /openban
 # Product Studio types are generated from the provider's committed design-first contract. Stage
 # exactly that contract at the same repo-relative path used by local builds; never duplicate DTOs.
 COPY --from=openapi-collector /openapi-bundle/openbank-product-catalog/openapi.yaml /openbank-product-catalog/src/main/resources/openapi.yaml
-# The readiness collector derives money-path policy from this authoritative source. Keep the
-# single file it reads at its repo-relative path; otherwise prebuild cannot distinguish a missing
-# policy from an empty policy and correctly refuses to produce a misleading scorecard.
-COPY --from=governance-collector /governance-src/openbank-libs/governance/rules.yaml /openbank-libs/governance/rules.yaml
+# Prebuild generators derive operator-facing data from authoritative governance registries. Stage
+# the directory at its repo-relative path so adding another registry-backed generator cannot pass
+# local CI and then fail only inside the deploy image build.
+COPY --from=governance-collector /governance-src/openbank-libs/governance /openbank-libs/governance
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=true
 # Source-map upload to GlitchTip (#3235). The token arrives as a BuildKit SECRET, not a build arg:

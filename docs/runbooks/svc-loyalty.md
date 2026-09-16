@@ -43,7 +43,7 @@ triaging an incident that starts on `loyalty`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: not declared in a matching workload · Liveness: not declared in a matching workload
 - Metrics: scraped by the fleet PodMonitor (namespace `loyalty`); dashboards in Grafana.
 - Logs: `kubectl logs -n loyalty deploy/loyalty-service -f`, or Loki
   `{namespace="loyalty"}`.

@@ -58,6 +58,8 @@ internal object KybJson {
         val body: String?,
         val role: String?,
         val since: LocalDate?,
+        // Defaulted so every extract stored before this field existed still reads back.
+        val address: AddressDoc? = null,
     )
 
     fun write(extract: RegistryExtract): String = mapper.writeValueAsString(
@@ -72,7 +74,14 @@ internal object KybJson {
             incorporatedOn = extract.incorporatedOn,
             taxId = extract.taxId,
             representatives = extract.representatives.map {
-                RepresentativeDoc(it.fullName, it.dateOfBirth, it.body, it.role, it.since)
+                RepresentativeDoc(
+                    it.fullName,
+                    it.dateOfBirth,
+                    it.body,
+                    it.role,
+                    it.since,
+                    it.address?.let { a -> AddressDoc(a.line1, a.city, a.postalCode, a.countryCode) },
+                )
             },
             ruleMode = extract.representationRule.mode.name,
             ruleRequired = extract.representationRule.requiredSigners,
@@ -99,7 +108,16 @@ internal object KybJson {
             incorporatedOn = d.incorporatedOn,
             taxId = d.taxId,
             representatives = d.representatives.map {
-                com.openbank.kyb.domain.model.Representative(it.fullName, it.dateOfBirth, it.body, it.role, it.since)
+                com.openbank.kyb.domain.model.Representative(
+                    it.fullName,
+                    it.dateOfBirth,
+                    it.body,
+                    it.role,
+                    it.since,
+                    it.address?.let { a ->
+                        com.openbank.kyb.domain.model.RegisteredAddress(a.line1, a.city, a.postalCode, a.countryCode)
+                    },
+                )
             },
             representationRule = com.openbank.kyb.domain.model.RepresentationRule(
                 com.openbank.kyb.domain.model.RepresentationMode.valueOf(d.ruleMode),

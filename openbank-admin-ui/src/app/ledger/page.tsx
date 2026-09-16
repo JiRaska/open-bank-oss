@@ -141,8 +141,7 @@ export default function LedgerPage() {
         <ContextualInsights dashboardUid="openbank-ledger-int" panels={LEDGER_INSIGHTS}
           titleCs="Integrita účetního toku" titleEn="Ledger flow integrity"
           descriptionCs="Čekající předání, chybovost a rychlost zaúčtování bez zavádějících účetních závěrů."
-          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions."
-          from={fromDate} to={toDate} />
+          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions." />
       </Can>
 
       <div className="card">

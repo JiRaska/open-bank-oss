@@ -30,7 +30,7 @@ triaging an incident that starts on `statement`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8136` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `statements`); dashboards in Grafana.
 - Logs: `kubectl logs -n statements deploy/statement-service -f`, or Loki
   `{namespace="statements"}`.

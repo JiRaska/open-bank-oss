@@ -142,6 +142,13 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
+  persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
+  carry that revision. The existing `sepa.payment.returned` evidence remains atomic with
+  `RETURNED`; context-service reads only payment id, reason code, reversal outcome, revision and
+  event time. Risk class = integrity and bounded confidentiality. `V9` is additive; rollback is to
+  stop consuming the revision and leave the column in place, avoiding a destructive down migration.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-20** — The `/returns` non-repudiation control now exists (issue #6056). It did not

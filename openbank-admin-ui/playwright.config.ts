@@ -16,7 +16,12 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   // Fail fast in CI — one retry on flake
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // The suite has grown past 200 browser tests. One CI worker made its wall time grow
+  // linearly until otherwise-green PR runs were cancelled near the end of the suite.
+  // Files are isolated (fresh browser context plus route-local mocks), while tests inside
+  // each file keep Playwright's default serial ordering, so four workers bound wall time
+  // without weakening state isolation or retry evidence.
+  workers: process.env.CI ? 4 : undefined,
   // CI retains both the human GitHub/HTML reports and a machine-readable JUnit
   // report. The latter is consumed by the shared Test Intelligence envelope;
   // merely exporting PLAYWRIGHT_JUNIT_OUTPUT_FILE in the workflow does nothing

@@ -80,6 +80,28 @@ def cnpg_clusters(gitops_dir: pathlib.Path):
             )
 
 
+def scheduled_backups(gitops_dir: pathlib.Path):
+    """Yield (namespace, cluster name, relpath, immediate) per ScheduledBackup."""
+    for path in sorted(gitops_dir.rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(path.read_text()))
+        except yaml.YAMLError:
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "ScheduledBackup":
+                continue
+            if not str(doc.get("apiVersion", "")).startswith(CNPG_API_PREFIX):
+                continue
+            meta = doc.get("metadata") or {}
+            spec = doc.get("spec") or {}
+            yield (
+                meta.get("namespace", "<no-namespace>"),
+                ((spec.get("cluster") or {}).get("name") or "<no-cluster>"),
+                str(path),
+                bool(spec.get("immediate")),
+            )
+
+
 def check(gitops_dir: pathlib.Path) -> tuple[int, int]:
     findings = 0
     subjects = 0
@@ -97,6 +119,32 @@ def check(gitops_dir: pathlib.Path) -> tuple[int, int]:
             f"reports it — check-db-backup-associations only inspects clusters that DO declare "
             f"one. Either add a barmanObjectStore, or annotate the cluster with "
             f'{EXEMPT_ANNOTATION}: "<why this database is disposable>".'
+        )
+
+    # SECOND RULE: a declared backup is not a recovery point until a BASE backup exists.
+    #
+    # WAL archiving starts with the cluster; the first base backup waits for the schedule, and
+    # until it lands `status.firstRecoverabilityPoint` is empty and no restore is possible while
+    # `Ready` and `ContinuousArchiving` both read True. Measured 2026-09-13: `wealth/wealth-db`
+    # was created at 22:58Z with a daily schedule of 04:55 and spent FIVE HOURS unrestorable,
+    # with WALs in the bucket and zero base backups. Nothing alerts on that window.
+    #
+    # `spec.immediate` closes it — the operator takes the first backup at creation
+    # ("Scheduled immediate backup now", measured on a fresh object). The reason it must be in
+    # the MANIFEST, and cannot be added to a running estate as a remediation, is that CNPG reads
+    # it only on the first reconcile: an object whose `status.lastCheckTime` is already set never
+    # evaluates it again, so patching one is inert (measured on two live ScheduledBackups, zero
+    # new backups). It is a property of the object's birth, which makes it a gate's business.
+    for ns, cluster, rel, immediate in scheduled_backups(gitops_dir):
+        if immediate:
+            continue
+        findings += 1
+        print(
+            f"::error file={rel}::ScheduledBackup for {ns}/{cluster} does not set "
+            f"spec.immediate: true, so the cluster has no recovery point between its creation "
+            f"and the first scheduled run — up to a full schedule interval, during which Ready "
+            f"and ContinuousArchiving both read True. Set immediate: true; CNPG honours it only "
+            f"at creation, so it cannot be added later to a cluster that already exists."
         )
     return subjects, findings
 
@@ -132,6 +180,26 @@ def self_test() -> int:
                          "annotations": {EXEMPT_ANNOTATION: "   "}},
             "spec": {"instances": 1},
         }, 1),
+        ("a ScheduledBackup with immediate: true", {
+            "apiVersion": "postgresql.cnpg.io/v1", "kind": "ScheduledBackup",
+            "metadata": {"name": "f-daily", "namespace": "n"},
+            "spec": {"schedule": "0 0 3 * * *", "immediate": True, "cluster": {"name": "f"}},
+        }, 0),
+        ("a ScheduledBackup WITHOUT immediate — MUST fire", {
+            "apiVersion": "postgresql.cnpg.io/v1", "kind": "ScheduledBackup",
+            "metadata": {"name": "g-daily", "namespace": "n"},
+            "spec": {"schedule": "0 0 3 * * *", "cluster": {"name": "g"}},
+        }, 1),
+        ("immediate: false is not immediate — MUST fire", {
+            "apiVersion": "postgresql.cnpg.io/v1", "kind": "ScheduledBackup",
+            "metadata": {"name": "h-daily", "namespace": "n"},
+            "spec": {"schedule": "0 0 3 * * *", "immediate": False, "cluster": {"name": "h"}},
+        }, 1),
+        ("a non-CNPG ScheduledBackup is not a subject", {
+            "apiVersion": "example.com/v1", "kind": "ScheduledBackup",
+            "metadata": {"name": "i-daily", "namespace": "n"},
+            "spec": {"cluster": {"name": "i"}},
+        }, 0),
         ("a non-CNPG kind: Cluster is not a subject", {
             "apiVersion": "cluster.x-k8s.io/v1", "kind": "Cluster",
             "metadata": {"name": "e", "namespace": "n"}, "spec": {},

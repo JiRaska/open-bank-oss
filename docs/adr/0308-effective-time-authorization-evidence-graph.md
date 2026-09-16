@@ -1,0 +1,129 @@
+---
+date: 2026-09-13
+decision-status: accepted
+delivery-status: partial
+followup: "#9945 — ingest historical authorization evidence and add governed evidentiary export"
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: [open-bank-oss]
+tags: [authz, audit, security, admin-ui]
+summary: "The shared context graph records effective-time authorization evidence and uses current OPA decisions for every read, enabling reviewers to explain past approvals without treating historical grants as current access."
+---
+
+# ADR-0308 — Effective-time authorization evidence graph
+
+## Context
+
+All business lenses need two different answers: whether an action was authorized when
+it happened, and whether the current reviewer may see its evidence now. Roles alone
+cannot answer either. Delegations, mandates, case assignments, approvals and policies
+change over time; a historical grant must never become present-day read authority.
+
+This capability is **P0 and blocks every investigative real-data lens**. The initial
+Customer 360 visualization may continue on its existing bounded permission, but no
+cross-customer expansion, semantic case retrieval or sensitive export ships first.
+
+## Decision
+
+We will add a shared authorization-evidence ontology, policy contract and access-audit
+path to ADR-0303's `context-service`. It is platform functionality used by all lenses,
+not a standalone operator graph and not a replacement for service authorization.
+
+The evidence model distinguishes:
+
+- subject —[HELD]→ role/capability/delegation with valid time and source version;
+- subject —[ASSIGNED_TO]→ case/portfolio with purpose, validity and approver;
+- action —[AUTHORIZED_BY]→ immutable decision evidence containing policy/bundle version,
+  evaluated resource/action, outcome and correlation reference;
+- action —[APPROVED_BY]→ maker/checker evidence, preserving distinct identities;
+- evidence —[SUPERSEDES/REVOKED_BY]→ later evidence without deleting history.
+
+This projection records evidence emitted by authoritative enforcement points. It must
+not reconstruct an authorization decision from today's role table or infer that the
+absence of a denial means allow. Where the historic decision evidence is unavailable,
+the answer is unknown. Source assertions carry valid/recorded time and integrity/hash
+references; personal claims and tokens are not copied wholesale.
+
+Every present-day graph request still invokes current OPA policy using authenticated
+subject, explicit capability, purpose, verified case/portfolio assignment, bank scope,
+root, requested relations/fields and export intent. The server derives policy input;
+browser-supplied purpose/case IDs are verified references. A current deny suppresses
+historic evidence. PDP or durable read-audit failure denies sensitive investigation.
+
+OPA filtering applies before traversal and again to returned nodes/edges/fields.
+Fixed query templates prevent arbitrary query-language injection. RLS is defense in
+depth under non-owner/non-BYPASSRLS credentials and transaction-local context; pool
+reuse, prepared statements and error paths are tested. Caches include subject access
+scope, capability, purpose, verified assignment, policy/bundle version, projection
+generation and filters, and are actively invalidated on revocation. TTL alone is insufficient.
+
+The durable read audit stores subject/workload identity, purpose, verified case,
+operation, root, normalized query hash, policy version/decision, projection snapshot,
+returned evidence references/count and export reference. It excludes raw PII from normal
+logs and is protected from the investigator. Audit failure cannot be converted to a
+successful empty result. Repeated UI navigation may be batched only if each disclosed
+scope remains reconstructable.
+
+The first delivered control contract includes distinct capabilities for root lookup,
+edge expansion, sensitive fields, semantic retrieval, batch analysis and export. Access
+is least privilege and expires with assignment. Break-glass is time-limited, reasoned,
+separately alerted and reviewed; it never silently maps to an admin role.
+
+Acceptance uses a deny matrix across roles, purposes, cases, tenants, roots, relations
+and fields; tests revoked/expired grants, policy/audit outage, stale cache, pool reuse,
+hidden-path/count/timing leakage, same maker/checker, forged case, replay and current-vs-
+historic time. A canary uses synthetic evidence, then audited staff accounts. Zero
+unauthorized disclosure is the release threshold; performance targets cannot weaken it.
+The production lens cannot run while its context authorization is advisory/shadow or
+configured fail-open; an enforced decision and durable denial evidence are release gates.
+
+## Delivery status
+
+### Delivered P0 controls
+
+The shared service now has durable, bank-scoped, effective-time assignments; admin-only proposal,
+independent checker approval and immediate revocation; append-only assignment-change audit; current
+assignment verification; mandatory OPA; and durable allow/deny/unavailable read audit before graph
+disclosure. The admin UI exposes the controlled lifecycle and hides it from non-admin users. OPA
+denies service accounts from assignment administration even if a broad operational role is present.
+Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
+so this ADR stays `partial`.
+
+## Alternatives considered
+
+- **Role-only RBAC:** rejected; it cannot express purpose, assignment, object or field scope.
+- **Use historical grants for current reads:** rejected; it converts evidence into authority.
+- **Client-side filtering:** rejected; denied data has already escaped once serialized.
+- **OPA without durable read audit:** rejected for sensitive investigation; authorization
+  and accountable observation are both required.
+- **Per-lens authorization implementations:** rejected; they drift at the highest-risk boundary.
+
+## Consequences
+
+**Positive**
+- All lenses share one testable authorization and observation contract.
+- Reviewers can explain past authorization without gaining historical privileges.
+
+**Negative**
+- Sensitive reads depend on both OPA and durable audit availability and fail closed.
+- Correct invalidation and field/edge filtering add latency and operational work.
+
+**Neutral**
+- Source services remain responsible for authorizing business writes and emitting evidence.
+
+## Compliance impact
+
+- PCI DSS: any card-related lens gets least privilege and audited access; sensitive
+  authentication data remains excluded.
+- DORA: policy/audit dependencies require availability, recovery and failure-mode tests.
+- GDPR: implements purpose limitation, access minimization and accountable access evidence.
+- PSD2: historic consent/mandate evidence is not treated as current authorization.
+- CNB: produces explainable access/decision evidence; no certification is claimed.
+
+## References
+
+- [ADR-0303](0303-banking-context-graph-and-authorized-hybrid-retrieval.md)
+- [ADR-0034](0034-unified-opa-authz-mcp-and-rest.md)
+- [ADR-0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md)
+- [Implementation roadmap #9945](https://github.com/JiRaska/open-bank-oss/issues/9945)

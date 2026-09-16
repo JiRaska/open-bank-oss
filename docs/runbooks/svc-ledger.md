@@ -30,7 +30,7 @@ triaging an incident that starts on `ledger`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8101` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `ledger`); dashboards in Grafana.
 - Logs: `kubectl logs -n ledger -l app.kubernetes.io/name=ledger-service -f`, or Loki
   `{namespace="ledger"}`.

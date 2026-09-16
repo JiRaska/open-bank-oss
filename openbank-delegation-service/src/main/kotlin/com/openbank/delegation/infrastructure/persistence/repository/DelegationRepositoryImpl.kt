@@ -23,6 +23,7 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // One aggregate adapter keeps lifecycle writes and reads transactionally coherent.
 class DelegationRepositoryImpl(
     private val outboxRepository: DelegationOutboxRepository,
     private val objectMapper: ObjectMapper,
@@ -113,6 +114,15 @@ class DelegationRepositoryImpl(
             resourceId,
         ).list<DelegationGrantEntity>()
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findActiveWithRecertificationAudience(): List<DelegationGrant> {
+        val entities = Panache.withSession {
+            find(
+                "status = 'ACTIVE' and recertificationAudience is not null",
+            ).list<DelegationGrantEntity>()
+        }.awaitSuspending()
+        return entities.map { it.toDomain() }
+    }
 
     override fun findExpiredActive(threshold: OffsetDateTime): Uni<List<DelegationGrant>> = Panache.withSession {
         find("status = 'ACTIVE' and validTo is not null and validTo < ?1", threshold)

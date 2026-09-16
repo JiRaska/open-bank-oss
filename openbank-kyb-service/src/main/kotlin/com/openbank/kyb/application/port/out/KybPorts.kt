@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.CountryPack
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
@@ -125,6 +126,9 @@ data class MandateRequest(
 interface PartyGateway {
     suspend fun createEntityParty(request: EntityPartyRequest): UUID
     suspend fun grantMandate(request: MandateRequest)
+
+    /** Who [partyId] verifiably is; null when party-service has no such party. Throws when it cannot be asked. */
+    suspend fun initiatorIdentity(partyId: UUID): InitiatorIdentity?
 }
 
 /** Opaque, unguessable invitation tokens. A port so tests can make them deterministic. */
