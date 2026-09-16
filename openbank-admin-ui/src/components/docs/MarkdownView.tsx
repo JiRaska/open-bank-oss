@@ -26,6 +26,18 @@ interface Props {
   serviceName: string
 }
 
+// Repo documentation and GitHub release bodies may contain useful presentational HTML
+// (`<details>`, `<summary>`, `<br>`), so disabling raw HTML wholesale would regress existing
+// ADRs. Active HTML is a different class: without this boundary react-markdown + rehype-raw
+// server-renders `<script>`, `<iframe>` and refresh `<meta>` tags verbatim. Keep the useful
+// subset while removing elements that can execute code, navigate the admin page, submit data,
+// embed a foreign origin, or establish a new document/security context.
+const ACTIVE_RAW_HTML_ELEMENTS = [
+  'base', 'button', 'canvas', 'embed', 'form', 'frame', 'frameset', 'iframe', 'input',
+  'link', 'math', 'meta', 'object', 'option', 'script', 'select', 'source', 'style',
+  'svg', 'template', 'textarea', 'track', 'video', 'audio',
+]
+
 export function MarkdownView({ markdown, serviceName }: Props) {
   const components: Components = {
     a({ node: _node, href, children, ...rest }) {
@@ -137,6 +149,7 @@ export function MarkdownView({ markdown, serviceName }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
+        disallowedElements={ACTIVE_RAW_HTML_ELEMENTS}
         components={components}
       >
         {markdown}
