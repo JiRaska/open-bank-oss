@@ -13,7 +13,9 @@
 // defense-in-depth layers, the image-anatomy narrative, and the plan-vs-reality rows — with the
 // DERIVED counts injected so the reality column is real.
 
-import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, readdirSync, writeFileSync, existsSync, statSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { createHash } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { sourceDate } from './lib/source-date.mjs'
@@ -38,6 +40,47 @@ const INPUTS = [
   'openbank-account-service/Dockerfile',
   'openbank-party-service/Dockerfile',
 ]
+
+// A content fingerprint still identifies the exact declared inputs in a depth-1 checkout,
+// where `git log -- <path>` cannot recover the true source commit date. The release build
+// has full history and keeps the human-readable source date; CI's shallow checkout can
+// prove freshness from bytes without pretending its boundary commit is the input commit.
+function inputFingerprint() {
+  const hash = createHash('sha256')
+  const add = (absolute, relative) => {
+    if (!existsSync(absolute)) {
+      hash.update(`${relative}\0missing\0`)
+    } else if (statSync(absolute).isDirectory()) {
+      for (const entry of readdirSync(absolute).sort()) add(path.join(absolute, entry), `${relative}/${entry}`)
+    } else {
+      hash.update(`${relative}\0`)
+      hash.update(readFileSync(absolute))
+      hash.update('\0')
+    }
+  }
+  // In a git checkout, exclude untracked local files: only committed inputs can enter
+  // the published snapshot. Still hash working-tree bytes so a tracked edit is caught.
+  let tracked = []
+  try {
+    tracked = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', ...INPUTS],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean).sort()
+  } catch { /* a source archive without .git uses the filesystem walk below */ }
+  if (tracked.length) {
+    for (const relative of tracked) add(path.join(REPO, relative), relative)
+  } else {
+    for (const input of INPUTS) add(path.join(REPO, input), input)
+  }
+  return `sha256:${hash.digest('hex')}`
+}
+
+function isShallowCheckout() {
+  try {
+    return execFileSync('git', ['-C', REPO, 'rev-parse', '--is-shallow-repository'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === 'true'
+  } catch {
+    return false
+  }
+}
 
 const read = (p) => { try { return readFileSync(p, 'utf8') } catch { return null } }
 
@@ -240,6 +283,7 @@ const out = {
   source: 'derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081',
   // Commit time of the newest input, not the clock — see scripts/lib/source-date.mjs (#2621).
   generatedAt: sourceDate(REPO, INPUTS),
+  inputFingerprint: inputFingerprint(),
   counts,
   groups: GROUPS,
   namespaces: ns,
@@ -251,7 +295,14 @@ const out = {
 const rendered = JSON.stringify(out, null, 2)
 if (process.argv.includes('--check')) {
   const committed = read(OUT)
-  if (committed !== rendered) {
+  let expected = rendered
+  if (committed && isShallowCheckout() && !process.env.SOURCE_DATE_EPOCH) {
+    try {
+      const existing = JSON.parse(committed)
+      expected = JSON.stringify({ ...out, generatedAt: existing.generatedAt }, null, 2)
+    } catch { /* malformed committed JSON still fails the exact comparison below */ }
+  }
+  if (committed !== expected) {
     console.error(`[generate-cluster-topology] ${OUT} is missing or stale; regenerate it from the declared GitOps and Dockerfile inputs`)
     process.exitCode = 1
   } else {

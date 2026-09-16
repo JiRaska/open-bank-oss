@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -56,6 +56,31 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
       writeFileSync(output, stale)
       expect(() => run(['--check'])).toThrow()
       expect(readFileSync(output, 'utf8')).toBe(stale)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('detects a changed GitOps input even when the displayed counts do not change (#10154)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'topology-input-fingerprint-'))
+    const apps = path.join(dir, 'openbank-infra', 'gitops', 'apps')
+    const manifest = path.join(apps, 'example.yaml')
+    const output = path.join(dir, 'cluster-topology.json')
+    const generator = path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs')
+    const run = (args: string[]) => execFileSync('node', [generator, '--repo', dir, '--out', output, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    try {
+      mkdirSync(apps, { recursive: true })
+      writeFileSync(manifest, 'namespace: example\n')
+      run([])
+      const original = readFileSync(output, 'utf8')
+      expect(() => run(['--check'])).not.toThrow()
+
+      writeFileSync(manifest, 'namespace: example\n# policy input changed\n')
+      expect(() => run(['--check'])).toThrow()
+      expect(readFileSync(output, 'utf8')).toBe(original)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
