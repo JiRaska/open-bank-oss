@@ -14,6 +14,9 @@ test.describe('/docs/cluster — semantic theme', () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/docs/cluster', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('button', { name: /admin-ui/i })).toBeVisible()
+    await expect(page.getByRole('note')).toContainText('Repository snapshot')
+    await expect(page.getByRole('note')).toContainText('not live cluster health')
+    await expect(page.getByRole('note').locator('time')).toBeVisible()
 
     const layout = await page.evaluate(() => {
       const defense = document.querySelector('[data-testid="cluster-defense-layout"]')

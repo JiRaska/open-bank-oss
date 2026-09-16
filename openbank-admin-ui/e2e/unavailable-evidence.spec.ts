@@ -52,3 +52,18 @@ test('cluster topology retry replaces unavailable evidence with verified data', 
   await expect(page.getByRole('status')).toHaveCount(0)
   expect(attempts).toBe(2)
 })
+
+test('cluster topology treats the API 200 unavailable sentinel as missing evidence', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  await page.route('**/api/cluster/topology', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schema: 'openbank.cluster-topology/v1', source: 'unavailable', generatedAt: null,
+      counts: {}, groups: [], namespaces: [], securityLayers: [], imageAnatomy: { steps: [] }, planVsReality: [],
+    }),
+  }))
+  await page.goto('/docs/cluster', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('status')).toContainText('Topology evidence unavailable')
+  await expect(page.getByText('Namespaces', { exact: true })).toHaveCount(0)
+})

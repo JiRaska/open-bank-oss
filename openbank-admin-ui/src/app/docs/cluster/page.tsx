@@ -27,6 +27,7 @@ interface Layer { id: string; label: string; icon: string; status: Status; analo
 interface AnatomyStep { id: string; label: string; status: Status; detail: string; adr: string[] }
 interface PvR { item: string; plan: string; reality: string; status: Status }
 interface Topology {
+  source: string
   generatedAt: string | null
   counts: { namespaces?: number; networkPolicies?: number; externalSecrets?: number; clusterPolicies?: number }
   groups: Group[]
@@ -165,7 +166,8 @@ export default function ClusterDossierPage() {
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
       if (!r.ok) throw new Error(`Cluster topology request failed (${r.status})`)
-      const d = await r.json()
+      const d = await r.json() as Topology
+      if (d.source === 'unavailable') throw new Error('Cluster topology artifact is unavailable')
       setTopo(d)
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)
     } catch { setTopo(null) } finally { setLoading(false) }
@@ -226,6 +228,12 @@ export default function ClusterDossierPage() {
         </div>
       ) : (
       <>
+      <div role="note" style={{ marginBottom: 20, padding: '11px 14px', background: 'var(--info-bg)', border: '1px solid var(--info-border)', borderRadius: 8, color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.5 }}>
+        <FileText aria-hidden="true" size={14} style={{ verticalAlign: 'text-bottom', marginRight: 7 }} />
+        {t('Snapshot repozitáře (GitOps a Dockerfile), poslední změna podkladů:', 'Repository snapshot (GitOps and Dockerfile), latest source change:')}{' '}
+        {topo.generatedAt ? <time dateTime={topo.generatedAt}>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium' }).format(new Date(topo.generatedAt))}</time> : t('datum neznámé', 'date unknown')}
+        {'. '}{t('Nejde o živý stav clusteru; před provozním rozhodnutím jej porovnejte s runtime telemetrií.', 'This is not live cluster health; compare it with runtime telemetry before operational decisions.')}
+      </div>
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
