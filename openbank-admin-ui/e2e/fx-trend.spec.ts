@@ -92,6 +92,34 @@ test('does not mislabel an outage as missing fixings and can retry', async ({ pa
   expect(attempts).toBeGreaterThan(attemptsBeforeRetry)
 })
 
+test('keeps the loaded trend readable in dark mode at a mobile width', async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'dark'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/fx/history?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ indicative: true, base: 'EUR', quote: 'CZK', points: [
+      { date: '2026-08-28', timestamp: '2026-08-28T00:00:00Z', rate: '25' },
+      { date: '2026-08-29', timestamp: '2026-08-29T00:00:00Z', rate: '25.5' },
+    ] }),
+  }))
+
+  await page.goto('/fx', { waitUntil: 'domcontentloaded' })
+  await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+  const chart = page.getByTestId('fx-trend-chart')
+  await expect(chart.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
+  expect(await chart.evaluate(element => {
+    const bounds = element.getBoundingClientRect()
+    return bounds.left >= 0 && bounds.right <= window.innerWidth + 1
+  })).toBe(true)
+
+  const scan = await new AxeBuilder({ page })
+    .include('[data-testid="fx-trend-chart"]')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+  expect(scan.violations, scan.violations.map(violation => violation.id).join(', ')).toEqual([])
+})
+
 test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page }) => {
   await page.route('**/api/fx/history?*', route => route.fulfill({
     status: 200,
