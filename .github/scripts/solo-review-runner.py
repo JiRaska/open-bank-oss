@@ -295,7 +295,16 @@ def review(input_path, output, slot, cli):
     write(usage_path, accounting)
     if proc.returncode != 0:
         raise ValueError(invocation_failure(proc))
-    write(output, parse_stream(proc.stdout, slot, data["subject"]))
+    report = parse_stream(proc.stdout, slot, data["subject"])
+    # CLI limits are not a shared pre-dispatch reservation. Detect missing or
+    # over-budget accounting without treating it as zero or accepting admission.
+    # The usage sidecar was already written, including any observed overrun.
+    require(accounting["cost_usd"] is not None
+            and all(value is not None for value in accounting["tokens"].values()),
+            "model accounting incomplete; no admission produced")
+    require(accounting["cost_usd"] <= float(CLI_BUDGET_USD),
+            "model cost exceeded invocation budget; no admission produced")
+    write(output, report)
 
 
 def seal(input_path, reports, output, owner_accepted, preview=False):

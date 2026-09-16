@@ -29,7 +29,10 @@ def stream(*, content=None, error=False, result=None):
         dict(type="system", subtype="init", tools=[]),
         dict(type="assistant", message=dict(model="claude-sonnet-test", content=content or [])),
         dict(type="result", subtype="success", is_error=error, session_id="fresh-session",
-             result="", structured_output=result or dict(verdict="NO_FINDINGS", findings=[], coverage=[])),
+             result="", total_cost_usd=0.25,
+             usage=dict(input_tokens=100, output_tokens=20, cache_read_input_tokens=0,
+                        cache_creation_input_tokens=0),
+             structured_output=result or dict(verdict="NO_FINDINGS", findings=[], coverage=[])),
     ])
 
 
@@ -87,6 +90,35 @@ class DriverTest(unittest.TestCase):
                     self.assertEqual(accounting["cost_usd"], 0.5)
                 else:
                     self.assertIsNone(accounting["cost_usd"])
+
+    def test_success_without_complete_bounded_accounting_cannot_produce_admission(self):
+        data = dict(payload={}, subject=dict(repo="example/bank", pr=12,
+                    input_digest=runner.proof.digest({})))
+        mutations = [
+            {"total_cost_usd": None}, {"total_cost_usd": True},
+            {"total_cost_usd": float("nan")}, {"total_cost_usd": 1.01},
+            {"usage": {}}, {"usage": dict(input_tokens=100, output_tokens=20)},
+        ]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                events = [json.loads(line) for line in stream().splitlines()]
+                events[-1].update(mutation)
+                raw = "\n".join(json.dumps(event) for event in events)
+                source, output = Path(directory) / "in.json", Path(directory) / "out.json"
+                source.write_text(json.dumps(data))
+                with patch.object(runner, "anchored", return_value=("example/bank", "d" * 40)), \
+                        patch.object(runner, "public_subject", return_value=pull()), \
+                        patch.object(runner.proof, "validate_subject"), \
+                        patch.object(runner.proof, "validate_policy_snapshot"), \
+                        patch.object(runner.subprocess, "run", return_value=
+                                     subprocess.CompletedProcess([], 0, stdout=raw, stderr="")):
+                    with self.assertRaisesRegex(ValueError, "accounting|cost exceeded"):
+                        runner.review(source, output, "correctness", "/trusted/cli")
+                self.assertFalse(output.exists())
+                accounting = json.loads(Path(str(output) + ".usage.json").read_text())
+                self.assertEqual(accounting["execution"], "exited")
+                if mutation.get("total_cost_usd") == 1.01:
+                    self.assertEqual(accounting["cost_usd"], 1.01)
 
     def test_policy_failures_are_classified_without_exposing_details(self):
         for error in (runner.guard.Undetermined("private fixture"), ImportError("private fixture")):
