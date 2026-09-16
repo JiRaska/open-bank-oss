@@ -9,6 +9,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { runtimeFreshnessState } from '@/lib/test-intelligence-freshness'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
+import { trustedRepositoryPullRequestUrl } from '@/lib/security/trustedUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,22 +87,7 @@ const boundedText = (value: unknown): string | null => {
 
 const safeProposalUrl = (value: unknown): string | null => {
   const text = boundedText(value)
-  if (!text) return null
-  try {
-    const parsed = new URL(text)
-    const parts = parsed.pathname.split('/')
-    return parsed.protocol === 'https:'
-      && parsed.hostname === 'github.com'
-      && !parsed.search
-      && !parsed.hash
-      && parts.length === 5
-      && parts[1] === 'JiRaska'
-      && parts[2] === 'open-bank-oss'
-      && parts[3] === 'pull'
-      && /^\d+$/.test(parts[4])
-      ? parsed.toString()
-      : null
-  } catch { return null }
+  return text ? trustedRepositoryPullRequestUrl(text) : null
 }
 
 // Agent responses are advisory, but they still cross a network boundary. Normalize them before
