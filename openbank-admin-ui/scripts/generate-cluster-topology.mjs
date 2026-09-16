@@ -146,54 +146,68 @@ function podSecurity() {
 // ── curated: per-namespace role + group (declared facts) ──────────────────────────────────────
 const GROUPS = [
   { id: 'domain', label: 'Byznys domény', labelEn: 'Business domains', color: '#326CE5', icon: 'bank',
-    blurb: 'Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy.' },
+    blurb: 'Mapa přiřazuje bankovním doménám namespace pro správu prostředků — ne automaticky izolovanou síť.',
+    blurbEn: 'The map assigns each banking domain a namespace for organizing resources, like a separate floor of a building; network isolation must be verified separately.' },
   { id: 'identity', label: 'Identita & tajemství', labelEn: 'Identity & secrets', color: '#8b5cf6', icon: 'lock',
-    blurb: 'Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.' },
+    blurb: 'Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.',
+    blurbEn: 'Who signs in and where keys live: Keycloak, OpenBao, secrets and certificates.' },
   { id: 'backbone', label: 'Páteř', labelEn: 'Backbone', color: '#0ea5e9', icon: 'network',
-    blurb: 'Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps.' },
+    blurb: 'Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps.',
+    blurbEn: 'The shared backbone: event messaging, ingress, observability and GitOps.' },
   { id: 'platform', label: 'Platforma & CI', labelEn: 'Platform & CI', color: '#10b981', icon: 'cpu',
-    blurb: 'Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery.' },
+    blurb: 'Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery.',
+    blurbEn: 'Operations and delivery: AI agent, CI runners, autoscaling, admission policies and scanners.' },
 ]
 const NS_MAP = {
   // domain
-  accounts: ['domain', 'Účty zákazníků'], balances: ['domain', 'Zůstatky (projekce ledgeru)'],
-  ledger: ['domain', 'Hlavní kniha (double-entry GL)'], payments: ['domain', 'Platby (SEPA/domácí/SCT Inst)'],
-  fx: ['domain', 'Směnárna / FX kurzy'], interest: ['domain', 'Úroky a kapitalizace'],
-  aml: ['domain', 'AML — praní špinavých peněz'], sanctions: ['domain', 'Sankční screening'],
-  kyc: ['domain', 'KYC — poznej svého klienta'], dispute: ['domain', 'Spory a chargebacky'],
-  consent: ['domain', 'Souhlasy (PSD2)'], onboarding: ['domain', 'Onboarding zákazníků'],
-  party: ['domain', 'Strany / klientská identita'], statements: ['domain', 'Výpisy'],
-  audit: ['domain', 'Auditní záznamy'], sca: ['domain', 'Silné ověření (SCA)'],
-  notifications: ['domain', 'Notifikace'], 'customer-edge': ['domain', 'Edge pro mobilní app'],
-  'open-banking': ['domain', 'Open Banking / TPP'],
-  communication: ['domain', 'Komunikační studio a šablony'],
-  context: ['domain', 'Bankovní souvislosti pro vyšetřování'],
-  engagement: ['domain', 'Interakce uživatelů v aplikaci'],
-  incentive: ['domain', 'Motivační pobídky'],
-  kyb: ['domain', 'Ověřování firemních klientů (KYB)'],
-  referral: ['domain', 'Doporučení klientů (MGM)'],
-  wealth: ['domain', 'Deklarovaný majetek klientů'],
+  accounts: ['domain', 'Účty zákazníků', 'Customer accounts'],
+  balances: ['domain', 'Zůstatky (projekce ledgeru)', 'Balances (ledger projection)'],
+  ledger: ['domain', 'Hlavní kniha (double-entry GL)', 'General ledger (double-entry)'],
+  payments: ['domain', 'Platby (SEPA/domácí/SCT Inst)', 'Payments (SEPA, domestic and instant)'],
+  fx: ['domain', 'Směnárna / FX kurzy', 'Foreign exchange rates'],
+  interest: ['domain', 'Úroky a kapitalizace', 'Interest and capitalization'],
+  aml: ['domain', 'AML — praní špinavých peněz', 'Anti-money-laundering checks'],
+  sanctions: ['domain', 'Sankční screening', 'Sanctions screening'],
+  kyc: ['domain', 'KYC — poznej svého klienta', 'Customer identity verification (KYC)'],
+  dispute: ['domain', 'Spory a chargebacky', 'Disputes and chargebacks'],
+  consent: ['domain', 'Souhlasy (PSD2)', 'PSD2 consents'],
+  onboarding: ['domain', 'Onboarding zákazníků', 'Customer onboarding'],
+  party: ['domain', 'Strany / klientská identita', 'Parties and customer identity'],
+  statements: ['domain', 'Výpisy', 'Account statements'],
+  audit: ['domain', 'Auditní záznamy', 'Audit records'],
+  sca: ['domain', 'Silné ověření (SCA)', 'Strong customer authentication (SCA)'],
+  notifications: ['domain', 'Notifikace', 'Notifications'],
+  'customer-edge': ['domain', 'Edge pro mobilní app', 'Mobile app gateway'],
+  'open-banking': ['domain', 'Open Banking / TPP', 'Open Banking / TPP'],
+  communication: ['domain', 'Komunikační studio a šablony', 'Communication Studio and templates'],
+  context: ['domain', 'Bankovní souvislosti pro vyšetřování', 'Banking context for investigations'],
+  engagement: ['domain', 'Interakce uživatelů v aplikaci', 'In-app engagement events'],
+  incentive: ['domain', 'Motivační pobídky', 'Incentive offers'],
+  kyb: ['domain', 'Ověřování firemních klientů (KYB)', 'Business customer verification (KYB)'],
+  referral: ['domain', 'Doporučení klientů (MGM)', 'Customer referrals (MGM)'],
+  wealth: ['domain', 'Deklarovaný majetek klientů', 'Declared customer assets'],
   // identity & secrets
-  iam: ['identity', 'Keycloak — IAM / OIDC'], identity: ['identity', 'Identita'],
-  vault: ['identity', 'OpenBao — trezor tajemství'],
-  'external-secrets': ['identity', 'External Secrets Operator (OpenBao→k8s)'],
-  'cert-manager': ['identity', 'cert-manager — TLS certifikáty'],
+  iam: ['identity', 'Keycloak — IAM / OIDC', 'Keycloak — IAM / OIDC'],
+  identity: ['identity', 'Identita', 'Identity'],
+  vault: ['identity', 'OpenBao — trezor tajemství', 'OpenBao secrets vault'],
+  'external-secrets': ['identity', 'External Secrets Operator (OpenBao→k8s)', 'External Secrets Operator (OpenBao to Kubernetes)'],
+  'cert-manager': ['identity', 'cert-manager — TLS certifikáty', 'cert-manager — TLS certificates'],
   // backbone
-  messaging: ['backbone', 'Apache Kafka — sběrnice událostí'],
-  'ingress-nginx': ['backbone', 'Vstupní brána (ingress)'],
-  observability: ['backbone', 'Prometheus / Grafana / Loki / Tempo'],
-  'external-dns': ['backbone', 'External DNS'],
+  messaging: ['backbone', 'Apache Kafka — sběrnice událostí', 'Apache Kafka event bus'],
+  'ingress-nginx': ['backbone', 'Vstupní brána (ingress)', 'Ingress gateway'],
+  observability: ['backbone', 'Prometheus / Grafana / Loki / Tempo', 'Prometheus / Grafana / Loki / Tempo'],
+  'external-dns': ['backbone', 'External DNS', 'External DNS'],
   // platform & CI
-  platform: ['platform', 'AI agent + řídicí plocha'],
-  kyverno: ['platform', 'Kyverno — admission policy & podpisy'],
-  keda: ['platform', 'KEDA — autoscaling'],
-  'arc-runners': ['platform', 'CI runnery (GitHub Actions)'],
-  'arc-systems': ['platform', 'CI runner controller'],
-  'security-scanner': ['platform', 'Bezpečnostní skener'],
-  'gradle-build-cache': ['platform', 'Gradle build cache'],
-  'registry-cache': ['platform', 'Cache image registru'],
-  'cnpg-system': ['platform', 'CloudNativePG operátor'],
-  'admin-ui': ['platform', 'Admin portál (tato aplikace)'],
+  platform: ['platform', 'AI agent + řídicí plocha', 'AI agent and control plane'],
+  kyverno: ['platform', 'Kyverno — admission policy & podpisy', 'Kyverno admission policies and signatures'],
+  keda: ['platform', 'KEDA — autoscaling', 'KEDA autoscaling'],
+  'arc-runners': ['platform', 'CI runnery (GitHub Actions)', 'CI runners (GitHub Actions)'],
+  'arc-systems': ['platform', 'CI runner controller', 'CI runner controller'],
+  'security-scanner': ['platform', 'Bezpečnostní skener', 'Security scanner'],
+  'gradle-build-cache': ['platform', 'Gradle build cache', 'Gradle build cache'],
+  'registry-cache': ['platform', 'Cache image registru', 'Container registry cache'],
+  'cnpg-system': ['platform', 'CloudNativePG operátor', 'CloudNativePG operator'],
+  'admin-ui': ['platform', 'Admin portál (tato aplikace)', 'Admin portal (this application)'],
 }
 
 function buildNamespaces() {
@@ -201,8 +215,8 @@ function buildNamespaces() {
   // include curated ns even if an app destination didn't capture them, but mark derived ones
   const names = new Set([...declared, ...Object.keys(NS_MAP)])
   return [...names].sort().map((name) => {
-    const [group, role] = NS_MAP[name] || ['domain', name]
-    return { name, group, role, declared: declared.includes(name) }
+    const [group, role, roleEn] = NS_MAP[name] || ['domain', name, name]
+    return { name, group, role, roleEn, declared: declared.includes(name) }
   })
 }
 
@@ -216,17 +230,16 @@ const counts = {
 }
 const img = imageFacts()
 const pod = podSecurity()
-const npCoverage = `${counts.networkPolicies} / ${ns.length}`
 
 const securityLayers = [
   { id: 'edge', label: 'Edge', icon: 'globe', status: 'partial',
     analogy: 'Ostraha a turniket u vchodu do banky.',
     summary: 'CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.',
     controls: ['CloudFront/WAF', 'TLS (ACM/cert-manager)', 'ingress-nginx'], adr: ['0027'], detailRoute: '/docs/cloud-architecture' },
-  { id: 'network', label: 'Síť (segmentace)', icon: 'network', status: 'planned',
+  { id: 'network', label: 'Síť (segmentace)', icon: 'network', status: counts.networkPolicies > 0 ? 'partial' : 'planned',
     analogy: 'Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.',
-    summary: `Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen ${counts.networkPolicies} NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.`,
-    controls: [`NetworkPolicy (${npCoverage})`, 'per-namespace deny-by-default (cíl)'], adr: ['0081'] },
+    summary: `Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno ${counts.networkPolicies} NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.`,
+    controls: [`NetworkPolicy manifesty (${counts.networkPolicies})`, 'per-namespace deny-by-default (cíl)'], adr: ['0081'] },
   { id: 'identity', label: 'Identita & autorizace', icon: 'lock', status: 'live',
     analogy: 'Občanka a oprávnění — každý ukáže, kdo je a co smí.',
     summary: 'Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.',
@@ -271,7 +284,7 @@ const imageAnatomy = {
 
 const planVsReality = [
   { item: 'Namespace segmentace', plan: 'Doménová izolace, 1 ns / doména', reality: `${counts.namespaces} namespaců`, status: 'live' },
-  { item: 'NetworkPolicy (east-west)', plan: 'deny-by-default v každém ns', reality: `${npCoverage} ns má NetworkPolicy → většina provozu otevřená`, status: 'planned' },
+  { item: 'NetworkPolicy (east-west)', plan: 'deny-by-default v každém ns', reality: `${counts.networkPolicies} NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny`, status: counts.networkPolicies > 0 ? 'partial' : 'planned' },
   { item: 'Podpis image', plan: 'Enforce — blokovat nepodepsané', reality: 'Cosign podpis zapojen, kyverno zatím Audit', status: 'partial' },
   { item: 'Tajemství', plan: 'OpenBao + ESO, nic v gitu', reality: `${counts.externalSecrets} ExternalSecret`, status: 'live' },
   { item: 'Pod hardening', plan: 'non-root + seccomp + read-only FS + drop caps', reality: `non-root ${pod.runAsNonRoot ? '✓' : '✗'}, seccomp ${pod.seccomp ? '✓' : '✗'}, read-only/caps jen místy`, status: 'partial' },

@@ -94,8 +94,21 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toThrow()
 
     const topology = JSON.parse(readFileSync(path.join(ADMIN_UI, 'cluster-topology.json'), 'utf8')) as {
-      namespaces: { name: string; role: string; declared: boolean }[]
+      namespaces: { name: string; role: string; roleEn?: string; declared: boolean }[]
+      groups: { id: string; blurbEn?: string }[]
+      securityLayers: { id: string; summary: string }[]
+      planVsReality: { item: string; reality: string }[]
     }
+    for (const namespace of topology.namespaces) {
+      expect(namespace.roleEn?.trim(), `${namespace.name} needs an English purpose`).toBeTruthy()
+    }
+    for (const group of topology.groups) {
+      expect(group.blurbEn?.trim(), `${group.id} needs an English explanation`).toBeTruthy()
+    }
+    expect(topology.securityLayers.find((layer) => layer.id === 'network')?.summary)
+      .toContain('nelze určit pokrytí namespaců ani účinnou izolaci')
+    expect(topology.planVsReality.find((row) => row.item === 'NetworkPolicy (east-west)')?.reality)
+      .toContain('pokrytí namespaců a runtime účinnost neověřeny')
     for (const name of ['communication', 'context', 'engagement', 'incentive', 'kyb', 'referral', 'wealth']) {
       const namespace = topology.namespaces.find((entry) => entry.name === name)
       expect(namespace?.declared, `${name} must come from a declared GitOps destination`).toBe(true)

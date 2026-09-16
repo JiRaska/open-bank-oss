@@ -16,7 +16,8 @@
       "labelEn": "Business domains",
       "color": "#326CE5",
       "icon": "bank",
-      "blurb": "Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy."
+      "blurb": "Mapa přiřazuje bankovním doménám namespace pro správu prostředků — ne automaticky izolovanou síť.",
+      "blurbEn": "The map assigns each banking domain a namespace for organizing resources, like a separate floor of a building; network isolation must be verified separately."
     },
     {
       "id": "identity",
@@ -24,7 +25,8 @@
       "labelEn": "Identity & secrets",
       "color": "#8b5cf6",
       "icon": "lock",
-      "blurb": "Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty."
+      "blurb": "Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.",
+      "blurbEn": "Who signs in and where keys live: Keycloak, OpenBao, secrets and certificates."
     },
     {
       "id": "backbone",
@@ -32,7 +34,8 @@
       "labelEn": "Backbone",
       "color": "#0ea5e9",
       "icon": "network",
-      "blurb": "Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps."
+      "blurb": "Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps.",
+      "blurbEn": "The shared backbone: event messaging, ingress, observability and GitOps."
     },
     {
       "id": "platform",
@@ -40,7 +43,8 @@
       "labelEn": "Platform & CI",
       "color": "#10b981",
       "icon": "cpu",
-      "blurb": "Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery."
+      "blurb": "Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery.",
+      "blurbEn": "Operations and delivery: AI agent, CI runners, autoscaling, admission policies and scanners."
     }
   ],
   "namespaces": [
@@ -48,450 +52,525 @@
       "name": "accounts",
       "group": "domain",
       "role": "Účty zákazníků",
+      "roleEn": "Customer accounts",
       "declared": true
     },
     {
       "name": "admin-ui",
       "group": "platform",
       "role": "Admin portál (tato aplikace)",
+      "roleEn": "Admin portal (this application)",
       "declared": true
     },
     {
       "name": "ai-platform",
       "group": "domain",
       "role": "ai-platform",
+      "roleEn": "ai-platform",
       "declared": true
     },
     {
       "name": "aml",
       "group": "domain",
       "role": "AML — praní špinavých peněz",
+      "roleEn": "Anti-money-laundering checks",
       "declared": true
     },
     {
       "name": "anacredit",
       "group": "domain",
       "role": "anacredit",
+      "roleEn": "anacredit",
       "declared": true
     },
     {
       "name": "analytics",
       "group": "domain",
       "role": "analytics",
+      "roleEn": "analytics",
       "declared": true
     },
     {
       "name": "arc-runners",
       "group": "platform",
       "role": "CI runnery (GitHub Actions)",
+      "roleEn": "CI runners (GitHub Actions)",
       "declared": false
     },
     {
       "name": "arc-systems",
       "group": "platform",
       "role": "CI runner controller",
+      "roleEn": "CI runner controller",
       "declared": false
     },
     {
       "name": "argo-rollouts",
       "group": "domain",
       "role": "argo-rollouts",
+      "roleEn": "argo-rollouts",
       "declared": true
     },
     {
       "name": "audit",
       "group": "domain",
       "role": "Auditní záznamy",
+      "roleEn": "Audit records",
       "declared": true
     },
     {
       "name": "authz-policy-auditor",
       "group": "domain",
       "role": "authz-policy-auditor",
+      "roleEn": "authz-policy-auditor",
       "declared": true
     },
     {
       "name": "balances",
       "group": "domain",
       "role": "Zůstatky (projekce ledgeru)",
+      "roleEn": "Balances (ledger projection)",
       "declared": true
     },
     {
       "name": "billing",
       "group": "domain",
       "role": "billing",
+      "roleEn": "billing",
       "declared": true
     },
     {
       "name": "campaign",
       "group": "domain",
       "role": "campaign",
+      "roleEn": "campaign",
       "declared": true
     },
     {
       "name": "cert-manager",
       "group": "identity",
       "role": "cert-manager — TLS certifikáty",
+      "roleEn": "cert-manager — TLS certificates",
       "declared": true
     },
     {
       "name": "cnpg-system",
       "group": "platform",
       "role": "CloudNativePG operátor",
+      "roleEn": "CloudNativePG operator",
       "declared": false
     },
     {
       "name": "communication",
       "group": "domain",
       "role": "Komunikační studio a šablony",
+      "roleEn": "Communication Studio and templates",
       "declared": true
     },
     {
       "name": "consent",
       "group": "domain",
       "role": "Souhlasy (PSD2)",
+      "roleEn": "PSD2 consents",
       "declared": true
     },
     {
       "name": "context",
       "group": "domain",
       "role": "Bankovní souvislosti pro vyšetřování",
+      "roleEn": "Banking context for investigations",
       "declared": true
     },
     {
       "name": "control-liveness-sentinel",
       "group": "domain",
       "role": "control-liveness-sentinel",
+      "roleEn": "control-liveness-sentinel",
       "declared": true
     },
     {
       "name": "customer-edge",
       "group": "domain",
       "role": "Edge pro mobilní app",
+      "roleEn": "Mobile app gateway",
       "declared": true
     },
     {
       "name": "delegation",
       "group": "domain",
       "role": "delegation",
+      "roleEn": "delegation",
       "declared": true
     },
     {
       "name": "developer-portal",
       "group": "domain",
       "role": "developer-portal",
+      "roleEn": "developer-portal",
       "declared": true
     },
     {
       "name": "devops-agent",
       "group": "domain",
       "role": "devops-agent",
+      "roleEn": "devops-agent",
       "declared": true
     },
     {
       "name": "dispute",
       "group": "domain",
       "role": "Spory a chargebacky",
+      "roleEn": "Disputes and chargebacks",
       "declared": true
     },
     {
       "name": "docs-truth-agent",
       "group": "domain",
       "role": "docs-truth-agent",
+      "roleEn": "docs-truth-agent",
       "declared": true
     },
     {
       "name": "documents",
       "group": "domain",
       "role": "documents",
+      "roleEn": "documents",
       "declared": true
     },
     {
       "name": "engagement",
       "group": "domain",
       "role": "Interakce uživatelů v aplikaci",
+      "roleEn": "In-app engagement events",
       "declared": true
     },
     {
       "name": "external-dns",
       "group": "backbone",
       "role": "External DNS",
+      "roleEn": "External DNS",
       "declared": true
     },
     {
       "name": "external-secrets",
       "group": "identity",
       "role": "External Secrets Operator (OpenBao→k8s)",
+      "roleEn": "External Secrets Operator (OpenBao to Kubernetes)",
       "declared": true
     },
     {
       "name": "falco",
       "group": "domain",
       "role": "falco",
+      "roleEn": "falco",
       "declared": true
     },
     {
       "name": "finops-agent",
       "group": "domain",
       "role": "finops-agent",
+      "roleEn": "finops-agent",
       "declared": true
     },
     {
       "name": "finops-scaledown",
       "group": "domain",
       "role": "finops-scaledown",
+      "roleEn": "finops-scaledown",
       "declared": true
     },
     {
       "name": "finrep",
       "group": "domain",
       "role": "finrep",
+      "roleEn": "finrep",
       "declared": true
     },
     {
       "name": "flaky-test-hunter",
       "group": "domain",
       "role": "flaky-test-hunter",
+      "roleEn": "flaky-test-hunter",
       "declared": true
     },
     {
       "name": "fraud",
       "group": "domain",
       "role": "fraud",
+      "roleEn": "fraud",
       "declared": true
     },
     {
       "name": "fx",
       "group": "domain",
       "role": "Směnárna / FX kurzy",
+      "roleEn": "Foreign exchange rates",
       "declared": true
     },
     {
       "name": "governance-auditor",
       "group": "domain",
       "role": "governance-auditor",
+      "roleEn": "governance-auditor",
       "declared": true
     },
     {
       "name": "gradle-build-cache",
       "group": "platform",
       "role": "Gradle build cache",
+      "roleEn": "Gradle build cache",
       "declared": true
     },
     {
       "name": "iam",
       "group": "identity",
       "role": "Keycloak — IAM / OIDC",
+      "roleEn": "Keycloak — IAM / OIDC",
       "declared": true
     },
     {
       "name": "identity",
       "group": "identity",
       "role": "Identita",
+      "roleEn": "Identity",
       "declared": false
     },
     {
       "name": "incentive",
       "group": "domain",
       "role": "Motivační pobídky",
+      "roleEn": "Incentive offers",
       "declared": true
     },
     {
       "name": "ingress-nginx",
       "group": "backbone",
       "role": "Vstupní brána (ingress)",
+      "roleEn": "Ingress gateway",
       "declared": true
     },
     {
       "name": "interest",
       "group": "domain",
       "role": "Úroky a kapitalizace",
+      "roleEn": "Interest and capitalization",
       "declared": true
     },
     {
       "name": "keda",
       "group": "platform",
       "role": "KEDA — autoscaling",
+      "roleEn": "KEDA autoscaling",
       "declared": false
     },
     {
       "name": "kyb",
       "group": "domain",
       "role": "Ověřování firemních klientů (KYB)",
+      "roleEn": "Business customer verification (KYB)",
       "declared": true
     },
     {
       "name": "kyc",
       "group": "domain",
       "role": "KYC — poznej svého klienta",
+      "roleEn": "Customer identity verification (KYC)",
       "declared": true
     },
     {
       "name": "kyverno",
       "group": "platform",
       "role": "Kyverno — admission policy & podpisy",
+      "roleEn": "Kyverno admission policies and signatures",
       "declared": true
     },
     {
       "name": "ledger",
       "group": "domain",
       "role": "Hlavní kniha (double-entry GL)",
+      "roleEn": "General ledger (double-entry)",
       "declared": true
     },
     {
       "name": "lending",
       "group": "domain",
       "role": "lending",
+      "roleEn": "lending",
       "declared": true
     },
     {
       "name": "messaging",
       "group": "backbone",
       "role": "Apache Kafka — sběrnice událostí",
+      "roleEn": "Apache Kafka event bus",
       "declared": true
     },
     {
       "name": "notifications",
       "group": "domain",
       "role": "Notifikace",
+      "roleEn": "Notifications",
       "declared": true
     },
     {
       "name": "observability",
       "group": "backbone",
       "role": "Prometheus / Grafana / Loki / Tempo",
+      "roleEn": "Prometheus / Grafana / Loki / Tempo",
       "declared": true
     },
     {
       "name": "onboarding",
       "group": "domain",
       "role": "Onboarding zákazníků",
+      "roleEn": "Customer onboarding",
       "declared": true
     },
     {
       "name": "open-banking",
       "group": "domain",
       "role": "Open Banking / TPP",
+      "roleEn": "Open Banking / TPP",
       "declared": false
     },
     {
       "name": "pact-broker",
       "group": "domain",
       "role": "pact-broker",
+      "roleEn": "pact-broker",
       "declared": true
     },
     {
       "name": "party",
       "group": "domain",
       "role": "Strany / klientská identita",
+      "roleEn": "Parties and customer identity",
       "declared": true
     },
     {
       "name": "payments",
       "group": "domain",
       "role": "Platby (SEPA/domácí/SCT Inst)",
+      "roleEn": "Payments (SEPA, domestic and instant)",
       "declared": true
     },
     {
       "name": "pid",
       "group": "domain",
       "role": "pid",
+      "roleEn": "pid",
       "declared": true
     },
     {
       "name": "platform",
       "group": "platform",
       "role": "AI agent + řídicí plocha",
+      "roleEn": "AI agent and control plane",
       "declared": true
     },
     {
       "name": "psd2",
       "group": "domain",
       "role": "psd2",
+      "roleEn": "psd2",
       "declared": true
     },
     {
       "name": "referral",
       "group": "domain",
       "role": "Doporučení klientů (MGM)",
+      "roleEn": "Customer referrals (MGM)",
       "declared": true
     },
     {
       "name": "registry-cache",
       "group": "platform",
       "role": "Cache image registru",
+      "roleEn": "Container registry cache",
       "declared": true
     },
     {
       "name": "release-steward",
       "group": "domain",
       "role": "release-steward",
+      "roleEn": "release-steward",
       "declared": true
     },
     {
       "name": "reposilite",
       "group": "domain",
       "role": "reposilite",
+      "roleEn": "reposilite",
       "declared": true
     },
     {
       "name": "sanctions",
       "group": "domain",
       "role": "Sankční screening",
+      "roleEn": "Sanctions screening",
       "declared": true
     },
     {
       "name": "sca",
       "group": "domain",
       "role": "Silné ověření (SCA)",
+      "roleEn": "Strong customer authentication (SCA)",
       "declared": true
     },
     {
       "name": "sdd",
       "group": "domain",
       "role": "sdd",
+      "roleEn": "sdd",
       "declared": true
     },
     {
       "name": "security-scanner",
       "group": "platform",
       "role": "Bezpečnostní skener",
+      "roleEn": "Security scanner",
       "declared": true
     },
     {
       "name": "statements",
       "group": "domain",
       "role": "Výpisy",
+      "roleEn": "Account statements",
       "declared": true
     },
     {
       "name": "temporal",
       "group": "domain",
       "role": "temporal",
+      "roleEn": "temporal",
       "declared": true
     },
     {
       "name": "tpp-registry",
       "group": "domain",
       "role": "tpp-registry",
+      "roleEn": "tpp-registry",
       "declared": true
     },
     {
       "name": "vault",
       "group": "identity",
       "role": "OpenBao — trezor tajemství",
+      "roleEn": "OpenBao secrets vault",
       "declared": true
     },
     {
       "name": "vpa",
       "group": "domain",
       "role": "vpa",
+      "roleEn": "vpa",
       "declared": true
     },
     {
       "name": "wealth",
       "group": "domain",
       "role": "Deklarovaný majetek klientů",
+      "roleEn": "Declared customer assets",
       "declared": true
     }
   ],
@@ -517,11 +596,11 @@
       "id": "network",
       "label": "Síť (segmentace)",
       "icon": "network",
-      "status": "planned",
+      "status": "partial",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 122 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 122 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
       "controls": [
-        "NetworkPolicy (122 / 75)",
+        "NetworkPolicy manifesty (122)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -685,8 +764,8 @@
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "122 / 75 ns má NetworkPolicy → většina provozu otevřená",
-      "status": "planned"
+      "reality": "122 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+      "status": "partial"
     },
     {
       "item": "Podpis image",

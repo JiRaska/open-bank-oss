@@ -19,8 +19,8 @@ import {
 
 type Status = 'live' | 'partial' | 'planned'
 
-interface Namespace { name: string; group: string; role: string; declared: boolean }
-interface Group { id: string; label: string; labelEn: string; color: string; icon: string; blurb: string }
+interface Namespace { name: string; group: string; role: string; roleEn?: string; declared: boolean }
+interface Group { id: string; label: string; labelEn: string; color: string; icon: string; blurb: string; blurbEn?: string }
 interface Layer { id: string; label: string; icon: string; status: Status; analogy: string; summary: string; controls: string[]; adr: string[]; detailRoute?: string }
 interface AnatomyStep { id: string; label: string; status: Status; detail: string; adr: string[] }
 interface PvR { item: string; plan: string; reality: string; status: Status }
@@ -203,7 +203,7 @@ export default function ClusterDossierPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
           { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: 'var(--success-text)' },
-          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: 'var(--warning-text)' },
+          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('deklarované v GitOpsu', 'declared in GitOps'), tone: 'var(--warning-text)' },
           { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('nic v gitu', 'none in git'), tone: 'var(--success-text)' },
           { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('image-verify (Audit)', 'image-verify (Audit)'), tone: 'var(--warning-text)' },
         ].map(s => (
@@ -221,7 +221,7 @@ export default function ClusterDossierPage() {
       {/* ── 1) Namespace map ── */}
       <SectionTitle icon={Boxes} title={t('1 · Mapa namespaces — „patra banky"', '1 · Namespace map — "floors of the bank"')} />
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14, maxWidth: 760 }}>
-        {t('Každá doména běží ve vlastním zapečeném namespace. Klikni na kostku pro roli a stav izolace.', 'Each domain runs in its own sealed namespace. Click a tile for its role and isolation state.')}
+        {t('Mapa ukazuje namespace pro správu prostředků jednotlivých domén. Samotný namespace neprokazuje síťovou izolaci. Klikněte na dlaždici pro její účel a rozsah dostupných důkazů.', 'The map shows each domain’s namespace for organizing resources. A namespace alone does not prove network isolation. Open a tile to see its purpose and the limits of the available evidence.')}
       </p>
       <div style={{ display: 'grid', gap: 18, marginBottom: 32 }}>
         {(topo?.groups ?? []).map(g => {
@@ -237,7 +237,7 @@ export default function ClusterDossierPage() {
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{language === 'cs' ? g.label : g.labelEn}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>· {items.length}</span>
               </div>
-              <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 8px 34px' }}>{g.blurb}</p>
+              <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 8px 34px' }}>{language === 'cs' ? g.blurb : (g.blurbEn ?? g.labelEn)}</p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8, paddingLeft: 34 }}>
                 {items.map(nsItem => {
                   const on = openNs === nsItem.name
@@ -255,9 +255,9 @@ export default function ClusterDossierPage() {
                       </div>
                       {on && (
                         <div id={panelId} role="region" aria-label={nsItem.name} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                          {nsItem.role}
+                          {language === 'cs' ? nsItem.role : (nsItem.roleEn ?? nsItem.name)}
                           <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-secondary)' }}>
-                            {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy nasazeny, fleet-wide aktivace probíhá (#854)', 'NetworkPolicies deployed, fleet-wide activation in progress (#854)') : t('zatím bez NetworkPolicy', 'no NetworkPolicy yet')}
+                            {t('Počet NetworkPolicy v celé platformě: ', 'Fleet-wide NetworkPolicy count: ')}{c.networkPolicies ?? '—'}. {t('To neprokazuje izolaci tohoto namespace.', 'This does not prove isolation of this namespace.')}
                           </div>
                         </div>
                       )}
