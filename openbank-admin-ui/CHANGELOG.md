@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.247.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.0...admin-ui-v0.247.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** upgrade Mermaid with patched parser dependencies ([#10045](https://github.com/JiRaska/open-bank-oss/issues/10045)) ([4c041a1](https://github.com/JiRaska/open-bank-oss/commit/4c041a1a8d4ca138fa851748899a1252c1d92bdf))
+
 ## [0.247.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.1...admin-ui-v0.247.0) (2026-09-16)
 
 
