@@ -87,7 +87,28 @@ const boundedText = (value: unknown): string | null => {
 
 const safeProposalUrl = (value: unknown): string | null => {
   const text = boundedText(value)
-  return text ? trustedRepositoryPullRequestUrl(text) : null
+  if (!text) return null
+  try {
+    // Keep this boundary explicit even though the shared helper repeats it. The ecosystem gate
+    // verifies this route without resolving imports, while the helper is the final common policy
+    // used by every Admin UI surface that renders an agent-provided pull-request link.
+    const parsed = new URL(text)
+    const parts = parsed.pathname.split('/')
+    const sourceLocalTrusted = parsed.protocol === 'https:'
+      && parsed.hostname === 'github.com'
+      && parsed.port === ''
+      && parsed.username === ''
+      && parsed.password === ''
+      && !parsed.search
+      && !parsed.hash
+      && parts.length === 5
+      && parts[1] === 'JiRaska'
+      && parts[2] === 'open-bank-oss'
+      && parts[3] === 'pull'
+      && /^\d+$/.test(parts[4])
+    if (!sourceLocalTrusted) return null
+    return trustedRepositoryPullRequestUrl(text)
+  } catch { return null }
 }
 
 // Agent responses are advisory, but they still cross a network boundary. Normalize them before
