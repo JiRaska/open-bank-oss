@@ -107,6 +107,7 @@ export default function DashboardPage() {
       setLastRefresh(new Date())
     } catch (error) {
       setStatuses([])
+      setLastRefresh(null)
       setEvidenceFailure(error instanceof Error && error.message === 'governance' ? 'governance' : 'health')
     }
     setLoading(false)
@@ -196,7 +197,19 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {evidenceFailure ? (
+      {loading && lastRefresh === null ? (
+        <section role="status" aria-label={t('Načítám evidenci platformy', 'Platform evidence is loading')}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+            {t('Ověřuji aktuální stav služeb. Počty zobrazím až po úplné odpovědi.', 'Verifying current service health. Counts appear only after a complete response.')}
+          </p>
+          <div className={styles.metrics} aria-hidden="true">
+            {[0, 1, 2, 3].map(index => <div key={index} className={`card ${styles.metric}`}>
+              <div className="skeleton" style={{ height: 14, width: '65%', marginBottom: 18 }} />
+              <div className="skeleton" style={{ height: 30, width: '40%' }} />
+            </div>)}
+          </div>
+        </section>
+      ) : evidenceFailure ? (
         <section className="card" aria-label={t('Dostupnost evidence platformy', 'Platform evidence availability')}>
           <DataUnavailable
             kind="unreachable"
