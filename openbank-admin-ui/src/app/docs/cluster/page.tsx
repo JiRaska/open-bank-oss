@@ -16,6 +16,7 @@ import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
 } from 'lucide-react'
+import styles from './cluster.module.css'
 
 type Status = 'live' | 'partial' | 'planned'
 
@@ -96,7 +97,7 @@ function DefenseRings({ layers, active, onPick, lang }: { layers: Layer[]; activ
 function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']; lang: string }) {
   const [open, setOpen] = useState<string | null>(anatomy.steps[0]?.id ?? null)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.3fr)', gap: 20, alignItems: 'start' }}>
+    <div role="group" aria-label={lang === 'cs' ? 'Anatomie kontejnerového image' : 'Container image anatomy'} className={styles.anatomyLayout}>
       {/* the box */}
       <div style={{ position: 'relative', background: 'var(--sidebar-bg)', borderRadius: 14, padding: 14, border: '2px solid var(--sidebar-border)', boxShadow: 'var(--shadow-xl)' }}>
         {/* corner rivets */}
@@ -296,7 +297,7 @@ export default function ClusterDossierPage() {
 
       {/* ── 2) Defense in depth ── */}
       <SectionTitle icon={Shield} title={t('2 · Obrana do hloubky — „vrstvy ochranky"', '2 · Defense in depth — "layers of security"')} />
-      <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 24, alignItems: 'center', marginBottom: 32 }}>
+      <div className={styles.defenseLayout}>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer} onPick={setActiveLayer} lang={language} />}
         </div>

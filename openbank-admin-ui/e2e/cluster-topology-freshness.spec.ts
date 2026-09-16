@@ -99,3 +99,22 @@ test('Czech namespace guidance preserves the role and the honest policy caveat',
   await expect(page.locator('#cluster-ns-panel-accounts')).toContainText('neprokazuje izolaci tohoto namespace')
   await expect(page.getByText(/pokrytí namespaců a runtime účinnost neověřeny/)).toBeVisible()
 })
+
+test('cluster dossier remains readable without page-level horizontal scrolling on mobile', async ({ page, context, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await signInAsOperator(context, baseURL!)
+  await context.addCookies([{ name: LANG_COOKIE, value: 'en', url: baseURL! }])
+  await page.goto('/docs/cluster')
+  await expect(page.getByRole('status', { name: 'GitOps snapshot provenance' })).toBeVisible()
+
+  const width = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }))
+  expect(width.document).toBeLessThanOrEqual(width.viewport + 1)
+
+  const layerDetailWidth = await page.getByRole('group', { name: 'Defense in depth' }).evaluate((diagram) =>
+    diagram.parentElement?.nextElementSibling?.getBoundingClientRect().width ?? 0)
+  expect(layerDetailWidth).toBeGreaterThanOrEqual(200)
+
+  const anatomyDetailWidth = await page.getByRole('group', { name: 'Container image anatomy' }).evaluate((anatomy) =>
+    anatomy.children[1]?.getBoundingClientRect().width ?? 0)
+  expect(anatomyDetailWidth).toBeGreaterThanOrEqual(200)
+})
