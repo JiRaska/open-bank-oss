@@ -13,7 +13,11 @@ test.beforeEach(async ({ context, baseURL }) => {
 test.describe('/docs/qrlesspay — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme keeps the payment safety model understandable and WCAG A/AA`, async ({ page }) => {
-      await page.goto('/docs/qrlesspay')
+      // The educational dossier is usable once its document is interactive. Waiting for the
+      // global `load` event also waits for unrelated late resources and has timed out twice
+      // under the parallel CI dev server even though the rendered page was ready. The heading
+      // and safety-model assertions below remain the authoritative readiness proof.
+      await page.goto('/docs/qrlesspay', { waitUntil: 'domcontentloaded' })
       await expect(page.getByRole('heading', { level: 1, name: /QRlessPay/ })).toBeVisible()
 
       await page.evaluate(selectedTheme => {
