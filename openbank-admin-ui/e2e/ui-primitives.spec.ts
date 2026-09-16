@@ -131,6 +131,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
+    await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/system/readiness')
 
     const swatch = page.locator('.tone-swatch').first()
@@ -155,6 +156,14 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     expect(Math.round(smallBox!.height)).toBe(18)
     // The digit must actually be inside it — zero content width renders an empty box.
     expect((await small.textContent())?.trim()).not.toBe('')
+
+    // The shell can be completing its bounded theme transition while the geometry assertions
+    // run. Wait for the semantic badge's light-theme endpoint before measuring contrast.
+    const successBadge = page.locator('.badge-success').first()
+    await expect.poll(() => successBadge.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { color: style.color, background: style.backgroundColor }
+    })).toEqual({ color: 'rgb(3, 116, 84)', background: 'rgb(236, 253, 245)' })
 
     const scan = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

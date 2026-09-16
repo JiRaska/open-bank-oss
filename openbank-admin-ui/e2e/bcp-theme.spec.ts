@@ -49,7 +49,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto('/docs/bcp')
     await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
     if (theme === 'dark') {
-      await page.locator('html').evaluate(element => element.classList.add('dark'))
+      await page.getByRole('button', { name: /Switch to the dark theme|Přepnout na tmavý motiv/ }).click()
       await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     }
 

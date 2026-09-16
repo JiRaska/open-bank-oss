@@ -52,7 +52,7 @@ test('nested service links keep native keyboard activation', async ({ page }) =>
   expect(href).toBeTruthy()
   await changelog.focus()
   await Promise.all([
-    page.waitForURL(url => url.pathname === href, { timeout: 15_000 }),
+    page.waitForURL(url => url.pathname === href, { waitUntil: 'domcontentloaded', timeout: 15_000 }),
     page.keyboard.press('Enter'),
   ])
 })
