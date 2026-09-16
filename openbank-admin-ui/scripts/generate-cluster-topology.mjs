@@ -123,6 +123,13 @@ const NS_MAP = {
   audit: ['domain', 'Auditní záznamy'], sca: ['domain', 'Silné ověření (SCA)'],
   notifications: ['domain', 'Notifikace'], 'customer-edge': ['domain', 'Edge pro mobilní app'],
   'open-banking': ['domain', 'Open Banking / TPP'],
+  communication: ['domain', 'Komunikační studio a šablony'],
+  context: ['domain', 'Bankovní souvislosti pro vyšetřování'],
+  engagement: ['domain', 'Interakce uživatelů v aplikaci'],
+  incentive: ['domain', 'Motivační pobídky'],
+  kyb: ['domain', 'Ověřování firemních klientů (KYB)'],
+  referral: ['domain', 'Doporučení klientů (MGM)'],
+  wealth: ['domain', 'Deklarovaný majetek klientů'],
   // identity & secrets
   iam: ['identity', 'Keycloak — IAM / OIDC'], identity: ['identity', 'Identita'],
   vault: ['identity', 'OpenBao — trezor tajemství'],
@@ -241,5 +248,16 @@ const out = {
   planVsReality,
 }
 
-writeFileSync(OUT, JSON.stringify(out, null, 2))
-console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+const rendered = JSON.stringify(out, null, 2)
+if (process.argv.includes('--check')) {
+  const committed = read(OUT)
+  if (committed !== rendered) {
+    console.error(`[generate-cluster-topology] ${OUT} is missing or stale; regenerate it from the declared GitOps and Dockerfile inputs`)
+    process.exitCode = 1
+  } else {
+    console.log(`[generate-cluster-topology] ${OUT} matches its declared inputs`)
+  }
+} else {
+  writeFileSync(OUT, rendered)
+  console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+}

@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-08-04T08:06:31.000Z",
+  "generatedAt": "2026-09-16T15:49:10.000Z",
   "counts": {
-    "namespaces": 68,
-    "networkPolicies": 108,
-    "externalSecrets": 144,
+    "namespaces": 75,
+    "networkPolicies": 122,
+    "externalSecrets": 177,
     "clusterPolicies": 5
   },
   "groups": [
@@ -140,9 +140,21 @@
       "declared": false
     },
     {
+      "name": "communication",
+      "group": "domain",
+      "role": "Komunikační studio a šablony",
+      "declared": true
+    },
+    {
       "name": "consent",
       "group": "domain",
       "role": "Souhlasy (PSD2)",
+      "declared": true
+    },
+    {
+      "name": "context",
+      "group": "domain",
+      "role": "Bankovní souvislosti pro vyšetřování",
       "declared": true
     },
     {
@@ -191,6 +203,12 @@
       "name": "documents",
       "group": "domain",
       "role": "documents",
+      "declared": true
+    },
+    {
+      "name": "engagement",
+      "group": "domain",
+      "role": "Interakce uživatelů v aplikaci",
       "declared": true
     },
     {
@@ -272,6 +290,12 @@
       "declared": false
     },
     {
+      "name": "incentive",
+      "group": "domain",
+      "role": "Motivační pobídky",
+      "declared": true
+    },
+    {
       "name": "ingress-nginx",
       "group": "backbone",
       "role": "Vstupní brána (ingress)",
@@ -288,6 +312,12 @@
       "group": "platform",
       "role": "KEDA — autoscaling",
       "declared": false
+    },
+    {
+      "name": "kyb",
+      "group": "domain",
+      "role": "Ověřování firemních klientů (KYB)",
+      "declared": true
     },
     {
       "name": "kyc",
@@ -380,6 +410,12 @@
       "declared": true
     },
     {
+      "name": "referral",
+      "group": "domain",
+      "role": "Doporučení klientů (MGM)",
+      "declared": true
+    },
+    {
       "name": "registry-cache",
       "group": "platform",
       "role": "Cache image registru",
@@ -450,6 +486,12 @@
       "group": "domain",
       "role": "vpa",
       "declared": true
+    },
+    {
+      "name": "wealth",
+      "group": "domain",
+      "role": "Deklarovaný majetek klientů",
+      "declared": true
     }
   ],
   "securityLayers": [
@@ -476,9 +518,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 108 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 122 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (108 / 68)",
+        "NetworkPolicy (122 / 75)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -546,10 +588,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 144 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 177 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (144)",
+        "External Secrets (177)",
         "KMS unseal"
       ],
       "adr": [
@@ -559,23 +601,23 @@
     }
   ],
   "imageAnatomy": {
-    "multiStage": false,
-    "buildBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
-    "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
+    "multiStage": true,
+    "buildBase": "above",
+    "runtimeBase": "eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e",
     "steps": [
       {
         "id": "build",
         "label": "Build stage (JDK)",
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": "Plný JDK (above) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
       },
       {
         "id": "runtime",
         "label": "Runtime stage (JRE-only)",
         "status": "live",
         "adr": [],
-        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
       },
       {
         "id": "nonroot",
@@ -636,13 +678,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "68 namespaců",
+      "reality": "75 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "108 / 68 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "122 / 75 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
@@ -654,7 +696,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "144 ExternalSecret",
+      "reality": "177 ExternalSecret",
       "status": "live"
     },
     {

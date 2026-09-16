@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -38,6 +38,46 @@ const COMMITTED_GENERATORS = [
 ]
 
 describe('committed derived artifacts are a pure function of their inputs (#2621)', () => {
+  it('rejects a stale or missing topology snapshot without rewriting it (#10154)', () => {
+    const generator = path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs')
+    const dir = mkdtempSync(path.join(tmpdir(), 'topology-freshness-'))
+    const output = path.join(dir, 'cluster-topology.json')
+    const run = (args: string[]) => execFileSync('node', [generator, '--repo', REPO, '--out', output, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    try {
+      expect(() => run(['--check'])).toThrow()
+      run([])
+      const current = readFileSync(output, 'utf8')
+      expect(() => run(['--check'])).not.toThrow()
+
+      const stale = current.replace('openbank.cluster-topology/v1', 'openbank.cluster-topology/stale')
+      writeFileSync(output, stale)
+      expect(() => run(['--check'])).toThrow()
+      expect(readFileSync(output, 'utf8')).toBe(stale)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the committed topology snapshot aligned with its declared inputs (#10154)', () => {
+    expect(() => execFileSync('node', [
+      path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs'),
+      '--repo', REPO,
+      '--check',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toThrow()
+
+    const topology = JSON.parse(readFileSync(path.join(ADMIN_UI, 'cluster-topology.json'), 'utf8')) as {
+      namespaces: { name: string; role: string; declared: boolean }[]
+    }
+    for (const name of ['communication', 'context', 'engagement', 'incentive', 'kyb', 'referral', 'wealth']) {
+      const namespace = topology.namespaces.find((entry) => entry.name === name)
+      expect(namespace?.declared, `${name} must come from a declared GitOps destination`).toBe(true)
+      expect(namespace?.role, `${name} needs an operator-readable purpose`).not.toBe(name)
+    }
+  })
+
   it(
     'regenerating cluster-topology.json after real time passes yields byte-identical output',
     () => {
