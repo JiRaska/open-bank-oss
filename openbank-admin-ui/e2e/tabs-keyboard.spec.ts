@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -38,4 +39,15 @@ test('keeps vertical settings tabs wrapping and automatically activated', async 
   await expect(language).toBeFocused()
   await expect(language).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('#settings-panel-regional')).toBeVisible()
+})
+
+test('keeps the selected settings tab readable against its tinted background', async ({ page }) => {
+  await page.goto('/settings')
+  await expect(page.locator('#settings-tab-profile')).toHaveAttribute('aria-selected', 'true')
+
+  const scan = await new AxeBuilder({ page })
+    .include('#settings-tab-profile')
+    .withRules(['color-contrast'])
+    .analyze()
+  expect(scan.violations).toEqual([])
 })

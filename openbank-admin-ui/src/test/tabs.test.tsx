@@ -6,13 +6,23 @@ import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { Tabs } from '@/components/ui'
 
-function Harness() {
+function Harness({ variant = 'underline' }: { variant?: 'underline' | 'rail' }) {
   const [value, setValue] = useState<'queue' | 'history'>('queue')
   return <Tabs items={[{ id: 'queue', label: 'Queue', tabId: 'legacy-queue-tab', panelId: 'legacy-queue-panel' }, { id: 'history', label: 'History' }]}
-    value={value} onChange={setValue} label="Cases" idPrefix="cases" />
+    value={value} onChange={setValue} label="Cases" idPrefix="cases" variant={variant} />
 }
 
 describe('Tabs', () => {
+  it('uses the high-contrast accent text for selected tabs in both layouts', () => {
+    const { rerender } = render(<Harness />)
+    const queue = screen.getByRole('tab', { name: 'Queue' })
+    expect(queue).toHaveStyle({ color: 'var(--accent-text)' })
+
+    rerender(<Harness variant="rail" />)
+    expect(queue).toHaveStyle({ color: 'var(--accent-text)', background: 'var(--accent-light)' })
+    expect(screen.getByRole('tab', { name: 'History' })).toHaveStyle({ color: 'var(--text-secondary)' })
+  })
+
   it('links tabs to panels and exposes exactly one roving tab stop', () => {
     render(<Harness />)
 
