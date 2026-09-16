@@ -681,6 +681,9 @@ export default function ApiCatalogPage() {
                 aria-controls={`api-service-${svc.id}`}
                 onClick={() => setExpanded(e => e === svc.id ? null : svc.id)}
                 onKeyDown={event => {
+                  // Nested documentation links own their keyboard activation. Handling their
+                  // bubbled Enter here would prevent navigation and toggle the disclosure.
+                  if (event.target !== event.currentTarget) return
                   if (event.key !== 'Enter' && event.key !== ' ') return
                   event.preventDefault()
                   setExpanded(e => e === svc.id ? null : svc.id)

@@ -39,3 +39,20 @@ test('service disclosures work from the keyboard', async ({ page }) => {
   await page.keyboard.press('Space')
   await expect(service).toHaveAttribute('aria-expanded', 'false')
 })
+
+test('nested service links keep native keyboard activation', async ({ page }) => {
+  await page.goto('/docs/api')
+
+  const service = page.locator('[role="button"][aria-controls^="api-service-"]').first()
+  await expect(service).toHaveAttribute('aria-expanded', 'false')
+  await expect(service.locator('.animate-spin')).toHaveCount(0)
+
+  const changelog = service.getByRole('link', { name: 'Changelog' })
+  const href = await changelog.getAttribute('href')
+  expect(href).toBeTruthy()
+  await changelog.focus()
+  await Promise.all([
+    page.waitForURL(url => url.pathname === href, { timeout: 15_000 }),
+    page.keyboard.press('Enter'),
+  ])
+})
