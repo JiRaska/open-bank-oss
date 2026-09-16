@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.8.0...case-coordinator-agent-v0.8.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **case-coordinator-agent:** guard case_outbox created_at plausibility at INSERT ([#9303](https://github.com/JiRaska/open-bank-oss/issues/9303)) ([a8177a7](https://github.com/JiRaska/open-bank-oss/commit/a8177a7b1f9309d764d11c313b8e9eb0e655301c))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.7.0...case-coordinator-agent-v0.8.0) (2026-08-24)
 
 

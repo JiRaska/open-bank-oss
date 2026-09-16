@@ -13,6 +13,7 @@ import java.util.UUID
 interface ReferralProgramRepository {
     suspend fun create(program: ReferralProgram): ReferralProgram
     suspend fun find(id: UUID): ReferralProgram?
+    suspend fun listPublished(): List<ReferralProgram>
     suspend fun publish(id: UUID, maker: String, checker: String, at: java.time.Instant): ReferralProgram
 }
 
@@ -21,6 +22,9 @@ interface ReferralInviteRepository {
     suspend fun findByToken(tokenHash: String): ReferralInvite?
     suspend fun findByIdempotencyKey(key: String): ReferralInvite?
     suspend fun attribute(id: UUID, refereePartyId: UUID, at: java.time.Instant): ReferralInvite
+
+    /** Every invite [referrerPartyId] issued, any status. */
+    suspend fun listByReferrer(referrerPartyId: UUID): List<ReferralInvite>
 }
 
 interface ReferralRewardRepository {
@@ -28,6 +32,9 @@ interface ReferralRewardRepository {
     suspend fun findByReference(reference: String): ReferralReward?
     suspend fun create(reward: ReferralReward): ReferralReward
     suspend fun outcome(reference: String, status: String, at: java.time.Instant): ReferralReward
+
+    /** Every reward on any of [inviteIds]; empty input returns empty without a query. */
+    suspend fun listByInviteIds(inviteIds: List<UUID>): List<ReferralReward>
 }
 
 interface ReferralEventPublisher {
@@ -41,4 +48,7 @@ interface ReferralEventPublisher {
 
 interface ReferralAuditRepository {
     suspend fun append(type: String, aggregateId: UUID, actor: String, details: String, at: java.time.Instant)
+
+    /** When each of [inviteIds] was issued, from its `INVITE_ISSUED` row; absent ids are omitted. */
+    suspend fun issuedAt(inviteIds: List<UUID>): Map<UUID, java.time.Instant>
 }

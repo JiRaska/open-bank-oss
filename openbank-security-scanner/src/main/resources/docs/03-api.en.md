@@ -246,8 +246,9 @@ OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED
 
 ## Events
 
-ICT incident events are emitted directly to Kafka by a SmallRye `@Channel` emitter — there is no
-outbox and no transactional guarantee. Scans emit nothing: the platform report is REST-only (#4709).
+ICT incident events are committed to `ict_incident_outbox` in the same transaction as the incident
+state and relayed through SmallRye Kafka when dispatch is enabled. Scans emit nothing: the platform
+report is REST-only (#4709).
 
 | Topic | Event type | Trigger | Key fields |
 |---|---|---|---|

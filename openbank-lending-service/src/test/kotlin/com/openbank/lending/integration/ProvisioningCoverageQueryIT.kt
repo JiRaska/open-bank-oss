@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.lending.integration
 
-import com.openbank.lending.application.port.out.LoanRepository
+import com.openbank.lending.application.port.out.ProvisioningCoverageRepository
 import com.openbank.lending.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -16,13 +16,13 @@ import javax.sql.DataSource
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class ProvisioningCoverageQueryIT {
     @Inject
-    lateinit var loans: LoanRepository
+    lateinit var loans: ProvisioningCoverageRepository
 
     @Inject
     lateinit var dataSource: DataSource
 
     private fun missing(period: String): Long =
-        VertxContextSupport.subscribeAndAwait { loans.countActiveWithoutProvisioning(period) }
+        VertxContextSupport.subscribeAndAwait { loans.countUnprovisioned(period) }
 
     private fun sql(query: String, vararg parameters: Any) {
         dataSource.connection.use { connection ->
@@ -44,12 +44,14 @@ class ProvisioningCoverageQueryIT {
     )
 
     @Test
-    fun `coverage counts only active loans missing the requested period`() {
+    fun `coverage counts every eligible exposure missing the requested period`() {
         val period = "2099-06"
         val baseline = missing(period)
         val application = UUID.randomUUID()
         val active = UUID.randomUUID()
         val closed = UUID.randomUUID()
+        val defaulted = UUID.randomUUID()
+        val delinquent = UUID.randomUUID()
         try {
             sql(
                 """INSERT INTO loan_application
@@ -59,7 +61,12 @@ class ProvisioningCoverageQueryIT {
                 application,
                 UUID.randomUUID(),
             )
-            for ((id, status) in listOf(active to "ACTIVE", closed to "CLOSED")) {
+            for ((id, status) in listOf(
+                active to "ACTIVE",
+                closed to "CLOSED",
+                defaulted to "DEFAULTED",
+                delinquent to "DELINQUENT",
+            )) {
                 sql(
                     """INSERT INTO loan
                         (id,application_id,party_id,principal,currency,nominal_annual_rate,term_periods,method,first_due_date,status)
@@ -73,14 +80,18 @@ class ProvisioningCoverageQueryIT {
             }
             provision(closed, period)
             provision(active, "2099-05")
-            assertThat(missing(period)).isEqualTo(baseline + 1)
+            provision(defaulted, "2099-05")
+            provision(delinquent, "2099-05")
+            assertThat(missing(period)).isEqualTo(baseline + 3)
 
             provision(active, period)
+            provision(defaulted, period)
+            provision(delinquent, period)
             assertThat(missing(period)).isEqualTo(baseline)
         } finally {
             // Shared test database: remove only this test's rows, never truncate another IT's fixtures.
-            sql("DELETE FROM loan_provisioning WHERE loan_id IN (?,?)", active, closed)
-            sql("DELETE FROM loan WHERE id IN (?,?)", active, closed)
+            sql("DELETE FROM loan_provisioning WHERE loan_id IN (?,?,?,?)", active, closed, defaulted, delinquent)
+            sql("DELETE FROM loan WHERE id IN (?,?,?,?)", active, closed, defaulted, delinquent)
             sql("DELETE FROM loan_application WHERE id = ?", application)
         }
     }

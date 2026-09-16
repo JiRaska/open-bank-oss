@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TestIntelligenceFlow, testIntelligenceCollectionNeedsAttention,
@@ -367,5 +367,43 @@ describe('Test Intelligence flow attention', () => {
     expect(queue.getAllByText('Synthetic: Sandbox login')).toHaveLength(1)
     expect(queue.queryByText('Required control: synthetic:sandbox-login')).not.toBeInTheDocument()
     expect(queue.getAllByText('Required control: openbank-libs-runtime:mutation')).toHaveLength(1)
+  })
+
+  it('renders rollout-attested, mismatched and plain CI browser evidence distinctly (#7451)', async () => {
+    const variant = (browser: 'chromium' | 'firefox' | 'webkit', state: 'passed' | 'failed', buildAttestation?: { requestedSha: string; observedSha: string | null; matched: boolean }) => ({
+      browser, state, observedAt: '2026-09-01T00:00:00.000Z', detail: `${browser} checks`,
+      run: { id: `b-${browser}`, attempt: 1, commit: 'abc1234def', branch: 'main', workflow: 'Admin UI browser synthetic', url: `https://github.com/JiRaska/open-bank-oss/actions/runs/b-${browser}` },
+      ...(buildAttestation ? { buildAttestation } : {}),
+    })
+    const report = reportFixture({
+      syntheticJourneys: [{
+        id: 'admin-ui-sso-boundary', title: 'Admin UI SSO boundary', status: 'active', capability: 'proves the SSO hand-off',
+        state: 'unknown', severity: 'ticket', executor: 'github-actions', schedule: null, environment: null, covers: [],
+        falsifies: 'remove the SSO boundary', blocker: null,
+        ci: {
+          state: 'failed', observedAt: '2026-09-01T00:00:00.000Z', detail: '1/3 declared browser variants passed.',
+          run: { id: 'b-chromium', attempt: 1, commit: 'abc1234def', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/b-chromium' },
+          variants: [
+            variant('chromium', 'passed', { requestedSha: 'abc1234', observedSha: 'abc1234def5678', matched: true }),
+            variant('firefox', 'failed', { requestedSha: 'abc1234', observedSha: null, matched: false }),
+            variant('webkit', 'passed'),
+          ],
+        },
+      }] as unknown as TestIntelligenceReport['syntheticJourneys'],
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    render(<TestIntelligencePage />)
+    fireEvent.click(await screen.findByRole('tab', { name: /Synthetics/ }).catch(() => screen.getByText('Synthetics')))
+
+    const chromium = within(await screen.findByLabelText('chromium browser evidence'))
+    expect(chromium.getByLabelText('Rollout-attested evidence')).toHaveTextContent(/requested\s*abc1234.*observed\s*abc1234def56/)
+    const firefox = within(screen.getByLabelText('firefox browser evidence'))
+    expect(firefox.getByLabelText('Deployed build mismatch')).toHaveTextContent(/observed\s*unavailable/)
+    const webkit = within(screen.getByLabelText('webkit browser evidence'))
+    expect(webkit.queryByLabelText('Rollout-attested evidence')).not.toBeInTheDocument()
+    expect(webkit.getByText(/not tied to a specific deployed build/)).toBeInTheDocument()
   })
 })

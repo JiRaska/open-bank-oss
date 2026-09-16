@@ -244,15 +244,17 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
+    await page.addInitScript(() => window.localStorage.setItem('ob-admin-theme', 'light'))
     await page.goto('/system/readiness')
 
     const body = page.locator('body')
+    const themeToggle = page.getByRole('button', { name: 'Switch to the dark theme' })
+    await expect(themeToggle).toBeVisible()
+    await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
     const lightBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
-    await page.locator('html').evaluate(el => el.classList.add('dark'))
-    // The class lands on a later frame, so reading straight away returns the LIGHT colour and
-    // every assertion below compares the old theme with itself. Wait for the repaint instead of
-    // guessing a frame count: if the theme never applies, this times out and the test fails —
-    // the same guarantee the not-equal assertion was there to give.
+    await themeToggle.click()
+    await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+    await expect(page.getByRole('button', { name: 'Switch to the light theme' })).toBeVisible()
     await page.waitForFunction(
       light => getComputedStyle(document.body).backgroundColor !== light,
       lightBackground,

@@ -12,6 +12,7 @@ import com.openbank.kyb.application.port.out.RegistryAdapter
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegisteredAddress
@@ -126,4 +127,9 @@ class StubPartyGateway : PartyGateway {
     override suspend fun grantMandate(request: MandateRequest) {
         mandates += request
     }
+
+    /** Who the initiator verifiably is. Null (no such party) unless a test sets it. */
+    @Volatile var identity: InitiatorIdentity? = null
+
+    override suspend fun initiatorIdentity(partyId: UUID): InitiatorIdentity? = identity
 }

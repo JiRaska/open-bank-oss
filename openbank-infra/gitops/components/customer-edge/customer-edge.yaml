@@ -81,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-9ce62868
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-7116b115
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -167,6 +167,10 @@ spec:
             # Declared here so gen-network-policies.py opens the edge->lending ingress allow.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # Declared off-platform holdings (ADR-0301 D2): one branch of the net-worth
+            # composition. The edge reads them and never stores them.
+            - name: WEALTH_SERVICE_URL
+              value: http://wealth-service.wealth.svc:8154
             # Delegated access / sharing (ADR-0232): the edge asks delegation-service whether an
             # ACTIVE grant lets the caller read someone else's account, card or document. The URL
             # was already correct as a CODE default, which is exactly why this was invisible: the
@@ -238,6 +242,12 @@ spec:
               value: https://campaign-service.campaign.svc:8443
             - name: OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE
               value: /mnt/campaign-tls/ca.crt
+            # Member-get-member for the app (CustomerReferralResource). referral-service serves
+            # HTTPS on 8443 with a cert from the same openbank-ca ClusterIssuer as campaign, so the
+            # trust file above covers it. Declared here so gen-network-policies.py opens the
+            # customer-edge -> referral ingress allow.
+            - name: REFERRAL_SERVICE_URL
+              value: https://referral-service.referral.svc:8443
             - name: STATEMENT_SERVICE_URL
               value: http://statement-service.statements.svc:8136
             - name: STANDING_ORDER_SERVICE_URL

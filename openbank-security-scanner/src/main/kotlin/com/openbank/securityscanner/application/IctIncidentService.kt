@@ -10,13 +10,13 @@ import com.openbank.securityscanner.domain.IctIncident
 import com.openbank.securityscanner.domain.IncidentCategory
 import com.openbank.securityscanner.domain.IncidentSeverity
 import com.openbank.securityscanner.domain.IncidentStatus
-import io.smallrye.reactive.messaging.kafka.Record
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
-import org.eclipse.microprofile.reactive.messaging.Channel
-import org.eclipse.microprofile.reactive.messaging.Emitter
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+
+private const val NANOS_PER_SECOND = 1_000_000_000L
 
 data class ReportIncidentCommand(
     val title: String,
@@ -42,7 +42,6 @@ class IctIncidentNotFoundException(id: UUID) : RuntimeException("ICT incident no
  */
 @ApplicationScoped
 class IctIncidentService(
-    @Channel("ict-incident-events-out") private val emitter: Emitter<Record<String, String>>,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val repository: IctIncidentRepository,
@@ -69,10 +68,9 @@ class IctIncidentService(
             assignedTo = cmd.assignedTo,
             createdAt = now,
             updatedAt = now,
+            aggregateRevision = 1,
         )
-        val saved = repository.save(incident)
-        publishEvent("ICT_INCIDENT_REPORTED", saved)
-        return saved
+        return repository.save(incident, eventFor("ICT_INCIDENT_REPORTED", incident))
     }
 
     suspend fun updateStatus(
@@ -84,18 +82,16 @@ class IctIncidentService(
         rpoMinutes: Int?,
     ): IctIncident {
         val existing = repository.findIncident(id) ?: throw IctIncidentNotFoundException(id)
-        val updated = repository.save(
-            existing.copy(
-                status = status,
-                containedAt = containedAt ?: existing.containedAt,
-                resolvedAt = resolvedAt ?: existing.resolvedAt,
-                rtoMinutes = rtoMinutes ?: existing.rtoMinutes,
-                rpoMinutes = rpoMinutes ?: existing.rpoMinutes,
-                updatedAt = Instant.now(clock),
-            ),
+        val updated = existing.copy(
+            status = status,
+            containedAt = containedAt ?: existing.containedAt,
+            resolvedAt = resolvedAt ?: existing.resolvedAt,
+            rtoMinutes = rtoMinutes ?: existing.rtoMinutes,
+            rpoMinutes = rpoMinutes ?: existing.rpoMinutes,
+            updatedAt = Instant.now(clock),
+            aggregateRevision = existing.aggregateRevision + 1,
         )
-        publishEvent("ICT_INCIDENT_STATUS_CHANGED", updated)
-        return updated
+        return repository.save(updated, eventFor("ICT_INCIDENT_STATUS_CHANGED", updated))
     }
 
     suspend fun getIncident(id: UUID): IctIncident =
@@ -110,27 +106,33 @@ class IctIncidentService(
 
     suspend fun markReportedToRegulator(id: UUID, regulatoryReportId: String): IctIncident {
         val existing = repository.findIncident(id) ?: throw IctIncidentNotFoundException(id)
-        val updated = repository.save(
-            existing.copy(
-                reportedToRegulator = true,
-                regulatoryReportId = regulatoryReportId,
-                updatedAt = Instant.now(clock),
-            ),
+        val updated = existing.copy(
+            reportedToRegulator = true,
+            regulatoryReportId = regulatoryReportId,
+            updatedAt = Instant.now(clock),
+            aggregateRevision = existing.aggregateRevision + 1,
         )
-        publishEvent("ICT_INCIDENT_REPORTED_TO_REGULATOR", updated)
-        return updated
+        return repository.save(updated, eventFor("ICT_INCIDENT_REPORTED_TO_REGULATOR", updated))
     }
 
-    private fun publishEvent(eventType: String, incident: IctIncident) {
+    private fun eventFor(eventType: String, incident: IctIncident): OutboxMessage {
         val payload = objectMapper.writeValueAsString(
             mapOf(
+                "schemaVersion" to 1,
+                "sourceVersion" to incident.updatedAt.toEpochNanoseconds(),
+                "aggregateRevision" to incident.aggregateRevision,
                 "eventType" to eventType,
                 "incident" to incident,
-                "occurredAt" to Instant.now(clock),
+                "occurredAt" to incident.updatedAt,
                 "sourceService" to SOURCE_SERVICE,
             ),
         )
-        emitter.send(Record.of(incident.id.toString(), payload))
+        return OutboxMessage(
+            aggregateId = incident.id,
+            eventType = eventType,
+            payload = payload,
+            createdAt = incident.updatedAt,
+        )
     }
 
     companion object {
@@ -148,3 +150,6 @@ class IctIncidentService(
         internal const val SOURCE_SERVICE = "security-scanner"
     }
 }
+
+private fun Instant.toEpochNanoseconds(): Long =
+    Math.addExact(Math.multiplyExact(epochSecond, NANOS_PER_SECOND), nano.toLong())

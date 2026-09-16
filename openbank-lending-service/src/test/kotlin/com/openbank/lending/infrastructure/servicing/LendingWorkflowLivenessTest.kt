@@ -147,25 +147,21 @@ class LendingWorkflowLivenessTest {
         val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
         val cycleUseCase = object : RunProvisioningCycleUseCase {
             override fun runProvisioningCycle(period: String, asOf: LocalDate, limit: Int) =
-                Uni.createFrom().item(ProvisioningRunOutcome(period = period, loansAssessed = 5, journalsPosted = 3))
+                Uni.createFrom().item(ProvisioningRunOutcome(period = period, loansAssessed = 5, journalsQueued = 3))
         }
         val scheduler =
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
-                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
                 // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
                 // Uni that never emits, so the coverage read after the drain hung the test forever
                 // (CI cancelled the lending build at 45 min).
-                loans =
+                coverage =
                 mockk(relaxed = true) {
-                    every { countActive() } returns Uni.createFrom().item(5L)
-                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
-                },
-                provisioning =
-                mockk(relaxed = true) {
+                    every { countEligibleForProvisioning() } returns Uni.createFrom().item(5L)
+                    every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
                     every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
                 },
                 registry = null,
@@ -183,7 +179,7 @@ class LendingWorkflowLivenessTest {
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "lending-provisioning-cycle")
                 .gauge()?.value(),
-        ).isEqualTo(Duration.ofHours(720).toSeconds().toDouble())
+        ).isEqualTo(Duration.ofHours(24).toSeconds().toDouble())
 
         scheduler.runProvisioningPass().await().indefinitely()
 
@@ -207,19 +203,15 @@ class LendingWorkflowLivenessTest {
             ProvisioningCycleScheduler(
                 cycleUseCase,
                 batchSize = 500,
-                maxBatches = 40,
                 clock = clock,
                 domainMetrics = metricsOver(registry),
                 // Stubbed, not relaxed: a relaxed mockk answers a Uni-returning method with a mocked
                 // Uni that never emits, so the coverage read after the drain hung the test forever
                 // (CI cancelled the lending build at 45 min).
-                loans =
+                coverage =
                 mockk(relaxed = true) {
-                    every { countActive() } returns Uni.createFrom().item(5L)
-                    every { countActiveWithoutProvisioning(any()) } returns Uni.createFrom().item(0L)
-                },
-                provisioning =
-                mockk(relaxed = true) {
+                    every { countEligibleForProvisioning() } returns Uni.createFrom().item(5L)
+                    every { countUnprovisioned(any()) } returns Uni.createFrom().item(0L)
                     every { countForPeriod(any()) } returns Uni.createFrom().item(5L)
                 },
                 registry = null,

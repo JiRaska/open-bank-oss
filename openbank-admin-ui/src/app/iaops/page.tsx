@@ -9,7 +9,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
-  Info, CheckCircle2, CircleDashed, CircleDot, Lock, Users, Search, Loader2,
+  Info, CheckCircle2, CircleDashed, Lock, Users, Search, Loader2,
   AlertOctagon, ChevronRight, Sparkles, Hand, Fingerprint,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'

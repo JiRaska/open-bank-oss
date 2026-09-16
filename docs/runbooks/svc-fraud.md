@@ -30,7 +30,7 @@ triaging an incident that starts on `fraud`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8133` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `fraud`); dashboards in Grafana.
 - Logs: `kubectl logs -n fraud -l app.kubernetes.io/name=fraud-service -f`, or Loki
   `{namespace="fraud"}`.

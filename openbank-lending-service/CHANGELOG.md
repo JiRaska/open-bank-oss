@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.2...lending-service-v0.33.3) (2026-09-16)
+
+
+### Bug Fixes
+
+* **lending:** bind risk model environment flag ([#10125](https://github.com/JiRaska/open-bank-oss/issues/10125)) ([7dd034b](https://github.com/JiRaska/open-bank-oss/commit/7dd034b322e48d44c4a8f88f18bc2a969f326c68)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.1...lending-service-v0.33.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* **lending:** bind pessimistic loan lock ([#10117](https://github.com/JiRaska/open-bank-oss/issues/10117)) ([57bd6de](https://github.com/JiRaska/open-bank-oss/commit/57bd6de40095c9fdb6038e7ff7c860af14e569a4)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+* **lending:** preserve credit risk evidence and reconcile allowances ([#9466](https://github.com/JiRaska/open-bank-oss/issues/9466)) ([1f8b96c](https://github.com/JiRaska/open-bank-oss/commit/1f8b96c7d7f00c3900392dd080b1c9d34e886179)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.0...lending-service-v0.33.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **lending:** replay-safe applications/collateral/compliance proposals + ADR-0297 ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#9077](https://github.com/JiRaska/open-bank-oss/issues/9077)) ([4219b4e](https://github.com/JiRaska/open-bank-oss/commit/4219b4e1b407293e2afe262e1177b2b8a4395fa8))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.2...lending-service-v0.33.0) (2026-09-08)
 
 

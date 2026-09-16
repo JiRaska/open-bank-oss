@@ -56,7 +56,13 @@ function nodeLabelText(svg: string): string {
   host.innerHTML = svg
   host.querySelectorAll('style').forEach(el => el.remove())
   return [...host.querySelectorAll('.nodes .label')]
-    .map(n => (n.textContent ?? '').replace(/\s+/g, ' ').trim())
+    .map(n => {
+      // SVG rows have visual line breaks but textContent concatenates them.
+      // Join rows, not every nested tspan: inline styling must not split words.
+      const rows = [...n.querySelectorAll('text > tspan.row')]
+      const text = rows.length ? rows.map(row => row.textContent ?? '').join(' ') : n.textContent ?? ''
+      return text.replace(/\s+/g, ' ').trim()
+    })
     .join(' | ')
 }
 
@@ -89,6 +95,15 @@ describe('mermaid diagram labels survive DOMPurify', () => {
     // for the same reason render-smoke's page mounts did (#2235); nothing here
     // asserts latency, so the timeout is generous on purpose.
   }, RENDER_TIMEOUT_MS)
+
+  it('reads SVG line breaks without inventing spaces within words or missing text', () => {
+    const label = (text: string) => `<svg><g class="nodes"><g class="label"><text>${text}</text></g></g></svg>`
+    expect(nodeLabelText(sanitize(label(
+      '<tspan class="row">Out<tspan>box</tspan></tspan><tspan class="row">Dispatcher</tspan>',
+    )))).toBe('Outbox Dispatcher')
+    expect(nodeLabelText(sanitize(label('<tspan>OutboxDispatcher</tspan>')))).toBe('OutboxDispatcher')
+    expect(nodeLabelText(sanitize(label('<tspan class="row">Outbox</tspan>')))).not.toContain('Dispatcher')
+  })
 
   it('pins htmlLabels at the top level, where mermaid actually reads it', () => {
     // flowchart.htmlLabels is deprecated in mermaid 11 and is NOT a substitute:
