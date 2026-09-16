@@ -18,6 +18,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { BADGE_CLASS, Drawer, PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   SAVINGS:      <Banknote size={13} />,
@@ -374,6 +375,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {product.termsAndConditions?.map(tac => {
                 const isCurrent = !tac.effectiveTo
+                const documentUrl = trustedHttpsUrl(tac.url)
                 return (
                   <div key={tac.id} style={{ padding: '10px 12px', borderRadius: '7px', background: isCurrent ? 'var(--success-bg)' : 'var(--surface-2)', border: `1px solid ${isCurrent ? 'var(--success-border)' : 'var(--border)'}` }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
@@ -384,10 +386,12 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                       {t('Platnost', 'Validity')}: {tac.effectiveFrom}{tac.effectiveTo ? ` → ${tac.effectiveTo}` : ` → ${t('dosud', 'present')}`}
                     </div>
                     {tac.summary && <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{tac.summary}</div>}
-                    <a href={tac.url} target="_blank" rel="noopener noreferrer"
+                    {documentUrl ? <a href={documentUrl} target="_blank" rel="noopener noreferrer"
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
                       <ExternalLink size={11} /> {t('Otevřít dokument', 'Open document')}
-                    </a>
+                    </a> : <span role="status" style={{ fontSize: '11px', color: 'var(--warning-text)', fontWeight: 600 }}>
+                      {t('Odkaz na dokument není bezpečně dostupný', 'Document link is not safely available')}
+                    </span>}
                   </div>
                 )
               })}

@@ -34,3 +34,21 @@ export function trustedRepositoryPullRequestUrl(value: unknown): string | null {
     return null
   }
 }
+
+/** Accept a public document destination without executable or credential-bearing schemes. */
+export function trustedHttpsUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const candidate = value.trim()
+  if (!candidate) return null
+
+  try {
+    const parsed = new URL(candidate)
+    return parsed.protocol === 'https:'
+      && parsed.username === ''
+      && parsed.password === ''
+      ? parsed.toString()
+      : null
+  } catch {
+    return null
+  }
+}
