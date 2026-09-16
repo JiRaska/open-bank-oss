@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.77.0...customer-edge-v0.78.0) (2026-09-14)
+
+
+### Features
+
+* **kyb:** bind the initiator to their verified identity, and add a sandbox demo company ([#10059](https://github.com/JiRaska/open-bank-oss/issues/10059)) ([545c744](https://github.com/JiRaska/open-bank-oss/commit/545c744be77662f22be40a6e7c392e2f9a2529d9))
+
 ## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.76.0...customer-edge-v0.77.0) (2026-09-13)
 
 

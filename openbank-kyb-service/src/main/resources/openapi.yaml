@@ -3,7 +3,7 @@ info:
   title: OpenBank KYB Service API
   # 1.2.0 -> 1.3.0 (#9711): additive — representation attestation. 1.2.0 shipped the name
   # search (#9707); this is the next free minor as of live main.
-  version: 1.4.0
+  version: 1.5.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -230,6 +230,18 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            Refused. The initiator's verified identity does not match the chosen listed representative,
+            the initiator is not a listed representative, or their identity is not yet verified. An
+            address mismatch alone is NOT this: it moves the case to MANUAL_REVIEW instead.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string, example: INITIATOR_IDENTITY_MISMATCH}
+                  message: {type: string}
   /api/v1/kyb/cases/{id}/cosigners:
     post:
       tags: [KYB]

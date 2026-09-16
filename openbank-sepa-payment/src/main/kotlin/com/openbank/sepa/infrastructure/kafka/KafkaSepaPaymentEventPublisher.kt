@@ -45,6 +45,7 @@ class KafkaSepaPaymentEventPublisher(
     ): String = objectMapper.writeValueAsString(
         SepaPaymentReturnedEvent(
             paymentId = payment.id,
+            version = payment.revision + 1,
             originalEndToEndId = originalEndToEndId,
             returnReasonCode = returnReasonCode,
             actorId = actorId,

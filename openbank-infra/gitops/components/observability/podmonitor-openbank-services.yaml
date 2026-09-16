@@ -63,6 +63,7 @@ spec:
       - campaign
       - communication
       - consent
+      - context
       - control-liveness-sentinel
       - customer-edge
       - delegation

@@ -92,6 +92,7 @@ class KafkaSepaPaymentEventPublisherTest {
         // domain-level assertion on the event alone cannot prove that, only serializing through
         // this publisher (the same objectMapper.writeValueAsString call the real outbox uses) can.
         assertThat(json).contains("\"sourceService\":\"sepa-payment\"")
+        assertThat(json).contains("\"version\":0")
     }
 
     @Test
@@ -105,6 +106,25 @@ class KafkaSepaPaymentEventPublisherTest {
         assertThat(json).contains("\"newStatus\":\"REJECTED\"")
         assertThat(json).contains("\"rejectReason\":\"SANCTIONS_HIT\"")
         assertThat(json).contains("\"sourceService\":\"sepa-payment\"")
+    }
+
+    @Test
+    fun `return evidence carries the revision of the pending returned transition`() {
+        val payment = payment().copy(revision = 4)
+
+        val json = publisher.returnEvidencePayload(
+            payment,
+            payment.endToEndId,
+            "AC04",
+            "operator-1",
+            "ROLE_OPERATOR",
+            "correlation-1",
+            true,
+        )
+
+        assertThat(json).contains("\"eventType\":\"sepa.payment.returned\"")
+        assertThat(json).contains("\"version\":5")
+        assertThat(json).contains("\"paymentId\":\"${payment.id}\"")
     }
 
     @Test

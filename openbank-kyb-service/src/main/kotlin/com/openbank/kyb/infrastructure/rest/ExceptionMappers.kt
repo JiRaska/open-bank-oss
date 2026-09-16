@@ -10,6 +10,7 @@ import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
 import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.CaseTransitionException
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -54,6 +55,16 @@ class CaseTransitionMapper : ExceptionMapper<CaseTransitionException> {
     override fun toResponse(e: CaseTransitionException): Response = error(CONFLICT, "INVALID_TRANSITION", e.message)
 }
 
+/**
+ * The initiator is not, verifiably, a listed representative. 422, not 403: the caller is authorised to
+ * drive their own case; it is this claim about the ENTITY that cannot be honoured.
+ */
+@Provider
+class InitiatorIdentityMismatchMapper : ExceptionMapper<InitiatorIdentityMismatchException> {
+    override fun toResponse(e: InitiatorIdentityMismatchException): Response =
+        error(UNPROCESSABLE, "INITIATOR_IDENTITY_MISMATCH", e.message)
+}
+
 @Provider
 class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> {
     override fun toResponse(e: RegistryUnavailableException): Response =
@@ -63,4 +74,5 @@ class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> 
 private const val NOT_FOUND = 404
 private const val FORBIDDEN = 403
 private const val CONFLICT = 409
+private const val UNPROCESSABLE = 422
 private const val UNAVAILABLE = 503

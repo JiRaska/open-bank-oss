@@ -170,8 +170,8 @@ OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED
 
 ## Eventy
 
-Eventy ICT incidentů vysílá přímo do Kafky SmallRye `@Channel` emitter — žádný outbox ani transakční
-záruka. Skeny nevysílají nic: platformový report je pouze přes REST (#4709).
+Eventy ICT incidentů se ukládají atomicky s incidentem do `ict_incident_outbox` a relay je při
+zapnutém dispatchi odesílá přes SmallRye Kafka. Výsledky skenů se jako eventy nevysílají.
 
 | Topic | Typ eventu | Spuštění | Klíčová pole |
 |---|---|---|---|
