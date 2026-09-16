@@ -250,6 +250,14 @@ describe('admin UI token contrast', () => {
     }
   })
 
+  it('strong accent controls keep readable text in both themes', () => {
+    const light = declarations(':root')
+    const dark = { ...light, ...declarations('\\.dark') }
+    for (const tokens of [light, dark]) {
+      expect(contrast(resolve(tokens, '--on-accent-strong'), resolve(tokens, '--accent-strong'))).toBeGreaterThanOrEqual(AA)
+    }
+  })
+
   it.each(themes)('%s sidebar navigation text remains legible', (_name, tokens) => {
     expect(contrast(resolve(tokens, '--sidebar-text-muted'), resolve(tokens, '--sidebar-bg'))).toBeGreaterThanOrEqual(AA)
   })

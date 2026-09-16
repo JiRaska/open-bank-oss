@@ -79,3 +79,26 @@ for (const state of states) {
     }
   })
 }
+
+test('selected service-group filter keeps AA contrast in both themes', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  await page.goto('/docs/service-map')
+  const selected = page.getByRole('group', { name: 'Service group filters' }).getByRole('button', { name: 'All' })
+  await expect(selected).toHaveAttribute('aria-pressed', 'true')
+  await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; }' })
+
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(selectedTheme => {
+      document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
+      document.documentElement.dataset.theme = selectedTheme
+    }, theme)
+    await expect.poll(() => page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--surface-4').trim(),
+    )).toBe(theme === 'dark' ? '#334155' : '#e2e8f0')
+    const colors = await selected.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { foreground: style.color, background: style.backgroundColor }
+    })
+    expect(contrast(colors.foreground, colors.background), `selected filter in ${theme}`).toBeGreaterThanOrEqual(4.5)
+  }
+})

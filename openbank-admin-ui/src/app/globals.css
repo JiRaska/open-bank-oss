@@ -110,6 +110,9 @@
      --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
      deliberately not --accent-hover, whose name promises an interaction state (#9749). */
   --accent-strong:        #4f46e5;
+  /* --text-inverse becomes dark ink in the dark theme, but --accent-strong stays
+     saturated violet in both themes. Keep its foreground white in both. */
+  --on-accent-strong:     #ffffff;
 
   /* ── Semantic ── */
   --success:              #10b981;
