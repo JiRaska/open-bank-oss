@@ -525,6 +525,10 @@ main {
   margin: 0 auto;
   padding: 0.25rem 0 2.5rem;
 }
+.dark .campaign-composer {
+  --campaign-ink: var(--text-primary);
+  --campaign-muted: var(--text-secondary);
+}
 .campaign-composer-hero {
   position: relative;
   overflow: hidden;
@@ -633,6 +637,7 @@ main {
 .campaign-brief-card .input:first-of-type { font-size: 1.25rem !important; }
 .campaign-audience-card,
 .campaign-entry-card { padding: 1.05rem; }
+.dark .campaign-audience-card .text-muted-foreground { color: var(--text-secondary); }
 .campaign-entry-card { background: linear-gradient(145deg, #fff 0%, #fbfbff 100%); }
 .campaign-section-heading { display: flex; align-items: flex-start; gap: .65rem; margin-bottom: .9rem; }
 .campaign-section-number {
