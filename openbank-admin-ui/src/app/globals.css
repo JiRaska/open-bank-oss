@@ -100,7 +100,7 @@
    * --accent-light/-bg/-border) as a *real color*, e.g. `color: var(--accent)`
    * or `background: var(--accent)`. These MUST be valid color values — see the
    * note on the tailwind-compat block below for why the triplet form broke them. */
-  --accent:               #6366f1;
+  --accent:               #5356d7; /* 5.10:1 on --accent-bg; readable as link text and solid control */
   --accent-hover:         #4f46e5;
   --accent-light:         #eef2ff;
   --accent-bg:            #eef2ff;
@@ -110,6 +110,7 @@
      --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
      deliberately not --accent-hover, whose name promises an interaction state (#9749). */
   --accent-strong:        #4f46e5;
+  --accent-strong-fg:     #ffffff; /* fixed deep fill keeps white text in both themes */
 
   /* ── Semantic ── */
   --success:              #10b981;
@@ -647,6 +648,8 @@ main {
 .campaign-section-heading p { margin: .03rem 0 .18rem; color: var(--text-secondary); /* was #8190a6:
    3.24:1 on white, below the 4.5:1 AA floor for this 0.64rem label (#9749). */ font-size: .64rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .campaign-section-heading h2 { color: var(--campaign-ink); font-size: .95rem; font-weight: 780; letter-spacing: -.025em; }
+.dark .campaign-audience-card .campaign-section-heading h2 { color: var(--text-primary); }
+.dark .campaign-audience-card .text-muted-foreground { color: var(--text-secondary); }
 .campaign-section-heading > p { margin: .08rem 0 0 auto; max-width: 19rem; color: var(--campaign-muted); line-height: 1.4; }
 .campaign-entry-card { container-type: inline-size; }
 .campaign-entry-card .campaign-section-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: .65rem; }
