@@ -211,10 +211,10 @@ export default function ClusterDossierPage() {
           <div key={s.label} className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               <s.Icon size={16} style={{ color: s.tone }} />
-              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', fontWeight: 700 }}>{s.label}</span>
+              <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 700 }}>{s.label}</span>
             </div>
             <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono, monospace)', lineHeight: 1 }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{s.note}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>{s.note}</div>
           </div>
         ))}
       </div>
@@ -236,9 +236,9 @@ export default function ClusterDossierPage() {
                   <GI size={14} style={{ color: g.color }} />
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{language === 'cs' ? g.label : g.labelEn}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>· {items.length}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>· {items.length}</span>
               </div>
-              <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 8px 34px' }}>{g.blurb}</p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 8px 34px' }}>{g.blurb}</p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8, paddingLeft: 34 }}>
                 {items.map(nsItem => {
                   const on = openNs === nsItem.name
@@ -287,7 +287,7 @@ export default function ClusterDossierPage() {
                   onClick={() => setActiveLayer(current => current === l.id ? null : l.id)}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveLayer(current => current === l.id ? null : l.id) } }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0, cursor: 'pointer' }}>
-                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-tertiary)', width: 18 }}>{i + 1}</span>
+                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-secondary)', width: 18 }}>{i + 1}</span>
                   <LI size={16} style={{ color: K8S_BLUE }} />
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{l.label}</span>
                   <StatusPill s={l.status} lang={language} />
@@ -347,7 +347,7 @@ export default function ClusterDossierPage() {
         </table>
       </div>
 
-      <p style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <p style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <FileText size={12} />
         {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
         {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}

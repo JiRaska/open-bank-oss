@@ -17,8 +17,6 @@ import { CardCapabilityMatrix } from '@/components/cards/CardCapabilityMatrix'
  * a client component and the language hook is unavailable to a server one, so one file could not
  * be both stale-proof and bilingual.
  */
-export const dynamic = 'force-static'
-
 export default function CardCapabilitiesPage() {
   return <CardCapabilityMatrix registry={getCardCapabilities()} />
 }

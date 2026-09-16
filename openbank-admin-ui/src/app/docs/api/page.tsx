@@ -694,7 +694,7 @@ export default function ApiCatalogPage() {
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{svc.name}</span>
                     <span style={{
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`, color: groupColor,
+                      background: `${groupColor}15`, color: 'var(--text-primary)',
                       borderRadius: '4px', border: `1px solid ${groupColor}30`,
                     }}>{groupLabel(svc.group)}</span>
                     <span style={{
@@ -937,7 +937,7 @@ export default function ApiCatalogPage() {
                   ) : item.publishers.map(p => (
                     <span key={p} style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                      background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
+                      background: `${item.color}15`, color: 'var(--text-primary)', border: `1px solid ${item.color}30`,
                       fontWeight: 600,
                     }}>↑ {p}</span>
                   ))}

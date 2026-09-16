@@ -5,13 +5,14 @@ import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 import { waitForSettledShell } from './helpers/shell'
 
-const ROUTES = ['/campaigns/new', '/campaigns/referrals', '/docs/service-map', '/services', '/settings'] as const
+const ROUTES = ['/campaigns/new', '/campaigns/referrals', '/cards/capabilities', '/docs/api', '/docs/service-map', '/services', '/settings'] as const
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.route('**/api/**', route => {
-    if (new URL(route.request().url()).pathname.startsWith('/api/auth/')) return route.continue()
+    const pathname = new URL(route.request().url()).pathname
+    if (!pathname.startsWith('/api/') || pathname.startsWith('/api/auth/')) return route.continue()
     return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"temporarily unavailable"}' })
   })
 })
@@ -36,6 +37,18 @@ for (const route of ROUTES) {
     for (const dark of [false, true]) await scanTheme(page, dark, '#main-content')
   })
 }
+
+test('card capability bootstrap scripts carry the request CSP nonce', async ({ page }) => {
+  const response = await page.goto('/cards/capabilities', { waitUntil: 'domcontentloaded' })
+  const nonce = response?.headers()['content-security-policy']?.match(/'nonce-([^']+)'/)?.[1]
+  expect(nonce).toBeTruthy()
+  const scripts = await page.locator('script[src*="/_next/static/chunks/"]').evaluateAll(elements =>
+    elements.map(element => (element as HTMLScriptElement).nonce),
+  )
+  expect(scripts.length).toBeGreaterThan(0)
+  expect(scripts.every(scriptNonce => scriptNonce === nonce)).toBe(true)
+  await waitForSettledShell(page)
+})
 
 test('published MGM programme card is readable in both themes', async ({ page }) => {
   await page.route('**/api/referral-programs', route => route.fulfill({
