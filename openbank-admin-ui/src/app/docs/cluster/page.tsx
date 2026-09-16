@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import styles from './cluster.module.css'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
@@ -95,7 +96,7 @@ function DefenseRings({ layers, active, onPick, lang }: { layers: Layer[]; activ
 function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']; lang: string }) {
   const [open, setOpen] = useState<string | null>(anatomy.steps[0]?.id ?? null)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.3fr)', gap: 20, alignItems: 'start' }}>
+    <div className={styles.anatomyLayout} data-testid="cluster-anatomy-layout">
       {/* the box */}
       <div style={{ position: 'relative', background: 'var(--sidebar-bg)', borderRadius: 14, padding: 14, border: '2px solid var(--sidebar-border)', boxShadow: 'var(--shadow-xl)' }}>
         {/* corner rivets */}
@@ -273,7 +274,7 @@ export default function ClusterDossierPage() {
 
       {/* ── 2) Defense in depth ── */}
       <SectionTitle icon={Shield} title={t('2 · Obrana do hloubky — „vrstvy ochranky"', '2 · Defense in depth — "layers of security"')} />
-      <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 24, alignItems: 'center', marginBottom: 32 }}>
+      <div className={styles.defenseLayout} data-testid="cluster-defense-layout">
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer} onPick={setActiveLayer} lang={language} />}
         </div>
@@ -324,8 +325,8 @@ export default function ClusterDossierPage() {
 
       {/* ── 4) Plan vs reality ── */}
       <SectionTitle icon={AlertTriangle} title={t('4 · Plán vs. realita', '4 · Plan vs reality')} />
-      <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div className={`card ${styles.comparisonScroll}`} role="region" aria-label={t('Tabulka plánu a reality', 'Plan versus reality table')} tabIndex={0} style={{ padding: 0, marginBottom: 24 }}>
+        <table className={styles.comparisonTable} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2)' }}>
               <th style={{ padding: '8px 14px' }}>{t('Kontrola', 'Control')}</th>

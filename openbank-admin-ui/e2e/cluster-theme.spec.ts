@@ -10,6 +10,34 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test.describe('/docs/cluster — semantic theme', () => {
+  test('mobile education stacks diagrams and keeps the comparison table keyboard-scrollable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/docs/cluster', { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('button', { name: /admin-ui/i })).toBeVisible()
+
+    const layout = await page.evaluate(() => {
+      const defense = document.querySelector('[data-testid="cluster-defense-layout"]')
+      const anatomy = document.querySelector('[data-testid="cluster-anatomy-layout"]')
+      const stacked = (element: Element | null) => {
+        const first = element?.firstElementChild?.getBoundingClientRect()
+        const second = element?.lastElementChild?.getBoundingClientRect()
+        return !!first && !!second && second.top >= first.bottom
+      }
+      return { viewport: innerWidth, document: document.documentElement.scrollWidth, defense: stacked(defense), anatomy: stacked(anatomy) }
+    })
+    expect(layout.document).toBeLessThanOrEqual(layout.viewport)
+    expect(layout.defense).toBe(true)
+    expect(layout.anatomy).toBe(true)
+
+    const comparison = page.getByRole('region', { name: 'Plan versus reality table' })
+    await expect(comparison).toBeVisible()
+    await expect(comparison).toHaveAttribute('tabindex', '0')
+    expect(await comparison.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+    await comparison.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => comparison.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+  })
+
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme preserves cluster education and WCAG A/AA`, async ({ page }) => {
       await page.goto('/docs/cluster')

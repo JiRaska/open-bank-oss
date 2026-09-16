@@ -1,0 +1,35 @@
+.defenseLayout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.anatomyLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.comparisonScroll {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.comparisonScroll:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.comparisonTable {
+  min-width: 620px;
+}
+
+@media (max-width: 760px) {
+  .defenseLayout,
+  .anatomyLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
