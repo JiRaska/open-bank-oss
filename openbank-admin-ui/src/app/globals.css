@@ -214,6 +214,7 @@
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
   --text-muted: var(--text-tertiary);
+  --muted-foreground: 215 20% 75%;
   --text-inverse: #0f172a;
   --accent: #a5b4fc;
   --accent-hover: #c7d2fe;
@@ -637,7 +638,6 @@ main {
 .campaign-brief-card .input:first-of-type { font-size: 1.25rem !important; }
 .campaign-audience-card,
 .campaign-entry-card { padding: 1.05rem; }
-.dark .campaign-audience-card .text-muted-foreground { color: var(--text-secondary); }
 .campaign-entry-card { background: linear-gradient(145deg, #fff 0%, #fbfbff 100%); }
 .campaign-section-heading { display: flex; align-items: flex-start; gap: .65rem; margin-bottom: .9rem; }
 .campaign-section-number {
@@ -995,6 +995,10 @@ main {
 .tone-text-info    { color: var(--info-text); }
 .tone-text-neutral { color: var(--text-secondary); }
 .tone-text-accent  { color: var(--ob-accent-text); }
+
+/* Editorial API domain chips retain their identity colour without losing AA contrast in dark mode. */
+.api-group-chip { color: var(--api-group-color); }
+.dark .api-group-chip { color: color-mix(in srgb, var(--api-group-color) 45%, var(--text-primary)); }
 
 /* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
    a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */

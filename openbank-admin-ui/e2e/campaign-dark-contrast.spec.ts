@@ -15,6 +15,7 @@ test.beforeEach(async ({ page, context, baseURL }) => {
 async function expectReadableDarkTheme(page: import('@playwright/test').Page) {
   await expect(page.locator('html')).toHaveClass(/dark/)
   await expect(page.locator('main').first()).toBeVisible()
+  await page.waitForTimeout(400)
   const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
   expect(scan.violations.flatMap(violation => violation.nodes.map(node => node.target.join(' > ')))).toEqual([])
 }
