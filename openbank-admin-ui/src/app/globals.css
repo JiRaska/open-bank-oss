@@ -90,8 +90,10 @@
   --z-toast: 60;
 
   /* ── Brand / Accent ── */
-  --ob-accent:            #6366f1;
-  --ob-accent-hover:      #4f46e5;
+  /* The primary brand shade must work as text on light surfaces AND behind white button text.
+     #4f46e5 clears AA in both directions on white; the previous #6366f1 missed by 0.04. */
+  --ob-accent:            #4f46e5;
+  --ob-accent-hover:      #4338ca;
   --ob-accent-light:      #eef2ff;
   --ob-accent-border:     #c7d2fe;
   --ob-accent-text:       #4338ca;
@@ -100,15 +102,14 @@
    * --accent-light/-bg/-border) as a *real color*, e.g. `color: var(--accent)`
    * or `background: var(--accent)`. These MUST be valid color values — see the
    * note on the tailwind-compat block below for why the triplet form broke them. */
-  --accent:               #6366f1;
-  --accent-hover:         #4f46e5;
+  --accent:               #4f46e5;
+  --accent-hover:         #4338ca;
   --accent-light:         #eef2ff;
   --accent-bg:            #eef2ff;
   --accent-border:        #c7d2fe;
   --accent-text:          #4338ca;
-  /* A selected toggle fills with the accent and puts WHITE text on it, which is 4.47:1 on
-     --accent — under AA. This is that fill: same hue, dark enough for white text (6.29:1). It is
-     deliberately not --accent-hover, whose name promises an interaction state (#9749). */
+  /* The selected-control token remains explicit, even though the corrected base brand shade now
+     shares its value. This preserves the separate semantic role for future palette changes. */
   --accent-strong:        #4f46e5;
   --accent-strong-text:   var(--text-inverse);
 
