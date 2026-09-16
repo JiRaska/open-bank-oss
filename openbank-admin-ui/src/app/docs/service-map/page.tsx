@@ -896,7 +896,7 @@ export default function ServiceMapPage() {
 
         {/* Detail panel */}
         {selectedSvc && (
-          <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
+          <div className="card" data-testid="map-service-detail" style={{ padding: '20px', alignSelf: 'start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
               <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: selectedSvc.color }} />
               <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{selectedSvc.name}</div>
@@ -911,7 +911,7 @@ export default function ServiceMapPage() {
                   fontSize: '11px',
                   fontWeight: 600,
                   background: healthStatuses[selectedSvc.id] === 'UP' ? 'var(--success-bg)' : healthStatuses[selectedSvc.id] === 'DOWN' ? 'var(--danger-bg)' : 'var(--surface-3)',
-                  color: healthStatuses[selectedSvc.id] === 'UP' ? 'var(--map-identity)' : healthStatuses[selectedSvc.id] === 'DOWN' ? 'var(--map-compliance)' : 'var(--text-secondary)'
+                  color: healthStatuses[selectedSvc.id] === 'UP' ? 'var(--success-text)' : healthStatuses[selectedSvc.id] === 'DOWN' ? 'var(--danger-text)' : 'var(--text-secondary)'
                 }}>
                   {healthStatuses[selectedSvc.id] === 'UP' && <CheckCircle2 size={12} />}
                   {healthStatuses[selectedSvc.id] === 'DOWN' && <XCircle size={12} />}
@@ -928,7 +928,7 @@ export default function ServiceMapPage() {
               </div>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('SKUPINA', 'GROUP')}</div>
-                <div style={{ fontSize: '12px', color: GROUP_LABELS[selectedSvc.group]?.color, fontWeight: 600 }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>
                   {groupLabel(selectedSvc.group)}
                 </div>
               </div>
@@ -941,7 +941,7 @@ export default function ServiceMapPage() {
                 href={`/services/${selectedSvc.id}/docs`}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                  padding: '8px 12px', background: 'var(--accent-bg)', color: 'var(--accent)',
+                  padding: '8px 12px', background: 'var(--accent-bg)', color: 'var(--accent-text)',
                   borderRadius: 'var(--r-md)', fontSize: '12px', fontWeight: 600,
                   textDecoration: 'none', marginTop: '4px',
                   border: '1px solid var(--accent-border, transparent)',
@@ -983,10 +983,10 @@ export default function ServiceMapPage() {
                         <div style={{ 
                           fontWeight: 500, 
                           color: govEntry.flywayDrift === true 
-                            ? 'var(--danger)' 
-                            : govEntry.flywayDrift === false 
-                              ? 'var(--success)' 
-                              : 'var(--warning)' 
+                            ? 'var(--danger-text)'
+                            : govEntry.flywayDrift === false
+                              ? 'var(--success-text)'
+                              : 'var(--warning-text)'
                         }}>
                           {govEntry.flywayDrift === true ? t('Ano', 'Yes') : govEntry.flywayDrift === false ? t('Ne', 'No') : t('Neznámé', 'Unknown')}
                         </div>
@@ -1005,7 +1005,7 @@ export default function ServiceMapPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Evidence exportována', 'Evidence Exported')}</div>
-                        <div style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success)' : 'var(--warning)' }}>
+                        <div style={{ fontWeight: 500, color: govEntry.evidenceExported ? 'var(--success-text)' : 'var(--warning-text)' }}>
                           {govEntry.evidenceExported ? t('Ano', 'Yes') : t('Ne', 'No')}
                         </div>
                       </div>
@@ -1082,7 +1082,8 @@ export default function ServiceMapPage() {
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', fontSize: '12px' }}>
                       <span style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{dir}</span>
-                      <span style={{ color: other?.color, fontWeight: 600 }}>{other?.name}</span>
+                      <span aria-hidden="true" style={{ width: 7, height: 7, flexShrink: 0, borderRadius: '50%', background: other?.color }} />
+                      <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{other?.name}</span>
                       <span style={{ color: 'var(--text-tertiary)', fontSize: '11px' }}>({e.label})</span>
                     </div>
                   )
@@ -1149,7 +1150,8 @@ export default function ServiceMapPage() {
                     {tierConsumers.map((c, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
                         <span style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>→</span>
-                        <span style={{ color: c.svc!.color, fontWeight: 600 }}>{c.svc!.name}</span>
+                        <span aria-hidden="true" style={{ width: 7, height: 7, flexShrink: 0, borderRadius: '50%', background: c.svc!.color }} />
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.svc!.name}</span>
                         <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)', background: 'var(--surface-2)', padding: '2px 6px', borderRadius: '4px' }}>
                           {edgeTypeLabel(c.type, t)}{isExt && !c.enabled ? ' · ' + t('vyp', 'off') : ''}
                         </span>
