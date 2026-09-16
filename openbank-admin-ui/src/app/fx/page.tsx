@@ -559,7 +559,7 @@ export default function FxPage() {
                         <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
                       </td></tr>
                     ) : bankRateRows.map(r => (
-                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', opacity: r.published ? 1 : 0.45 }}
+                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', background: r.published ? undefined : 'var(--surface-2)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>

@@ -110,7 +110,7 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10 }}>{cards.map((card, index) => <button key={card.tab} type="button" onClick={() => selectTab(card.tab)} style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--surface-1)', borderRadius: 11, padding: 14, animation: `fadeIn ${180 + index * 80}ms ease-out both` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}><div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em' }}>{card.eyebrow}</div><strong style={{ display: 'block', marginTop: 3 }}>{card.title}</strong></div><StateBadge state={card.state} /></div>
       <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 10 }}>{card.detail}</div>
-      <div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
+      <div style={{ color: 'var(--accent-text)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
     </button>)}</div>
   </section>
 }
@@ -578,6 +578,7 @@ export default function TestIntelligencePage() {
     setLoading(true)
     try {
       const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
       setReport(await response.json() as TestIntelligenceReport)
     } catch { setReport(null) } finally { setLoading(false) }
   }, [])
