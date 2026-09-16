@@ -99,6 +99,42 @@ test.describe('Transaction ledger search recovery', () => {
     expect(background).not.toBe('none')
   })
 
+  test('explains invalid ranges before requesting the transaction ledger', async ({ page }) => {
+    const requestedUrls: string[] = []
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => {
+      requestedUrls.push(route.request().url())
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [], count: 0, limit: 51, offset: 0 }) })
+    })
+
+    await page.goto('/transactions', { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: 'Filters' }).click()
+    await page.getByLabel('Date from').fill('2026-09-16')
+    await page.getByLabel('Date to').fill('2026-09-01')
+    await expect(page.locator('#transaction-date-range-error')).toContainText('The start date must be on or before the end date.')
+    const search = page.getByRole('button', { name: 'Search transactions' })
+    await expect(search).toBeDisabled()
+    await page.getByLabel('Search by account ID').press('Enter')
+    expect(requestedUrls).toHaveLength(0)
+
+    await page.getByLabel('Date to').fill('2026-09-30')
+    await page.getByLabel('Amount from (CZK)').fill('200')
+    await page.getByLabel('Amount to (CZK)').fill('100')
+    await expect(page.locator('#transaction-amount-range-error')).toContainText('The minimum amount cannot exceed the maximum amount.')
+    await expect(search).toBeDisabled()
+    await page.getByLabel('Search by account ID').press('Enter')
+    expect(requestedUrls).toHaveLength(0)
+
+    await page.getByLabel('Amount to (CZK)').fill('300')
+    await expect(search).toBeEnabled()
+    await search.click()
+    await expect(page.getByRole('status')).toContainText('No transactions match your search criteria')
+    expect(requestedUrls).toHaveLength(1)
+    expect(requestedUrls[0]).toContain('dateFrom=2026-09-16')
+    expect(requestedUrls[0]).toContain('dateTo=2026-09-30')
+    expect(requestedUrls[0]).toContain('amountMin=200')
+    expect(requestedUrls[0]).toContain('amountMax=300')
+  })
+
   test('rejects a malformed successful response without replacing verified money-path evidence', async ({ page }) => {
     let malformed = false
     await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => route.fulfill({
