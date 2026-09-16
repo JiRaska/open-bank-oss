@@ -415,7 +415,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('cnb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ČNB', 'Scrollable CNB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -464,7 +464,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('ecb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ECB', 'Scrollable ECB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -546,7 +546,7 @@ export default function FxPage() {
                 </span>
               </div>
 
-              <div style={{ maxHeight: '480px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvný bankovní kurzovní lístek', 'Scrollable bank rate sheet')} tabIndex={0} style={{ maxHeight: '480px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Publikovat', 'Publish'), t('Měna', 'Currency'), t('ECB Střed', 'ECB Mid'), t('Nákup (banka)', 'Buy (bank)'), t('Prodej (banka)', 'Sell (bank)'), t('Override', 'Override'), t('Datum', 'Date')].map(h => (
@@ -753,7 +753,7 @@ export default function FxPage() {
               <History size={14} style={{ color: 'var(--text-primary)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
-            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+            <div role="region" aria-label={t('Posuvná historie akcí operátora', 'Scrollable operator action history')} tabIndex={0} style={{ maxHeight: '220px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {[t('Čas', 'Time'), t('Zdroj', 'Source'), t('Pár', 'Pair'), t('Kurz', 'Rate')].map(h => (
@@ -791,7 +791,7 @@ export default function FxPage() {
                 {t('Žádné konverze v interním systému.', 'No conversions in internal system.')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka posledních konverzí', 'Scrollable recent conversions table')} tabIndex={0} style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Datum', 'Date'), t('Z → Na', 'From → To'), t('Částka Z', 'From'), t('Částka Na', 'To'), t('Status', 'Status')].map(h => (
