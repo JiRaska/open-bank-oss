@@ -118,14 +118,6 @@ jobs:
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
-      - name: Build
-        # Build once before browser tests. Playwright serves this immutable production bundle;
-        # the previous dev server compiled each visited route on demand and exhausted clean-runner
-        # wall time as the suite grew past 200 scenarios.
-        run: npm run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-
       - name: Install Playwright browsers
         # Download the Chromium binary (always works, no root required).
         run: npx playwright install chromium
@@ -160,7 +152,6 @@ jobs:
           NEXTAUTH_URL: "http://localhost:3001"
           NEXTAUTH_SECRET: "ci-e2e-secret"
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
-          OPENBANK_E2E_SERVER: "production"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
       - name: Build Admin UI Test Intelligence envelope
@@ -209,6 +200,11 @@ jobs:
           name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
 
   # Gate job — always runs, maps to the "Admin UI" required check name.
   # Passes when ui-build succeeded or was skipped (no UI changes); fails when

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against an auto-started Next.js server (development locally, production in CI).
+// Runs against an auto-started Next.js server (development by default, production when opted in).
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
@@ -57,9 +57,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    // Hosted CI already builds the app once before this suite. Serving that immutable bundle
-    // avoids compiling 100+ routes on demand under four browser workers, which made clean runners
-    // hit the job budget and exposed dev-only HMR duplicate-tree/theme-transition races.
+    // Opt-in production runs serve the prebuilt bundle, avoiding on-demand compilation and
+    // dev-only HMR races. The caller must run `npm run build` before selecting this mode.
     command: useProductionServer
       ? `npm run start -- -p ${e2ePort}`
       : `npm run dev -- -p ${e2ePort}`,
