@@ -47,3 +47,25 @@ test('cluster dossier explains a missing generated topology without inventing po
   await expect(page.getByText(/Failed to load: cluster topology|Načtení selhalo: topologie clusteru/)).toBeVisible()
   await expect(page.locator('#screen-error-title')).toHaveCount(0)
 })
+
+test('cluster dossier recovers from HTTP 503 without inventing posture', async ({ page }) => {
+  await page.unroute('**/api/**')
+  let requests = 0
+  await page.route('**/api/cluster/topology', route => {
+    requests += 1
+    return requests === 1
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+      : route.continue()
+  })
+
+  await page.goto('/docs/cluster', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByText(/Failed to load: cluster topology|Načtení selhalo: topologie clusteru/)).toBeVisible()
+  const namespacesCard = page.locator('.card').filter({ hasText: 'Namespaces' }).first()
+  await expect(namespacesCard).toContainText('—')
+  const refresh = page.getByRole('button', { name: /Refresh|Obnovit/ })
+  await expect(refresh).toBeEnabled()
+  await refresh.click()
+  await expect(page.getByText(/Failed to load: cluster topology|Načtení selhalo: topologie clusteru/)).toHaveCount(0)
+  await expect(namespacesCard).not.toContainText('—')
+  expect(requests).toBe(2)
+})
