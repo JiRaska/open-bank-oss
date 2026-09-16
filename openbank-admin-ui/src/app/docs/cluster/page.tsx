@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import styles from './cluster.module.css'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
@@ -201,6 +202,30 @@ export default function ClusterDossierPage() {
         </button>}
       />
 
+      {!topo ? (
+        <div className="card" style={{ marginBottom: 24 }}>
+          {loading ? (
+            <div role="status" aria-live="polite" style={{ padding: 32, color: 'var(--text-secondary)', textAlign: 'center' }}>
+              <RefreshCw aria-hidden="true" size={15} className="animate-spin" />{' '}
+              {t('Načítám ověřenou topologii clusteru…', 'Loading verified cluster topology…')}
+            </div>
+          ) : (
+            <DataUnavailable
+              kind="error"
+              lang={language}
+              title={t('Podklady topologie nejsou dostupné', 'Topology evidence unavailable')}
+              detail={t(
+                'Počty a bezpečnostní stavy jsou skryté, dokud se nepodaří načíst ověřený podklad. Pomlčka by neznamenala, že v clusteru nic není.',
+                'Counts and security states are hidden until verified evidence loads. A dash would not mean the cluster is empty.',
+              )}
+              dense
+            >
+              <button type="button" className="btn btn-secondary" onClick={load}>{t('Zkusit znovu', 'Try again')}</button>
+            </DataUnavailable>
+          )}
+        </div>
+      ) : (
+      <>
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
@@ -353,6 +378,8 @@ export default function ClusterDossierPage() {
         {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
         {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
       </p>
+      </>
+      )}
     </div>
   )
 }
