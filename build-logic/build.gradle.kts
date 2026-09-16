@@ -46,6 +46,14 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     implementation("org.jetbrains.kotlin.plugin.allopen:org.jetbrains.kotlin.plugin.allopen.gradle.plugin:$kotlinVersion")
     implementation("io.quarkus:io.quarkus.gradle.plugin:$quarkusVersion")
+    // Already supplied at runtime by the Quarkus plugin; expose its descriptor
+    // factory to the convention compiler without adding a second runtime version.
+    compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion") {
+        isTransitive = false
+    }
+    compileOnly("io.quarkus:quarkus-bootstrap-app-model:$quarkusVersion") {
+        isTransitive = false
+    }
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion")
     // Static analysis (SAST gate), applied fleet-wide by the openbank.static-analysis
