@@ -142,6 +142,7 @@ export default function FxPage() {
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<string | null>(null)
+  const [refreshFeedback, setRefreshFeedback] = useState<{ kind: 'success' | 'failure'; source: 'cnb' | 'ecb' | 'all'; denied?: boolean } | null>(null)
   // Typed unavailable reason for a failed aggregate fetch → renders the calm
   // <DataUnavailable> panel instead of leaking a raw "HTTP 500" (graceful-state rule).
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -188,12 +189,16 @@ export default function FxPage() {
       }
       const data = await res.json()
 
-      setCnbRates(data.cnb?.rates ?? [])
-      setCnbSyncedAt(data.cnb?.syncedAt ?? null)
+      if (!data.cnb?.error && Array.isArray(data.cnb?.rates)) {
+        setCnbRates(data.cnb.rates)
+        setCnbSyncedAt(data.cnb.syncedAt ?? null)
+      }
       setCnbError(data.cnb?.error ?? null)
 
-      setEcbRates(data.ecb?.rates ?? [])
-      setEcbSyncedAt(data.ecb?.syncedAt ?? null)
+      if (!data.ecb?.error && Array.isArray(data.ecb?.rates)) {
+        setEcbRates(data.ecb.rates)
+        setEcbSyncedAt(data.ecb.syncedAt ?? null)
+      }
       setEcbError(data.ecb?.error ?? null)
 
       setFxStatus((data.fxService?.status as FxStatus | undefined) ?? (data.fxService?.up ? 'up' : 'down'))
@@ -217,6 +222,7 @@ export default function FxPage() {
 
   const manualRefresh = async (source: 'cnb' | 'ecb' | 'all') => {
     setRefreshing(source)
+    setRefreshFeedback(null)
     try {
       const res = await fetch('/api/fx/refresh', {
         method: 'POST',
@@ -224,8 +230,14 @@ export default function FxPage() {
         body: JSON.stringify({ source }),
         signal: AbortSignal.timeout(20000),
       })
+      if (!res.ok) {
+        setRefreshFeedback({ kind: 'failure', source, denied: res.status === 401 || res.status === 403 })
+        return
+      }
       const data = await res.json()
       const now = new Date().toISOString()
+      const requested = source === 'all' ? ['cnb', 'ecb'] : [source]
+      const succeeded = requested.every(key => data?.results?.[key]?.ok === true)
       setSchedules(prev => prev.map(s => {
         const key = s.source.toLowerCase() as 'cnb' | 'ecb'
         if (source !== 'all' && key !== source) return s
@@ -233,7 +245,10 @@ export default function FxPage() {
         if (!r) return s
         return { ...s, lastRun: now, lastStatus: r.ok ? 'ok' : 'error', lastCount: r.count ?? null, nextRun: nextRunTime(s.hour, s.minute, s.days) }
       }))
+      setRefreshFeedback({ kind: succeeded ? 'success' : 'failure', source })
       await loadData()
+    } catch {
+      setRefreshFeedback({ kind: 'failure', source })
     } finally {
       setRefreshing(null)
     }
@@ -328,6 +343,16 @@ export default function FxPage() {
             })()}
           </div>}
         />
+
+        {refreshFeedback && (
+          <div role={refreshFeedback.kind === 'failure' ? 'alert' : 'status'} style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '8px', background: refreshFeedback.kind === 'failure' ? 'var(--danger-bg)' : 'var(--success-bg)', color: refreshFeedback.kind === 'failure' ? 'var(--danger-text)' : 'var(--success-text)', border: `1px solid ${refreshFeedback.kind === 'failure' ? 'var(--danger-border)' : 'var(--success-border)'}` }}>
+            {refreshFeedback.denied
+              ? t('Ověření zdroje vyžaduje přihlášení a přístup k devizovým operacím.', 'Checking the source requires sign-in and FX access.')
+              : refreshFeedback.kind === 'success'
+                ? t('Požadované externí zdroje odpověděly. Aktuální kurzy se načítají samostatně níže.', 'The requested external sources responded. Current rates are loaded separately below.')
+                : t('Některý požadovaný zdroj neodpověděl. Ponecháváme zobrazené kurzy; zkuste akci znovu.', 'A requested source did not respond. Displayed rates remain available; try again.')}
+          </div>
+        )}
 
         {unavailable && (
           <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
