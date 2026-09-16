@@ -1,0 +1,147 @@
+quarkus:
+  application:
+    name: openbank-context-service
+  http:
+    port: 8149
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_context
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_context
+  flyway:
+    migrate-at-start: true
+  hibernate-orm:
+    database:
+      generation: none
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  smallrye-openapi:
+    store-schema-directory: target/openapi
+  management:
+    enabled: true
+    port: 8085
+    root-path: /q
+"%dev":
+  quarkus:
+    oidc:
+      enabled: false
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+  openbank:
+    context:
+      # Hosted CI cold-starts PostgreSQL and the reactive pool under shared CPU.
+      # Keep production's 500 ms fail-fast budget while preventing infrastructure
+      # scheduling jitter from turning the integration test into a false 500.
+      query-timeout-ms: 5000
+  mp:
+    messaging:
+      incoming:
+        dispute-events-in:
+          connector: smallrye-in-memory
+        ict-incident-events-in:
+          connector: smallrye-in-memory
+        domestic-payment-events-in:
+          connector: smallrye-in-memory
+        transaction-events-in:
+          connector: smallrye-in-memory
+        ledger-events-in:
+          connector: smallrye-in-memory
+        clearing-events-in:
+          connector: smallrye-in-memory
+        sepa-payment-events-in:
+          connector: smallrye-in-memory
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      dispute-events-in:
+        connector: smallrye-kafka
+        topic: openbank.dispute.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.dispute-events
+      ict-incident-events-in:
+        connector: smallrye-kafka
+        topic: openbank.security.ict.incident
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.ict-incident-events
+      domestic-payment-events-in:
+        connector: smallrye-kafka
+        topic: openbank.domestic.payment.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.domestic-payment-events
+      transaction-events-in:
+        connector: smallrye-kafka
+        topic: openbank.transactions.transaction.initiated
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.transaction-events
+      ledger-events-in:
+        connector: smallrye-kafka
+        topic: openbank.ledger.journal.posted
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.ledger-events
+      clearing-events-in:
+        connector: smallrye-kafka
+        topic: openbank.clearing.batch.event
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.clearing-events
+      sepa-payment-events-in:
+        connector: smallrye-kafka
+        topic: openbank.sepa.payment.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.sepa-payment-events
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
+authz:
+  enforce: true
+openbank:
+  context:
+    bank-scope: ${CONTEXT_BANK_SCOPE:openbank-cz}
+    projection-generation: ${CONTEXT_PROJECTION_GENERATION:1}
+    # Compatibility window only. Production activation sets this true after every source emits
+    # a database-backed aggregateRevision; legacy timestamp ordering is measured separately.
+    require-strict-revisions: ${CONTEXT_REQUIRE_STRICT_REVISIONS:false}
+    max-nodes: 100
+    max-edges: 200
+    query-timeout-ms: 500

@@ -1,5 +1,75 @@
 # Changelog
 
+## [0.247.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.0...admin-ui-v0.247.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** upgrade Mermaid with patched parser dependencies ([#10045](https://github.com/JiRaska/open-bank-oss/issues/10045)) ([4c041a1](https://github.com/JiRaska/open-bank-oss/commit/4c041a1a8d4ca138fa851748899a1252c1d92bdf))
+
+## [0.247.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.1...admin-ui-v0.247.0) (2026-09-16)
+
+
+### Features
+
+* **admin-ui:** transform context graph into investigation field ([#10095](https://github.com/JiRaska/open-bank-oss/issues/10095)) ([37f82a1](https://github.com/JiRaska/open-bank-oss/commit/37f82a140f232f6e96daa97454c4cac2dcdae50b))
+
+
+### Bug Fixes
+
+* **lending:** preserve credit risk evidence and reconcile allowances ([#9466](https://github.com/JiRaska/open-bank-oss/issues/9466)) ([1f8b96c](https://github.com/JiRaska/open-bank-oss/commit/1f8b96c7d7f00c3900392dd080b1c9d34e886179)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
+## [0.246.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.0...admin-ui-v0.246.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** populate customer graph from domain owners ([#10081](https://github.com/JiRaska/open-bank-oss/issues/10081)) ([81e8c12](https://github.com/JiRaska/open-bank-oss/commit/81e8c12712d631f952e623b3a601e22a7a25a7fe))
+* **admin-ui:** resolve card feed in payments namespace ([#10084](https://github.com/JiRaska/open-bank-oss/issues/10084)) ([0933f6e](https://github.com/JiRaska/open-bank-oss/commit/0933f6eeea003b15dd51502eeda3b8960fe0ab03))
+
+## [0.246.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.245.0...admin-ui-v0.246.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [0.245.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.244.0...admin-ui-v0.245.0) (2026-09-14)
+
+
+### Features
+
+* **admin-ui:** redesign loyalty workspace for marketing ([#10053](https://github.com/JiRaska/open-bank-oss/issues/10053)) ([4f44883](https://github.com/JiRaska/open-bank-oss/commit/4f44883c0240e5630cbdc80bee422385fcf3a1db))
+
+## [0.244.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.3...admin-ui-v0.244.0) (2026-09-13)
+
+
+### Features
+
+* **admin-ui:** surface operational evidence ([#9988](https://github.com/JiRaska/open-bank-oss/issues/9988)) ([a3c4ed0](https://github.com/JiRaska/open-bank-oss/commit/a3c4ed08242c1c1d442c4351742c6fa606e0f4b3))
+
+## [0.243.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.2...admin-ui-v0.243.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **infra:** verify image signature and SBOM in one Kyverno entry, for one verdict ([#9950](https://github.com/JiRaska/open-bank-oss/issues/9950)) ([ed77bae](https://github.com/JiRaska/open-bank-oss/commit/ed77baea9eab65b662a2a0e461bbd2e5e345fb1a))
+
+## [0.243.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.1...admin-ui-v0.243.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead bindings and preserve theme contrast ([#9972](https://github.com/JiRaska/open-bank-oss/issues/9972)) ([25c544d](https://github.com/JiRaska/open-bank-oss/commit/25c544dbe9ec74bba94672a1e18d9afec282876e))
+
+## [0.243.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.243.0...admin-ui-v0.243.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** review notification decisions ([#9352](https://github.com/JiRaska/open-bank-oss/issues/9352)) ([0f241ae](https://github.com/JiRaska/open-bank-oss/commit/0f241aefb66eca1a85ef3f299829270bd81e18f7))
+* **admin-ui:** stage governance registries in image builds ([#9969](https://github.com/JiRaska/open-bank-oss/issues/9969)) ([9b36367](https://github.com/JiRaska/open-bank-oss/commit/9b363672f5e8c6624b4773a45066634d494b5b5a))
+
 ## [0.243.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.242.0...admin-ui-v0.243.0) (2026-09-13)
 
 

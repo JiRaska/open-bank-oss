@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: Apache-2.0
+openapi: 3.1.0
+info:
+  title: Banking Context Service API
+  version: 1.0.0
+  description: Purpose-bound, case-assigned graph views for authorized investigations.
+paths:
+  /api/v1/context/assignment-proposals:
+    post:
+      operationId: proposeContextAssignment
+      summary: Propose time-bounded investigation access for independent approval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposeAssignment' }
+      responses:
+        '201': { description: Pending proposal created }
+        '400': { description: Invalid scope or validity window }
+        '403': { description: Policy denied }
+    get:
+      operationId: listPendingContextAssignments
+      summary: List pending assignment proposals for a checker
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200': { description: Pending proposals }
+        '403': { description: Policy denied }
+  /api/v1/context/assignment-proposals/{id}:
+    patch:
+      operationId: decideContextAssignment
+      summary: Approve or reject as a checker distinct from the maker
+      parameters:
+        - $ref: '#/components/parameters/id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecideAssignment' }
+      responses:
+        '200': { description: Decision recorded; an approval creates the assignment atomically }
+        '403': { description: Policy denied }
+        '404': { description: Proposal not found in the configured bank scope }
+        '409': { description: Self-approval or proposal already decided }
+  /api/v1/context/assignment-proposals/assignments/{id}:
+    delete:
+      operationId: revokeContextAssignment
+      summary: Immediately revoke active investigation access
+      parameters:
+        - $ref: '#/components/parameters/id'
+      responses:
+        '204': { description: Assignment expired and revocation audited }
+        '403': { description: Policy denied }
+        '404': { description: Assignment not found in the configured bank scope }
+  /api/v1/context/assignment-proposals/assignments:
+    get:
+      operationId: listActiveContextAssignments
+      summary: List active investigation assignments for revocation review
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200': { description: Active time-bounded assignments }
+        '403': { description: Policy denied }
+  /api/v1/context/complaints/{reference}:
+    get:
+      operationId: getComplaintContext
+      summary: Read a bounded payment-complaint context graph
+      parameters:
+        - $ref: '#/components/parameters/reference'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - $ref: '#/components/parameters/asOf'
+      responses:
+        '200': { description: Authorized bounded neighborhood }
+        '400': { description: Invalid investigation context or asOf timestamp }
+        '403': { description: No active assignment or policy denied }
+        '404': { description: Root not projected }
+        '503': { description: Authorization decision unavailable }
+  /api/v1/context/incidents/{reference}/impact:
+    get:
+      operationId: getIncidentImpact
+      summary: Read aggregate incident impact without affected identifiers
+      parameters:
+        - $ref: '#/components/parameters/reference'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - $ref: '#/components/parameters/asOf'
+      responses:
+        '200': { description: Authorized aggregate impact }
+        '400': { description: Invalid investigation context or asOf timestamp }
+        '403': { description: No active assignment or policy denied }
+        '503': { description: Authorization decision unavailable }
+components:
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    reference:
+      name: reference
+      in: path
+      required: true
+      schema: { type: string, maxLength: 200 }
+    caseId:
+      name: X-Investigation-Case-Id
+      in: header
+      required: true
+      schema: { type: string, maxLength: 200 }
+    purpose:
+      name: X-Investigation-Purpose
+      in: header
+      required: true
+      schema: { type: string, maxLength: 80 }
+    asOf:
+      name: asOf
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+  schemas:
+    ProposeAssignment:
+      type: object
+      required: [principalId, caseId, purpose, validTo]
+      properties:
+        principalId: { type: string, minLength: 1, maxLength: 200 }
+        caseId: { type: string, minLength: 1, maxLength: 200 }
+        purpose: { type: string, minLength: 1, maxLength: 80 }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+    DecideAssignment:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }

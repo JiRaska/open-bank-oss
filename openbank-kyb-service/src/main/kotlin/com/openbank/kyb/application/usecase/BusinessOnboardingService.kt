@@ -22,6 +22,7 @@ import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
@@ -119,7 +120,11 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     override suspend fun matchInitiator(cmd: MatchInitiatorCommand): BusinessOnboardingCase {
         val case = ownedBy(cmd.caseId, cmd.callerPartyId)
         val now = Instant.now(clock)
-        val matched = case.initiatorMatched(cmd.representativeIndex, cmd.claimedName, cmd.dateOfBirth, now)
+        // Who the initiator IS comes from party-service's record, never from the request: `claimedName`
+        // and `dateOfBirth` stay on the command for the API contract and are not used for identity.
+        val identity = parties.initiatorIdentity(case.initiatorPartyId)
+            ?: throw InitiatorIdentityMismatchException("no identity on record for the initiator")
+        val matched = case.initiatorMatched(cmd.representativeIndex, identity, now)
         val event = if (matched.status == CaseStatus.MANUAL_REVIEW) KybEvents.reviewRequired(matched, now) else null
         return cases.update(matched, event).also(::armTimers)
     }

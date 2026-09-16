@@ -258,30 +258,47 @@ data class BusinessOnboardingCase(
         copy(entityPartyId = partyId, updatedAt = at)
 
     /**
-     * The initiator claims to be the listed representative at [representativeIndex]. A sole
-     * trader is always their own (and only) representative. A claim that does not match a
-     * listed person is not refused — it is a power-of-attorney situation and goes to review.
+     * The initiator says which listed representative they are, and party-service's VERIFIED record of
+     * who they are decides whether that is true — the request's claimed name is never trusted for it.
+     * Deliberately asymmetric outcomes:
+     *
+     *  - identity not verified, not a listed representative, or the name does not match → refused
+     *    ([InitiatorIdentityMismatchException]). Opening an entity's account on someone else's behalf
+     *    is not a review case; it is not allowed.
+     *  - the name matches but the register's address for that person and the verified address
+     *    disagree → MANUAL_REVIEW. People move and registers lag; a human looks, nobody is refused.
+     *  - both agree → the signing mechanics below.
      */
-    fun initiatorMatched(
-        representativeIndex: Int?,
-        claimedName: String,
-        dateOfBirth: LocalDate?,
-        at: Instant,
-    ): BusinessOnboardingCase {
+    fun initiatorMatched(representativeIndex: Int?, identity: InitiatorIdentity, at: Instant): BusinessOnboardingCase {
         require(status == CaseStatus.REGISTRY_VERIFIED) { "initiator can only be matched after registry verification" }
         val ex = requireNotNull(extract)
-        val rep = representativeIndex?.let { ex.representatives.getOrNull(it) }
-        if (!ex.isSoleTrader && rep == null) {
-            return copy(
+        if (!identity.verified) {
+            throw InitiatorIdentityMismatchException("complete identity verification before onboarding a company")
+        }
+        // A sole trader IS the single listed representative, whatever index the client sent.
+        val rep = if (ex.isSoleTrader) {
+            ex.representatives.firstOrNull()
+        } else {
+            representativeIndex?.let(
+                ex.representatives::getOrNull,
+            )
+        }
+        if (rep == null || !isVerifiedAs(ex, rep, identity)) {
+            throw InitiatorIdentityMismatchException(
+                "the verified identity does not match a listed representative of ${ex.legalName} — an account " +
+                    "can only be opened by a person the register lists as able to act for the entity",
+            )
+        }
+        val signer = initiatorSigner(representativeIndex, rep.fullName, rep.dateOfBirth, at)
+        val next = copy(status = CaseStatus.INITIATOR_MATCHED, signers = listOf(signer), updatedAt = at)
+        if (IdentityMatch.addressConflicts(rep.address, identity.address)) {
+            return next.copy(
                 status = CaseStatus.MANUAL_REVIEW,
-                reviewReason = "initiator '$claimedName' is not a listed representative — power of attorney required",
-                signers = listOf(initiatorSigner(null, claimedName, dateOfBirth, at)),
+                reviewReason = "the initiator matches ${rep.fullName} by name, but the register's address for that " +
+                    "person differs from the verified address — confirm it is the same person",
                 updatedAt = at,
             )
         }
-        val signer =
-            initiatorSigner(representativeIndex, rep?.fullName ?: claimedName, rep?.dateOfBirth ?: dateOfBirth, at)
-        val next = copy(status = CaseStatus.INITIATOR_MATCHED, signers = listOf(signer), updatedAt = at)
         // A one-signature rule is ready immediately — unless it NAMES the office, in which case the
         // initiator has to actually hold it. Without this clause a single-office rule would skip
         // the check in `cosignersInvited` entirely, because it never invites anyone.
@@ -294,6 +311,13 @@ data class BusinessOnboardingCase(
             next.copy(status = CaseStatus.MANUAL_REVIEW, reviewReason = e.message, updatedAt = at)
         }
     }
+
+    private fun isVerifiedAs(ex: RegistryExtract, rep: Representative, identity: InitiatorIdentity): Boolean =
+        if (ex.isSoleTrader) {
+            IdentityMatch.soleTraderIs(rep.fullName, identity.legalName)
+        } else {
+            IdentityMatch.samePerson(rep.fullName, identity.legalName)
+        }
 
     private fun initiatorSigner(index: Int?, name: String, dob: LocalDate?, at: Instant) = Signer(
         id = Ids.newId(),

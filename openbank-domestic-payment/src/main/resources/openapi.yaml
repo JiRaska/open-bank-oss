@@ -5,7 +5,7 @@ info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -370,6 +370,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        aggregateRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+          description: Database-backed monotonic ordering token for lifecycle evidence.
 
     ApiError:
       type: object

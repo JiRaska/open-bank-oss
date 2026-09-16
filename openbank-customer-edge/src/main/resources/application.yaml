@@ -163,6 +163,14 @@ openbank:
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
     incentive-service-url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
+    # Member-get-member for the app (CustomerReferralResource). referral-service serves HTTPS on
+    # 8443 with the platform CA, the same trust file the campaign call already uses.
+    referral-service-url: ${REFERRAL_SERVICE_URL:https://referral-service.referral.svc:8443}
+    # Lístky for the app (CustomerLoyaltyResource). Deliberately NO in-cluster default:
+    # loyalty-service has no deployment yet (#8793), so any default would name a host that does
+    # not resolve and a plaintext edge. Blank = unconfigured, and routes answer 503
+    # LOYALTY_UNAVAILABLE. Wired over TLS together with loyalty-service's own gitops deployment.
+    loyalty-service-url: ${LOYALTY_SERVICE_URL:}
     statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
     standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}
