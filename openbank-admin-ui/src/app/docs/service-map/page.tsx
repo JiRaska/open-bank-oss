@@ -636,12 +636,13 @@ export default function ServiceMapPage() {
       <section className="card" aria-label={t('Stav zdrojů mapy', 'Map evidence status')} style={{ padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
         {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {
           const state = evidence[key]
-          const tone = state === 'ok' ? 'var(--success)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning)'
+          const tone = state === 'ok' ? 'var(--success-text)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning-text)'
+          const marker = state === 'ok' ? 'var(--success)' : state === 'loading' ? 'var(--text-tertiary)' : 'var(--warning)'
           return (
             <div key={key} data-testid={`map-evidence-${key}`} role={state === 'ok' || state === 'loading' ? undefined : 'status'} aria-live={state === 'ok' || state === 'loading' ? undefined : 'polite'} style={{ minWidth: 0, padding: '8px 10px', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3 }}>{evidenceLabels[key]}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: tone, fontSize: 11 }}>
-                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: tone, flexShrink: 0 }} />
+                <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: marker, flexShrink: 0 }} />
                 <span>{evidenceCopy(key, state)}</span>
               </div>
             </div>
@@ -659,7 +660,7 @@ export default function ServiceMapPage() {
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
                 background: filter === key ? 'var(--accent-strong)' : 'var(--surface)',
-                color: filter === key ? 'var(--text-inverse)' : 'var(--text-secondary)',
+                color: filter === key ? 'var(--accent-strong-text)' : 'var(--text-secondary)',
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>{label}</button>
           ))}
@@ -677,8 +678,8 @@ export default function ServiceMapPage() {
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
                 borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                 border: `1px solid ${c.on ? 'var(--accent)' : 'var(--border)'}`,
-                background: c.on ? 'var(--accent)' : 'var(--surface)',
-                color: c.on ? 'var(--text-inverse)' : 'var(--text-secondary)',
+                background: c.on ? 'var(--accent-strong)' : 'var(--surface)',
+                color: c.on ? 'var(--accent-strong-text)' : 'var(--text-secondary)',
               }}>
               {c.icon}{c.label}
             </button>

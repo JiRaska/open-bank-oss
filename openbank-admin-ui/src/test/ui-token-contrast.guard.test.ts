@@ -222,11 +222,16 @@ describe('admin UI token contrast', () => {
     // (e.g. --success #10b981 on --success-bg = 2.41:1 on /day-end and /system/health).
     const tones = ['--success', '--warning', '--danger', '--info', '--accent']
     const missingSurfaces = surfaces.filter(n => !SURFACE_TOKENS.includes(n as never))
-    // --text-inverse is excluded by design: it exists to sit on a solid accent/tone fill, not on any
-    // token in SURFACE_TOKENS, so including it would assert 12 pairs nobody writes.
+    // Inverse text belongs on solid fills, not any light content surface. The dedicated strong
+    // accent pair is asserted below instead of adding invented cross-product combinations.
     const missingTexts = [...texts, ...tones]
-      .filter(n => n !== '--text-inverse' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
+      .filter(n => n !== '--text-inverse' && n !== '--accent-strong-text' && !n.startsWith('--ob-') && !TEXT_TOKENS.includes(n as never))
     expect({ missingSurfaces, missingTexts }).toEqual({ missingSurfaces: [], missingTexts: [] })
+  })
+
+  it.each(['light', 'dark'] as const)('%s: text on the strong accent fill is AA', theme => {
+    const tokens = { ...declarations(':root'), ...(theme === 'dark' ? declarations('\\.dark') : {}) }
+    expect(contrast(resolve(tokens, '--accent-strong-text'), resolve(tokens, '--accent-strong'))).toBeGreaterThanOrEqual(AA)
   })
 
   // Ported from the light-theme guard #9788 added, which this file subsumes: if the arithmetic is
