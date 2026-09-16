@@ -7,9 +7,14 @@ import { signInAsOperator } from './helpers/auth'
 test.beforeEach(async ({ page, context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
   await context.addInitScript(() => localStorage.setItem('ob-admin-theme', 'dark'))
-  await page.route('**/api/**', route => route.request().url().includes('/api/auth/')
-    ? route.continue()
-    : route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }))
+  await page.route('**/api/**', route => {
+    // The glob also matches /_next/static/chunks/app/docs/api/page-*.js.
+    // Only BFF paths should fail; blocking that chunk strands the loading boundary.
+    const pathname = new URL(route.request().url()).pathname
+    return pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+      : route.continue()
+  })
 })
 
 for (const route of ['/docs/api', '/docs/cluster', '/docs/sensors/shortcuts', '/regulatory', '/services', '/system/tests']) {
