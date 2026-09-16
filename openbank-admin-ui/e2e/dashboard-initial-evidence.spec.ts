@@ -72,3 +72,36 @@ test('dashboard keeps the retry state truthful after a failed refresh', async ({
   await expect(page.getByText('1/1', { exact: true })).toHaveCount(2)
   expect(healthCalls).toBe(3)
 })
+
+test('work queues wait for the operator role instead of looking empty or mislabelled', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  let releaseSession!: () => void
+  let markSessionRequested!: () => void
+  const heldSession = new Promise<void>(resolve => { releaseSession = resolve })
+  const sessionRequested = new Promise<void>(resolve => { markSessionRequested = resolve })
+  await page.route('**/api/auth/session', async route => {
+    markSessionRequested()
+    await heldSession
+    await route.continue()
+  })
+  await page.route('**/api/services/governance', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ available: true, timestamp: '2026-09-16T10:00:00Z', items: [
+      { serviceName: 'account-service', dataDomain: 'core' },
+    ] }),
+  }))
+  await page.route('**/api/services/health', route => route.fulfill({
+    contentType: 'application/json', body: '{"services":[]}',
+  }))
+
+  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
+  await sessionRequested
+  const workQueues = page.locator('section[aria-labelledby="workspace-heading"]')
+  await expect(workQueues.getByRole('status', { name: 'Work queues are loading' })).toBeVisible()
+  await expect(page.getByText('My workspace', { exact: true })).toBeVisible()
+  await expect(workQueues.getByRole('link')).toHaveCount(0)
+
+  releaseSession()
+  await expect(workQueues.getByRole('status', { name: 'Work queues are loading' })).toHaveCount(0)
+  await expect(workQueues.getByRole('link', { name: 'Test Intelligence' })).toBeVisible()
+})
