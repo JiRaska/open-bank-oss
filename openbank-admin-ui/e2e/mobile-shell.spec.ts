@@ -2,7 +2,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-async function holdClientSession(page: Page) {
+async function holdClientSession(page: Page, replacement?: object) {
   let releaseSession!: () => void
   const heldSession = new Promise<void>(resolve => { releaseSession = () => resolve() })
   let signalSessionRequested!: () => void
@@ -10,7 +10,11 @@ async function holdClientSession(page: Page) {
   await page.route('**/api/auth/session', async route => {
     signalSessionRequested()
     await heldSession
-    await route.continue()
+    if (replacement) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(replacement) })
+    } else {
+      await route.continue()
+    }
   })
   return { releaseSession, sessionRequested }
 }
@@ -38,16 +42,21 @@ test('keeps the mobile navigation keyboard-complete and removes it from focus wh
   // drawer in that window must focus the first control from the final permission-filtered nav,
   // not a fallback control that happens to be first while roles are still empty.
   await sessionRequested
+  // `loading.tsx` is a sibling streaming fallback in production. Wait until Next has replaced it
+  // with the hydrated shell before asserting landmark/control cardinality.
+  await expect(page.locator('body > .ob-app-content')).toHaveCount(0)
+  await expect(page.locator('#admin-sidebar')).toHaveCount(1)
 
-  const menu = page.locator('button[aria-controls="admin-sidebar"]')
-  const sidebar = page.locator('#admin-sidebar')
-  const sidebarControls = page.locator('#admin-sidebar a, #admin-sidebar button:not([disabled])')
+  const menu = page.locator('button[aria-controls="admin-sidebar"]:visible')
+  const sidebar = page.locator('#admin-sidebar:visible')
+  const sidebarControls = sidebar.locator('a, button:not([disabled])')
   await expect(menu).toBeVisible()
   await expect(sidebar).toBeHidden()
 
   await menu.click()
   await expect(menu).toHaveAttribute('aria-expanded', 'true')
   await expect(sidebar).toBeFocused()
+  await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
   releaseSession()
   await expect(sidebarControls.first()).toHaveAttribute('href', '/system/tests')
   await expect(sidebarControls.first()).toBeFocused()
@@ -62,11 +71,11 @@ test('keeps the mobile navigation keyboard-complete and removes it from focus wh
   await expect(menu).toBeFocused()
   await expect(sidebar).toBeHidden()
 
-  await page.keyboard.press('Shift+Tab')
-  const skipLink = page.getByRole('link', { name: /Skip to main content|Přeskočit na hlavní obsah/ })
+  await menu.press('Shift+Tab')
+  const skipLink = page.locator('a.ob-skip-link:visible')
   await expect(skipLink).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page.locator('#main-content')).toBeFocused()
+  await expect(page.locator('#main-content:visible')).toBeFocused()
 })
 
 test('does not steal focus when an operator moves inside the drawer while permissions resolve', async ({ page }) => {
@@ -75,26 +84,73 @@ test('does not steal focus when an operator moves inside the drawer while permis
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/dashboard')
   await sessionRequested
+  await expect(page.locator('body > .ob-app-content')).toHaveCount(0)
+  await expect(page.locator('#admin-sidebar')).toHaveCount(1)
 
-  const menu = page.locator('button[aria-controls="admin-sidebar"]')
-  const sidebar = page.locator('#admin-sidebar')
-  const dashboard = page.locator('#admin-sidebar a[href="/dashboard"]')
-  const sidebarControls = page.locator('#admin-sidebar a, #admin-sidebar button:not([disabled])')
+  const menu = page.locator('button[aria-controls="admin-sidebar"]:visible')
+  const sidebar = page.locator('#admin-sidebar:visible')
+  const sidebarControls = sidebar.locator('a, button:not([disabled])')
 
   await menu.click()
   await expect(sidebar).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(dashboard).toBeFocused()
+  await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+  await page.waitForTimeout(250)
+  const initiallyChosenControl = sidebarControls.first()
+  await initiallyChosenControl.focus()
+  await expect(initiallyChosenControl).toBeFocused()
+  const chosenHref = await initiallyChosenControl.getAttribute('href')
+  expect(chosenHref).not.toBeNull()
+  const chosenControl = page.locator(`#admin-sidebar:visible a[href="${chosenHref}"]`)
+  await expect(chosenControl).toBeFocused()
 
   releaseSession()
   await expect(sidebarControls.first()).toHaveAttribute('href', '/system/tests')
   await page.evaluate(() => new Promise<void>(resolve => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   }))
-  await expect(dashboard).toBeFocused()
+  await expect(chosenControl).toBeFocused()
 
   await page.keyboard.press('Escape')
   await expect(menu).toHaveAttribute('aria-expanded', 'false')
   await expect(menu).toBeFocused()
   await expect(sidebar).toBeHidden()
+})
+
+test('keeps Escape available when a permission refresh removes the focused link', async ({ page }) => {
+  const { releaseSession, sessionRequested } = await holdClientSession(page, {
+    user: {
+      name: 'E2E Operator',
+      email: 'e2e-operator@openbank.test',
+      roles: ['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_AUDITOR', 'ROLE_COMPLIANCE', 'ROLE_PAYMENTS'],
+    },
+    expires: '2099-01-01T00:00:00.000Z',
+  })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/dashboard')
+  await sessionRequested
+  await expect(page.locator('#admin-sidebar')).toHaveCount(1)
+
+  const menu = page.locator('button[aria-controls="admin-sidebar"]:visible')
+  const sidebar = page.locator('#admin-sidebar:visible')
+  await menu.click()
+  await expect(sidebar).toBeFocused()
+  await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
+  await page.waitForTimeout(250)
+
+  const disappearingLink = sidebar.locator('a[href="/dashboard"]')
+  await expect(disappearingLink).toBeVisible()
+  await disappearingLink.focus()
+  await expect(disappearingLink).toBeFocused()
+  await disappearingLink.evaluate(element => element.remove())
+  await expect(disappearingLink).toHaveCount(0)
+  await expect(page.locator('body')).toBeFocused()
+
+  // Model React's permission-filter reconciliation: the focused node is removed and focus
+  // falls to BODY before the held session response completes.
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveAttribute('aria-expanded', 'false')
+  await expect(menu).toBeFocused()
+  await expect(sidebar).toBeHidden()
+  releaseSession()
 })

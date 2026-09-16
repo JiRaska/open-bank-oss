@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against the Next.js dev server (auto-started before tests, torn down after).
+// Runs against an auto-started Next.js server (development locally, production in CI).
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
 import { defineConfig, devices } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 
 const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
 const e2eBaseUrl = `http://localhost:${e2ePort}`
+const useProductionServer = process.env.OPENBANK_E2E_SERVER === 'production'
 
 export default defineConfig({
   testDir: './e2e',
@@ -41,6 +43,10 @@ export default defineConfig({
     baseURL: e2eBaseUrl,
     // Don't re-use browser state between tests — each spec gets a fresh page
     trace: 'on-first-retry',
+    // Deterministic screenshots, DOM cardinality and Axe readings must not sample an outgoing
+    // transition tree alongside its replacement. The product's reduced-motion path is itself
+    // an accessibility contract and keeps every assertion enabled.
+    reducedMotion: 'reduce',
   },
 
   projects: [
@@ -51,7 +57,12 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run dev -- -p ${e2ePort}`,
+    // Hosted CI already builds the app once before this suite. Serving that immutable bundle
+    // avoids compiling 100+ routes on demand under four browser workers, which made clean runners
+    // hit the job budget and exposed dev-only HMR duplicate-tree/theme-transition races.
+    command: useProductionServer
+      ? `npm run start -- -p ${e2ePort}`
+      : `npm run dev -- -p ${e2ePort}`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
@@ -62,6 +73,14 @@ export default defineConfig({
       // same secret (falls back to the same default) — keep the two in sync.
       NEXTAUTH_URL: e2eBaseUrl,
       NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret',
+      ...(useProductionServer ? {
+        // Exercise the production URL policy without depending on a live identity provider.
+        // E2E sessions are minted locally; the reserved .invalid host is never contacted.
+        KEYCLOAK_PUBLIC_URL: 'https://keycloak.e2e.invalid',
+        KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET ?? randomUUID(),
+        // The browser server itself intentionally remains loopback HTTP in CI.
+        ALLOW_INSECURE_STUDIO_URLS: 'true',
+      } : {}),
     },
   },
 })

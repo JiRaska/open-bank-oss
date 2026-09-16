@@ -226,6 +226,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   const { data: session } = useSession()
   const { t, language } = useLanguage()
   const roles: string[] = session?.user?.roles ?? []
+  const roleSignature = roles.join('\u0000')
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
   const isLocked = (item: NavItem) =>
     (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
@@ -255,6 +256,21 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   // list back to the top — annoying when the active item is far down. We restore
   // from sessionStorage on mount and save on every scroll (rAF-throttled).
   const navRef = useRef<HTMLElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!mobileOpen) return
+    const frame = requestAnimationFrame(() => asideRef.current?.focus())
+    return () => { cancelAnimationFrame(frame) }
+  }, [mobileOpen])
+  useEffect(() => {
+    if (!mobileOpen) return
+    const frame = requestAnimationFrame(() => {
+      const aside = asideRef.current
+      if (!aside || document.activeElement !== document.body) return
+      aside.querySelector<HTMLElement>('a, button:not([disabled])')?.focus()
+    })
+    return () => { cancelAnimationFrame(frame) }
+  }, [mobileOpen, roleSignature])
   useEffect(() => {
     const el = navRef.current
     if (!el) return
@@ -270,7 +286,41 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   }, [])
 
   return (
-    <aside id="admin-sidebar" tabIndex={-1} aria-label={t('Hlavní navigace', 'Main navigation')} className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}>
+    <aside
+      ref={asideRef}
+      id="admin-sidebar"
+      tabIndex={-1}
+      aria-label={t('Hlavní navigace', 'Main navigation')}
+      className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}
+      onTransitionEnd={event => {
+        if (mobileOpen && event.propertyName === 'transform' && !event.currentTarget.contains(document.activeElement)) {
+          event.currentTarget.focus()
+        }
+      }}
+      onKeyDown={event => {
+        if (!mobileOpen) return
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onClose?.()
+          return
+        }
+        if (event.key !== 'Tab') return
+        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a, button:not([disabled])'))
+        const first = focusable[0]
+        const last = focusable.at(-1)
+        if (!first || !last) return
+        if (document.activeElement === event.currentTarget) {
+          event.preventDefault()
+          ;(event.shiftKey ? last : first).focus()
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }}
+    >
       {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.brandLockup}>

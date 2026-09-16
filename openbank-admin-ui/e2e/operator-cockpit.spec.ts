@@ -128,9 +128,12 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
   })
 
   await page.goto('/regulatory')
-  // Next's parallel dev renderer can briefly retain the pre-refresh tree while swapping in the
-  // hydrated tree. This scenario verifies the live report control, not that transient dev shell.
-  const disclosure = page.locator('button[aria-controls="regulatory-report-cnb-finrep"]').first()
+  const disclosure = page.locator('#main-content:visible button[aria-controls="regulatory-report-cnb-finrep"]')
+  await expect.poll(async () => {
+    const before = await disclosure.count()
+    await page.waitForTimeout(250)
+    return [before, await disclosure.count()]
+  }).toEqual([1, 1])
   await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()
   await page.keyboard.press('Enter')

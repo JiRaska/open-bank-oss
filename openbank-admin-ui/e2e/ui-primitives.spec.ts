@@ -81,10 +81,12 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     )
 
     await page.goto('/dashboard')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
 
-    await expect(page.getByText('Healthy services', { exact: true })).toBeVisible()
-    await expect(page.getByText('1/2', { exact: true })).toBeVisible()
-    await expect(page.getByText('Average check latency', { exact: true })).toBeVisible()
+    await expect(main.getByText('Healthy services', { exact: true })).toBeVisible()
+    await expect(main.getByText('1/2', { exact: true })).toBeVisible()
+    await expect(main.getByText('Average check latency', { exact: true })).toBeVisible()
     // Health discovery does not measure any of these. Rendering a proxy as a fact is unsafe.
     await expect(page.getByText('Security Grade', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Error Rate', { exact: true })).toHaveCount(0)
@@ -96,18 +98,18 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // The approved dashboard direction is deliberately denser than the old generic-card
     // layout: four factual metrics at desktop, then a two-column service overview. These
     // geometry checks make that information hierarchy a browser-observable contract.
-    const metricGrid = page.locator('[aria-label="Platform key metrics"]')
+    const metricGrid = main.locator('[aria-label="Platform key metrics"]')
     expect(await metricGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4)
     expect(await metricGrid.locator('.stat-card').first().evaluate(el => getComputedStyle(el).borderTopLeftRadius)).toBe('14px')
 
-    const serviceGrid = page.locator('[aria-label="Services by group"]')
+    const serviceGrid = main.locator('[aria-label="Services by group"]')
     expect(await serviceGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2)
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
-    expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
-    expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
+    expect(Math.round((await page.locator('#admin-sidebar:visible').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('header:visible').boundingBox())!.height)).toBe(60)
+    expect(await main.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
 
     // The Explorer portrait is deliberately oversized and clipped by the guide,
     // but its top (and therefore its head) must remain inside the visible banner.
@@ -133,6 +135,8 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     )
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/system/readiness')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
 
     const swatch = page.locator('.tone-swatch').first()
     await expect(swatch).toBeVisible()
@@ -178,12 +182,14 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
     await page.goto('/system/readiness')
+    const main = page.locator('#main-content:visible')
+    await expect(main).toHaveCount(1)
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
     // substring match, so it also selects the "NO-GO" card and the locator resolves to two
     // elements under strict mode.
     const colourOf = (label: string) =>
-      page
+      main
         .locator('.stat-card')
         .filter({ has: page.locator('.stat-label', { hasText: new RegExp(`^${label}$`) }) })
         .locator('.stat-value')
