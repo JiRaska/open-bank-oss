@@ -162,6 +162,7 @@ export default function ClusterDossierPage() {
     setLoading(true)
     try {
       const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
+      if (!r.ok) throw new Error(`Cluster topology request failed (${r.status})`)
       const d = await r.json()
       setTopo(d)
       setActiveLayer(d.securityLayers?.[0]?.id ?? null)

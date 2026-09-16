@@ -578,6 +578,7 @@ export default function TestIntelligencePage() {
     setLoading(true)
     try {
       const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Test intelligence request failed (${response.status})`)
       setReport(await response.json() as TestIntelligenceReport)
     } catch { setReport(null) } finally { setLoading(false) }
   }, [])
