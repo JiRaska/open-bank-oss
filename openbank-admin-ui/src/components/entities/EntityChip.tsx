@@ -59,19 +59,27 @@ export function EntityChip({ type, id, label, sublabel }: Props) {
     // human name visible for one render after an id change.
     if (label || !canOpenParty) return
     const ctrl = new AbortController()
+    let active = true
     fetch(RESOLVER[type].url(id), { signal: ctrl.signal, cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then(d => {
-        if (d) setResolution({ identity, label: RESOLVER[type].pick(d) ?? shortId(id) })
+        if (active && d) setResolution({ identity, label: RESOLVER[type].pick(d) ?? shortId(id) })
       })
       .catch(error => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (!active || (error instanceof DOMException && error.name === 'AbortError')) return
         setResolution({ identity, label: shortId(id) })
       })
-    return () => ctrl.abort()
+    return () => {
+      active = false
+      ctrl.abort()
+    }
   }, [type, id, identity, label, canOpenParty])
 
-  const visibleLabel = label ?? (resolution?.identity === identity ? resolution.label : undefined) ?? shortId(id)
+  // A resolver label is party PII fetched under the permission that existed when the request
+  // started. Mask it immediately if that permission is revoked; an explicit snapshot supplied
+  // by the owning workflow follows its separate display policy and remains non-linking.
+  const resolvedLabel = canOpenParty && resolution?.identity === identity ? resolution.label : undefined
+  const visibleLabel = label ?? resolvedLabel ?? shortId(id)
 
   const content = (
     <>
