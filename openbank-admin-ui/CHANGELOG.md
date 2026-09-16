@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.247.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.1...admin-ui-v0.247.0) (2026-09-16)
+
+
+### Features
+
+* **admin-ui:** transform context graph into investigation field ([#10095](https://github.com/JiRaska/open-bank-oss/issues/10095)) ([37f82a1](https://github.com/JiRaska/open-bank-oss/commit/37f82a140f232f6e96daa97454c4cac2dcdae50b))
+
+
+### Bug Fixes
+
+* **lending:** preserve credit risk evidence and reconcile allowances ([#9466](https://github.com/JiRaska/open-bank-oss/issues/9466)) ([1f8b96c](https://github.com/JiRaska/open-bank-oss/commit/1f8b96c7d7f00c3900392dd080b1c9d34e886179)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
 ## [0.246.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.246.0...admin-ui-v0.246.1) (2026-09-14)
 
 
