@@ -138,6 +138,14 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
+      kyb-ubo-observation-references-out:
+        connector: smallrye-kafka
+        client.id: kyb-ubo-reference-${quarkus.uuid}
+        topic: openbank.kyb.ubo-observation-references
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       kyb-events-out:
         connector: smallrye-kafka
         client.id: kyb-service-${quarkus.uuid}

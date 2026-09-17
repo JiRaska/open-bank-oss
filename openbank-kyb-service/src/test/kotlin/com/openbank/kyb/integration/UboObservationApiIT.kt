@@ -98,8 +98,9 @@ class UboObservationApiIT {
         DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
             connection.autoCommit = false
             connection.prepareStatement(
-                "INSERT INTO kyb_cases (case_id, identifier_scheme, identifier_value, initiator_party_id, " +
-                    "status, created_at, updated_at) VALUES (?, 'CZ_ICO', '45274649', ?, 'MANUAL_REVIEW', ?, ?)",
+                "INSERT INTO kyb_cases (id, case_id, identifier_scheme, identifier_value, initiator_party_id, " +
+                    "status, created_at, updated_at) VALUES (nextval('kyb_cases_seq'), ?, 'CZ_ICO', " +
+                    "'45274649', ?, 'MANUAL_REVIEW', ?, ?)",
             ).use { statement ->
                 statement.setObject(1, caseId)
                 statement.setObject(2, UUID.randomUUID())

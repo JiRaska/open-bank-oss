@@ -6,6 +6,7 @@ package com.openbank.kyb.integration
 
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.infrastructure.persistence.repository.KybJson
 import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubPartyGateway
@@ -258,6 +259,33 @@ class KybCaseApiIT {
                     assertThat(rows.next()).isFalse()
                 }
             }
+            c.prepareStatement(
+                "SELECT o.observation_id, o.source_sha256, b.payload FROM kyb_ubo_observations o " +
+                    "JOIN kyb_outbox b ON b.aggregate_id = o.case_id " +
+                    "AND b.event_type = 'KybUboObservationRecorded' WHERE o.case_id = ?",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(caseId))
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val payload = rows.getString("payload")
+                    val ref = KybJson.mapper.readTree(payload)
+                    assertThat(ref.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                        "schemaVersion",
+                        "eventType",
+                        "caseId",
+                        "observationId",
+                        "revision",
+                        "sourceSha256",
+                    )
+                    assertThat(ref.path("caseId").asText()).isEqualTo(caseId)
+                    assertThat(
+                        ref.path("observationId").asText(),
+                    ).isEqualTo(rows.getObject("observation_id").toString())
+                    assertThat(ref.path("sourceSha256").asText()).isEqualTo(rows.getString("source_sha256"))
+                    assertThat(ref.path("revision").asLong()).isEqualTo(1)
+                    assertThat(rows.next()).isFalse()
+                }
+            }
         }
         Given {
             header("X-Customer-Party-Id", cosigner.toString())
@@ -332,6 +360,7 @@ class KybCaseApiIT {
                     "BUSINESS_REGISTRY_VERIFIED",
                     "BUSINESS_SIGNER_INVITED",
                     "BUSINESS_SIGNER_IDENTIFIED",
+                    "KybUboObservationRecorded",
                     "BUSINESS_AGREEMENT_SIGNED",
                 )
             }

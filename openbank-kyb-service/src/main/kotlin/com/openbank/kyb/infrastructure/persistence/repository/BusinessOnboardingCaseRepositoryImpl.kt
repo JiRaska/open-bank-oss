@@ -16,6 +16,7 @@ import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboObservation
+import com.openbank.kyb.infrastructure.messaging.UboObservationReference
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
 import com.openbank.kyb.infrastructure.persistence.entity.UboObservationEntity
@@ -98,7 +99,11 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
                                 fetchedAt = finding.fetchedAt
                                 this.recordedAt = recordedAt
                             },
-                        ).replaceWith(observation)
+                        ).flatMap {
+                            outbox.persistInTransaction(
+                                UboObservationReference.from(observation).toOutboxMessage(recordedAt),
+                            ).replaceWith(observation)
+                        }
                     }
                 }
             }
