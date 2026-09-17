@@ -31,7 +31,6 @@ import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
-import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.domain.czech.CzechRepresentationRuleParser
 import com.openbank.kyb.domain.model.AcceptedDisclosure
@@ -63,8 +62,8 @@ class InvitationNotFoundException : RuntimeException("no open invitation for thi
 
 /**
  * The business onboarding use case (ADR-0284 D1/D3). Every transition goes through the aggregate
- * and is persisted with its event in one transaction; party-service calls happen BEFORE the local
- * write they are evidence for, so a party-service failure leaves the case where it was.
+ * and is persisted with its event in one transaction. Party-service projects signed mandates and
+ * the statutory rule from that outbox event atomically; before projection, authority is denied.
  */
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one method per state transition; the count is the state machine's, not the class's
@@ -305,7 +304,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             CaseStatus.MANUAL_REVIEW -> KybEvents.reviewRequired(signed, now)
             else -> null
         }
-        if (signed.status == CaseStatus.SIGNED || signed.status == CaseStatus.ACTIVE) grantMandates(signed)
         val saved = cases.update(signed, event)
         if (saved.status == CaseStatus.ACTIVE) cases.update(saved, KybEvents.completed(saved, now))
         return saved.also(::armTimers)
@@ -338,12 +336,9 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         )
         // A review can now COMPLETE a case: `reviewResolved` finishes one whose signatures were
         // already collected and satisfy what the operator just confirmed (#9711). That path has to
-        // do everything `sign` does on the same transition — grant the mandates and emit the
-        // signed/completed events — or the entity goes active with NOBODY authorised to act for
-        // it, which is silent: the case reads ACTIVE from every angle and every later request by
-        // its own representatives is refused.
+        // emit the same signed event as `sign` does. Party-service projects every mandate and the
+        // rule from that event in one transaction; authority remains denied until projection.
         if (resolved.status == CaseStatus.SIGNED || resolved.status == CaseStatus.ACTIVE) {
-            grantMandates(resolved)
             val saved = cases.update(
                 resolved,
                 KybEvents.agreementSigned(resolved, now, cmd.operator, resolved.statutoryPolicyEvidence(now)),
@@ -493,34 +488,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         val case = get(caseId)
         if (case.initiatorPartyId != callerPartyId) throw CaseCallerMismatchException("only the initiator may do this")
         return case
-    }
-
-    /**
-     * Every signer who actually signed becomes a mandate holder on the entity (ADR-0284 D3). The
-     * role is a fact from the register (`REGISTRY`), or `OWNER` for a sole trader who IS the entity.
-     */
-    private suspend fun grantMandates(case: BusinessOnboardingCase) {
-        val entity = requireNotNull(case.entityPartyId) { "a SIGNED case must carry its entity party" }
-        val sole = case.extract?.isSoleTrader == true
-        val joint = (case.requiredSignatures ?: 1) > 1
-        val requiredSignatures = requireNotNull(
-            case.requiredSignatures,
-        ) {
-            "a SIGNED case must carry its signature quorum"
-        }
-        case.signers.filter { it.status == SignerStatus.SIGNED && it.partyId != null }.forEach { signer ->
-            parties.grantMandate(
-                MandateRequest(
-                    principalPartyId = entity,
-                    agentPartyId = signer.partyId!!,
-                    role = if (sole) "OWNER" else "LEGAL_REPRESENTATIVE",
-                    authority = if (joint) "JOINT" else "SOLE",
-                    requiredSignatures = requiredSignatures,
-                    source = if (signer.representativeIndex != null) "REGISTRY" else "POWER_OF_ATTORNEY",
-                    evidenceRef = "kyb-case:${case.id}:signature:${signer.signatureRef}",
-                ),
-            )
-        }
     }
 
     private companion object {

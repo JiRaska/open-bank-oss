@@ -315,8 +315,7 @@ class KybCaseApiIT {
             statusCode(200)
             body("status", equalTo("SIGNED"))
         }
-        assertThat(parties.mandates.filter { it.evidenceRef.contains(ceremonyId) }).hasSize(2)
-        assertThat(parties.mandates.filter { it.evidenceRef.contains(caseId) }).hasSize(2)
+        assertThat(parties.mandates).isEmpty() // Party consumes the signed outbox event after commit.
 
         // 11. the outbox holds one row per lifecycle event, written in the same transactions
         DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->

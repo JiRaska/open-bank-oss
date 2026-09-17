@@ -181,7 +181,7 @@ data class BusinessSignerIdentified(
     }
 }
 
-/** The required number of distinct verified signers has signed; mandates were granted in party-service. */
+/** The required number of distinct verified signers has signed; party-service projects the mandates. */
 data class SignedMandateHolderEvidence(
     val signerId: UUID,
     val partyId: UUID,

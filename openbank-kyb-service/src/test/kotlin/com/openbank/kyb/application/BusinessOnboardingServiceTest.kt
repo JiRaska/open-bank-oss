@@ -396,15 +396,15 @@ class BusinessOnboardingServiceTest {
         }
 
     @Test
-    fun `the happy path signs and binds the mandate evidence to the ceremony`(): Unit = runBlocking {
-        val mandate = slot<MandateRequest>()
+    fun `the happy path signs and emits the mandate holders with the ceremony`(): Unit = runBlocking {
         val id = soleCaseReadyToSign()
-        coEvery { parties.grantMandate(capture(mandate)) } returns Unit
         val ceremony = readyToSign(id, initiator)
         val signed = signs(id, initiator, ceremony)
         assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
         assertThat(signed.reviewReason).isNull()
-        assertThat(mandate.captured.evidenceRef).isEqualTo("kyb-case:$id:signature:$ceremony")
+        val payload = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }.payload as BusinessAgreementSigned
+        assertThat(payload.signedMandateHolders!!.single().partyId).isEqualTo(initiator)
+        coVerify(exactly = 0) { parties.grantMandate(any()) }
     }
 
     @Test
@@ -423,7 +423,11 @@ class BusinessOnboardingServiceTest {
 
             val resolved = service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna"))
             assertThat(resolved.status).isEqualTo(CaseStatus.SIGNED)
-            assertThat(mandates).hasSize(1)
+            val signedPayload = events.last {
+                it.eventType == KybEvents.AGREEMENT_SIGNED
+            }.payload as BusinessAgreementSigned
+            assertThat(signedPayload.signedMandateHolders).hasSize(1)
+            assertThat(mandates).isEmpty()
         }
 
     @Test
@@ -658,15 +662,7 @@ class BusinessOnboardingServiceTest {
             assertThat(mandates).isEmpty() // one signature of two: nothing is granted yet
             val signed = signs(started.id, cosigner, ceremony)
             assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
-            assertThat(mandates).hasSize(2)
-            assertThat(mandates.map { it.agentPartyId }).containsExactlyInAnyOrder(initiator, cosigner)
-            assertThat(mandates).allMatch {
-                it.principalPartyId == entityParty &&
-                    it.role == "LEGAL_REPRESENTATIVE" &&
-                    it.authority == "JOINT" &&
-                    it.requiredSignatures == 2 &&
-                    it.source == "REGISTRY"
-            }
+            assertThat(mandates).isEmpty() // Party projects both only after the signed outbox event.
             val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
             val signedPayload = signedEvent.payload as BusinessAgreementSigned
             val policy = signedPayload.statutoryPolicy
@@ -726,8 +722,6 @@ class BusinessOnboardingServiceTest {
         coEvery { registry.lookup(ico, null) } returns
             extract(RepresentationRule.SOLE, listOf("Jan Novák"), LegalFormClass.SOLE_TRADER)
         coEvery { parties.createEntityParty(any()) } returns entityParty
-        val mandate = slot<MandateRequest>()
-        coEvery { parties.grantMandate(capture(mandate)) } returns Unit
 
         val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
         assertThatThrownBy {
@@ -742,17 +736,18 @@ class BusinessOnboardingServiceTest {
         val ready = service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jan Novák", null))
         assertThat(ready.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         signs(started.id, initiator, readyToSign(started.id, initiator))
-        assertThat(mandate.captured.role).isEqualTo("OWNER")
-        assertThat(mandate.captured.authority).isEqualTo("SOLE")
-        assertThat(mandate.captured.requiredSignatures).isEqualTo(1)
+        val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
+        val payload = signedEvent.payload as BusinessAgreementSigned
+        assertThat(payload.legalFormClass).isEqualTo(LegalFormClass.SOLE_TRADER)
+        assertThat(payload.requiredSignatures).isEqualTo(1)
+        assertThat(payload.signedMandateHolders!!.single().partyId).isEqualTo(initiator)
+        coVerify(exactly = 0) { parties.grantMandate(any()) }
     }
 
     @Test
-    fun `a review that COMPLETES an already-signed case still grants the mandates`(): Unit = runBlocking {
+    fun `a review that COMPLETES an already-signed case still emits the mandate holders`(): Unit = runBlocking {
         // reviewResolved can now finish a case whose signatures were already collected (#9711).
-        // grantMandates lives inside sign(), so that path could have produced an ACTIVE entity
-        // with NOBODY authorised to act for it — silent from every angle: the case reads
-        // complete, and every later request by its own representatives is refused.
+        // Both completion paths must publish the same signed event for Party's atomic projector.
         coEvery { registry.lookup(ico, null) } returns
             extract(
                 RepresentationRule(
@@ -789,10 +784,9 @@ class BusinessOnboardingServiceTest {
         val accepted = service.resolveReview(ResolveReviewCommand(started.id, 2, "operator-anna"))
 
         assertThat(accepted.status).isIn(CaseStatus.SIGNED, CaseStatus.ACTIVE)
-        assertThat(mandates)
-            .describedAs("an entity that reaches SIGNED must carry a mandate per signature")
-            .hasSize(2)
+        assertThat(mandates).isEmpty()
         val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
+        assertThat((signedEvent.payload as BusinessAgreementSigned).signedMandateHolders).hasSize(2)
         assertThat((signedEvent.payload as BusinessAgreementSigned).statutoryPolicy)
             .describedAs("a manual override is not a verified statutory rule")
             .isNull()

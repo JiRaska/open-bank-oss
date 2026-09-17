@@ -219,7 +219,7 @@ object KybEvents {
         )
     }
 
-    /** Every required signature is in; mandates were granted in party-service. */
+    /** Every required signature is in; party-service projects mandates from this signed event. */
     fun agreementSigned(
         case: BusinessOnboardingCase,
         at: Instant,
