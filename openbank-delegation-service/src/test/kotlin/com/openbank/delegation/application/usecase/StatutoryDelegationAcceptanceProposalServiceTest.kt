@@ -116,4 +116,23 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
         }
         coVerify(exactly = 0) { operations.create(any()) }
     }
+
+    @Test
+    fun `changed offer revision or legal rule invalidates pending ballot`(): Unit = runBlocking {
+        coEvery { grants.findById(grant.id) } returns grant
+        coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
+        coEvery { operations.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+        val operation = service.propose(grant.id, company, company, actor, "accept-1").operation
+        coEvery { operations.find(operation.id, company) } returns operation
+        assertThat(service.pending(operation.id, company, company, actor)).isEqualTo(operation)
+
+        coEvery { grants.findById(grant.id) } returns grant.copy(lifecycleRevision = 1)
+        assertThatThrownBy { runBlocking { service.pending(operation.id, company, company, actor) } }
+            .isInstanceOf(StatutoryProposalStale::class.java)
+
+        coEvery { grants.findById(grant.id) } returns grant
+        coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule.copy(revision = 2))
+        assertThatThrownBy { runBlocking { service.pending(operation.id, company, company, actor) } }
+            .isInstanceOf(StatutoryProposalStale::class.java)
+    }
 }

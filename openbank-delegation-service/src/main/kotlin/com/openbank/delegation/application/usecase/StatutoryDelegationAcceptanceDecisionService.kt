@@ -9,36 +9,30 @@ import com.openbank.delegation.application.port.out.StatutoryDecisionConflict
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
-import com.openbank.delegation.domain.model.StatutoryDelegationOperation
-import com.openbank.delegation.domain.model.StatutoryOperationState
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
 import java.util.UUID
 
-class StatutoryDecisionUnavailable : RuntimeException("statutory SCA decision cannot be verified now")
-
-/** Records signer evidence only. No grant, quorum execution or event is produced here. */
+/** Each company representative signs only their own acceptance ballot; no activation happens here. */
 @ApplicationScoped
-class StatutoryDelegationDecisionService(
-    private val proposals: StatutoryDelegationProposalService,
+class StatutoryDelegationAcceptanceDecisionService(
+    private val proposals: StatutoryDelegationAcceptanceProposalService,
     private val repository: StatutoryDelegationOperationRepository,
-    private val sca: ScaChallengeClient,
+    sca: ScaChallengeClient,
     private val clock: Clock,
 ) {
     private val ceremony = StatutoryDecisionCeremony(sca)
 
     @Inject
     constructor(
-        proposals: StatutoryDelegationProposalService,
+        proposals: StatutoryDelegationAcceptanceProposalService,
         repository: StatutoryDelegationOperationRepository,
         sca: ScaChallengeClient,
     ) : this(proposals, repository, sca, Clock.systemUTC())
 
-    suspend fun approvalIntent(id: UUID, principal: UUID, actor: UUID): String {
-        val operation = pending(id, principal, actor)
-        return ceremony.approvalHash(operation, actor)
-    }
+    suspend fun approvalIntent(id: UUID, principal: UUID, actor: UUID): String =
+        ceremony.approvalHash(proposals.pending(id, principal, principal, actor), actor)
 
     suspend fun decide(
         id: UUID,
@@ -47,7 +41,7 @@ class StatutoryDelegationDecisionService(
         verdict: StatutoryDecisionVerdict,
         scaSessionId: UUID?,
     ): StatutoryDelegationDecision {
-        val operation = pending(id, principal, actor)
+        val operation = proposals.pending(id, principal, principal, actor)
         require((verdict == StatutoryDecisionVerdict.APPROVE) == (scaSessionId != null)) {
             "APPROVE requires an SCA session; REJECT must not supply one"
         }
@@ -61,11 +55,5 @@ class StatutoryDelegationDecisionService(
         return repository.recordDecision(
             StatutoryDelegationDecision(id, actor, verdict, scaSessionId, clock.instant()),
         )
-    }
-
-    private suspend fun pending(id: UUID, principal: UUID, actor: UUID): StatutoryDelegationOperation {
-        val operation = proposals.get(id, principal, principal, actor)
-        if (operation.state != StatutoryOperationState.PENDING) throw StatutoryProposalStale(id)
-        return operation
     }
 }

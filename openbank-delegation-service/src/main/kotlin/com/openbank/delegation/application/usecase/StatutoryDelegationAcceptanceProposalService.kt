@@ -81,6 +81,38 @@ class StatutoryDelegationAcceptanceProposalService(
         return outcome
     }
 
+    /** A ballot is valid only while both the frozen offer and the live JOINT rule still match. */
+    internal suspend fun pending(
+        id: UUID,
+        company: UUID,
+        caller: UUID?,
+        actorPartyId: UUID?,
+    ): StatutoryDelegationOperation {
+        val actor = requireActor(company, caller, actorPartyId)
+        val operation = operations.find(id, company)
+            ?.takeIf { it.operationKind == StatutoryOperationKind.ACCEPT }
+            ?: throw StatutoryProposalNotFound(id)
+        val target = loadOffered(requireNotNull(operation.targetGrantId), company, clock.instant())
+        val rule = resolve(company, actor)
+        ensurePendingSnapshot(operation, target, rule)
+        return operation
+    }
+
+    private fun ensurePendingSnapshot(
+        operation: StatutoryDelegationOperation,
+        target: DelegationGrant,
+        rule: StatutoryRepresentationRule,
+    ) {
+        val pendingAndLive = operation.state == StatutoryOperationState.PENDING &&
+            clock.instant().isBefore(operation.expiresAt)
+        val exactEvidence = target.lifecycleRevision == operation.expectedLifecycleRevision &&
+            evidence.acceptance(target) == operation.payloadJson &&
+            evidence.rule(rule) == operation.ruleSnapshotJson
+        if (!pendingAndLive || !exactEvidence) {
+            throw StatutoryProposalStale(operation.id)
+        }
+    }
+
     private fun requireActor(company: UUID, caller: UUID?, actor: UUID?): UUID = actor?.takeIf { caller == company }
         ?: throw StatutoryProposalDenied("authenticated company profile and human actor are required")
 
