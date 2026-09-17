@@ -14,7 +14,7 @@ info:
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
   # Additive recertification review and evidence routes.
-  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, agreement and
+  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
   # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
   # decisions are always the human signer's.
   version: 1.68.0
@@ -3854,6 +3854,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BusinessQuestionnairePrefill' }
         '404': {description: Not involved}
+
+  /business/onboarding/{id}/documents/{documentId}/content:
+    get:
+      tags: [Business]
+      summary: Stream a document of this onboarding case (agreement or disclosure) to a case participant
+      description: >-
+        Works before any mandate exists; X-Acting-For is ignored. The case is read from kyb-service
+        as the authenticated human (initiator or invited signer only). The document must carry
+        caseRef equal to the case id, otherwise 404, so the existence of other documents is never revealed.
+      operationId: getBusinessCaseDocumentContent
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': {description: kyb-service refused the caller for this case}
+        '404': {description: Case not visible to the caller, or the document does not belong to this case}
 
   /business/onboarding/{id}/declarations:
     put:

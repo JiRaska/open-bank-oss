@@ -16,6 +16,7 @@ class CustomerBusinessAgreementOpenApiTest {
     fun `the five onboarding routes are published with the shared schema names`() {
         assertThat(normalized).contains("/business/onboarding/{id}/questionnaire: put:")
         assertThat(normalized).contains("/business/onboarding/{id}/questionnaire/prefill: get:")
+        assertThat(normalized).contains("/business/onboarding/{id}/documents/{documentId}/content: get:")
         assertThat(normalized).contains("/business/onboarding/{id}/declarations: put:")
         assertThat(normalized).contains("/business/onboarding/{id}/agreement: post:")
         assertThat(normalized).contains("/business/onboarding/{id}/agreement/accept: post:")
@@ -34,6 +35,9 @@ class CustomerBusinessAgreementOpenApiTest {
     fun `refusals are documented - stale acceptance 409, not involved 404, missing mandate 403`() {
         assertThat(normalized).contains("'409': {description: The accepted set does not match the current disclosures")
         assertThat(normalized).contains("'404': {description: Not involved}")
+        assertThat(
+            normalized,
+        ).contains("'404': {description: Case not visible to the caller, or the document does not belong")
         assertThat(normalized).contains("Business partyId to act for; 403 without an active mandate")
         assertThat(normalized).contains("partyRef is forced to the JWT's human party, also under X-Acting-For")
     }

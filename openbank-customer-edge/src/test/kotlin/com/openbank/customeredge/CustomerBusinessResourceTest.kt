@@ -23,6 +23,7 @@ class CustomerBusinessResourceTest {
     private val caller = UUID.randomUUID()
     private val stranger = UUID.randomUUID()
     private val kyb = "http://kyb-service.kyb.svc:8157"
+    private val docs = "http://document-service.documents.svc:8143"
 
     /** One past the edge's own URL bound. kyb-service imposes no maximum name length at all. */
     private val maxTermPlusOne = CustomerBusinessResource.MAX_TERM + 1
@@ -36,6 +37,7 @@ class CustomerBusinessResourceTest {
             }
             objectMapper = ObjectMapper()
             kybServiceUrl = kyb
+            documentServiceUrl = docs
         }
     }
 
@@ -264,6 +266,51 @@ class CustomerBusinessResourceTest {
 
         every { upstream.get(any(), any()) } returns Response.status(404).entity("""{"error":"NOT_INVOLVED"}""").build()
         assertThat(resource(upstream).questionnairePrefill(case).status).isEqualTo(404)
+    }
+
+    private fun caseDocUpstream(case: UUID, doc: UUID, kybStatus: Int, docCaseRef: UUID): UpstreamClient =
+        mockk<UpstreamClient>().also { u ->
+            every { u.get("$kyb/api/v1/kyb/cases/$case", caller.toString()) } returns
+                Response.status(kybStatus).entity("""{"id":"$case"}""").build()
+            every { u.get("$docs/api/v1/documents/$doc", caller.toString()) } returns
+                Response.ok("""{"id":"$doc","partyRef":"${UUID.randomUUID()}","caseRef":"$docCaseRef"}""").build()
+            every { u.getRaw("$docs/api/v1/documents/$doc/content", caller.toString(), any()) } returns
+                Response.ok(byteArrayOf(1, 2)).type("application/pdf").build()
+        }
+
+    @Test
+    fun `a case participant streams a document of that case without any mandate`() {
+        val case = UUID.randomUUID()
+        val doc = UUID.randomUUID()
+        val upstream = caseDocUpstream(case, doc, 200, case)
+
+        val resp = resource(upstream).caseDocumentContent(case, doc)
+
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(resp.mediaType.toString()).isEqualTo("application/pdf")
+    }
+
+    @Test
+    fun `a non-participant gets kyb's refusal and no document is ever read`() {
+        listOf(403, 404).forEach { code ->
+            val case = UUID.randomUUID()
+            val doc = UUID.randomUUID()
+            val upstream = caseDocUpstream(case, doc, code, case)
+
+            assertThat(resource(upstream).caseDocumentContent(case, doc).status).isEqualTo(code)
+            io.mockk.verify(exactly = 0) { upstream.get(match { it.startsWith(docs) }, any()) }
+            io.mockk.verify(exactly = 0) { upstream.getRaw(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a document of ANOTHER case is 404 and its content is never fetched`() {
+        val case = UUID.randomUUID()
+        val doc = UUID.randomUUID()
+        val upstream = caseDocUpstream(case, doc, 200, UUID.randomUUID())
+
+        assertThat(resource(upstream).caseDocumentContent(case, doc).status).isEqualTo(404)
+        io.mockk.verify(exactly = 0) { upstream.getRaw(any(), any(), any()) }
     }
 
     @Test

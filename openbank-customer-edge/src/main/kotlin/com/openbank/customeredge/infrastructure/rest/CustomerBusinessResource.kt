@@ -54,6 +54,9 @@ class CustomerBusinessResource(
     @ConfigProperty(name = "openbank.edge.kyb-service-url", defaultValue = "http://kyb-service.kyb.svc:8157")
     lateinit var kybServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.document-service-url")
+    lateinit var documentServiceUrl: String
+
     @GET
     @Path("/schemes")
     @Blocking
@@ -178,6 +181,35 @@ class CustomerBusinessResource(
     fun questionnairePrefill(@PathParam("id") id: UUID): Response =
         upstream.get("$kybServiceUrl$UPSTREAM/cases/$id/questionnaire/prefill", human().toString())
 
+    /**
+     * A case document (agreement or disclosure PDF) for someone taking part in the case. This works
+     * before any mandate exists, so it deliberately ignores `X-Acting-For`. Authorization comes from
+     * kyb: the case read is made as the human and kyb enforces initiator/signer ownership. The document
+     * must belong to THIS case; any other document answers 404 so its existence is never revealed.
+     */
+    @GET
+    @Path("/onboarding/{id}/documents/{documentId}/content")
+    @Produces(MediaType.WILDCARD)
+    @Blocking
+    fun caseDocumentContent(@PathParam("id") id: UUID, @PathParam("documentId") documentId: UUID): Response {
+        val me = human().toString()
+        val case = upstream.get("$kybServiceUrl$UPSTREAM/cases/$id", me)
+        if (case.status != HTTP_OK) {
+            return Response.status(case.status).entity(case.entity).type(MediaType.APPLICATION_JSON).build()
+        }
+        val meta = upstream.get("$documentServiceUrl/api/v1/documents/$documentId", me)
+        val caseRef = if (meta.status == HTTP_OK) {
+            runCatching { objectMapper.readTree(meta.entity as? String).path("caseRef").asText(null) }.getOrNull()
+        } else {
+            null
+        }
+        if (caseRef != id.toString()) {
+            return Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to "Not found"))
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        return upstream.getRaw("$documentServiceUrl/api/v1/documents/$documentId/content", me, MediaType.WILDCARD)
+    }
+
     /** UBO / PEP / truthfulness declarations. */
     @PUT
     @Path("/onboarding/{id}/declarations")
@@ -267,6 +299,7 @@ class CustomerBusinessResource(
     // hard-codes the number instead would keep passing when the bound moves.
     internal companion object {
         const val UPSTREAM = "/api/v1/kyb"
+        const val HTTP_OK = 200
 
         /** An invitation token is opaque, URL-safe and bounded; anything else is malformed. */
         val TOKEN = Regex("^[A-Za-z0-9_-]{8,128}$")
