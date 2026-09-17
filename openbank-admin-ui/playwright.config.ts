@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against the Next.js dev server (auto-started before tests, torn down after).
+// Runs against the Next.js dev server by default, or a prebuilt production server when opted in.
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
 import { defineConfig, devices } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 
 const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
 const e2eBaseUrl = `http://localhost:${e2ePort}`
+const useProductionServer = process.env.OPENBANK_E2E_SERVER === 'production'
 
 export default defineConfig({
   testDir: './e2e',
@@ -41,6 +43,9 @@ export default defineConfig({
     baseURL: e2eBaseUrl,
     // Don't re-use browser state between tests — each spec gets a fresh page
     trace: 'on-first-retry',
+    // Contrast and layout assertions should observe the settled accessible state,
+    // not an intermediate frame of the shell's opacity/position entrance.
+    reducedMotion: 'reduce',
   },
 
   projects: [
@@ -51,7 +56,11 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run dev -- -p ${e2ePort}`,
+    // The caller builds first; a production run avoids on-demand compilation and
+    // the unbounded dev cache during broad browser sweeps.
+    command: useProductionServer
+      ? `npm run start -- -p ${e2ePort}`
+      : `npm run dev -- -p ${e2ePort}`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
@@ -62,6 +71,11 @@ export default defineConfig({
       // same secret (falls back to the same default) — keep the two in sync.
       NEXTAUTH_URL: e2eBaseUrl,
       NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret',
+      ...(useProductionServer ? {
+        KEYCLOAK_PUBLIC_URL: 'https://keycloak.e2e.invalid',
+        KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET ?? randomUUID(),
+        ALLOW_INSECURE_STUDIO_URLS: 'true',
+      } : {}),
     },
   },
 })

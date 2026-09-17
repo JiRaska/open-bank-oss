@@ -105,8 +105,8 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
-    expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
+    expect(Math.round((await page.locator('#admin-sidebar').first().boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('header').first().boundingBox())!.height)).toBe(60)
     expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
 
     // The Explorer portrait is deliberately oversized and clipped by the guide,
@@ -169,6 +169,10 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
     )
     await page.goto('/system/readiness')
+    const serviceValue = page.locator('.stat-card')
+      .filter({ has: page.locator('.stat-label', { hasText: /^Services$/ }) })
+      .locator('.stat-value').first()
+    await expect(serviceValue).toHaveText('2')
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
     // substring match, so it also selects the "NO-GO" card and the locator resolves to two
@@ -177,7 +181,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       page
         .locator('.stat-card')
         .filter({ has: page.locator('.stat-label', { hasText: new RegExp(`^${label}$`) }) })
-        .locator('.stat-value')
+        .locator('.stat-value').first()
         .evaluate(el => getComputedStyle(el).color)
 
     // GO and NO-GO carry a verdict, so their VALUES must differ in colour from each other

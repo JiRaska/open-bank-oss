@@ -106,8 +106,10 @@ test.describe('Transaction ledger search recovery', () => {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [], count: 0, limit: 51, offset: 0 }) })
     })
 
-    await page.goto('/transactions', { waitUntil: 'domcontentloaded' })
-    await page.getByRole('button', { name: 'Filters' }).click()
+    await page.goto('/transactions')
+    const filters = page.getByRole('button', { name: 'Filters' })
+    await filters.click()
+    await expect(filters).toHaveAttribute('aria-expanded', 'true')
     await page.getByLabel('Date from').fill('2026-09-16')
     await page.getByLabel('Date to').fill('2026-09-01')
     await expect(page.locator('#transaction-date-range-error')).toContainText('The start date must be on or before the end date.')

@@ -83,6 +83,7 @@ test('does not steal focus when an operator moves inside the drawer while permis
 
   await menu.click()
   await expect(sidebar).toBeFocused()
+  await expect(sidebar).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
   await page.keyboard.press('Tab')
   await expect(dashboard).toBeFocused()
 

@@ -128,7 +128,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
   })
 
   await page.goto('/regulatory')
-  const finrep = page.locator('.card').filter({ hasText: 'CNB — Finanční výkazy (FINREP)' })
+  const finrep = page.locator('.card').filter({ hasText: 'CNB — Finanční výkazy (FINREP)' }).first()
   const disclosure = finrep.locator('button[aria-controls="regulatory-report-cnb-finrep"]')
   await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()

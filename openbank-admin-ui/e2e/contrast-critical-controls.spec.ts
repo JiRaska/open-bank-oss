@@ -51,7 +51,9 @@ for (const theme of ['light', 'dark'] as const) {
       const detail = page.getByTestId('map-service-detail')
       await expect(detail).toContainText('PostgreSQL')
       for (const source of ['health', 'governance', 'topology']) {
-        await expect(page.getByTestId(`map-evidence-${source}`)).toContainText('Verified')
+        const evidence = page.getByTestId(`map-evidence-${source}`)
+        await expect(evidence).toHaveCount(1)
+        await expect(evidence).toContainText('Verified')
       }
 
       const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
