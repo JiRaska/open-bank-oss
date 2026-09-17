@@ -259,6 +259,22 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /** A company signer may propose an exact grant for co-signature; this cannot create access. */
+    @GET
+    @Path("/statutory-operations")
+    @Blocking
+    fun pendingStatutory(): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    /** A company signer may propose an exact grant for co-signature; this cannot create access. */
     @POST
     @Path("/statutory-operations")
     @Blocking

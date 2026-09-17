@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.72.0
+  version: 1.73.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3571,6 +3571,26 @@ paths:
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
   /delegations/statutory-operations:
+    get:
+      tags: [Delegation]
+      summary: List pending company delegation proposals for the selected profile
+      description: >-
+        Returns at most 50 unexpired proposals under the current statutory rule. Requires
+        X-Acting-For; the company and human signer are derived from the authenticated context.
+        A displayed proposal is not authority to act and is rechecked before every decision.
+      operationId: listPendingStatutoryDelegations
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Recent actionable pending proposals, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/StatutoryDelegationProposal'}
+        '403': {description: No selected company or caller lacks current joint representation}
+        '503': {description: Live company representation cannot be verified}
     post:
       tags: [Delegation]
       summary: Propose a company delegation requiring joint statutory signatures
