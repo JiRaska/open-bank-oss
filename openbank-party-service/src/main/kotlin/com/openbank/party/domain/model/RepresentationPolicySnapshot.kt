@@ -4,19 +4,23 @@
 
 package com.openbank.party.domain.model
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import java.time.Instant
 import java.util.UUID
 
 /** The register's rule after human confirmation, never a customer-managed employee approval group. */
 enum class RepresentationPolicyMode { SOLE, JOINT_N, JOINT_ALL }
 
-/** One bank-identified human and their verified office in this exact rule revision. */
-data class EligibleRepresentative(val partyId: UUID, val office: String) {
+/** One bank-identified human and the office tags verified for this exact rule revision. */
+data class EligibleRepresentative(val partyId: UUID, val officeTags: Set<String>) {
     init {
-        require(office.isNotBlank()) { "representative office is required" }
+        require(officeTags.isNotEmpty() && officeTags.all { it.isNotBlank() }) {
+            "at least one verified representative office is required"
+        }
     }
 
-    val normalizedOffice: String get() = office.trim().lowercase()
+    @get:JsonIgnore
+    val normalizedOfficeTags: Set<String> get() = officeTags.map(String::normalizedOffice).toSet()
 }
 
 /**
@@ -58,9 +62,7 @@ data class RepresentationPolicySnapshot(
         require(mode != RepresentationPolicyMode.JOINT_ALL || requiredSignatures == eligibleRepresentatives.size) {
             "joint-all requires every verified representative"
         }
-        val available = eligibleRepresentatives.groupingBy { it.normalizedOffice }.eachCount()
-        val required = requiredOffices.map(String::normalizedOffice).groupingBy { it }.eachCount()
-        require(required.all { (office, count) -> available.getOrDefault(office, 0) >= count }) {
+        require(officesCoveredBy(eligibleRepresentatives)) {
             "verified roster cannot satisfy the required offices"
         }
     }
@@ -70,10 +72,27 @@ data class RepresentationPolicySnapshot(
         if (signerPartyIds.size < requiredSignatures) return false
         val eligible = eligibleRepresentatives.associateBy { it.partyId }
         if (!signerPartyIds.all(eligible::containsKey)) return false
-        val signedOffices = signerPartyIds.map { eligible.getValue(it).normalizedOffice }
-            .groupingBy { it }.eachCount()
-        val required = requiredOffices.map(String::normalizedOffice).groupingBy { it }.eachCount()
-        return required.all { (office, count) -> signedOffices.getOrDefault(office, 0) >= count }
+        return officesCoveredBy(signerPartyIds.map(eligible::getValue))
+    }
+
+    /** A human can fill at most one office slot, even when their registry role carries many tags. */
+    private fun officesCoveredBy(representatives: List<EligibleRepresentative>): Boolean {
+        val slots = requiredOffices.map(String::normalizedOffice)
+        val assignedSlot = IntArray(representatives.size) { -1 }
+
+        fun assign(slot: Int, visited: BooleanArray): Boolean {
+            representatives.forEachIndexed { human, representative ->
+                if (visited[human] || slots[slot] !in representative.normalizedOfficeTags) return@forEachIndexed
+                visited[human] = true
+                if (assignedSlot[human] == -1 || assign(assignedSlot[human], visited)) {
+                    assignedSlot[human] = slot
+                    return true
+                }
+            }
+            return false
+        }
+
+        return slots.indices.all { assign(it, BooleanArray(representatives.size)) }
     }
 }
 

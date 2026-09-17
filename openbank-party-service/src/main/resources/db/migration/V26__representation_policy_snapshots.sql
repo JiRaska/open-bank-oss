@@ -4,8 +4,12 @@
 -- authorized archival and after all readers have been rolled back; do not delete signed evidence
 -- merely to roll back the application image.
 
+-- The direct-SQL default and Hibernate's pooled allocator must draw from the SAME sequence.
+-- Two independent sequences can both issue id=1 and fail a legitimate second insert.
+CREATE SEQUENCE party_representation_policies_seq INCREMENT BY 50;
+
 CREATE TABLE party_representation_policies (
-    id                            BIGSERIAL PRIMARY KEY,
+    id                            BIGINT DEFAULT nextval('party_representation_policies_seq') PRIMARY KEY,
     policy_id                     UUID NOT NULL UNIQUE,
     principal_party_id            UUID NOT NULL,
     revision                      BIGINT NOT NULL CHECK (revision > 0),
@@ -26,9 +30,7 @@ CREATE TABLE party_representation_policies (
 CREATE INDEX idx_party_representation_policy_principal
     ON party_representation_policies (principal_party_id, revision DESC);
 
--- Panache's pooled sequence uses the fleet's standard increment; the BIGSERIAL default is not
--- relied on by Hibernate but remains available to direct migration inserts.
-CREATE SEQUENCE IF NOT EXISTS party_representation_policies_seq INCREMENT BY 50;
+ALTER SEQUENCE party_representation_policies_seq OWNED BY party_representation_policies.id;
 
 -- A signed representation rule is evidence, not mutable profile configuration. A new verified
 -- rule creates a new revision; neither application bugs nor manual SQL may rewrite the old one.

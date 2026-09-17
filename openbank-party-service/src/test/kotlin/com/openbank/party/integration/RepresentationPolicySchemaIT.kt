@@ -4,15 +4,24 @@
 
 package com.openbank.party.integration
 
+import com.openbank.party.application.port.out.RepresentationPolicyRepository
+import com.openbank.party.domain.model.EligibleRepresentative
+import com.openbank.party.domain.model.RepresentationPolicyMode
+import com.openbank.party.domain.model.RepresentationPolicySnapshot
 import com.openbank.party.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.sql.Connection
 import java.sql.SQLException
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -21,6 +30,38 @@ import javax.sql.DataSource
 @QuarkusTestResource(PostgresRedpandaTestResource::class)
 class RepresentationPolicySchemaIT {
     @Inject lateinit var dataSource: DataSource
+
+    @Inject lateinit var policies: RepresentationPolicyRepository
+
+    private fun <T> onVertxContext(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
+
+    @Test
+    fun `repository round-trips the entire verified roster and office rule`() {
+        val chair = UUID.randomUUID()
+        val member = UUID.randomUUID()
+        val snapshot = RepresentationPolicySnapshot(
+            id = UUID.randomUUID(),
+            principalPartyId = UUID.randomUUID(),
+            revision = 1,
+            sourceCaseId = UUID.randomUUID(),
+            ruleTextHash = "b".repeat(64),
+            mode = RepresentationPolicyMode.JOINT_N,
+            requiredSignatures = 2,
+            requiredOffices = listOf("Chair", "Member"),
+            eligibleRepresentatives = listOf(
+                EligibleRepresentative(chair, setOf("Chair", "Member")),
+                EligibleRepresentative(member, setOf("Member")),
+            ),
+            evidenceRef = "verified-case",
+            effectiveFrom = Instant.parse("2026-09-17T00:00:00Z"),
+        )
+        onVertxContext { policies.insert(snapshot) }
+        val restored = onVertxContext { policies.findById(snapshot.id) }
+        assertThat(restored).isEqualTo(snapshot)
+        assertThat(restored!!.satisfiedBy(setOf(chair, member))).isTrue()
+        assertThat(onVertxContext { policies.findBySourceCaseId(snapshot.sourceCaseId) }).isEqualTo(snapshot)
+    }
 
     @Test
     fun `verified rule evidence cannot be rewritten or inserted twice for one KYB case`() {
@@ -78,8 +119,8 @@ class RepresentationPolicySchemaIT {
             statement.setString(
                 6,
                 "[" +
-                    "{\"partyId\":\"${UUID.randomUUID()}\",\"office\":\"Chair\"}," +
-                    "{\"partyId\":\"${UUID.randomUUID()}\",\"office\":\"Member\"}]",
+                    "{\"partyId\":\"${UUID.randomUUID()}\",\"officeTags\":[\"Chair\",\"Member\"]}," +
+                    "{\"partyId\":\"${UUID.randomUUID()}\",\"officeTags\":[\"Member\"]}]",
             )
             assertThat(statement.executeUpdate()).isEqualTo(1)
         }

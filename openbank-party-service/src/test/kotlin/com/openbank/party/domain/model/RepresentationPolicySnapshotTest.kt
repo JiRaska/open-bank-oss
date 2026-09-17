@@ -25,9 +25,9 @@ class RepresentationPolicySnapshotTest {
         requiredSignatures = 2,
         requiredOffices = requiredOffices,
         eligibleRepresentatives = listOf(
-            EligibleRepresentative(chair, " Chair "),
-            EligibleRepresentative(memberA, "Member"),
-            EligibleRepresentative(memberB, "Member"),
+            EligibleRepresentative(chair, setOf(" Chair ", "Member")),
+            EligibleRepresentative(memberA, setOf("Member")),
+            EligibleRepresentative(memberB, setOf("Member")),
         ),
         evidenceRef = "verified-case",
         effectiveFrom = Instant.parse("2026-09-17T00:00:00Z"),
@@ -45,7 +45,8 @@ class RepresentationPolicySnapshotTest {
     @Test
     fun `repeated office requirements count distinct signers`() {
         val rule = policy(listOf("Member", "Member"))
-        assertThat(rule.satisfiedBy(setOf(chair, memberA))).isFalse()
+        assertThat(rule.satisfiedBy(setOf(chair))).isFalse()
+        assertThat(rule.satisfiedBy(setOf(chair, memberA))).isTrue()
         assertThat(rule.satisfiedBy(setOf(memberA, memberB))).isTrue()
     }
 
@@ -55,7 +56,19 @@ class RepresentationPolicySnapshotTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { policy().copy(ruleTextHash = "unknown") }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { policy().copy(eligibleRepresentatives = listOf(EligibleRepresentative(chair, "Chair"))) }
+        assertThatThrownBy {
+            policy().copy(eligibleRepresentatives = listOf(EligibleRepresentative(chair, setOf("Chair", "Member"))))
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { policy().copy(requiredOffices = listOf("Chair", "Chair")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            policy().copy(
+                eligibleRepresentatives = listOf(
+                    EligibleRepresentative(chair, setOf("Chair", "Member")),
+                    EligibleRepresentative(memberA, setOf("Secretary")),
+                ),
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }
