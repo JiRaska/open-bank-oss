@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.248.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.0...admin-ui-v0.248.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** harden operator evidence, contrast and table access ([#10205](https://github.com/JiRaska/open-bank-oss/issues/10205)) ([3b981fe](https://github.com/JiRaska/open-bank-oss/commit/3b981fe2d87cc128b87412198cf5cc196fa0edc1))
+
+## [0.248.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.2...admin-ui-v0.248.0) (2026-09-17)
+
+
+### Features
+
+* **admin-ui:** advance incident and complaint context investigations ([#10194](https://github.com/JiRaska/open-bank-oss/issues/10194)) ([34614d0](https://github.com/JiRaska/open-bank-oss/commit/34614d08ebeaa92b9caa20cf1c7c0c4df12a6b85))
+
+## [0.247.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.1...admin-ui-v0.247.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** harden and accelerate operator workflows ([#10138](https://github.com/JiRaska/open-bank-oss/issues/10138)) ([2828fa1](https://github.com/JiRaska/open-bank-oss/commit/2828fa10ffdee9d5bd5d7916951c5b52f4301360))
+
 ## [0.247.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.0...admin-ui-v0.247.1) (2026-09-16)
 
 

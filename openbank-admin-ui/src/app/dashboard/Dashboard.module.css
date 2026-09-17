@@ -295,8 +295,7 @@
 
 .serviceChipPlanned {
   background: var(--surface-2);
-  color: var(--text-tertiary);
-  opacity: 0.78;
+  color: var(--text-secondary);
 }
 
 .serviceChipPlanned .serviceDot {

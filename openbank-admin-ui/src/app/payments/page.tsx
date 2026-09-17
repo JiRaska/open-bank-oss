@@ -1185,7 +1185,9 @@ function PaymentsContent() {
 
           {/* Payments table */}
           <div className="card" style={{ overflow: 'hidden' }}>
+            <div className="table-scroll-region" tabIndex={0} aria-label={t('Posuvný seznam plateb', 'Scrollable payments list')}>
             <table className="data-table">
+              <caption className="sr-only">{t('SEPA a tuzemské platby dostupné operátorovi', 'SEPA and domestic payments available to the operator')}</caption>
               <thead>
                 <tr>
                   <th>{t('ID', 'ID')}</th>
@@ -1195,7 +1197,7 @@ function PaymentsContent() {
                   <th>{t('Příjemce', 'Creditor')}</th>
                   <th>{t('IBAN / Účet příjemce', 'Creditor IBAN / Account')}</th>
                   <th>{t('Vytvořeno', 'Created')}</th>
-                  <th aria-label={t('Detail', 'Detail')} style={{ width: '36px' }} />
+                  <th style={{ width: '36px' }}><span className="sr-only">{t('Detail', 'Detail')}</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -1232,6 +1234,7 @@ function PaymentsContent() {
                 ))}
               </tbody>
             </table>
+            </div>
             {!loading && visibleSources.map(type => sourceEvidence[type].hasMore || sourceEvidence[type].loadingMore ? (
               <div key={type} style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
                 <button

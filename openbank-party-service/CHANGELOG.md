@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.1...party-service-v0.24.0) (2026-09-17)
+
+
+### Features
+
+* **party:** store the customer's personal AML profile ([#10202](https://github.com/JiRaska/open-bank-oss/issues/10202)) ([84d9bfa](https://github.com/JiRaska/open-bank-oss/commit/84d9bfacd550d38053c9c7fa88fd6ecd2f617faa))
+
 ## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.0...party-service-v0.23.1) (2026-09-13)
 
 

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
+import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -57,7 +58,18 @@ data class PartyCreated(val id: UUID)
 
 /** The part of party-service's `GET /parties/{id}` that decides who an initiator verifiably is. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class PartyRecord(val legalName: String, val kycStatus: String?, val address: PartyAddress?)
+data class PartyRecord(
+    val legalName: String,
+    val kycStatus: String?,
+    val address: PartyAddress?,
+    // Compliance metadata party-service stores (`parties.pep_flag`, `pep_category`, `fatca_status`,
+    // `crs_status`). Nullable and defaulted: a response that does not carry them reads as "not on
+    // file", which makes the person declare rather than silently count as non-PEP.
+    val pepFlag: Boolean? = null,
+    val pepCategory: String? = null,
+    val fatcaStatus: String? = null,
+    val crsStatus: String? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PartyAddress(val line1: String?, val city: String?, val postalCode: String?, val countryCode: String?)
@@ -180,6 +192,17 @@ class PartyServiceGateway : PartyGateway {
             },
             verified = party.kycStatus == KYC_APPROVED,
         )
+    }
+
+    @Timeout(PARTY_TIMEOUT_MS)
+    override suspend fun pepProfile(partyId: UUID): PepProfile? {
+        val party = try {
+            client.getParty(partyId)
+        } catch (e: WebApplicationException) {
+            if (e.response?.status == HTTP_NOT_FOUND) return null
+            throw e
+        }
+        return PepProfile(pep = party.pepFlag, category = party.pepCategory)
     }
 
     private companion object {

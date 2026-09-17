@@ -36,6 +36,16 @@ test('keeps account extent visible while incrementally rendering a bounded resul
   await expect(page.getByText('ACCOUNT-30', { exact: true })).toBeVisible()
   await expect(page.getByText('Showing 30 of 30 accounts')).toBeVisible()
   await expect(more).toHaveCount(0)
+
+  // A clipped account table must remain discoverable and operable without a pointer.
+  await page.setViewportSize({ width: 375, height: 812 })
+  const tableRegion = page.getByRole('region', { name: 'Scrollable accounts table' })
+  await expect(tableRegion).toBeVisible()
+  expect(await tableRegion.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await tableRegion.focus()
+  await expect(tableRegion).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => tableRegion.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
 })
 
 test('keeps masked card extent visible and removes an exhausted action', async ({ page }) => {

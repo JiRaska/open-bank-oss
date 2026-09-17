@@ -84,11 +84,3 @@ export type TechNode = z.infer<typeof TechNodeSchema>
 export type TechZone = z.infer<typeof TechZoneSchema>
 export type Control = z.infer<typeof ControlSchema>
 export type Process = z.infer<typeof ProcessSchema>
-
-// Weighted compliance score (0–100), derived — never authored. Single source of
-// the number the scorecard gauge shows.
-export function overallScore(controls: Control[]): number {
-  const wsum = controls.reduce((a, c) => a + c.weight, 0)
-  if (wsum === 0) return 0
-  return Math.round(controls.reduce((a, c) => a + c.weight * c.pct, 0) / wsum)
-}

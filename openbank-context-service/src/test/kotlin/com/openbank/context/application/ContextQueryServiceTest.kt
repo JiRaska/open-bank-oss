@@ -5,6 +5,7 @@ import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.domain.ContextNeighborhood
 import com.openbank.context.domain.ContextNode
 import com.openbank.context.domain.DataClassification
+import com.openbank.context.domain.ImpactProjectionStatus
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
 import com.openbank.libs.authz.AuthzDecision
@@ -102,8 +103,38 @@ class ContextQueryServiceTest {
         val impact = service.incident("inc-1", actor, context.copy(purpose = "INCIDENT_IMPACT"))
         assertThat(impact.affectedByType).containsEntry("PAYMENT", 2).containsEntry("WORKFLOW", 1)
         assertThat(impact.total).isEqualTo(3)
+        assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.AVAILABLE)
         assertThat(impact.drilldownAvailable).isFalse()
         assertThat(impact.toString()).doesNotContain("payment:p1", "workflow:w1")
+    }
+
+    @Test
+    fun `missing incident projection reports unknown impact after authorization`(): Unit = runBlocking {
+        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns null
+
+        val impact = service.incident("missing", actor, context.copy(purpose = "INCIDENT_IMPACT"))
+        assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.MISSING)
+        assertThat(impact.affectedByType).isEmpty()
+        coVerify { audit.record(match { it.decision == "ALLOWED" && it.rootRef == "incident:missing" }) }
+    }
+
+    @Test
+    fun `bounded incident query preserves partial coverage`(): Unit = runBlocking {
+        coEvery { assignments.isAssigned(any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true)
+        coEvery { graph.neighborhood(any(), any(), any(), any(), any()) } returns ContextNeighborhood(
+            "incident:inc-1",
+            listOf(node("incident:inc-1", "INCIDENT"), node("service:s1", "SERVICE")),
+            emptyList(),
+            true,
+        )
+
+        val impact = service.incident("inc-1", actor, context.copy(purpose = "INCIDENT_IMPACT"))
+        assertThat(impact.projectionStatus).isEqualTo(ImpactProjectionStatus.PARTIAL)
+        assertThat(impact.total).isEqualTo(1)
+        assertThat(impact.toString()).doesNotContain("service:s1")
     }
 
     private fun node(key: String, type: String) = ContextNode(
