@@ -25,7 +25,7 @@ class ReviewTransportTest(unittest.TestCase):
             line.strip()
             for step in workflow["jobs"]["review"]["steps"]
             for line in step.get("run", "").replace("\\\n", " ").splitlines()
-            if line.strip().startswith("claude -p ") and "--max-turns 12" in line
+            if line.strip().startswith("claude -p ")
         ]
         self.assertEqual(len(commands), 1)
         with tempfile.TemporaryDirectory() as tmp:
@@ -58,17 +58,15 @@ class ReviewTransportTest(unittest.TestCase):
         self.assertEqual(received["size"], len(payload))
         self.assertEqual(received["sha256"], hashlib.sha256(payload).hexdigest())
 
-    def test_tool_denials_and_stream_output_are_preserved(self):
+    def test_no_tools_and_stream_output_are_preserved(self):
         args = self.invoke(b"small review prompt\n")["argv"]
-        self.assertEqual(args[:3], ["-p", "--max-turns", "12"])
-        start = args.index("--disallowed-tools") + 1
-        end = args.index("--output-format")
         self.assertEqual(
-            set(args[start:end]),
-            set("Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite "
-                "NotebookEdit BashOutput KillShell ReportFindings".split()),
+            args,
+            ["-p", "--model", "sonnet", "--max-turns", "2", "--max-budget-usd", "0.50",
+             "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+             "--setting-sources", "", "--no-session-persistence",
+             "--output-format", "stream-json", "--verbose"],
         )
-        self.assertEqual(args[end:], ["--output-format", "stream-json", "--verbose"])
 
 
 if __name__ == "__main__":
