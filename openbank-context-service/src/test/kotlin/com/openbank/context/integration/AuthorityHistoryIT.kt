@@ -41,6 +41,15 @@ class AuthorityHistoryIT {
     lateinit var assignments: AssignmentAdministrationService
 
     @Test
+    fun `consumer group and replay policy resolve from the shipped application config`() {
+        val config = ConfigProvider.getConfig()
+        assertThat(config.getValue("mp.messaging.incoming.delegation-history-in.group.id", String::class.java))
+            .isEqualTo("openbank-context-service-authority-history")
+        assertThat(config.getValue("mp.messaging.incoming.delegation-history-in.auto.offset.reset", String::class.java))
+            .isEqualTo("earliest")
+    }
+
+    @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `offered revision zero survives storage and unrelated spend events do not become authority`() {
         val id = UUID.randomUUID()

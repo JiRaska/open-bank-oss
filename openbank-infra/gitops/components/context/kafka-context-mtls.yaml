@@ -58,6 +58,9 @@ spec:
       - resource: { type: topic, name: openbank.dlq.context-service.delegation-history, patternType: literal }
         operations: [Write, Describe]
         host: "*"
+      - resource: { type: group, name: openbank-context-service-authority-history, patternType: literal }
+        operations: [Read]
+        host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }
         operations: [Read]
         host: "*"

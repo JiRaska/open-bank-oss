@@ -77,6 +77,12 @@ mp:
       delegation-history-in:
         connector: smallrye-kafka
         topic: openbank.delegation.events
+        # Nested keys avoid quoted dotted YAML leaves; ship with the consumer image.
+        group:
+          id: openbank-context-service-authority-history
+        auto:
+          offset:
+            reset: earliest
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         failure-strategy: dead-letter-queue
