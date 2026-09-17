@@ -162,8 +162,9 @@ jobs:
           dependency-graph: generate-and-submit
           dependency-graph-continue-on-failure: false
           # Resolves all resolvable configurations without compiling source or running tests.
-          # Preserve the full runtime and test graph while bounding Gradle worker concurrency.
-          additional-arguments: --no-daemon --max-workers=4
+          # The isolated run 35220711284 still OOMed with four project resolvers active;
+          # serialize them without reducing the runtime or test configuration scope.
+          additional-arguments: --no-daemon --no-parallel --max-workers=1
           # COUPLING: the Gradle action injects its own
           # org.gradle:github-dependency-graph-gradle-plugin:<version> onto the buildscript
           # classpath, and Gradle dependency verification checks it against
