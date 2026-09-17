@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.74.0
+  version: 1.75.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3771,6 +3771,29 @@ paths:
         '409': {description: Quorum incomplete or proposal stale}
         '422': {description: Grant eligibility or resource ownership failed fresh validation}
         '503': {description: Legal rule or validation source is unavailable}
+  /delegations/statutory-operations/{id}/progress:
+    get:
+      tags: [Delegation]
+      summary: Show server-evaluated statutory signing progress for the selected company
+      description: >-
+        Advisory display state only. The office-aware quorum is evaluated by delegation-service;
+        the app must not infer legal sufficiency from approvalCount alone. Every mutation rechecks
+        current representation and frozen proposal evidence.
+      operationId: getStatutoryDelegationProgress
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Signing counts and current quorum flags
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutorySigningProgress'}
+        '403': {description: Caller lacks current joint representation}
+        '404': {description: Proposal not found for this company}
+        '409': {description: Proposal expired, stale or no longer pending}
+        '503': {description: Live company representation cannot be verified}
   /delegations/recertifications:
     get:
       tags: [Delegation]
@@ -5088,6 +5111,17 @@ components:
         actorPartyId: {type: string, format: uuid}
         verdict: {type: string, enum: [APPROVE, REJECT]}
         decidedAt: {type: string, format: date-time}
+    StatutorySigningProgress:
+      type: object
+      required: [operationId, requiredSignatures, approvalCount, rejectionCount, quorumSatisfied, quorumPossible, myVerdict]
+      properties:
+        operationId: {type: string, format: uuid}
+        requiredSignatures: {type: integer, minimum: 2}
+        approvalCount: {type: integer, minimum: 0}
+        rejectionCount: {type: integer, minimum: 0}
+        quorumSatisfied: {type: boolean}
+        quorumPossible: {type: boolean}
+        myVerdict: {type: [string, 'null'], enum: [APPROVE, REJECT, null]}
     StatutoryApprovalIntent:
       type: object
       required: [operationId, purpose, operationHash]
