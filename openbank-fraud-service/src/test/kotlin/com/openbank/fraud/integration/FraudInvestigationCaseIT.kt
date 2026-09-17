@@ -31,6 +31,7 @@ class FraudInvestigationCaseIT {
 
         val opened = given().contentType("application/json")
             .header("X-Investigation-Purpose", PURPOSE)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .body("""{"scoreId":"$scoreId"}""")
             .post("/api/v1/fraud/cases").then().statusCode(201)
             .header("Cache-Control", "no-store")
@@ -41,6 +42,7 @@ class FraudInvestigationCaseIT {
         assertThat(opened.body.asString()).doesNotContain(accountId.toString(), counterpartyId.toString())
 
         given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .body("""{"scoreId":"$scoreId"}""")
             .post("/api/v1/fraud/cases").then().statusCode(201)
             .body("caseId", equalTo(caseId.toString()))
@@ -49,10 +51,12 @@ class FraudInvestigationCaseIT {
         assertReference(caseId, 1, "fraud.case_opened", accountId, counterpartyId)
 
         given().header("X-Investigation-Purpose", PURPOSE)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("status", equalTo("CLOSED_NO_FINDING"))
             .body("revision", equalTo(2))
         given().header("X-Investigation-Purpose", PURPOSE)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("revision", equalTo(2))
         assertThat(outboxCount(caseId)).isEqualTo(2)
@@ -73,6 +77,7 @@ class FraudInvestigationCaseIT {
         seedScore(missingAccountScoreId, "REVIEW", null, null)
         for (scoreId in listOf(allowedScoreId, missingAccountScoreId, UUID.randomUUID())) {
             given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
                 .body("""{"scoreId":"$scoreId"}""")
                 .post("/api/v1/fraud/cases").then().statusCode(404)
         }
@@ -105,6 +110,16 @@ class FraudInvestigationCaseIT {
     @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
     fun `missing purpose is rejected before case lookup`() {
         given().get("/api/v1/fraud/cases/${UUID.randomUUID()}").then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
+    fun `missing idempotency key is rejected before case mutation`() {
+        given().contentType("application/json").header("X-Investigation-Purpose", PURPOSE)
+            .body("""{"scoreId":"${UUID.randomUUID()}"}""")
+            .post("/api/v1/fraud/cases").then().statusCode(400)
+        given().header("X-Investigation-Purpose", PURPOSE)
+            .post("/api/v1/fraud/cases/${UUID.randomUUID()}/close-without-finding").then().statusCode(400)
     }
 
     private fun seedScore(scoreId: UUID, verdict: String, accountId: UUID?, counterpartyId: UUID?) {

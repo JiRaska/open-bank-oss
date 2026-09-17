@@ -38,8 +38,10 @@ class FraudInvestigationCaseResource(
     suspend fun open(
         request: OpenFraudInvestigationRequest?,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key is required" }
         val scoreId = requireNotNull(request?.scoreId) { "scoreId is required" }
         val result = cases.open(scoreId, identity.principal.name)
             ?: return Response.status(Response.Status.NOT_FOUND).build()
@@ -69,8 +71,10 @@ class FraudInvestigationCaseResource(
     suspend fun closeWithoutFinding(
         @PathParam("caseId") caseId: UUID,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         require(purpose == PURPOSE) { "FRAUD_INVESTIGATION is required" }
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key is required" }
         val result = cases.closeWithoutFinding(caseId, identity.principal.name)
             ?: return Response.status(Response.Status.NOT_FOUND).build()
         return Response.ok(result.toResponse()).header("Cache-Control", "no-store").build()
