@@ -470,6 +470,15 @@ class SourceAndAcceptanceTest(unittest.TestCase):
         self.assertIn("secrets.AGENT_REVIEW_ANTHROPIC_API_KEY", workflow.read_text())
         jobs = config["jobs"]
         self.assertNotIn("review", jobs)
+        self.assertEqual(jobs["solo-prepare"]["needs"], "budget-tests")
+        self.assertIn("vars.AGENT_REVIEW_API_ENABLED == 'true'", jobs["solo-prepare"]["if"])
+        prepare = jobs["solo-prepare"]["steps"]
+        budget_index = next(i for i, step in enumerate(prepare)
+                            if step.get("run") == "python3 .github/scripts/agent-review-budget.py")
+        subject_index = next(i for i, step in enumerate(prepare) if step.get("id") == "subject")
+        self.assertLess(budget_index, subject_index)
+        self.assertEqual(jobs["solo-review"]["needs"], "solo-prepare")
+        self.assertNotIn("always()", jobs["solo-review"].get("if", ""))
         for name in ("solo-prepare", "solo-review", "solo-proof", "solo-seal"):
             self.assertTrue(jobs[name]["permissions"])
             self.assertTrue(all(value == "read" for value in jobs[name]["permissions"].values()))

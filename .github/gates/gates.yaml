@@ -4852,6 +4852,7 @@ gates:
     run: |
       set -e
       bash .github/scripts/check-agent-review-happened.sh --self-test
+      python3 .github/scripts/test-agent-review-budget.py
       python3 .github/scripts/test-solo-review-proof.py
       python3 .github/scripts/test-solo-review-runner.py
       python3 .github/scripts/test-agent-pr-review-bridge.py

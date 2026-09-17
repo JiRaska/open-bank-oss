@@ -230,8 +230,12 @@ spending limit on that project before enabling it. The runner fails before any
 provider call when either prerequisite is absent. Its temporary HOME and config
 paths prevent discovery of a personal CLI login; OAuth credentials are excluded.
 The complete workflow serializes dispatches through `agent-provider-budget` and
-never cancels an active paid run for a newer dispatch. Serialization is not a
-rolling spend cap or failure circuit breaker. Automatic retries remain disabled;
+never cancels an active paid run for a newer dispatch. Before preparing a subject, the shared dispatch admission checks the live default-branch
+controller, rejects reruns and incomplete history, and permits at most two dispatches
+in seven days. A prior failed, cancelled or unresolved dispatch opens the circuit.
+The allowance covers the whole two-model dispatch; it is not a provider billing cap.
+The owner anchor must also match the controller: an unmerged candidate cannot call
+the provider through this path. Automatic retries remain disabled;
 unknown usage must be reconciled before another paid dispatch. Do not restore the
 removed personal OAuth credential or enable the retired invocation path. The new
 locator job makes no model calls and does not submit owner acceptance. No source
