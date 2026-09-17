@@ -9,7 +9,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank KYB Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
     verified against its public register and signed for by its listed representatives.
@@ -34,6 +34,17 @@ servers:
     description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`kyb-service`)."
 
 channels:
+  kybUboObservationReferences:
+    address: openbank.kyb.ubo-observation-references
+    title: Case-scoped UBO observation references
+    description: |
+      Reference-only feed for Context Graph. The mapped ownership finding remains in KYB;
+      authorised reviewers fetch one observation through the case-scoped KYB API.
+      Partition key is the case id. The topic has separate KYB Write / Context Read ACLs,
+      a 7-day retention and an isolated Context DLQ.
+    messages:
+      KybUboObservationRecorded:
+        $ref: '#/components/messages/KybUboObservationRecorded'
   kybEvents:
     address: openbank.kyb.events
     title: Business onboarding case lifecycle
@@ -65,6 +76,11 @@ channels:
         $ref: '#/components/messages/BusinessOnboardingAbandoned'
 
 operations:
+  publishKybUboObservationReferences:
+    action: send
+    channel:
+      $ref: '#/channels/kybUboObservationReferences'
+    summary: "kyb-service publishes a reference after the observation and outbox entry commit together."
   publishKybEvents:
     action: send
     channel:
@@ -73,6 +89,11 @@ operations:
 
 components:
   messages:
+    KybUboObservationRecorded:
+      name: KybUboObservationRecorded
+      summary: "A versioned ownership finding was recorded for this KYB case."
+      payload:
+        $ref: '#/components/schemas/UboObservationReference'
     BusinessOnboardingStarted:
       name: BUSINESS_ONBOARDING_STARTED
       payload:
@@ -117,6 +138,30 @@ components:
         $ref: '#/components/schemas/CaseEnvelope'
 
   schemas:
+    UboObservationReference:
+      type: object
+      additionalProperties: false
+      description: "Reference-only v1 payload; no owner attributes, addresses or free text."
+      required: [schemaVersion, eventType, caseId, observationId, revision, sourceSha256]
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        eventType:
+          type: string
+          const: KybUboObservationRecorded
+        caseId:
+          type: string
+          format: uuid
+        observationId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        sourceSha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
     CaseEnvelope:
       type: object
       description: "Flat payload of `CaseEvent` (domain/model/KybEvent.kt) — the constructor properties ARE the wire fields."
