@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -340,6 +340,10 @@ components:
         operationHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
     ScaChallengeResponse:
       type: object
+      description: >-
+        Includes the write-once statutory operation binding and consumedAt so a caller can
+        reconcile an ambiguous consume timeout. A completed but unconsumed challenge is not
+        authority, and both fields must be compared before recording a recovered decision.
       properties:
         id:
           type: string
@@ -352,6 +356,9 @@ components:
         status:
           type: string
           enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
+        operationId: { type: string, format: uuid, nullable: true }
+        operationHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+        consumedAt: { type: string, format: date-time, nullable: true }
         attemptsRemaining:
           type: integer
         expiresAt:

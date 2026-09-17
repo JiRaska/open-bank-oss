@@ -109,6 +109,9 @@ data class ScaChallengeResponse(
     val expiresAt: String,
     val completedAt: String?,
     val consumedAt: String?,
+    /** Exact device-signed statutory binding, exposed for safe post-consume retry recovery. */
+    val operationId: String?,
+    val operationHash: String?,
     val attemptCount: Int,
     val maxAttempts: Int,
 ) {
@@ -122,6 +125,8 @@ data class ScaChallengeResponse(
             expiresAt = c.expiresAt.toString(),
             completedAt = c.completedAt?.toString(),
             consumedAt = c.consumedAt?.toString(),
+            operationId = c.dynamicLinkingData?.operationId,
+            operationHash = c.dynamicLinkingData?.operationHash,
             attemptCount = c.attemptCount,
             maxAttempts = c.maxAttempts,
         )

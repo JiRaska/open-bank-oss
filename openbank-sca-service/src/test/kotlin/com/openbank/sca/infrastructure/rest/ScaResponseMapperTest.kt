@@ -90,6 +90,39 @@ class ScaResponseMapperTest {
         assertThat(dto.completedAt).isNull()
         assertThat(dto.consumedAt).isNull()
         assertThat(dto.status).isEqualTo(ScaStatus.PENDING)
+        assertThat(dto.operationId).isNull()
+        assertThat(dto.operationHash).isNull()
+    }
+
+    @Test
+    fun `ScaChallengeResponse exposes the exact consumed statutory binding for reconciliation`() {
+        val operationId = UUID.randomUUID().toString()
+        val operationHash = "a".repeat(64)
+        val challenge = ScaChallenge(
+            partyId = UUID.randomUUID(),
+            purpose = ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            method = ScaMethod.BIOMETRIC,
+            status = ScaStatus.COMPLETED,
+            expiresAt = now.plusMinutes(5),
+            completedAt = now.plusMinutes(1),
+            consumedAt = now.plusMinutes(2),
+            createdAt = now,
+            dynamicLinkingData = DynamicLinkingData(
+                amount = null,
+                currency = null,
+                creditorIban = null,
+                creditorName = null,
+                reference = null,
+                operationId = operationId,
+                operationHash = operationHash,
+            ),
+        )
+
+        val dto = ScaChallengeResponse.from(challenge)
+
+        assertThat(dto.operationId).isEqualTo(operationId)
+        assertThat(dto.operationHash).isEqualTo(operationHash)
+        assertThat(dto.consumedAt).isNotNull()
     }
 
     @Test
