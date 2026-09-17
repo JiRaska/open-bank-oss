@@ -83,6 +83,8 @@ class PublicationWaitTest(unittest.TestCase):
         self.assertIn("needs: [changes, publication-ready]", build)
         self.assertIn("needs.publication-ready.result == 'success'", build)
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
+        self.assertIn("github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''", build)
+        self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", build)
         self.assertIn("needs: [changes, publication-ready, build, verification-metadata]", all_green)
         self.assertIn('needs.publication-ready.result }}" != "success"', all_green)
         self.assertNotIn("verify-admin-ui-providers:", pact)

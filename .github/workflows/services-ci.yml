@@ -438,12 +438,13 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: ${{ matrix.service }}
-    # Pass the Pact Broker password (secret) through to the reusable workflow
-    # (ADR-0092); vars.PACT_BROKER_URL/_USERNAME are available to it automatically.
+    # Pass the Pact Broker password only when the callee's contract job can run
+    # (ADR-0092). PRs and schedules must not receive a write-capable broker secret.
+    # vars.PACT_BROKER_URL/_USERNAME are available to the callee automatically.
     # Named explicitly rather than `secrets: inherit` — inherit hands the called
     # workflow EVERY repo secret, and this is the only one it reads.
     secrets:
-      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
   # Single required status check that aggregates the matrix, so branch protection
   # can require "Services CI / all-green" without enumerating every service.
