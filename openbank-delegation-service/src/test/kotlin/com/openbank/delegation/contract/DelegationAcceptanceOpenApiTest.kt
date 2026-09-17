@@ -17,5 +17,8 @@ class DelegationAcceptanceOpenApiTest {
         assertThat(accept).contains("#/components/parameters/CustomerPartyId")
         assertThat(accept).contains("#/components/parameters/CustomerActorPartyId")
         assertThat(accept).contains("actor lacks sole authority")
+        assertThat(accept).contains(
+            "'403': { description: The authenticated party is not the grantee, or its actor lacks sole authority }",
+        )
     }
 }

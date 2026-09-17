@@ -38,4 +38,15 @@ class CustomerApprovalGroupsOpenApiTest {
             "required: [id, ownerPartyId, name, members, threshold, revision, active, createdAt, updatedAt]",
         )
     }
+
+    @Test
+    fun `approval group contract hides foreign groups and rejects unauthorized writes`() {
+        val item = routes.substringAfter("  /delegations/approval-groups/{id}:")
+        val create = routes.substringAfter("  /delegations/approval-groups:")
+            .substringBefore("  /delegations/approval-groups/sca-reference:")
+
+        assertThat(item).contains("'404': {description: Missing group or owned by another profile}")
+        assertThat(item).contains("'403': {description: Actor lacks current authority}")
+        assertThat(create).contains("'403': {description: The actor lacks current authority for the selected profile}")
+    }
 }
