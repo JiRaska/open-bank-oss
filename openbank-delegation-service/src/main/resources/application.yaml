@@ -114,6 +114,10 @@ quarkus:
       url: ${PARTY_SERVICE_URL:http://localhost:8081}
       connect-timeout: 2000
       read-timeout: 2000
+    kyb-service:
+      url: ${KYB_SERVICE_URL:http://localhost:8157}
+      connect-timeout: 2000
+      read-timeout: 2000
     # Resource-ownership gate (ADR-0232 threat model T1): the only services that can answer
     # "does this grantor own that resource?". An outage here refuses new offers — it never
     # affects an existing grant, which is enforced from each product service's own projection.

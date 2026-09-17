@@ -128,6 +128,10 @@ spec:
             # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
+            # Live statutory attestation status. Unavailable KYB refuses new JOINT proposals;
+            # the historical Party policy alone is never current authority.
+            - name: KYB_SERVICE_URL
+              value: http://kyb-service.kyb.svc:8157
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit

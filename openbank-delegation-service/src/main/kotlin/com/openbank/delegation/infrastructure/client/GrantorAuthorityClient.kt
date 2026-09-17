@@ -142,10 +142,16 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
 
 /** Fail-closed JOINT rule resolver; never derives a quorum from one acting-for mandate. */
 @ApplicationScoped
-class RestStatutoryRuleClient(@RestClient private val client: PartyAuthorityRestClient, private val clock: Clock) :
-    StatutoryRuleClient {
+class RestStatutoryRuleClient(
+    @RestClient private val client: PartyAuthorityRestClient,
+    @RestClient private val kyb: KybAttestationRestClient,
+    private val clock: Clock,
+) : StatutoryRuleClient {
     @Inject
-    constructor(@RestClient client: PartyAuthorityRestClient) : this(client, Clock.systemUTC())
+    constructor(
+        @RestClient client: PartyAuthorityRestClient,
+        @RestClient kyb: KybAttestationRestClient,
+    ) : this(client, kyb, Clock.systemUTC())
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override suspend fun resolve(principalPartyId: UUID, actorPartyId: UUID): StatutoryRuleResolution = try {
@@ -159,7 +165,15 @@ class RestStatutoryRuleClient(@RestClient private val client: PartyAuthorityRest
             val now = clock.instant()
             val policyIsEffective = policy.principalPartyId == principalPartyId && !now.isBefore(policy.effectiveFrom)
             val actorIsInRoster = rule.eligibleRepresentatives.any { it.partyId == actorPartyId }
-            if (policyIsEffective && actorIsInRoster && rule.hasCurrentRoster(mandates, now)) {
+            val attestationIsCurrent = if (policyIsEffective &&
+                actorIsInRoster &&
+                rule.hasCurrentRoster(mandates, now)
+            ) {
+                kyb.current(rule.attestationId).matches(rule)
+            } else {
+                false
+            }
+            if (attestationIsCurrent) {
                 StatutoryRuleResolution.RosterMatched(rule)
             } else {
                 StatutoryRuleResolution.Denied
@@ -171,6 +185,13 @@ class RestStatutoryRuleClient(@RestClient private val client: PartyAuthorityRest
         Log.errorf(e, "statutory rule lookup for principal %s failed — refusing", principalPartyId)
         StatutoryRuleResolution.Unverifiable
     }
+
+    private fun KybAttestationStatusResponse.matches(rule: StatutoryRepresentationRule): Boolean =
+        id == rule.attestationId &&
+            current &&
+            ruleTextHash == rule.ruleTextHash &&
+            confirmedSigners == rule.requiredSignatures &&
+            confirmedRoles.sorted() == rule.requiredOffices.sorted()
 
     private fun StatutoryRepresentationRule.hasCurrentRoster(
         mandates: List<StatutoryMandateResponse>,

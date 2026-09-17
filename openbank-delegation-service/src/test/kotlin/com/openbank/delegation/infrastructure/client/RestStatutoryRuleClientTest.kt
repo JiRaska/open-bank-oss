@@ -23,7 +23,7 @@ class RestStatutoryRuleClientTest {
     @Test
     fun `joint rule requires live same-case mandates for every identified representative`(): Unit = runBlocking {
         val rest = Fixture()
-        val resolver = RestStatutoryRuleClient(rest, Clock.fixed(now, ZoneOffset.UTC))
+        val resolver = RestStatutoryRuleClient(rest, KybFixture(rest), Clock.fixed(now, ZoneOffset.UTC))
         val verified = resolver.resolve(principal, first)
         assertThat(verified).isInstanceOf(StatutoryRuleResolution.RosterMatched::class.java)
         val rule = (verified as StatutoryRuleResolution.RosterMatched).rule
@@ -42,7 +42,7 @@ class RestStatutoryRuleClientTest {
     @Test
     fun `office slots need distinct people and unknown policy cannot authorize`(): Unit = runBlocking {
         val rest = Fixture()
-        val resolver = RestStatutoryRuleClient(rest, Clock.fixed(now, ZoneOffset.UTC))
+        val resolver = RestStatutoryRuleClient(rest, KybFixture(rest), Clock.fixed(now, ZoneOffset.UTC))
         rest.policy = rest.policy.copy(
             requiredOffices = listOf("chair", "finance"),
             eligibleRepresentatives = listOf(
@@ -60,11 +60,42 @@ class RestStatutoryRuleClientTest {
     @Test
     fun `missing mandate metadata and upstream outage fail closed`(): Unit = runBlocking {
         val rest = Fixture()
-        val resolver = RestStatutoryRuleClient(rest, Clock.fixed(now, ZoneOffset.UTC))
+        val resolver = RestStatutoryRuleClient(rest, KybFixture(rest), Clock.fixed(now, ZoneOffset.UTC))
         rest.mandates = rest.mandates.map { it.copy(requiredSignatures = null) }
         assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Denied)
         rest.fail = true
         assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Unverifiable)
+    }
+
+    @Test
+    fun `amended or unavailable KYB attestation cannot authorize the roster`(): Unit = runBlocking {
+        val rest = Fixture()
+        val kyb = KybFixture(rest)
+        val resolver = RestStatutoryRuleClient(rest, kyb, Clock.fixed(now, ZoneOffset.UTC))
+        kyb.status = kyb.status.copy(current = false)
+        assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Denied)
+        kyb.status = kyb.status.copy(current = true, ruleTextHash = "b".repeat(64))
+        assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Denied)
+        kyb.status = kyb.status.copy(ruleTextHash = rest.policy.ruleTextHash, confirmedSigners = 1)
+        assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Denied)
+        kyb.fail = true
+        assertThat(resolver.resolve(principal, first)).isEqualTo(StatutoryRuleResolution.Unverifiable)
+    }
+
+    private inner class KybFixture(rest: Fixture) : KybAttestationRestClient {
+        var fail = false
+        var status = KybAttestationStatusResponse(
+            id = rest.policy.attestationId,
+            current = true,
+            ruleTextHash = rest.policy.ruleTextHash,
+            confirmedSigners = rest.policy.requiredSignatures,
+            confirmedRoles = rest.policy.requiredOffices,
+        )
+
+        override suspend fun current(id: UUID): KybAttestationStatusResponse {
+            if (fail) error("KYB unavailable")
+            return status
+        }
     }
 
     private inner class Fixture : PartyAuthorityRestClient {
