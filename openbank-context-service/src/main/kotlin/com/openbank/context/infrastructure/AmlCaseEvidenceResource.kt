@@ -66,6 +66,7 @@ class AmlCaseEvidenceResource(
                                 ) {
                                     if (source.isOpen(candidate)) {
                                         history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
+                                            .takeIf { related -> sharedReferences(root, related) }
                                     } else {
                                         null
                                     }
@@ -132,6 +133,20 @@ class AmlCaseEvidenceResource(
     } catch (exception: DateTimeParseException) {
         throw IllegalArgumentException("timestamps must use RFC 3339", exception)
     }
+
+    // Candidate discovery may match an older event outside the bounded related slice.
+    // Omit that case rather than return a node with no visible evidence for its edge.
+    private fun sharedReferences(root: AmlCaseHistory, related: AmlCaseHistory): Boolean =
+        references(root).intersect(references(related)).isNotEmpty()
+
+    private fun references(history: AmlCaseHistory): Set<String> = history.observations.flatMap { row ->
+        val evidence = row.evidence
+        listOfNotNull(
+            "party:${evidence.partyId}",
+            evidence.accountId?.let { "account:$it" },
+            evidence.transactionId?.let { "transaction:$it" },
+        )
+    }.toSet()
 
     private companion object {
         const val PURPOSE = "AML_INVESTIGATION"

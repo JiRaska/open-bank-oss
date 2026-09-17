@@ -169,6 +169,35 @@ class AmlCaseEvidenceResourceIT {
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    fun `network omits a candidate when its bounded history no longer shows the linking evidence`() {
+        val root = UUID.randomUUID()
+        val related = UUID.randomUUID()
+        val account = UUID.randomUUID()
+        val relatedParty = UUID.randomUUID().toString()
+        record(root, party = UUID.randomUUID().toString(), account = account)
+        record(related, party = relatedParty, account = account)
+        grant(root)
+        grant(related)
+        (1..21).forEach { index ->
+            val previous = if (index % 2 == 1) "OPEN" else "UNDER_REVIEW"
+            val next = if (index % 2 == 1) "UNDER_REVIEW" else "OPEN"
+            val payload = mapper.writeValueAsString(
+                mapOf(
+                    "caseId" to related,
+                    "partyId" to relatedParty,
+                    "previousStatus" to previous,
+                    "newStatus" to next,
+                    "occurredAt" to Instant.parse("2026-09-02T00:00:00Z").plusSeconds(index.toLong()),
+                ),
+            )
+            val observation = decoder.decode(payload, UUID.randomUUID().toString(), "aml.case.status_changed.v1")
+            onVertx { repository.append(observation) }
+        }
+        requestNetwork(root).then().statusCode(200).body("related.size()", equalTo(0))
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
     fun `network requires root assignment before candidate discovery or source access`() {
         val id = UUID.randomUUID()
         record(id, party = UUID.randomUUID().toString())
@@ -203,7 +232,7 @@ class AmlCaseEvidenceResourceIT {
         return requireNotNull(onVertx { assignments.decide(proposal.id, true, "aml-checker") }.assignmentId)
     }
 
-    private fun record(id: UUID, terminal: Boolean = false, party: String = PARTY) {
+    private fun record(id: UUID, terminal: Boolean = false, party: String = PARTY, account: UUID? = null) {
         val fields = mutableMapOf<String, Any?>("caseId" to id, "partyId" to party)
         if (terminal) {
             fields.putAll(
@@ -221,7 +250,7 @@ class AmlCaseEvidenceResourceIT {
                     "status" to "OPEN",
                     "riskLevel" to "LOW",
                     "screeningType" to "TRANSACTION_MONITORING",
-                    "accountId" to null,
+                    "accountId" to account,
                     "transactionId" to null,
                     "occurredAt" to "2026-09-01T00:00:00Z",
                     "matchedEntity" to "Synthetic Person",
