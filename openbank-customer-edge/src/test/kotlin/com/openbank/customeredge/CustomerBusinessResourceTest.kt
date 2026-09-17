@@ -194,4 +194,97 @@ class CustomerBusinessResourceTest {
 
         assertThat(url.captured).contains("name=Zem%C4%9Bd%C4%9Blsk%C3%A9")
     }
+
+    @Test
+    fun `questionnaire and declarations are PUT to kyb as the token human with the body untouched`() {
+        val upstream = mockk<UpstreamClient>()
+        val urls = mutableListOf<String>()
+        val parties = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        every { upstream.put(capture(urls), capture(parties), capture(bodies)) } returns Response.ok("{}").build()
+        val case = UUID.randomUUID()
+        val q = """{"purpose":"OPERATING_ACCOUNT","cashIntensive":false}"""
+        val d = """{"uboConfirmed":true,"peps":[],"truthful":true}"""
+
+        resource(upstream).questionnaire(case, q)
+        resource(upstream).declarations(case, d)
+
+        assertThat(urls).containsExactly(
+            "$kyb/api/v1/kyb/cases/$case/questionnaire",
+            "$kyb/api/v1/kyb/cases/$case/declarations",
+        )
+        assertThat(parties).containsOnly(caller.toString())
+        assertThat(bodies).containsExactly(q, d)
+    }
+
+    @Test
+    fun `agreement and accept are POSTed to kyb as the token human, lang pinned`() {
+        val upstream = mockk<UpstreamClient>()
+        val urls = mutableListOf<String>()
+        val parties = mutableListOf<String>()
+        val bodies = mutableListOf<String>()
+        every { upstream.post(capture(urls), capture(parties), capture(bodies), any()) } returns
+            Response.ok("{}").build()
+        val case = UUID.randomUUID()
+        val accept = """{"disclosures":[{"code":"VOP_CS","version":"1.1.0","sha256":"ab"}]}"""
+
+        resource(upstream).agreement(case, "EN")
+        resource(upstream).agreement(case, null)
+        resource(upstream).acceptAgreement(case, accept)
+
+        assertThat(urls).containsExactly(
+            "$kyb/api/v1/kyb/cases/$case/agreement?lang=en",
+            "$kyb/api/v1/kyb/cases/$case/agreement",
+            "$kyb/api/v1/kyb/cases/$case/agreement/accept",
+        )
+        assertThat(parties).containsOnly(caller.toString())
+        assertThat(bodies.last()).isEqualTo(accept)
+
+        assertThatThrownBy { resource(upstream).agreement(case, "cs&x=1") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        io.mockk.verify(exactly = 3) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `questionnaire prefill is read from kyb as the token human and passed through`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        val case = UUID.randomUUID()
+        val prefill =
+            """{"knownPersons":[{"name":"Jana","partyId":"$caller","pep":null}],""" +
+                """"previousQuestionnaire":null}"""
+        every { upstream.get(capture(url), capture(party)) } returns Response.ok(prefill).build()
+
+        val ok = resource(upstream).questionnairePrefill(case)
+
+        assertThat(url.captured).isEqualTo("$kyb/api/v1/kyb/cases/$case/questionnaire/prefill")
+        assertThat(party.captured).isEqualTo(caller.toString())
+        assertThat(ok.entity).isEqualTo(prefill)
+
+        every { upstream.get(any(), any()) } returns Response.status(404).entity("""{"error":"NOT_INVOLVED"}""").build()
+        assertThat(resource(upstream).questionnairePrefill(case).status).isEqualTo(404)
+    }
+
+    @Test
+    fun `kyb refusals on the new routes reach the client unchanged`() {
+        val upstream = mockk<UpstreamClient>()
+        val case = UUID.randomUUID()
+        every { upstream.put(match { it.endsWith("/questionnaire") }, any(), any()) } returns
+            Response.status(400).entity("""{"error":"purpose required"}""").build()
+        every { upstream.put(match { it.endsWith("/declarations") }, any(), any()) } returns
+            Response.status(422).entity("""{"error":"truthful"}""").build()
+        every { upstream.post(match { it.endsWith("/agreement/accept") }, any(), any(), any()) } returns
+            Response.status(409).entity("""{"error":"DISCLOSURES_STALE"}""").build()
+        every { upstream.post(match { it.contains("/agreement?") }, any(), any(), any()) } returns
+            Response.status(409).entity("""{"error":"QUESTIONNAIRE_MISSING"}""").build()
+
+        val r = resource(upstream)
+        assertThat(r.questionnaire(case, "{}").status).isEqualTo(400)
+        assertThat(r.declarations(case, "{}").status).isEqualTo(422)
+        val stale = r.acceptAgreement(case, "{}")
+        assertThat(stale.status).isEqualTo(409)
+        assertThat(stale.entity as String).contains("DISCLOSURES_STALE")
+        assertThat(r.agreement(case, "cs").status).isEqualTo(409)
+    }
 }

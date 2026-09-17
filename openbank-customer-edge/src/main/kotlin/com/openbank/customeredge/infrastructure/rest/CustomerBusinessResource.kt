@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -163,6 +164,48 @@ class CustomerBusinessResource(
     fun inviteCosigners(@PathParam("id") id: UUID, body: String): Response =
         upstream.post("$kybServiceUrl$UPSTREAM/cases/$id/cosigners", human().toString(), body, null)
 
+    /** AML/FATCA-CRS questionnaire (answers are validated and ownership-checked by kyb-service). */
+    @PUT
+    @Path("/onboarding/{id}/questionnaire")
+    @Blocking
+    fun questionnaire(@PathParam("id") id: UUID, body: String): Response =
+        upstream.put("$kybServiceUrl$UPSTREAM/cases/$id/questionnaire", human().toString(), body)
+
+    /** Persons already known for the case (register + party-service) and any earlier answers, to prefill the form. */
+    @GET
+    @Path("/onboarding/{id}/questionnaire/prefill")
+    @Blocking
+    fun questionnairePrefill(@PathParam("id") id: UUID): Response =
+        upstream.get("$kybServiceUrl$UPSTREAM/cases/$id/questionnaire/prefill", human().toString())
+
+    /** UBO / PEP / truthfulness declarations. */
+    @PUT
+    @Path("/onboarding/{id}/declarations")
+    @Blocking
+    fun declarations(@PathParam("id") id: UUID, body: String): Response =
+        upstream.put("$kybServiceUrl$UPSTREAM/cases/$id/declarations", human().toString(), body)
+
+    /**
+     * Render (or fetch) the business framework agreement and its disclosures. `lang` is the only
+     * caller-supplied value that reaches the upstream query, so it is pinned to a closed set.
+     */
+    @POST
+    @Path("/onboarding/{id}/agreement")
+    @Blocking
+    fun agreement(@PathParam("id") id: UUID, @QueryParam("lang") lang: String?): Response {
+        val chosen = lang?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        require(chosen == null || chosen in LANGS) { "lang must be one of $LANGS" }
+        val q = chosen?.let { "?lang=$it" }.orEmpty()
+        return upstream.post("$kybServiceUrl$UPSTREAM/cases/$id/agreement$q", human().toString(), "{}", null)
+    }
+
+    /** Accept the disclosures bound to code+version+sha256; kyb answers 409 when the set is stale. */
+    @POST
+    @Path("/onboarding/{id}/agreement/accept")
+    @Blocking
+    fun acceptAgreement(@PathParam("id") id: UUID, body: String): Response =
+        upstream.post("$kybServiceUrl$UPSTREAM/cases/$id/agreement/accept", human().toString(), body, null)
+
     @POST
     @Path("/onboarding/{id}/sign")
     @Blocking
@@ -228,6 +271,7 @@ class CustomerBusinessResource(
         /** An invitation token is opaque, URL-safe and bounded; anything else is malformed. */
         val TOKEN = Regex("^[A-Za-z0-9_-]{8,128}$")
         val COUNTRY = Regex("^[A-Za-z]{2}$")
+        val LANGS = setOf("cs", "en")
 
         /**
          * [MIN_TERM] and [MAX_LIMIT] mirror kyb-service's own `RegistrySearchQuery` exactly, so the
