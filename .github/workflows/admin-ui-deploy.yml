@@ -130,12 +130,21 @@ jobs:
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: read
     outputs:
       proceed: ${{ steps.source.outputs.proceed }}
     steps:
+      # Evidence-only workflow_run bursts can otherwise start a full API-heavy image
+      # build for every successive main SHA. Wait once, then let the existing ancestry
+      # guard reject a source superseded by a later build-relevant commit. Source
+      # pushes and explicit operator refreshes remain immediate. Never cancel an
+      # in-flight build: it must finish signing and attesting the image it pushed.
+      - name: Coalesce evidence-only merge bursts
+        if: github.event_name == 'workflow_run'
+        run: sleep 600
       # Always checkout the event's trusted default-branch revision. In particular, a
       # workflow_run must never feed its payload SHA into checkout: that trigger carries
       # repository secrets and a write-capable downstream job, so coupling it to a payload
