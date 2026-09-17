@@ -29,6 +29,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -133,6 +134,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   const dateLocale = numberLocale
   const [expanded, setExpanded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const sourceUrl = trustedHttpsUrl(list.sourceUrl)
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -188,8 +190,9 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
             <ExternalLink size={11} />
-            <a href={list.sourceUrl} target="_blank" rel="noreferrer"
-              style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{list.sourceUrl}</a>
+            {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer"
+              style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{sourceUrl}</a>
+              : <span role="status" style={{ color: 'var(--warning-text)' }}>{t('Zdrojový odkaz není bezpečně dostupný', 'Source link is not safely available')}</span>}
           </div>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '2px' }}>{t('Plán stahování', 'Download schedule')}</div>
           <Can permission="sanctions:manage"><CronEditor key={`${list.id}-${list.cronDays}-${list.cronHour}-${list.cronMinute}`} list={list} onSave={onSave} /></Can>
@@ -1001,8 +1004,8 @@ export default function SanctionsPage() {
                               <div style={{ fontSize: '12px', fontWeight: 600, color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
                                 display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', lineHeight: 1.3 }}>
                                 {lst.displayName}
-                                {isPep && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
-                                {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
+                                {isPep && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-text)', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', padding: '1px 4px', borderRadius: '3px' }}>PEP</span>}
+                                {!lst.enabled && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
                               {/* A checked row paints --accent-bg (#eef2ff) behind this line, and
                                   --text-tertiary (#64748b) on it measures 4.26:1 — under the 4.5:1

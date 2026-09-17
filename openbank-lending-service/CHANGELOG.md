@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.3...lending-service-v0.33.4) (2026-09-17)
+
+
+### Bug Fixes
+
+* **lending:** inject demonstration risk flag into CDI adapter ([#10170](https://github.com/JiRaska/open-bank-oss/issues/10170)) ([de1c479](https://github.com/JiRaska/open-bank-oss/commit/de1c479b6869adfa893e2052938d7c8af4f58e47)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
 ## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.2...lending-service-v0.33.3) (2026-09-16)
 
 

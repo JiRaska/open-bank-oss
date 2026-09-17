@@ -10,6 +10,7 @@
 
 import { useState } from 'react'
 import { ShieldAlert, ShieldCheck, Clock, ArrowUpCircle, ExternalLink, ClipboardPlus, Loader2, Check } from 'lucide-react'
+import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
 
 export type Urgency = 'current' | 'patch-available' | 'major-available' | 'vulnerable' | 'eol-soon' | 'eol' | 'unknown'
 
@@ -56,23 +57,13 @@ function fmtDate(iso: string, locale: string): string {
   return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short' })
 }
 
-function safeReleaseNotesUrl(candidate: string | null): string | null {
-  if (!candidate) return null
-  try {
-    const url = new URL(candidate)
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null
-  } catch {
-    return null
-  }
-}
-
 export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: CompLifecycle; name: string; t: T; dateLocale?: string }) {
   const [draft, setDraft] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
   const u = URGENCY[data.urgency]
   const lc = data.lifecycle
   const has = lc.available
   const running = data.running.version
-  const releaseNotesUrl = safeReleaseNotesUrl(data.upgrade.releaseNotesUrl)
+  const releaseNotesUrl = trustedHttpsUrl(data.upgrade.releaseNotesUrl)
 
   const planUpgrade = async () => {
     setDraft('busy')

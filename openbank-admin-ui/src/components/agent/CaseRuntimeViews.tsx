@@ -92,7 +92,7 @@ export function CaseRuntimeTimeline({ thread, locale }: { thread: RuntimeCaseVie
               <time style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)' }}>{new Date(entry.atEpochMs).toLocaleString(locale)}</time>
             </div>
             {(entry.signalId || entry.rolloutId) && (
-              <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>
+              <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-tertiary)' }}>
                 {entry.signalId && <>signal {entry.signalId}</>}{entry.signalId && entry.rolloutId && ' · '}{entry.rolloutId && <>rollout {entry.rolloutId}</>}
               </div>
             )}
@@ -148,7 +148,7 @@ export function CaseRuntimeTopology({ thread, locale }: { thread: RuntimeCaseVie
                 <span style={{ height: '2px', width: '40px', background: 'var(--accent-text)' }} />
                 <ArrowRight size={14} style={{ color: 'var(--accent-text)', marginLeft: '-14px' }} />
                 <strong style={{ fontFamily: 'var(--font-mono)' }}>{edge.to}</strong>
-                <span style={{ marginLeft: 'auto', padding: '2px 7px', borderRadius: '8px', background: 'var(--accent-bg)', color: 'var(--accent-text)', fontSize: '9px', fontWeight: 850 }}>{edge.evidence.stage}</span>
+                <span style={{ marginLeft: 'auto', padding: '2px 7px', borderRadius: '8px', background: 'var(--accent-bg)', color: 'var(--accent-text)', fontSize: '10px', fontWeight: 850 }}>{edge.evidence.stage}</span>
               </div>
               <EvidenceDetails evidence={edge.evidence} locale={locale} />
             </article>

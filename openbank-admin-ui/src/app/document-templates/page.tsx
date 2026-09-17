@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { sandboxedPreviewDocument } from '@/lib/documents/sandboxedPreview'
 import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -333,12 +334,14 @@ export default function DocumentTemplatesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runPreview closes over formData.bodyHtml/sampleDataText, both already deps below
   }, [formData.bodyHtml, sampleDataText])
 
-  // "Open in a new window" — a Blob URL so the merged preview opens as its own
-  // real document/tab (what a client would actually see), not squeezed into a
-  // small iframe. Revoked after a delay so the new tab has time to load it.
+  // "Open in a new window" keeps the merged HTML inside a scriptless sandbox.
+  // Making previewHtml the Blob's top-level document would silently bypass the
+  // inline preview's sandbox and execute an authored <script> in a fresh tab.
   function openPreviewInNewWindow() {
     if (!previewHtml) return
-    const blobUrl = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html' }))
+    const title = t('Izolovaný náhled šablony', 'Isolated template preview')
+    const safeDocument = sandboxedPreviewDocument(previewHtml, title)
+    const blobUrl = URL.createObjectURL(new Blob([safeDocument], { type: 'text/html' }))
     window.open(blobUrl, '_blank', 'noopener,noreferrer')
     setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000)
   }

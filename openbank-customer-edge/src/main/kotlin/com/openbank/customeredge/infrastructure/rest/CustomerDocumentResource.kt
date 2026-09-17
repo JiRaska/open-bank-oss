@@ -142,7 +142,7 @@ class CustomerDocumentResource(private val upstream: UpstreamClient, private val
     @Path("/signature-ceremonies/{id}")
     @Blocking
     fun ceremony(@PathParam("id") id: UUID): Response {
-        val partyId = partyId()
+        val partyId = partyId(asSigner = true)
         val ceremony = upstream.get("$documentServiceUrl/api/v1/signature-ceremonies/$id", partyId)
         if (ceremony.status != OK) return notFound()
         if (!signersOf(ceremony).contains(partyId)) return notFound()
@@ -153,12 +153,16 @@ class CustomerDocumentResource(private val upstream: UpstreamClient, private val
      * Record the caller's signing decision on a ceremony (ADR-0169). `partyRef` is forced to the
      * caller's token; `evidenceRef` (the SCA challenge id) is passed through and verified upstream
      * by document-service's `SignerVerificationPort` against sca-service (ADR-0021).
+     *
+     * The signer is always the HUMAN, even under `X-Acting-For`: a business agreement's document
+     * belongs to the entity, but its ceremony lists the natural persons who sign for it, and an
+     * entity cannot give an SCA-bound decision.
      */
     @POST
     @Path("/signature-ceremonies/{id}/decisions")
     @Blocking
     fun recordDecision(@PathParam("id") id: UUID, body: String?): Response {
-        val partyId = partyId()
+        val partyId = partyId(asSigner = true)
         val ceremony = upstream.get("$documentServiceUrl/api/v1/signature-ceremonies/$id", partyId)
         if (ceremony.status != OK) return notFound()
         if (!signersOf(ceremony).contains(partyId)) return notFound()
@@ -187,14 +191,13 @@ class CustomerDocumentResource(private val upstream: UpstreamClient, private val
     @jakarta.ws.rs.core.Context
     lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
 
-    private fun partyId(): String {
-        val claimed = CustomerEdgeResource.resolvePartyIdClaim(
-            partyIdClaim = jwt.getClaim<String>("party_id"),
-            sub = jwt.subject,
-        ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
-        val human = runCatching {
-            UUID.fromString(claimed)
-        }.getOrElse { throw ForbiddenException("party_id claim is not a valid party UUID") }
+    /**
+     * The party a route is scoped to. With [asSigner] (ceremony routes) it is always the HUMAN: a
+     * present `X-Acting-For` header is still validated (fail-closed, 403 without an active mandate),
+     * but never replaces the signer identity.
+     */
+    private fun partyId(asSigner: Boolean = false): String {
+        val human = humanPartyOf(jwt)
         val actingFor = if (this::requestHeaders.isInitialized) {
             requestHeaders.getHeaderString(
                 CustomerEdgeResource.ACTING_FOR_HEADER,
@@ -203,7 +206,7 @@ class CustomerDocumentResource(private val upstream: UpstreamClient, private val
             null
         }
         val resolved = if (this::actingForResolver.isInitialized) actingForResolver.resolve(human, actingFor) else human
-        return resolved.toString()
+        return if (asSigner) human.toString() else resolved.toString()
     }
 
     private fun ownerPartyOf(response: Response): String? =
@@ -265,3 +268,14 @@ private fun sharedDocuments(
             put("sharedWithMe", true)
         }
     }
+
+/** The token's HUMAN party, never the acted-for entity. File-level to stay within the class function budget. */
+private fun humanPartyOf(jwt: JsonWebToken): UUID {
+    val claimed = CustomerEdgeResource.resolvePartyIdClaim(
+        partyIdClaim = jwt.getClaim<String>("party_id"),
+        sub = jwt.subject,
+    ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
+    return runCatching {
+        UUID.fromString(claimed)
+    }.getOrElse { throw ForbiddenException("party_id claim is not a valid party UUID") }
+}
