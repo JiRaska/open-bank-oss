@@ -34,7 +34,7 @@
 //                                              [--gate-detail-runs <n>]
 
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { requireTrustedMainRuns, trustedRunQuery } from './gate-health-run-source.mjs'
@@ -79,34 +79,33 @@ async function ghJson(pathname) {
   return (await gh(pathname)).json()
 }
 
-// One HTTP round trip per artifact; `unzip` shelled out to rather than an npm dependency,
-// same "no new dependency" convention collect-dora.mjs already keeps (execFileSync + fs
-// only). Returns null on ANY failure (expired artifact, no `unzip` on PATH, corrupt zip) —
-// the caller must treat that run as shard-only, not crash the whole collector over one gap.
+// One HTTP round trip per artifact. Read exactly the expected JSON member from the ZIP;
+// never extract archive entries into the privileged build workspace. Returns null on any
+// missing/invalid artifact so the caller can retain shard-only evidence for that run.
 async function downloadArtifactJson(artifact, workdir) {
   try {
-    // CodeQL js/http-to-file-access: the GitHub Actions API is a trusted, authenticated source
-    // (not a "download from evil.com" backdoor pattern) and the zip is only ever unzipped and
-    // read back as JSON, never executed — but the path built from `artifact.id` below is worth
-    // hardening on its own terms (CWE-434): reject anything that isn't the safe integer the
-    // API contract promises before it reaches path.join, rather than trusting the shape.
-    if (!Number.isInteger(artifact.id) || artifact.id < 0) {
-      throw new Error(`unexpected artifact id shape: ${JSON.stringify(artifact.id)}`)
+    const MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
+    if (!Number.isSafeInteger(artifact.id) || artifact.id < 0 ||
+        !/^gate-results-[a-z0-9-]+$/.test(artifact.name) ||
+        !Number.isSafeInteger(artifact.size_in_bytes) ||
+        artifact.size_in_bytes < 1 || artifact.size_in_bytes > MAX_ARCHIVE_BYTES) {
+      throw new Error('unexpected gate artifact metadata')
     }
     const res = await gh(`/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
       redirect: 'follow',
     })
     const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length > MAX_ARCHIVE_BYTES) throw new Error('gate artifact archive too large')
     const zipPath = path.join(workdir, `${artifact.id}.zip`)
     writeFileSync(zipPath, buf)
-    execFileSync('unzip', ['-o', '-q', zipPath, '-d', workdir], { stdio: 'ignore' })
-    const jsonName = artifact.name.replace(/^gate-results-/, '') + '.json'
-    // run-gates.py --json writes whatever filename the caller passed; ci.yml (this change)
-    // names it gate-results-<group>.json inside the artifact, matching the artifact's own
-    // name — read that, and fall back to the first *.json in the extracted dir so a rename
-    // on either side degrades to "not found" rather than a silent empty array.
-    const candidate = path.join(workdir, `gate-results-${jsonName.replace('.json', '')}.json`)
-    const text = readFileSync(candidate, 'utf8')
+    const entry = `${artifact.name}.json`
+    const entries = execFileSync('unzip', ['-Z', '-1', zipPath], {
+      encoding: 'utf8', maxBuffer: 1024 * 1024,
+    }).trimEnd()
+    if (entries !== entry) throw new Error('gate artifact contains unexpected entries')
+    const text = execFileSync('unzip', ['-p', zipPath, entry], {
+      encoding: 'utf8', maxBuffer: MAX_ARCHIVE_BYTES,
+    })
     return JSON.parse(text)
   } catch {
     return null
