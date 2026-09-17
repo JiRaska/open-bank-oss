@@ -66,12 +66,14 @@ follow-up issue named in the PR that introduced this script.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 WORKFLOW = ".github/workflows/auto-deploy-red-watch.yml"
 WORKFLOW_ID = "auto-deploy.yml"
@@ -80,6 +82,8 @@ THRESHOLD = 3
 # R4: one page, a little above the threshold so a couple of cancelled runs still leave enough
 # verdicts. NOT a paginate; NOT the history.
 PER_PAGE = 8
+LOOKBACK = timedelta(hours=24)
+MAX_NEWEST_AGE = timedelta(hours=6)  # the scheduled lane normally ticks every 3h
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -134,12 +138,30 @@ def _slim(r: dict) -> dict:
 # --------------------------------------------------------------------------- online lane
 
 
-def fetch_runs(repo: str, per_page: int = PER_PAGE) -> list[dict]:
-    """One bounded call (R4). `event=` is a server-side filter, so the page IS the lane."""
-    path = (
-        f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs"
-        f"?event={LANE}&status=completed&per_page={per_page}"
-    )
+def require_fresh_runs(runs: list[dict], now: datetime) -> None:
+    """Reject a stale or incomplete API page instead of reviving an old red streak."""
+    if not runs:
+        raise RuntimeError("no completed scheduled runs in the last 24 hours")
+    created = []
+    for run in runs:
+        try:
+            stamp = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+        except (KeyError, AttributeError, TypeError, ValueError) as error:
+            raise RuntimeError("workflow run has no valid creation time") from error
+        if stamp.tzinfo is None or stamp < now - LOOKBACK or stamp > now + timedelta(minutes=5):
+            raise RuntimeError("workflow runs API returned a run outside the requested time window")
+        created.append(stamp)
+    if max(created) < now - MAX_NEWEST_AGE:
+        raise RuntimeError("newest completed scheduled run is too old to establish current health")
+
+
+def fetch_runs(repo: str, per_page: int = PER_PAGE, *, now: datetime | None = None) -> list[dict]:
+    """One bounded, recent-lane call; reject stale API evidence before evaluating it."""
+    now = now or datetime.now(timezone.utc)
+    since = (now - LOOKBACK).strftime("%Y-%m-%dT%H:%M:%SZ")
+    query = urlencode({"event": LANE, "status": "completed", "per_page": per_page,
+                       "created": f">={since}"})
+    path = f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs?{query}"
     out = subprocess.run(
         ["gh", "api", path, "--jq", ".workflow_runs"],
         check=True, capture_output=True, text=True,
@@ -147,6 +169,7 @@ def fetch_runs(repo: str, per_page: int = PER_PAGE) -> list[dict]:
     runs = json.loads(out)
     if not isinstance(runs, list):
         raise RuntimeError(f"unexpected shape from {path}: {type(runs).__name__}")
+    require_fresh_runs(runs, now)
     return runs
 
 
@@ -251,6 +274,39 @@ def self_test() -> int:
                   _run(1, "push", "failure")])
     check("three red PUSH runs are not a scheduled-lane verdict", not v["stuck"]
           and v["population"] == 0)
+
+    # The pure streak classifier accepts any three red runs; the evidence boundary
+    # must reject a response from an old time window before it reaches that classifier.
+    now = datetime(2026, 9, 17, 12, 38, tzinfo=timezone.utc)
+    old = [{"event": "schedule", "status": "completed", "conclusion": "failure",
+            "created_at": f"2026-08-{day:02d}T12:00:00Z"} for day in (19, 18, 17)]
+    check("stale API page would reproduce the false red without freshness validation",
+          evaluate(old)["stuck"])
+    for label, rows in (
+        ("August page is rejected", old),
+        ("empty page is not a clean verdict", []),
+        ("an eight-hour-old newest run is not current health",
+         [{"created_at": "2026-09-17T04:00:00Z"}]),
+        ("malformed creation time is not evidence", [{"created_at": "unknown"}]),
+    ):
+        try:
+            require_fresh_runs(rows, now)
+            check(label, False)
+        except RuntimeError:
+            check(label, True)
+    fresh = [{"event": "schedule", "status": "completed", "conclusion": "success",
+              "created_at": "2026-09-17T09:33:35Z"}]
+    require_fresh_runs(fresh, now)
+    check("recent scheduled success remains valid", evaluate(fresh)["close_on"] is not None)
+
+    from unittest.mock import patch
+    with patch("subprocess.run", return_value=subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=json.dumps(fresh), stderr="")) as request:
+        fetched = fetch_runs("JiRaska/open-bank-oss", now=now)
+    path = request.call_args.args[0][2]
+    check("the actual API request bounds its result to the recent scheduled lane",
+          fetched == fresh and "created=%3E%3D2026-09-16T12%3A38%3A00Z" in path
+          and "event=schedule" in path and "status=completed" in path)
 
     # Declaration lane, held to a known-positive and two sabotages on a synthetic tree.
     import tempfile
