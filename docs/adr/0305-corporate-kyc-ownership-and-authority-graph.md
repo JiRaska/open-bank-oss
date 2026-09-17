@@ -85,6 +85,8 @@ V10 adds append-only case-, principal- and purpose-scoped read audit for correct
 candidates. The KYB API can now propose a candidate only from a fresh register read,
 release it after a live assignment check and committed read audit, and let a different
 KYC/admin reviewer approve or reject it only after their own audited candidate read.
+V11 indexes that reviewer/candidate existence check and the read path stops at one row;
+it does not imply a measured 10× workload qualification.
 Approval writes the successor observation
 and the existing minimized reference event in one transaction. The observation detail
 exposes an explicit predecessor ID; chronological adjacency alone is not a correction.

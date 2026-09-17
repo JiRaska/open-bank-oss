@@ -171,10 +171,13 @@ class UboCorrectionRepositoryImpl(private val outbox: KybOutboxRepository) : Ubo
         session: org.hibernate.reactive.mutiny.Mutiny.Session,
         correctionId: UUID,
         actorId: String,
-    ): Uni<Boolean> = session.createQuery(
-        "select count(a) from UboCorrectionReadEntity a where a.correctionId = :id and a.principalId = :actor",
-        java.lang.Long::class.java,
-    ).setParameter("id", correctionId).setParameter("actor", actorId).singleResult.map { it.toLong() > 0 }
+    ): Uni<Boolean> {
+        val query = session.createQuery(
+            "select a.readId from UboCorrectionReadEntity a where a.correctionId = :id and a.principalId = :actor",
+            UUID::class.java,
+        ).setParameter("id", correctionId).setParameter("actor", actorId).setMaxResults(1)
+        return query.resultList.map { it.isNotEmpty() }
+    }
 
     private fun newProposal(
         caseId: UUID,
