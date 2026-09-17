@@ -101,3 +101,24 @@ for (const width of [1280, 320] as const) {
     })
   }
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`API domain filters retain readable selected states in ${theme} theme`, async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: 'ob-admin-theme', value: theme, url: baseURL! }])
+    await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+    const filters = page.getByRole('group', { name: 'Filter by domain' })
+    await expect.poll(async () => filters.getByRole('button').count()).toBeGreaterThan(1)
+    const labels = (await filters.getByRole('button').allTextContents()).slice(1)
+    expect(labels.length).toBeGreaterThan(0)
+    for (const label of labels) {
+      const filter = filters.getByRole('button', { name: label, exact: true })
+      await filter.click()
+      await expect(filter).toHaveAttribute('aria-pressed', 'true')
+      const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
+      expect(scan.violations.flatMap(violation => violation.nodes.map(node => ({
+        target: node.target.join(' > '),
+        detail: node.any[0]?.message,
+      })))).toEqual([])
+    }
+  })
+}
