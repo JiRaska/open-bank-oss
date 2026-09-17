@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
+import fnmatch
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
 import textwrap
 
 WORKFLOW = Path(__file__).resolve().parents[2] / "workflows" / "dependency-review.yml"
+SUBMISSION = WORKFLOW.with_name("dependency-submission.yml")
 GH = """#!/usr/bin/env python3
 import json, os, sys
 args=sys.argv[1:]
@@ -35,6 +38,34 @@ print(json.dumps(dict(check_runs=rows)))
 
 
 class BasisTests(unittest.TestCase):
+    def test_snapshot_wait_matches_submission_trigger(self):
+        source = WORKFLOW.read_text()
+        pattern = re.search(r"if grep -qE '([^']+)' <<<", source)
+        self.assertIsNotNone(pattern)
+        submitted_paths = [
+            "openbank-ledger-service/build.gradle.kts",
+            "openbank-libs/gradle/libs.versions.toml",
+            "settings.gradle.kts",
+            "gradle/wrapper/gradle-wrapper.properties",
+            ".github/workflows/dependency-submission.yml",
+            ".github/scripts/dependency_snapshot.py",
+            ".github/scripts/dependency-resolution-strict.init.gradle",
+            ".github/scripts/tests/test_dependency_snapshot.py",
+            ".github/scripts/tests/test_dependency_resolution_guard.py",
+        ]
+        submission = SUBMISSION.read_text().split("  pull_request:", 1)[1].split(
+            "  schedule:", 1
+        )[0]
+        trigger_patterns = re.findall(r'^\s+- "([^"]+)"$', submission, re.MULTILINE)
+        self.assertEqual(len(trigger_patterns), 9)
+        for path in submitted_paths:
+            with self.subTest(path=path):
+                self.assertTrue(
+                    any(fnmatch.fnmatch(path, trigger) for trigger in trigger_patterns)
+                )
+                self.assertRegex(path, pattern.group(1))
+        self.assertNotRegex("docs/architecture.md", pattern.group(1))
+
     def run_case(self, case):
         source = WORKFLOW.read_text()
         block = source.split(

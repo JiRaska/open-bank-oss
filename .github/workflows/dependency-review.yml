@@ -68,12 +68,12 @@ jobs:
           # Here-string, not a pipe: `set -o pipefail` + `grep -q` exiting early SIGPIPEs
           # the producer and fails the step (a known footgun in this repo's workflows).
           files="$(git diff --name-only "${base}" "${GITHUB_SHA}")"
-          if grep -qE '(^|/)build\.gradle\.kts$|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/' <<< "${files}"; then
+          if grep -qE '(^|/)build\.gradle\.kts$|^openbank-libs/gradle/libs\.versions\.toml$|^settings\.gradle\.kts$|^gradle/wrapper/|^\.github/workflows/dependency-submission\.yml$|^\.github/scripts/dependency_snapshot\.py$|^\.github/scripts/dependency-resolution-strict\.init\.gradle$|^\.github/scripts/tests/test_dependency_(snapshot|resolution_guard)\.py$' <<< "${files}"; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Dependency manifests changed — will wait for the Gradle snapshot from dependency-submission.yml."
+            echo "Dependency submission input changed — will wait for the Gradle snapshot from dependency-submission.yml."
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No dependency manifest touched — no Gradle submission runs for this PR, so nothing to wait for."
+            echo "No dependency submission input touched — no Gradle submission runs for this PR, so nothing to wait for."
           fi
 
       - name: Dependency Review
