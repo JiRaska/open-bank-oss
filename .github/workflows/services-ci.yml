@@ -104,6 +104,9 @@ jobs:
             case "$1" in
               openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
                 return 0 ;;
+              .github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
+                # These feed the separate Pact drift/publication gate, not a service build.
+                return 0 ;;
               .github/workflows/*)
                 # These two files own the service build itself. A change to either must
                 # still select the canary below; all other workflow files are external
@@ -123,6 +126,26 @@ jobs:
             || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+          is_inert_service_path ".github/scripts/publish-admin-ui-pacts.py" \
+            || { echo "selector self-test: Admin UI Pact publication must not full-fleet" >&2; exit 1; }
+          is_inert_service_path ".github/gates/workflow-write-permissions-baseline.txt" \
+            || { echo "selector self-test: Pact gate permission baseline is service-inert" >&2; exit 1; }
+
+          # Main and PR both use the last '-openbank-' delimiter. The Admin UI is a
+          # consumer, but not a Gradle module; only its provider belongs in this matrix.
+          pact_build_modules() {
+            local base prov cons
+            base=$(basename "$1" .json)
+            case "$base" in *-openbank-*) ;; *) return 1 ;; esac
+            prov="openbank-${base##*-openbank-}"
+            cons="${base%-openbank-*}"
+            if [ "$cons" != "openbank-admin-ui" ]; then printf '%s\n' "$cons"; fi
+            printf '%s\n' "$prov"
+          }
+          [ "$(pact_build_modules pacts/openbank-admin-ui-openbank-context-service.json)" = "openbank-context-service" ] \
+            || { echo "selector self-test: Admin UI Pact must select its provider only" >&2; exit 1; }
+          [ "$(pact_build_modules pacts/openbank-ledger-service-openbank-balance-service.json)" = $'openbank-ledger-service\nopenbank-balance-service' ] \
+            || { echo "selector self-test: service Pact must select both sides" >&2; exit 1; }
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -167,9 +190,9 @@ jobs:
               # the Pact graph.
               #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
               #     service's compile/test inputs may change).
-              #   - pacts/<consumer>-<provider>.json changed -> build BOTH: the consumer republishes
-              #     the pact, the provider re-verifies against it (the exact completeness reason
-              #     main-push used to full-fleet for). Delimiter is the single '-openbank-'.
+              #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
+              #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
+              #     publishes it, so only its provider belongs in this matrix.
               #   - <module>/... changed -> that module.
               #   - openbank-libs/governance/ -> data for CI checks/admin-ui, not a compile input.
               #   - the CI recipe itself -> canary below.
@@ -185,12 +208,10 @@ jobs:
                   [ -z "$f" ] && continue
                   case "$f" in
                     pacts/*.json)
-                      base=$(basename "$f" .json)
-                      prov="openbank-${base##*-openbank-}"
-                      cons="${base%-openbank-*}"
-                      for p in "$cons" "$prov"; do
+                      if ! modules=$(pact_build_modules "$f"); then SCOPE_OK=0; continue; fi
+                      while IFS= read -r p; do
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
-                      done ;;
+                      done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
                     .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) : ;;
                     openbank-*/*)
@@ -308,7 +329,7 @@ jobs:
               # with the causing PR long merged (issue #8984).
               # Derivation matches the push path (split on the LAST '-openbank-'). A consumer that
               # is not a Gradle module is skipped rather than failing the scoping: openbank-admin-ui
-              # authors four of the committed pacts and builds in its own workflow. A PROVIDER that
+              # authors five of the committed pacts and builds in its own workflow. A PROVIDER that
               # does not resolve to a module is not skippable — it is the side that verifies — so
               # that falls back to the full fleet, the safe direction this detector always takes.
               while IFS= read -r f; do
