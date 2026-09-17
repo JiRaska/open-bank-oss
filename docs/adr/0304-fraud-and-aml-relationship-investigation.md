@@ -96,10 +96,13 @@ or transaction identifier in the same effective/knowledge window. Candidate disc
 joins only currently approved assignments for that investigator and returns at most four
 cases. Every candidate is then independently re-authorized, read-audited and checked
 against its current source status before any evidence is returned. A revoked or terminal
-candidate is omitted; source or policy unavailability fails the whole request. The
-displayed network is intentionally incomplete: the four-case cap, assignment scope and
-source lag mean absence of an edge does not prove absence of a relationship. Exact
-identifier equality is a lead, not a fraud finding or inferred ownership.
+candidate is omitted; source or policy unavailability fails the whole request. Each
+related case returns at most 20 observations. If that bounded slice no longer includes
+the linking observation, the candidate is omitted rather than drawn without visible
+evidence. The displayed network is intentionally incomplete: the four-case cap,
+observation cap, assignment scope and source lag mean absence of an edge does not
+prove absence of a relationship. Exact identifier equality is a lead, not a fraud
+finding or inferred ownership.
 
 Fraud's current source emits a temporary fraud-hold change for marketing suppression;
 it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
