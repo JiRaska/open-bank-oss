@@ -64,7 +64,11 @@ class AmlCaseEvidenceResource(
                                     actor,
                                     InvestigationContext(candidate.toString(), purpose, effective, known),
                                 ) {
-                                    if (source.isOpen(candidate)) history.history(candidate, effective, known) else null
+                                    if (source.isOpen(candidate)) {
+                                        history.history(candidate, effective, known, RELATED_OBSERVATION_LIMIT)
+                                    } else {
+                                        null
+                                    }
                                 }
                             } catch (_: ContextAccessDenied) {
                                 // Revocation between candidate discovery and authorization is expected.
@@ -131,6 +135,7 @@ class AmlCaseEvidenceResource(
 
     private companion object {
         const val PURPOSE = "AML_INVESTIGATION"
+        const val RELATED_OBSERVATION_LIMIT = 20
     }
 }
 

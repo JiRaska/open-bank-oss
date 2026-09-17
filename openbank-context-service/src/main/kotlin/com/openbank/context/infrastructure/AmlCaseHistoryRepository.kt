@@ -140,7 +140,13 @@ class AmlCaseHistoryRepository(
         }.bounded().awaitSuspending()
     }
 
-    suspend fun history(id: UUID, effectiveAt: Instant, knownAt: Instant): AmlCaseHistory {
+    suspend fun history(
+        id: UUID,
+        effectiveAt: Instant,
+        knownAt: Instant,
+        observationLimit: Int = MAX_OBSERVATIONS,
+    ): AmlCaseHistory {
+        require(observationLimit in 1..MAX_OBSERVATIONS) { "invalid AML observation limit" }
         val rows = transaction { session ->
             session.createQuery(
                 "from AmlCaseEvidenceEntity where bankScope = :bank and caseId = :id " +
@@ -149,13 +155,13 @@ class AmlCaseHistoryRepository(
                 AmlCaseEvidenceEntity::class.java,
             ).setParameter("bank", bankScope).setParameter("id", id)
                 .setParameter("effectiveAt", effectiveAt).setParameter("knownAt", knownAt)
-                .setMaxResults(MAX_OBSERVATIONS + 1).resultList
+                .setMaxResults(observationLimit + 1).resultList
         }.bounded().awaitSuspending()
         return AmlCaseHistory(
             "aml-case:$id",
             effectiveAt,
             knownAt,
-            rows.take(MAX_OBSERVATIONS).map { row ->
+            rows.take(observationLimit).map { row ->
                 RecordedAmlCaseObservation(
                     mapper.readValue(row.evidence, AmlCaseObservation::class.java),
                     row.recordedAt,
@@ -163,7 +169,7 @@ class AmlCaseHistoryRepository(
                     row.contentHash,
                 )
             },
-            rows.size > MAX_OBSERVATIONS,
+            rows.size > observationLimit,
         )
     }
 

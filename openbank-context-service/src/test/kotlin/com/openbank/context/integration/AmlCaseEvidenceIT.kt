@@ -77,6 +77,20 @@ class AmlCaseEvidenceIT {
     }
 
     @Test
+    fun `bounded related history discloses truncation instead of returning every observation`() {
+        val id = UUID.randomUUID()
+        val first = decoder.decode(payload(id), UUID.randomUUID().toString(), CREATED)
+        val second = decoder.decode(payload(id, changed = true), UUID.randomUUID().toString(), CHANGED)
+        onVertx { repository.append(first) }
+        onVertx { repository.append(second) }
+        val bound = Instant.now().plusSeconds(60)
+        val limited = onVertx { repository.history(id, bound, bound, 1) }
+        assertThat(limited.observations.map { it.evidence }).containsExactly(second)
+        assertThat(limited.truncated).isTrue()
+        assertThat(history(id).truncated).isFalse()
+    }
+
+    @Test
     fun `broker shaped created and changed messages are acknowledged and store minimized evidence`() {
         val id = UUID.randomUUID()
         val created = message(payload(id), UUID.randomUUID().toString(), CREATED)

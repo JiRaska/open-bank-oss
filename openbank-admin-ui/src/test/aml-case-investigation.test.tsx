@@ -32,7 +32,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('AML case investigation', () => {
   it('shows only validated source-linked nodes and evidence provenance', async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [related] })))
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [{ ...related, truncated: true }] })))
     vi.stubGlobal('fetch', fetcher)
     render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
@@ -41,6 +41,7 @@ describe('AML case investigation', () => {
     expect(fetcher).toHaveBeenCalledWith(`/api/context/aml-cases/${caseId}?view=network`, { cache: 'no-store' })
     expect(screen.getByText(/SHA-256:/)).toHaveTextContent('a'.repeat(64))
     expect(screen.getByText(/not proven fraud/)).toBeInTheDocument()
+    expect(screen.getByText(/partial history/)).toBeInTheDocument()
   })
 
   it('fails closed on malformed evidence and clears it when the case changes', async () => {

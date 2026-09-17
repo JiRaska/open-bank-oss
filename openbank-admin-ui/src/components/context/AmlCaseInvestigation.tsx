@@ -75,7 +75,7 @@ export function AmlCaseInvestigation({ initialCaseId = '' }: { initialCaseId?: s
         </svg>
       </div>}
       <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Zobrazeny jsou jen případy s vlastním schváleným přiřazením a aktuálním ověřením ve zdroji. Shodný identifikátor je vodítko, ne důkaz podvodu. Hledání je omezeno na čtyři související případy.', 'Only independently assigned, currently source-verified cases are shown. A shared identifier is a lead, not proof of fraud. Discovery is bounded to four related cases.')}</p>
-      {related.map(item => <p key={item.root} style={{ fontSize: 12 }}><strong>{t('Související případ', 'Related case')}: {item.root.slice(9)}</strong> · {sharedAmlReferences(history, item).map(refLabel).join(', ')} · {item.observations.length} {t('pozorování', 'observations')}</p>)}
+      {related.map(item => <p key={item.root} style={{ fontSize: 12 }}><strong>{t('Související případ', 'Related case')}: {item.root.slice(9)}</strong> · {sharedAmlReferences(history, item).map(refLabel).join(', ')} · {item.observations.length} {t('pozorování', 'observations')}{item.truncated ? ` · ${t('částečná historie', 'partial history')}` : ''}</p>)}
       {observation && <div style={{ marginTop: 16 }}><strong>{t('Vybrané pozorování', 'Selected observation')}</strong>
         <p>{observation.evidence.eventType} · {observation.evidence.previousStatus ? `${observation.evidence.previousStatus} → ` : ''}{observation.evidence.status} · {observation.evidence.occurredAt}</p>
         <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('Zdroj evidence', 'Evidence source')}: {observation.evidenceRef}<br />{t('Zaznamenáno', 'Recorded')}: {observation.recordedAt}<br />SHA-256: {observation.contentHash}</p>
