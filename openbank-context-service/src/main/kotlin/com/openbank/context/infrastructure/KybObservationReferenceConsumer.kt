@@ -38,9 +38,20 @@ class KybObservationReferenceConsumer(
                 ?.value()?.toString(Charsets.UTF_8)
             val reference = decoder.decode(message.payload, id, type)
             require(record.key == reference.caseId.toString()) { "KYB reference case and broker key disagree" }
-            references.append(reference)
+            when (reference.eventType) {
+                KybObservationReferenceDecoder.EVENT_TYPE -> references.append(reference)
+                KybObservationReferenceDecoder.RESTRICTED_EVENT_TYPE -> references.restrict(reference)
+                else -> error("unsupported KYB reference event")
+            }
             Uni.createFrom().completionStage(message.ack()).awaitSuspending()
-            meters.counter("openbank_context_kyb_reference_events", "outcome", "recorded").increment()
+            val outcome = if (reference.eventType ==
+                KybObservationReferenceDecoder.EVENT_TYPE
+            ) {
+                "recorded"
+            } else {
+                "restricted"
+            }
+            meters.counter("openbank_context_kyb_reference_events", "outcome", outcome).increment()
         } catch (failure: Exception) {
             meters.counter("openbank_context_kyb_reference_events", "outcome", "failed").increment()
             Uni.createFrom().completionStage(message.nack(failure)).awaitSuspending()

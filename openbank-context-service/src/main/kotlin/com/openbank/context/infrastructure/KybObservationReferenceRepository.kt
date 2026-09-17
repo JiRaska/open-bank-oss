@@ -53,6 +53,39 @@ class KybObservationReferenceEntity {
     lateinit var recordedAt: Instant
 }
 
+data class KybObservationRestrictionKey(var bankScope: String = "", var observationId: UUID = UUID(0, 0)) :
+    Serializable {
+    private companion object {
+        const val serialVersionUID = 1L
+    }
+}
+
+/** A durable tombstone; arrival before the recorded event still hides the observation. */
+@Entity
+@IdClass(KybObservationRestrictionKey::class)
+@Table(name = "context_kyb_observation_restrictions")
+class KybObservationRestrictionEntity {
+    @Id
+    @Column(name = "bank_scope")
+    lateinit var bankScope: String
+
+    @Id
+    @Column(name = "observation_id")
+    lateinit var observationId: UUID
+
+    @Column(name = "event_id")
+    lateinit var eventId: UUID
+
+    @Column(name = "case_id")
+    lateinit var caseId: UUID
+
+    @Column(name = "revision")
+    var revision: Long = 0
+
+    @Column(name = "source_sha256")
+    lateinit var sourceSha256: String
+}
+
 /** Bounded reference history. recordedAt is Context ingestion time, not KYB finding time. */
 data class KybObservationHistory(
     val root: String,
@@ -77,8 +110,10 @@ class KybObservationReferenceRepository(
     suspend fun history(caseId: UUID, knownAt: Instant): KybObservationHistory {
         val rows = transaction { session ->
             session.createQuery(
-                "from KybObservationReferenceEntity where bankScope = :bank and caseId = :caseId " +
-                    "and recordedAt <= :knownAt order by revision desc, recordedAt desc",
+                "from KybObservationReferenceEntity r where r.bankScope = :bank and r.caseId = :caseId " +
+                    "and r.recordedAt <= :knownAt and not exists (" +
+                    "select 1 from KybObservationRestrictionEntity t where t.bankScope = r.bankScope " +
+                    "and t.observationId = r.observationId) order by r.revision desc, r.recordedAt desc",
                 KybObservationReferenceEntity::class.java,
             ).setParameter("bank", bankScope).setParameter("caseId", caseId).setParameter("knownAt", knownAt)
                 .setMaxResults(MAX_OBSERVATIONS + 1).resultList
@@ -119,6 +154,37 @@ class KybObservationReferenceRepository(
                     ) {
                         "conflicting KYB observation reference"
                     }
+                }
+        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+    }
+
+    suspend fun restrict(reference: KybObservationReference) {
+        transaction { session ->
+            session.createNativeMutationQuery(
+                """INSERT INTO context_kyb_observation_restrictions
+                   (bank_scope, observation_id, event_id, case_id, revision, source_sha256)
+                   VALUES (:bank, :observation, :event, :case, :revision, :hash)
+                   ON CONFLICT DO NOTHING
+                """.trimIndent(),
+            ).setParameter("bank", bankScope).setParameter("observation", reference.observationId)
+                .setParameter("event", reference.eventId).setParameter("case", reference.caseId)
+                .setParameter("revision", reference.revision).setParameter("hash", reference.sourceSha256)
+                .executeUpdate().flatMap {
+                    session.createQuery(
+                        "from KybObservationRestrictionEntity where bankScope = :bank and observationId = :observation",
+                        KybObservationRestrictionEntity::class.java,
+                    ).setParameter(
+                        "bank",
+                        bankScope,
+                    ).setParameter("observation", reference.observationId).singleResultOrNull
+                }.invoke { row ->
+                    check(
+                        row != null &&
+                            row.eventId == reference.eventId &&
+                            row.caseId == reference.caseId &&
+                            row.revision == reference.revision &&
+                            row.sourceSha256 == reference.sourceSha256,
+                    ) { "conflicting KYB observation restriction" }
                 }
         }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
     }

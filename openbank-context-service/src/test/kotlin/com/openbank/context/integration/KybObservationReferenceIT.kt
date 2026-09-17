@@ -71,6 +71,28 @@ class KybObservationReferenceIT {
     }
 
     @Test
+    fun `restriction hides observation before and after recorded event arrives`() {
+        for (restrictionFirst in listOf(true, false)) {
+            val caseId = UUID.randomUUID()
+            val observationId = UUID.randomUUID()
+            val recorded = decoder.decode(payload(caseId, observationId), UUID.randomUUID().toString(), EVENT_TYPE)
+            val restricted = decoder.decode(
+                payload(caseId, observationId, RESTRICTED_EVENT_TYPE),
+                UUID.randomUUID().toString(),
+                RESTRICTED_EVENT_TYPE,
+            )
+            if (restrictionFirst) onVertx { repository.restrict(restricted) }
+            onVertx { repository.append(recorded) }
+            if (!restrictionFirst) onVertx { repository.restrict(restricted) }
+            onVertx { repository.restrict(restricted) }
+            assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
+            assertThatThrownBy {
+                onVertx { repository.restrict(restricted.copy(sourceSha256 = "b".repeat(64))) }
+            }.hasStackTraceContaining("conflicting KYB observation restriction")
+        }
+    }
+
+    @Test
     fun `broker reference is acknowledged while mismatched case key is nacked`() {
         val caseId = UUID.randomUUID()
         val observationId = UUID.randomUUID()
@@ -88,6 +110,25 @@ class KybObservationReferenceIT {
         assertThat(rejected.acked.get()).isZero()
         assertThat(rejected.nacked.get()).isEqualTo(1)
         assertThat(visibleRows(rejectedId, scoped = true)).isZero()
+    }
+
+    @Test
+    fun `broker restriction is acknowledged and removes history`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        onVertx {
+            repository.append(decoder.decode(payload(caseId, observationId), UUID.randomUUID().toString(), EVENT_TYPE))
+        }
+        val restricted = message(
+            payload(caseId, observationId, RESTRICTED_EVENT_TYPE),
+            UUID.randomUUID(),
+            caseId,
+            RESTRICTED_EVENT_TYPE,
+        )
+        onVertx { consumer.consume(restricted.value) }
+        assertThat(restricted.acked.get()).isEqualTo(1)
+        assertThat(restricted.nacked.get()).isZero()
+        assertThat(onVertx { repository.history(caseId, Instant.now()) }.observations).isEmpty()
     }
 
     @Test
@@ -137,16 +178,16 @@ class KybObservationReferenceIT {
         .header("X-Investigation-Purpose", PURPOSE)
         .get("/api/v1/context/kyb-cases/$caseId/ownership-observations")
 
-    private fun payload(caseId: UUID, observationId: UUID) =
-        """{"schemaVersion":1,"eventType":"$EVENT_TYPE","caseId":"$caseId", """ +
+    private fun payload(caseId: UUID, observationId: UUID, type: String = EVENT_TYPE) =
+        """{"schemaVersion":1,"eventType":"$type","caseId":"$caseId", """ +
             """"observationId":"$observationId","revision":1,"sourceSha256":"${"a".repeat(64)}"}"""
 
-    private fun message(payload: String, eventId: UUID, brokerCaseId: UUID): Delivery {
+    private fun message(payload: String, eventId: UUID, brokerCaseId: UUID, type: String = EVENT_TYPE): Delivery {
         val headers = RecordHeaders()
         mapOf(
             OutboxKafkaHeaders.HEADER_EVENT_ID to eventId.toString(),
             OutboxKafkaHeaders.HEADER_IDEMPOTENCY_KEY to eventId.toString(),
-            OutboxKafkaHeaders.HEADER_EVENT_TYPE to EVENT_TYPE,
+            OutboxKafkaHeaders.HEADER_EVENT_TYPE to type,
         ).forEach { (name, value) -> headers.add(name, value.toByteArray(Charsets.UTF_8)) }
         val record = ConsumerRecord(
             TOPIC, 0, 0L, RecordBatch.NO_TIMESTAMP, TimestampType.NO_TIMESTAMP_TYPE,
@@ -220,5 +261,6 @@ class KybObservationReferenceIT {
         const val PURPOSE = "KYB_OWNERSHIP_REVIEW"
         const val TOPIC = "openbank.kyb.ubo-observation-references"
         const val EVENT_TYPE = "KybUboObservationRecorded"
+        const val RESTRICTED_EVENT_TYPE = "KybUboObservationRestricted"
     }
 }

@@ -27,6 +27,16 @@ class KybObservationReferenceDecoderTest {
     }
 
     @Test
+    fun `accepts restriction only when payload and header types agree`() {
+        val restricted = payload.replace("KybUboObservationRecorded", "KybUboObservationRestricted")
+        val result = decoder.decode(restricted, eventId, KybObservationReferenceDecoder.RESTRICTED_EVENT_TYPE)
+        assertThat(result.eventType).isEqualTo(KybObservationReferenceDecoder.RESTRICTED_EVENT_TYPE)
+        assertThatThrownBy {
+            decoder.decode(restricted, eventId, KybObservationReferenceDecoder.EVENT_TYPE)
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `rejects owner fields and schema drift rather than retaining personal data`() {
         assertThatThrownBy {
             decoder.decode(
