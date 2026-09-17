@@ -330,6 +330,30 @@ class CustomerDelegationResourceTest {
         assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
     }
 
+    @Test
+    fun `quorum execution forwards only authenticated company and human identities`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        val headers = slot<Map<String, String>>()
+        val key = slot<String?>()
+        every { upstream.post(capture(url), capture(party), eq(""), captureNullable(key), capture(headers)) } returns
+            Response.ok("{}").build()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource.executeStatutory(GRANT_ID).status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/statutory-operations/$GRANT_ID/execute")
+        assertThat(party.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+        assertThat(key.captured).isNull()
+    }
+
     /**
      * A preview exists to tell the customer whether the grant they are about to sign for can
      * succeed. Answering 400 to a cumulative ceiling would now be a lie — delegation-service both

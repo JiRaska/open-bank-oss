@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.71.0
+  version: 1.72.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3678,6 +3678,36 @@ paths:
         '403': {description: Caller is not a current company representative}
         '409': {description: Stale proposal, conflicting decision or wrong SCA binding}
         '503': {description: Legal rule or SCA consumption cannot be verified}
+  /delegations/statutory-operations/{id}/execute:
+    post:
+      tags: [Delegation]
+      summary: Issue one offered company grant after the statutory signing quorum
+      description: >-
+        The selected company and human signer come from the authenticated session. The
+        delegation service rechecks the live legal rule, draft and quorum under a database
+        lock, then commits grant and outbox together. This does not activate the grant;
+        the grantee must still accept it.
+      operationId: executeStatutoryDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: New OFFERED grant; an exact retry returns the linked grant in its current state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: {type: string, format: uuid}
+                  status: {type: string}
+        '403': {description: Caller lacks a current joint mandate}
+        '404': {description: Proposal not found for this company}
+        '409': {description: Quorum incomplete or proposal stale}
+        '422': {description: Grant eligibility or resource ownership failed fresh validation}
+        '503': {description: Legal rule or validation source is unavailable}
   /delegations/recertifications:
     get:
       tags: [Delegation]

@@ -343,6 +343,24 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** Ask delegation-service to recheck live law and issue one grant only after a complete quorum. */
+    @POST
+    @Path("/statutory-operations/{id}/execute")
+    @Blocking
+    fun executeStatutory(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id/execute",
+            context.principal.toString(),
+            "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
