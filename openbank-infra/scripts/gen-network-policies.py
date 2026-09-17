@@ -49,6 +49,7 @@ import glob
 import os
 import re
 import sys
+import tempfile
 from collections import defaultdict
 
 import yaml
@@ -589,12 +590,27 @@ def main():
             continue
         out = os.path.join(out_dir, "network-policies.yaml")
         policies.sort(key=lambda p: p["metadata"]["name"])
-        with open(out, "w", encoding="utf-8") as fh:
-            fh.write(HEADER)
-            for pol in policies:
-                fh.write("---\n")
-                yaml.dump(pol, fh, Dumper=IndentedDumper,
-                          sort_keys=False, default_flow_style=False)
+        # Gates run concurrently in one checkout. A direct "w" truncates this
+        # file while readiness collectors read it, making identical inputs score
+        # differently depending on which collector observes the empty window.
+        # Render beside the destination so replace is atomic on the same device.
+        fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".network-policies-", suffix=".yaml")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(HEADER)
+                for pol in policies:
+                    fh.write("---\n")
+                    yaml.dump(pol, fh, Dumper=IndentedDumper,
+                              sort_keys=False, default_flow_style=False)
+            try:
+                mode = os.stat(out).st_mode & 0o777
+            except FileNotFoundError:
+                mode = 0o644
+            os.chmod(tmp, mode)
+            os.replace(tmp, out)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
         written.add(os.path.realpath(out))
         print(f"wrote {os.path.relpath(out, ROOT)} ({len(policies)} policies)")
 
