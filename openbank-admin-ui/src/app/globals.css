@@ -300,14 +300,14 @@ main {
   transform: translateY(-180%);
   padding: .6rem .8rem;
   border-radius: .5rem;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-bg);
+  color: var(--accent-text);
   font-size: .875rem;
   font-weight: 700;
   text-decoration: none;
   transition: transform .15s ease-out;
 }
-.ob-skip-link:focus { transform: translateY(0); outline: 3px solid rgba(255, 255, 255, .9); outline-offset: 2px; }
+.ob-skip-link:focus { transform: translateY(0); outline: 3px solid var(--accent-text); outline-offset: 2px; }
 .ob-mobile-nav-overlay { display: none; }
 
 /* ── Operator application shell ── */
@@ -996,9 +996,8 @@ main {
 .tone-text-neutral { color: var(--text-secondary); }
 .tone-text-accent  { color: var(--ob-accent-text); }
 
-/* Editorial API domain chips retain their identity colour without losing AA contrast in dark mode. */
-.api-group-chip { color: var(--api-group-color); }
-.dark .api-group-chip { color: color-mix(in srgb, var(--api-group-color) 45%, var(--text-primary)); }
+/* API domain chips carry group colour in their border/background; semantic text stays readable. */
+.api-group-chip { color: var(--text-primary); }
 
 /* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
    a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */

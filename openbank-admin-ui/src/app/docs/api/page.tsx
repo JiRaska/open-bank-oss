@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useEffect, useState, useCallback, type CSSProperties } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -149,12 +149,12 @@ const GROUP_COLORS: Record<string, string> = {
 }
 
 const METHOD_COLORS: Record<string, { bg: string, text: string, border: string }> = {
-  get: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
-  post: { bg: '#f0fdf4', text: '#16a34a', border: '#bbf7d0' },
-  put: { bg: '#fffbeb', text: '#d97706', border: '#fef08a' },
-  patch: { bg: '#fffbeb', text: '#d97706', border: '#fef08a' },
-  delete: { bg: '#fef2f2', text: '#dc2626', border: '#fecaca' },
-  default: { bg: '#f3f4f6', text: '#4b5563', border: '#e5e7eb' },
+  get: { bg: 'var(--info-bg)', text: 'var(--info-text)', border: 'var(--info-border)' },
+  post: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
+  put: { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
+  patch: { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
+  delete: { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' },
+  default: { bg: 'var(--surface-3)', text: 'var(--text-secondary)', border: 'var(--border)' },
 }
 
 
@@ -335,7 +335,7 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
   }
 
   return (
-    <div style={{ marginTop: '8px', padding: '16px', background: '#fff', border: `1px solid ${methodColor.border}`, borderRadius: '6px' }}>
+    <div style={{ marginTop: '8px', padding: '16px', background: 'var(--surface)', border: `1px solid ${methodColor.border}`, borderRadius: '6px' }}>
       <div style={{ marginBottom: '12px' }}>
         <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
           {desc}
@@ -399,9 +399,9 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
             const isSuccess = code.startsWith('2')
             const isClientErr = code.startsWith('4')
             const isServerErr = code.startsWith('5')
-            const color = isSuccess ? 'var(--success)' : isClientErr ? 'var(--warning)' : isServerErr ? 'var(--danger)' : 'var(--text-secondary)'
-            const bg = isSuccess ? '#f0fdf4' : isClientErr ? '#fffbeb' : isServerErr ? '#fef2f2' : 'var(--surface)'
-            const border = isSuccess ? '#bbf7d0' : isClientErr ? '#fef08a' : isServerErr ? '#fecaca' : 'var(--border)'
+            const color = isSuccess ? 'var(--success-text)' : isClientErr ? 'var(--warning-text)' : isServerErr ? 'var(--danger-text)' : 'var(--text-secondary)'
+            const bg = isSuccess ? 'var(--success-bg)' : isClientErr ? 'var(--warning-bg)' : isServerErr ? 'var(--danger-bg)' : 'var(--surface-3)'
+            const border = isSuccess ? 'var(--success-border)' : isClientErr ? 'var(--warning-border)' : isServerErr ? 'var(--danger-border)' : 'var(--border)'
             return (
               <div key={code} style={{
                 padding: '4px 8px', borderRadius: '4px', border: `1px solid ${border}`,
@@ -707,11 +707,10 @@ export default function ApiCatalogPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{svc.name}</span>
                     <span className="api-group-chip" style={{
-                      '--api-group-color': groupColor,
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
                       background: `${groupColor}15`,
                       borderRadius: '4px', border: `1px solid ${groupColor}30`,
-                    } as CSSProperties}>{groupLabel(svc.group)}</span>
+                    }}>{groupLabel(svc.group)}</span>
                     <span style={{
                       fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',
                       color: 'var(--text-tertiary)',

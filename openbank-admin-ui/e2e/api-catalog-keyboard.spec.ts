@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -21,7 +22,16 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     body: JSON.stringify({
       openapi: '3.1.0',
       info: { title: 'Keyboard test API', version: '1.0.0' },
-      paths: { '/api/v1/example': { get: { summary: 'Read an example', responses: { 200: { description: 'OK' } } } } },
+      paths: { '/api/v1/example': Object.fromEntries(
+        ['get', 'post', 'put', 'patch', 'delete'].map(method => [method, {
+          summary: `${method.toUpperCase()} example`,
+          responses: {
+            200: { description: 'OK' },
+            400: { description: 'Bad request' },
+            500: { description: 'Server error' },
+          },
+        }]),
+      ) },
     }),
   }))
   await page.route('**/api/svc/**', route => route.fulfill({ status: 503, body: '{}' }))
@@ -56,3 +66,38 @@ test('nested service links keep native keyboard activation', async ({ page }) =>
     page.keyboard.press('Enter'),
   ])
 })
+
+for (const width of [1280, 320] as const) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`loaded API operations remain readable in ${theme} theme at ${width}px`, async ({ page, context, baseURL }) => {
+      await context.addCookies([{ name: 'ob-admin-theme', value: theme, url: baseURL! }])
+      await page.setViewportSize({ width, height: 900 })
+      await page.route('**/api/services/health', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ byContainer: { 'account-service': { status: 'UP' } }, source: 'test' }),
+      }))
+      await page.goto('/docs/api', { waitUntil: 'domcontentloaded' })
+      const service = page.locator('[role="button"][aria-controls^="api-service-"]').first()
+      await expect(service.locator('.animate-spin')).toHaveCount(0)
+      await service.focus()
+      await page.keyboard.press('Enter')
+      await expect(service).toHaveAttribute('aria-expanded', 'true')
+      for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+        const operation = page.locator(`button[aria-controls="api-operation-account-0-${method}"]`)
+        await expect(operation).toBeVisible()
+        await operation.click()
+        await expect(operation).toHaveAttribute('aria-expanded', 'true')
+        if (width === 320) {
+          const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+          expect(documentWidth).toBeLessThanOrEqual(width + 1)
+        }
+        const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
+        expect(scan.violations.flatMap(violation => violation.nodes.map(node => ({
+          target: node.target.join(' > '),
+          detail: node.any[0]?.message,
+        })))).toEqual([])
+      }
+    })
+  }
+}
