@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.5.0...kyb-service-v0.6.0) (2026-09-17)
+
+
+### Features
+
+* **kyb:** collect AML answers and sign the business agreement with SCA ([#10199](https://github.com/JiRaska/open-bank-oss/issues/10199)) ([8d5a644](https://github.com/JiRaska/open-bank-oss/commit/8d5a64401ffcd80980d9b759c1d21ec9eaa97e97))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.4.0...kyb-service-v0.5.0) (2026-09-17)
 
 
