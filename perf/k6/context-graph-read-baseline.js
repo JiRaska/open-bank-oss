@@ -47,7 +47,9 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (lens !== "complaint" && lens !== "incident") fail("CONTEXT_PERF_LENS must be complaint or incident");
+  if (!["complaint", "incident", "authority", "aml"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority or aml");
+  }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
   if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(__ENV.CONTEXT_PERF_URL)) {
@@ -62,9 +64,13 @@ export function setup() {
 export default function () {
   const baseUrl = __ENV.CONTEXT_PERF_URL.replace(/\/$/, "");
   const reference = encodeURIComponent(__ENV.CONTEXT_PERF_REFERENCE);
-  const path = lens === "complaint"
-    ? `/api/v1/context/complaints/${reference}`
-    : `/api/v1/context/incidents/${reference}/impact`;
+  const paths = {
+    complaint: `/api/v1/context/complaints/${reference}`,
+    incident: `/api/v1/context/incidents/${reference}/impact`,
+    authority: `/api/v1/context/authorizations/${reference}`,
+    aml: `/api/v1/context/aml-cases/${reference}`,
+  };
+  const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
     headers: {
       Authorization: `Bearer ${__ENV.CONTEXT_PERF_TOKEN}`,
@@ -92,10 +98,22 @@ export default function () {
     "authorized graph read returned 200": (r) => r.status === 200,
     "graph response is valid JSON": () => body !== null,
     "graph response is bounded": () => response.status === 200 && bounded,
-    "graph fixture contains source evidence": () => lens === "complaint"
-      ? body !== null && Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100 &&
+    "graph fixture contains source evidence": () => {
+      if (body === null) return false;
+      if (lens === "complaint") {
+        return Array.isArray(body.nodes) && body.nodes.length > 0 && body.nodes.length <= 100 &&
           Array.isArray(body.edges) && body.edges.length > 0 && body.edges.length <= 200 &&
-          typeof body.truncated === "boolean"
-      : body !== null && body.projectionStatus === "AVAILABLE" && Number.isInteger(body.total) && body.total > 0,
+          typeof body.truncated === "boolean";
+      }
+      if (lens === "incident") {
+        return body.projectionStatus === "AVAILABLE" && Number.isInteger(body.total) && body.total > 0;
+      }
+      return typeof body.root === "string" && body.root.length > 0 &&
+        Array.isArray(body.observations) && body.observations.length > 0 && body.observations.length <= 100 &&
+        body.observations.every((item) => typeof item.evidenceRef === "string" &&
+          /^[0-9a-f]{64}$/.test(item.contentHash)) &&
+        typeof body.truncated === "boolean" &&
+        (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
+    },
   });
 }
