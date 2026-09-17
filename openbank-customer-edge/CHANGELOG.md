@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.79.0...customer-edge-v0.80.0) (2026-09-17)
+
+
+### Features
+
+* **customer-edge:** let customers read and update their AML profile ([#10204](https://github.com/JiRaska/open-bank-oss/issues/10204)) ([7839ebd](https://github.com/JiRaska/open-bank-oss/commit/7839ebdace00e52c6fa382245a3035e9b34bfa7a)), closes [#10200](https://github.com/JiRaska/open-bank-oss/issues/10200)
+
 ## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.78.0...customer-edge-v0.79.0) (2026-09-17)
 
 

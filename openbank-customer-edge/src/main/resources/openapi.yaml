@@ -17,8 +17,9 @@ info:
   # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
   # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
   # decisions are always the human signer's.
-  # 1.68.0 -> 1.70.0 (#10016): additive GET /capabilities (ADR-0310 D5).
-  # 1.69.0 is claimed by open PR #10204; this PR takes the next free minor.
+  # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
+  # FATCA/CRS self-certification).
+  # 1.69.0 -> 1.70.0 (#10016): additive GET /capabilities (ADR-0310 D5).
   version: 1.70.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
@@ -1242,6 +1243,59 @@ paths:
           description: Consent does not belong to caller
         '404':
           description: Consent not found
+
+  /me/aml-profile:
+    get:
+      tags: [Profile]
+      summary: The caller's own personal AML profile
+      description: >-
+        AML Act 253/2008 §9 declaration plus the FATCA/CRS self-certification of the HUMAN behind
+        the token. The party id is taken from the token only; X-Acting-For is ignored on this route,
+        so a customer acting for a company still sees their own profile. party-service's status and
+        body are passed through.
+      operationId: getMyAmlProfile
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current profile; declaredAt says when it was last confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '404':
+          description: The customer has not declared an AML profile yet
+    put:
+      tags: [Profile]
+      summary: Declare (or re-confirm) the caller's personal AML profile
+      description: >-
+        Stores a new version (version increments on every change; history is kept). The party id
+        is taken from the token only — a partyId in the body and the X-Acting-For header are
+        ignored. A declaration carrying a risk factor (PEP, US person, cash-intensive, high-risk
+        tax residency, turnover over 500k CZK) is still stored and answers reviewStatus
+        ENHANCED_DUE_DILIGENCE, meaning the account needs a check.
+      operationId: putMyAmlProfile
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmlProfileRequest'
+      responses:
+        '200':
+          description: The stored version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '400':
+          description: >-
+            Body is not a JSON object, or party-service rejected the declaration (the error message
+            names the rule), passed through unchanged
+        '422':
+          description: The caller's party is not a natural person, or is closed
 
   /payees:
     get:
@@ -4516,6 +4570,103 @@ components:
         capabilities:
           type: array
           items: {$ref: '#/components/schemas/Capability'}
+    AmlPep:
+      type: object
+      required: [isPep]
+      properties:
+        isPep: {type: boolean}
+        category:
+          type: string
+          nullable: true
+          description: Required when isPep is true; must be empty otherwise.
+          enum: [HEAD_OF_STATE_OR_GOV, MINISTER, MP, JUDGE, CENTRAL_BANK, AMBASSADOR, MILITARY,
+                 STATE_COMPANY_BOARD, INTL_ORG, PARTY_LEADERSHIP, FAMILY_MEMBER, CLOSE_ASSOCIATE]
+        detail: {type: string, nullable: true, maxLength: 500}
+
+    AmlProfileRequest:
+      type: object
+      required: [purpose, incomeSources, occupation, expectedMonthlyTurnover, cashIntensive, pep,
+                 taxResidencies, usPerson, truthful]
+      properties:
+        purpose:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EVERYDAY_BANKING, SALARY, SAVINGS, INVESTMENTS, BUSINESS_SIDE_INCOME, OTHER]
+        purposeNote: {type: string, nullable: true, maxLength: 500, description: Required when purpose includes OTHER}
+        incomeSources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EMPLOYMENT, SELF_EMPLOYMENT, PENSION, STUDENT_SUPPORT, RENTAL, INVESTMENTS, INHERITANCE_GIFT, OTHER]
+        incomeNote: {type: string, nullable: true, maxLength: 500, description: Required when incomeSources includes OTHER}
+        occupation:
+          type: string
+          enum: [EMPLOYED, SELF_EMPLOYED, STUDENT, RETIRED, UNEMPLOYED, OTHER]
+        occupationNote: {type: string, nullable: true, maxLength: 500, description: Required when occupation is OTHER}
+        expectedMonthlyTurnover:
+          type: string
+          description: Monthly turnover band in CZK
+          enum: [UP_TO_30K, UP_TO_100K, UP_TO_500K, OVER_500K]
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: ISO 3166-1 alpha-2 codes, no repeats. A US residency requires usPerson=true.
+          items: {type: string, pattern: '^[A-Za-z]{2}$'}
+        tin:
+          type: object
+          description: >-
+            Taxpayer identification number per NON-CZ residency, keyed by ISO 3166-1 alpha-2 code,
+            e.g. {"SK": "1234567890"}. Keys must be declared taxResidencies and must not include CZ.
+          additionalProperties: {type: string, maxLength: 64}
+        usPerson: {type: boolean, description: FATCA self-certification}
+        truthful: {type: boolean, description: Must be true}
+
+    AmlProfile:
+      type: object
+      required: [partyId, version, declaredAt, purpose, incomeSources, occupation, expectedMonthlyTurnover,
+                 cashIntensive, pep, taxResidencies, tin, usPerson, truthful, riskFactors, eddRequired,
+                 reviewStatus, pepFlag, fatcaStatus, crsStatus]
+      properties:
+        partyId: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        declaredAt: {type: string, format: date-time, description: When this version was confirmed}
+        purpose: {type: array, items: {type: string}}
+        purposeNote: {type: string, nullable: true}
+        incomeSources: {type: array, items: {type: string}}
+        incomeNote: {type: string, nullable: true}
+        occupation: {type: string}
+        occupationNote: {type: string, nullable: true}
+        expectedMonthlyTurnover: {type: string}
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies: {type: array, items: {type: string}}
+        tin:
+          type: object
+          additionalProperties: {type: string}
+        usPerson: {type: boolean}
+        truthful: {type: boolean}
+        riskFactors:
+          type: array
+          items:
+            type: string
+            enum: [PEP, US_PERSON, CASH_INTENSIVE, HIGH_RISK_COUNTRY, HIGH_TURNOVER]
+        eddRequired: {type: boolean}
+        reviewStatus:
+          type: string
+          enum: [STANDARD, ENHANCED_DUE_DILIGENCE]
+          description: ENHANCED_DUE_DILIGENCE — tell the customer the account needs a check.
+        pepFlag: {type: boolean}
+        pepCategory: {type: string, nullable: true}
+        fatcaStatus: {type: string, enum: [US_PERSON, NON_US]}
+        crsStatus: {type: string, enum: [REPORTABLE, NON_REPORTABLE]}
+
     BusinessQuestionnaire:
       type: object
       required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.6.0...kyb-service-v0.7.0) (2026-09-17)
+
+
+### Features
+
+* **kyb:** preserve PSC source evidence and completeness ([#10242](https://github.com/JiRaska/open-bank-oss/issues/10242)) ([ab45286](https://github.com/JiRaska/open-bank-oss/commit/ab452866569c13cc5c2facb0922cc986d570e209))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.5.0...kyb-service-v0.6.0) (2026-09-17)
 
 
