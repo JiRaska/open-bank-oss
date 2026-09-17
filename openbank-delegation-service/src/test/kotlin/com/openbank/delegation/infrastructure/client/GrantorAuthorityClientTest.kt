@@ -35,7 +35,9 @@ class GrantorAuthorityClientTest {
     fun `active organization requires principal in actor mandate set`(): Unit = runBlocking {
         coEvery { rest.getParty(principal) } returns
             AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
-        coEvery { rest.actingFor(actor) } returns listOf(ActingForResponse(principal))
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, RepresentationMandateResponse("SOLE", 1)),
+        )
 
         val result = client.authorityFor(principal, actor)
 
@@ -43,6 +45,33 @@ class GrantorAuthorityClientTest {
         assertThat(result.displayName).isEqualTo("Acme s.r.o.")
         assertThat(result.partyType).isEqualTo("COMPANY")
         coVerify(exactly = 1) { rest.getParty(principal) }
+    }
+
+    @Test
+    fun `joint representative cannot issue a delegation alone`(): Unit = runBlocking {
+        coEvery { rest.getParty(principal) } returns
+            AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, RepresentationMandateResponse("JOINT", 2)),
+        )
+
+        assertThat(client.authorityFor(principal, actor).verdict)
+            .isEqualTo(GrantorAuthorityVerdict.DENIED)
+    }
+
+    @Test
+    fun `missing or inconsistent mandate metadata never becomes sole authority`(): Unit = runBlocking {
+        coEvery { rest.getParty(principal) } returns
+            AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
+        coEvery { rest.actingFor(actor) } returns listOf(ActingForResponse(principal))
+        assertThat(client.authorityFor(principal, actor).verdict)
+            .isEqualTo(GrantorAuthorityVerdict.DENIED)
+
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, RepresentationMandateResponse("SOLE", 2)),
+        )
+        assertThat(client.authorityFor(principal, actor).verdict)
+            .isEqualTo(GrantorAuthorityVerdict.DENIED)
     }
 
     @Test
