@@ -6,6 +6,7 @@ package com.openbank.kyb.infrastructure.client
 
 import com.openbank.kyb.application.port.out.UboObservationAccess
 import com.openbank.kyb.application.port.out.UboObservationAccessDecision
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -15,6 +16,7 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -28,6 +30,7 @@ private const val HTTP_NOT_FOUND = 404
 /** Uses the investigator's bearer, never the KYB service identity, for the live assignment check. */
 @Path("/api/v1/context/kyb-cases")
 @RegisterRestClient(configKey = "context-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface ContextOwnershipAccessRestClient {
     @GET
     @Path("/{caseId}/ownership-observations")
