@@ -36,7 +36,9 @@ for (const width of [1440, 390, 320]) test(`keeps the ${width}px shell visually 
   await page.setViewportSize({ width, height: 900 })
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
   await sessionRequested
-  const nav = page.locator('#admin-sidebar nav')
+  const shell = page.locator('.ob-app-shell:visible')
+  await expect(shell).toHaveCount(1)
+  const nav = shell.locator('#admin-sidebar nav')
   const userMenu = page.getByRole('button', { name: 'Open user menu' })
   const search = page.getByRole('button', { name: 'Quick search (⌘K)' })
   await expect(nav).toHaveAttribute('aria-busy', 'true')
@@ -45,6 +47,7 @@ for (const width of [1440, 390, 320]) test(`keeps the ${width}px shell visually 
   const searchBefore = width <= 860 ? await search.boundingBox() : null
 
   releaseSession()
+  await expect(shell).toHaveCount(1)
   await expect(nav).toHaveAttribute('aria-busy', 'false')
   if (width > 860) await expect(nav.locator('a[href="/system/tests"]').first()).toBeVisible()
   await expect(userMenu).toBeVisible()
