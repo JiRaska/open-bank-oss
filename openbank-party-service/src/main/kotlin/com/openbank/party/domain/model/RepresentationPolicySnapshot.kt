@@ -11,9 +11,16 @@ import java.util.UUID
 /** The register's rule after human confirmation, never a customer-managed employee approval group. */
 enum class RepresentationPolicyMode { SOLE, JOINT_N, JOINT_ALL }
 
-/** One bank-identified human and the office tags verified for this exact rule revision. */
-data class EligibleRepresentative(val partyId: UUID, val officeTags: Set<String>) {
+/** One bank-identified human, tied to exact rows in the verified register extract. */
+data class EligibleRepresentative(
+    val partyId: UUID,
+    val registryRepresentativeIndices: Set<Int>,
+    val officeTags: Set<String>,
+) {
     init {
+        require(registryRepresentativeIndices.isNotEmpty() && registryRepresentativeIndices.all { it >= 0 }) {
+            "a representative must map to a verified register row"
+        }
         require(officeTags.isNotEmpty() && officeTags.all { it.isNotBlank() }) {
             "at least one verified representative office is required"
         }
@@ -53,6 +60,10 @@ data class RepresentationPolicySnapshot(
         require(eligibleRepresentatives.map { it.partyId }.distinct().size == eligibleRepresentatives.size) {
             "representatives must be distinct people"
         }
+        require(
+            eligibleRepresentatives.flatMap { it.registryRepresentativeIndices }.distinct().size ==
+                eligibleRepresentatives.sumOf { it.registryRepresentativeIndices.size },
+        ) { "a register row cannot identify two different people" }
         require(requiredSignatures in 1..eligibleRepresentatives.size) { "quorum must fit the verified roster" }
         require(requiredOffices.all { it.isNotBlank() } && requiredOffices.size <= requiredSignatures) {
             "required offices must fit the quorum"

@@ -53,8 +53,8 @@ class RepresentationPolicySchemaIT {
             requiredSignatures = 2,
             requiredOffices = listOf("Chair", "Member"),
             eligibleRepresentatives = listOf(
-                EligibleRepresentative(chair, setOf("Chair", "Member")),
-                EligibleRepresentative(member, setOf("Member")),
+                EligibleRepresentative(chair, setOf(0), setOf("Chair", "Member")),
+                EligibleRepresentative(member, setOf(1), setOf("Member")),
             ),
             evidenceRef = "verified-case",
             effectiveFrom = Instant.parse("2026-09-17T00:00:00Z"),
@@ -124,8 +124,10 @@ class RepresentationPolicySchemaIT {
             statement.setString(
                 7,
                 "[" +
-                    "{\"partyId\":\"${UUID.randomUUID()}\",\"officeTags\":[\"Chair\",\"Member\"]}," +
-                    "{\"partyId\":\"${UUID.randomUUID()}\",\"officeTags\":[\"Member\"]}]",
+                    "{\"partyId\":\"${UUID.randomUUID()}\",\"registryRepresentativeIndices\":[0]," +
+                    "\"officeTags\":[\"Chair\",\"Member\"]}," +
+                    "{\"partyId\":\"${UUID.randomUUID()}\",\"registryRepresentativeIndices\":[1]," +
+                    "\"officeTags\":[\"Member\"]}]",
             )
             assertThat(statement.executeUpdate()).isEqualTo(1)
         }
