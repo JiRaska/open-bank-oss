@@ -104,11 +104,11 @@ jobs:
     permissions:
       contents: write # required by the dependency-submission API
     env:
-      # Keep the existing ceiling for dependency resolution, but do not increase it to mask
-      # the OOM seen on #10216: its Gradle daemon reached 6133/6144 MiB while compiling
-      # fleet-wide `assemble testClasses`. The action below resolves configurations without
-      # Quarkus code generation or compilation, avoiding that unnecessary heap pressure.
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+      # The old compile-based run reached the 6 GiB daemon ceiling with 19 JVMs alive.
+      # Resolution-only run 35221374688 still exhausted 6 GiB with a single worker,
+      # so give that one daemon 8 GiB without reviving parallel compiler processes.
+      # Do not narrow the dependency graph to make an incomplete snapshot look green.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
     steps:
