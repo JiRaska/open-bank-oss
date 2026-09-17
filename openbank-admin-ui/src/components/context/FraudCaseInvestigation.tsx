@@ -49,7 +49,7 @@ export function FraudCaseInvestigation({ initialCaseId = '' }: { initialCaseId?:
 
   return <section className={styles.shell} aria-label={t('Fraud Context Graph', 'Fraud Context Graph')}>
     <div className={styles.content}>
-      <div className={styles.eyebrow}>Context intelligence / Fraud</div>
+      <div className={styles.eyebrow}>{t('Kontextové souvislosti / Fraud', 'Context intelligence / Fraud')}</div>
       <h2 className={styles.heading}>{t('Spojitosti za případem', 'Connections behind a case')}</h2>
       <p className={styles.intro}>{t('Prozkoumejte pouze otevřené, přidělené případy. Každá hrana znamená přesnou shodu zdrojového identifikátoru, ne prokázaný podvod.', 'Explore only open cases assigned to you. Every edge is an exact source-ID match, not a proven fraud finding.')}</p>
       <form className={styles.form} onSubmit={load}>
