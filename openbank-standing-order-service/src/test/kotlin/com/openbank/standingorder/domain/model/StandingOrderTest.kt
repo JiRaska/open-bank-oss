@@ -71,6 +71,22 @@ class StandingOrderTest {
     }
 
     @Test
+    fun `recordExecution preserves the payment instruction while scheduling its next occurrence`() {
+        val updated = standingOrder().recordExecution(LocalDate.of(2026, 3, 1), FIXED_NOW)
+
+        assertThat(updated.idempotencyKey).isEqualTo("idempotency-key")
+        assertThat(updated.debtorIban).isEqualTo("DE89370400440532013001")
+        assertThat(updated.debtorName).isEqualTo("Debtor")
+        assertThat(updated.creditorIban).isEqualTo("DE89370400440532013000")
+        assertThat(updated.creditorName).isEqualTo("Creditor")
+        assertThat(updated.creditorBic).isEqualTo("DEUTDEFF")
+        assertThat(updated.amountMinorUnits).isEqualTo(1000L)
+        assertThat(updated.currency).isEqualTo("EUR")
+        assertThat(updated.remittanceInfo).isEqualTo("Rent")
+        assertThat(updated.endDate).isEqualTo(LocalDate.of(2026, 12, 31))
+    }
+
+    @Test
     fun `recordExecution() sets status COMPLETED when nextDate is after endDate`() {
         val order = standingOrder(
             endDate = LocalDate.of(2026, 3, 1),
