@@ -43,6 +43,14 @@ jobs:
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
         with:
           language: jvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # The repository has >360k Actions artifacts. The default artifact filestore
+          # searches that collection for coverage and corpus on every PR and exhausts
+          # the installation API limit before the 300s fuzz budget can finish (#10268).
+          # This public seed branch is read-only to PR jobs; no PAT or write token.
+          storage-repo: https://github.com/JiRaska/open-bank-oss.git
+          storage-repo-branch: codex/cflite-corpus-seeds
+          storage-repo-branch-coverage: codex/cflite-corpus-seeds
           sanitizer: address
       - name: Run fuzzers (code-change mode)
         uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
@@ -51,4 +59,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fuzz-seconds: 300
           mode: code-change
+          storage-repo: https://github.com/JiRaska/open-bank-oss.git
+          storage-repo-branch: codex/cflite-corpus-seeds
+          storage-repo-branch-coverage: codex/cflite-corpus-seeds
           sanitizer: address
