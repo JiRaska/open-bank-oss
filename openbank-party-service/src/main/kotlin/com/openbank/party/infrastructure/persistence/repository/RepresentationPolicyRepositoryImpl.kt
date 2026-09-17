@@ -35,7 +35,12 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
     }
 
     override suspend fun insert(snapshot: RepresentationPolicySnapshot): RepresentationPolicySnapshot {
-        val entity = RepresentationPolicyEntity().apply {
+        Panache.withTransaction { persist(toEntity(snapshot)) }.awaitSuspending()
+        return snapshot
+    }
+
+    internal fun toEntity(snapshot: RepresentationPolicySnapshot): RepresentationPolicyEntity =
+        RepresentationPolicyEntity().apply {
             policyId = snapshot.id
             principalPartyId = snapshot.principalPartyId
             revision = snapshot.revision
@@ -52,39 +57,36 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
             evidenceRef = snapshot.evidenceRef
             effectiveFrom = snapshot.effectiveFrom
         }
-        Panache.withTransaction { persist(entity) }.awaitSuspending()
-        return snapshot
-    }
 
     override suspend fun findById(id: UUID): RepresentationPolicySnapshot? =
-        Panache.withSession { find("policyId", id).firstResult() }.awaitSuspending()?.toDomain()
+        Panache.withSession { find("policyId", id).firstResult() }.awaitSuspending()?.let(::fromEntity)
 
     override suspend fun findBySourceCaseId(sourceCaseId: UUID): RepresentationPolicySnapshot? =
-        Panache.withSession { find("sourceCaseId", sourceCaseId).firstResult() }.awaitSuspending()?.toDomain()
+        Panache.withSession { find("sourceCaseId", sourceCaseId).firstResult() }.awaitSuspending()?.let(::fromEntity)
 
     override suspend fun findLatestEffective(principalPartyId: UUID): RepresentationPolicySnapshot? =
         Panache.withSession {
             find("principalPartyId = ?1 order by effectiveFrom desc, revision desc", principalPartyId).firstResult()
-        }.awaitSuspending()?.toDomain()
+        }.awaitSuspending()?.let(::fromEntity)
 
-    private fun RepresentationPolicyEntity.toDomain() = RepresentationPolicySnapshot(
-        id = policyId,
-        principalPartyId = principalPartyId,
-        revision = revision,
-        sourceCaseId = sourceCaseId,
-        attestationId = attestationId,
-        ruleTextHash = ruleTextHash.trim(),
-        registrySource = registrySource,
-        registrySourceRef = registrySourceRef,
-        registryRepresentativeCount = registryRepresentativeCount,
-        mode = RepresentationPolicyMode.valueOf(mode),
-        requiredSignatures = requiredSignatures,
-        requiredOffices = mapper.readValue(requiredOfficesJson, object : TypeReference<List<String>>() {}),
+    internal fun fromEntity(entity: RepresentationPolicyEntity) = RepresentationPolicySnapshot(
+        id = entity.policyId,
+        principalPartyId = entity.principalPartyId,
+        revision = entity.revision,
+        sourceCaseId = entity.sourceCaseId,
+        attestationId = entity.attestationId,
+        ruleTextHash = entity.ruleTextHash.trim(),
+        registrySource = entity.registrySource,
+        registrySourceRef = entity.registrySourceRef,
+        registryRepresentativeCount = entity.registryRepresentativeCount,
+        mode = RepresentationPolicyMode.valueOf(entity.mode),
+        requiredSignatures = entity.requiredSignatures,
+        requiredOffices = mapper.readValue(entity.requiredOfficesJson, object : TypeReference<List<String>>() {}),
         eligibleRepresentatives = mapper.readValue(
-            eligibleRepresentativesJson,
+            entity.eligibleRepresentativesJson,
             object : TypeReference<List<EligibleRepresentative>>() {},
         ),
-        evidenceRef = evidenceRef,
-        effectiveFrom = effectiveFrom,
+        evidenceRef = entity.evidenceRef,
+        effectiveFrom = entity.effectiveFrom,
     )
 }

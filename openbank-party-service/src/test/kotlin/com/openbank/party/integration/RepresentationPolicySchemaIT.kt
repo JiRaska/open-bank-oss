@@ -4,6 +4,9 @@
 
 package com.openbank.party.integration
 
+import com.openbank.party.application.port.out.KybSignedCaseProjection
+import com.openbank.party.application.port.out.KybSignedCaseProjectionRepository
+import com.openbank.party.application.port.out.KybSignedMandateHolder
 import com.openbank.party.application.port.out.RepresentationPolicyRepository
 import com.openbank.party.domain.model.EligibleRepresentative
 import com.openbank.party.domain.model.RepresentationPolicyMode
@@ -36,6 +39,8 @@ class RepresentationPolicySchemaIT {
     @Inject lateinit var dataSource: DataSource
 
     @Inject lateinit var policies: RepresentationPolicyRepository
+
+    @Inject lateinit var signedCases: KybSignedCaseProjectionRepository
 
     private fun <T> onVertxContext(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -88,6 +93,84 @@ class RepresentationPolicySchemaIT {
             get("/api/v1/parties/${UUID.randomUUID()}/representation-policy")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    fun `all mandates rule and outbox commit together or all roll back`() {
+        val caseId = UUID.randomUUID()
+        val principalId = UUID.randomUUID()
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val at = Instant.parse("2026-09-17T12:00:00Z")
+        val policy = RepresentationPolicySnapshot(
+            id = UUID.randomUUID(),
+            principalPartyId = principalId,
+            revision = 1,
+            sourceCaseId = caseId,
+            attestationId = UUID.randomUUID(),
+            ruleTextHash = "b".repeat(64),
+            registrySource = "verified-registry",
+            registrySourceRef = null,
+            registryRepresentativeCount = 2,
+            mode = RepresentationPolicyMode.JOINT_ALL,
+            requiredSignatures = 2,
+            requiredOffices = emptyList(),
+            eligibleRepresentatives = listOf(
+                EligibleRepresentative(first, setOf(0), setOf("statutory-representative")),
+                EligibleRepresentative(second, setOf(1), setOf("statutory-representative")),
+            ),
+            evidenceRef = "kyb-case:$caseId:ceremony:${UUID.randomUUID()}",
+            effectiveFrom = at,
+        )
+        val projection = KybSignedCaseProjection(
+            caseId = caseId,
+            principalPartyId = principalId,
+            payloadHash = "a".repeat(64),
+            occurredAt = at,
+            requiredSignatures = 2,
+            soleTrader = false,
+            holders = listOf(
+                KybSignedMandateHolder(UUID.randomUUID(), first, 0),
+                KybSignedMandateHolder(UUID.randomUUID(), second, 1),
+            ),
+            policy = policy,
+        )
+
+        assertThatThrownBy {
+            onVertxContext {
+                signedCases.project(projection.copy(policy = policy.copy(registrySource = "x".repeat(65))))
+            }
+        }.isInstanceOf(Exception::class.java)
+        assertProjectionCounts(caseId, principalId, 0)
+
+        assertThat(onVertxContext { signedCases.project(projection) }).isTrue()
+        assertProjectionCounts(caseId, principalId, 2)
+        assertThat(onVertxContext { signedCases.project(projection) }).isFalse()
+        assertProjectionCounts(caseId, principalId, 2)
+        assertThatThrownBy {
+            onVertxContext { signedCases.project(projection.copy(payloadHash = "c".repeat(64))) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertProjectionCounts(caseId, principalId, 2)
+    }
+
+    private fun assertProjectionCounts(caseId: UUID, principalId: UUID, expectedMandates: Int) {
+        dataSource.connection.use { connection ->
+            fun count(sql: String, id: UUID): Int = connection.prepareStatement(sql).use { statement ->
+                statement.setObject(1, id)
+                statement.executeQuery().use { rows ->
+                    rows.next()
+                    rows.getInt(1)
+                }
+            }
+            assertThat(count("SELECT count(*) FROM party_kyb_signed_case_projections WHERE case_id = ?", caseId))
+                .isEqualTo(if (expectedMandates == 0) 0 else 1)
+            assertThat(count("SELECT count(*) FROM party_representation_policies WHERE source_case_id = ?", caseId))
+                .isEqualTo(if (expectedMandates == 0) 0 else 1)
+            assertThat(count("SELECT count(*) FROM party_mandates WHERE principal_party_id = ?", principalId))
+                .isEqualTo(expectedMandates)
+            assertThat(count("SELECT count(*) FROM party_outbox WHERE aggregate_id = ?", principalId))
+                .isEqualTo(expectedMandates)
         }
     }
 

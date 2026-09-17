@@ -12,13 +12,17 @@ import com.openbank.party.domain.model.MandateAuthority
 import com.openbank.party.domain.model.MandateRole
 import com.openbank.party.domain.model.MandateSource
 import com.openbank.party.domain.model.MandateStatus
+import com.openbank.party.domain.model.PartyActor
 import com.openbank.party.domain.model.PartyEvent
+import com.openbank.party.domain.model.PartyEvents
 import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.infrastructure.persistence.entity.PartyMandateEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
 /** Mandate row + `party_outbox` event in one transaction, same discipline as the party aggregate (#4007). */
@@ -71,6 +75,52 @@ class PartyMandateRepositoryImpl(
                 MandateStatus.ACTIVE.name,
             ).firstResult()
         }.awaitSuspending()?.toDomain()
+
+    /** Joins the caller's transaction: every signer, outbox event and rule commit or roll back together. */
+    internal fun upsertSignedInTransaction(session: Mutiny.Session, caseId: UUID, mandate: PartyMandate): Uni<Void> =
+        session.createQuery(
+            "FROM PartyMandateEntity WHERE principalPartyId = :principal AND agentPartyId = :agent " +
+                "AND role = :role ORDER BY updatedAt DESC",
+            PartyMandateEntity::class.java,
+        ).setParameter("principal", mandate.principalPartyId)
+            .setParameter("agent", mandate.agentPartyId)
+            .setParameter("role", mandate.role.name)
+            .setMaxResults(1)
+            .singleResultOrNull
+            .flatMap { existing ->
+                val sameCase = existing?.evidenceRef?.startsWith("kyb-case:$caseId:") == true
+                val sameCaseActive = existing?.status == MandateStatus.ACTIVE.name &&
+                    sameCase &&
+                    existing.authority == mandate.authority.name &&
+                    existing.requiredSignatures == mandate.requiredSignatures &&
+                    existing.source == mandate.source.name
+                if (sameCaseActive) {
+                    return@flatMap Uni.createFrom().voidItem()
+                }
+                // A later revocation wins; a later active grant with different facts is ambiguous,
+                // so never silently mark this signed case as projected with the wrong authority.
+                if (existing != null && existing.updatedAt.isAfter(mandate.validFrom)) {
+                    if (existing.status != MandateStatus.ACTIVE.name) return@flatMap Uni.createFrom().voidItem()
+                    require(false) { "later active mandate conflicts with signed KYB case $caseId" }
+                }
+                val granted = if (existing?.status == MandateStatus.ACTIVE.name) {
+                    mandate.copy(id = existing.mandateId, createdAt = existing.createdAt)
+                } else {
+                    mandate
+                }
+                val event = PartyEvents.mandateGranted(granted, mandate.validFrom, PartyActor.system("kyb-signed-case"))
+                val write = if (existing?.status == MandateStatus.ACTIVE.name) {
+                    existing.fill(granted)
+                    Uni.createFrom().voidItem()
+                } else {
+                    val entity = PartyMandateEntity().apply {
+                        mandateId = granted.id
+                        createdAt = granted.createdAt
+                    }.fill(granted)
+                    session.persist(entity)
+                }
+                write.flatMap { outboxRepository.persistInTransaction(event.toOutboxMessage()) }
+            }
 
     private fun PartyMandateEntity.fill(m: PartyMandate) = apply {
         principalPartyId = m.principalPartyId

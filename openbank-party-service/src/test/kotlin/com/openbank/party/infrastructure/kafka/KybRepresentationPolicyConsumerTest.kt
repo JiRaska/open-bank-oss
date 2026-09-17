@@ -5,11 +5,15 @@
 package com.openbank.party.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.party.application.port.out.KybSignedCaseProjection
+import com.openbank.party.application.port.out.KybSignedCaseProjectionRepository
 import com.openbank.party.application.port.out.RepresentationPolicyRepository
 import com.openbank.party.domain.model.RepresentationPolicySnapshot
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -18,7 +22,9 @@ import java.util.UUID
 
 class KybRepresentationPolicyConsumerTest {
     private val policies = mockk<RepresentationPolicyRepository>()
-    private val consumer = KybRepresentationPolicyConsumer(policies, ObjectMapper())
+    private val signedCases = mockk<KybSignedCaseProjectionRepository>()
+    private val mapper = ObjectMapper()
+    private val consumer = KybRepresentationPolicyConsumer(policies, signedCases, mapper)
     private val caseId = UUID.randomUUID()
     private val principalId = UUID.randomUUID()
     private val chairId = UUID.randomUUID()
@@ -70,6 +76,29 @@ class KybRepresentationPolicyConsumerTest {
         assertThat(stored!!.revision).isEqualTo(42)
         coVerify(exactly = 1) { policies.allocateRevision() }
         coVerify(exactly = 1) { policies.insert(any()) }
+    }
+
+    @Test
+    fun `new signed event enters the atomic case projector instead of independent policy write`(): Unit = runBlocking {
+        val root = mapper.readTree(event()) as ObjectNode
+        root.put("legalFormClass", "LIMITED_COMPANY")
+        root.put("occurredAt", "2026-09-17T00:00:00Z")
+        root.set<com.fasterxml.jackson.databind.JsonNode>(
+            "signedMandateHolders",
+            mapper.readTree(
+                """[{"signerId":"${UUID.randomUUID()}","partyId":"$chairId","registryRepresentativeIndex":0},
+                    {"signerId":"${UUID.randomUUID()}","partyId":"$memberId","registryRepresentativeIndex":1}]""",
+            ),
+        )
+        val projected = slot<KybSignedCaseProjection>()
+        coEvery { signedCases.project(capture(projected)) } returns true
+
+        consumer.consume(mapper.writeValueAsString(root))
+
+        assertThat(projected.captured.caseId).isEqualTo(caseId)
+        assertThat(projected.captured.holders.map { it.partyId }).containsExactlyInAnyOrder(chairId, memberId)
+        assertThat(projected.captured.policy!!.requiredSignatures).isEqualTo(2)
+        coVerify(exactly = 0) { policies.insert(any()) }
     }
 
     @Test

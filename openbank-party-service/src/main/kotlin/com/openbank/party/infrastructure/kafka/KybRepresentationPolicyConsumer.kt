@@ -7,6 +7,9 @@ package com.openbank.party.infrastructure.kafka
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.messaging.EventRetry
+import com.openbank.party.application.port.out.KybSignedCaseProjection
+import com.openbank.party.application.port.out.KybSignedCaseProjectionRepository
+import com.openbank.party.application.port.out.KybSignedMandateHolder
 import com.openbank.party.application.port.out.RepresentationPolicyRepository
 import com.openbank.party.domain.model.EligibleRepresentative
 import com.openbank.party.domain.model.RepresentationPolicyMode
@@ -14,6 +17,7 @@ import com.openbank.party.domain.model.RepresentationPolicySnapshot
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -21,6 +25,7 @@ import java.util.UUID
 @ApplicationScoped
 class KybRepresentationPolicyConsumer(
     private val policies: RepresentationPolicyRepository,
+    private val signedCases: KybSignedCaseProjectionRepository,
     private val mapper: ObjectMapper,
 ) {
     private val log = Logger.getLogger(KybRepresentationPolicyConsumer::class.java)
@@ -30,8 +35,17 @@ class KybRepresentationPolicyConsumer(
         val root = mapper.readTree(payload)
         if (root.path("eventType").asText() != "BUSINESS_AGREEMENT_SIGNED") return
         val rule = root.path("statutoryPolicy")
-        if (rule.isMissingNode || rule.isNull) return // pre-rollout event or manually overridden rule
-        val snapshot = parse(root, rule)
+        val snapshot = rule.takeUnless { it.isMissingNode || it.isNull }?.let { parse(root, it) }
+        val holderNodes = root.path("signedMandateHolders")
+        if (!holderNodes.isMissingNode && !holderNodes.isNull) {
+            val case = parseSignedCase(root, holderNodes, snapshot, payload)
+            EventRetry.withRetry(log, "atomic KYB signed-case projection", case.caseId) {
+                signedCases.project(case)
+            }
+            return
+        }
+        // Pre-rollout events were already granted through KYB's REST loop; retain only their rule.
+        if (snapshot == null) return
         EventRetry.withRetry(log, "KYB statutory rule projection", snapshot.sourceCaseId) {
             val existing = policies.findBySourceCaseId(snapshot.sourceCaseId)
             if (existing != null) {
@@ -42,6 +56,56 @@ class KybRepresentationPolicyConsumer(
                 policies.insert(snapshot.copy(revision = policies.allocateRevision()))
             }
         }
+    }
+
+    private fun parseSignedCase(
+        root: JsonNode,
+        holderNodes: JsonNode,
+        policy: RepresentationPolicySnapshot?,
+        payload: String,
+    ): KybSignedCaseProjection {
+        require(root.path("sourceService").asText() == "kyb-service") { "unexpected signed-case producer" }
+        require(root.path("status").asText() in setOf("SIGNED", "ACTIVE")) { "unsigned mandate projection" }
+        require(holderNodes.isArray && !holderNodes.isEmpty) { "signed case has no mandate holders" }
+        val holders = holderNodes.map { holder ->
+            val index = holder.path("registryRepresentativeIndex")
+            require(index.isNull || index.isIntegralNumber) { "invalid signed-holder register index" }
+            KybSignedMandateHolder(
+                signerId = holder.requiredUuid("signerId"),
+                partyId = holder.requiredUuid("partyId"),
+                registryRepresentativeIndex = if (index.isNull) null else index.intValue(),
+            )
+        }
+        require(holders.size == root.requiredInt("signedCount")) { "signed-holder count mismatch" }
+        val form = root.requiredText("legalFormClass")
+        val knownForms = setOf(
+            "SOLE_TRADER", "LIMITED_COMPANY", "JOINT_STOCK", "PARTNERSHIP", "COOPERATIVE",
+            "FOUNDATION", "PUBLIC_BODY", "BRANCH", "OTHER",
+        )
+        require(form in knownForms) { "unknown legal form for signed KYB case" }
+        val caseId = root.requiredUuid("caseId")
+        val principalId = root.requiredUuid("entityPartyId")
+        policy?.eligibleRepresentatives?.forEach { representative ->
+            val matched = holders.any { holder ->
+                holder.partyId == representative.partyId &&
+                    holder.registryRepresentativeIndex != null &&
+                    holder.registryRepresentativeIndex in representative.registryRepresentativeIndices
+            }
+            require(matched) { "statutory representative does not match a signed KYB holder" }
+        }
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(payload.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return KybSignedCaseProjection(
+            caseId = caseId,
+            principalPartyId = principalId,
+            payloadHash = hash,
+            occurredAt = Instant.parse(root.requiredText("occurredAt")),
+            requiredSignatures = root.requiredInt("requiredSignatures"),
+            soleTrader = form == "SOLE_TRADER",
+            holders = holders,
+            policy = policy,
+        )
     }
 
     private fun parse(root: JsonNode, rule: JsonNode): RepresentationPolicySnapshot {
