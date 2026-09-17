@@ -4,9 +4,12 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.fraud.application.port.out.FraudInvestigationCaseStore
 import com.openbank.fraud.domain.model.FraudInvestigationCase
 import com.openbank.fraud.domain.model.FraudInvestigationStatus
+import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -69,7 +72,11 @@ class FraudInvestigationCaseEntity {
 
 /** Source-controlled case lifecycle; score is a lead and never creates a case by itself. */
 @ApplicationScoped
-class FraudInvestigationCaseRepository(private val clock: Clock) : FraudInvestigationCaseStore {
+class FraudInvestigationCaseRepository(
+    private val clock: Clock,
+    private val outbox: FraudOutboxRepositoryImpl,
+    private val objectMapper: ObjectMapper,
+) : FraudInvestigationCaseStore {
     override suspend fun find(caseId: UUID): FraudInvestigationCase? = Panache.withSession {
         Panache.getSession().flatMap { it.find(FraudInvestigationCaseEntity::class.java, caseId) }
     }.awaitSuspending()?.toDomain()
@@ -97,13 +104,20 @@ class FraudInvestigationCaseRepository(private val clock: Clock) : FraudInvestig
                             .setParameter("accountId", score.accountId)
                             .setParameter("counterpartyId", score.counterpartyId)
                             .setParameter("actor", actorId).setParameter("at", now)
-                            .executeUpdate().flatMap {
+                            .executeUpdate().flatMap { inserted ->
                                 session.createQuery(
                                     "from FraudInvestigationCaseEntity where scoreId = :scoreId",
                                     FraudInvestigationCaseEntity::class.java,
                                 ).setParameter("scoreId", scoreId).singleResult.flatMap { row ->
                                     val result = row.toDomain()
-                                    Uni.createFrom().item(result)
+                                    if (inserted == 1) {
+                                        outbox.persistInTransaction(
+                                            reference(result, FraudCaseOpenedReference.EVENT_TYPE),
+                                        )
+                                            .replaceWith(result)
+                                    } else {
+                                        Uni.createFrom().item(result)
+                                    }
                                 }
                             }
                     }
@@ -133,11 +147,56 @@ class FraudInvestigationCaseRepository(private val clock: Clock) : FraudInvestig
                             .setParameter("at", now).setParameter("caseId", caseId)
                             .setParameter("previousRevision", row.revision).executeUpdate().flatMap { changed ->
                                 check(changed == 1) { "fraud case changed concurrently" }
-                                Uni.createFrom().item(next)
+                                outbox.persistInTransaction(reference(next, FraudCaseClosedReference.EVENT_TYPE))
+                                    .replaceWith(next)
                             }
                     }
                 }
             }
         }.awaitSuspending()
+    }
+
+    /** The Context topic carries a case reference only; all source identifiers remain in Fraud. */
+    private fun reference(case: FraudInvestigationCase, eventType: String): OutboxMessage {
+        val occurredAt = case.closedAt ?: case.openedAt
+        val payload = when (eventType) {
+            FraudCaseOpenedReference.EVENT_TYPE -> objectMapper.writeValueAsString(
+                FraudCaseOpenedReference(eventType, case.id, case.revision, occurredAt),
+            )
+            FraudCaseClosedReference.EVENT_TYPE -> objectMapper.writeValueAsString(
+                FraudCaseClosedReference(eventType, case.id, case.revision, occurredAt),
+            )
+            else -> error("unsupported fraud case reference: $eventType")
+        }
+        return OutboxMessage(
+            eventId = Ids.newId(),
+            aggregateId = case.id,
+            eventType = eventType,
+            payload = payload,
+            createdAt = occurredAt,
+        )
+    }
+}
+
+/** Contract names are pinned independently from the case's internal status. */
+data class FraudCaseOpenedReference(
+    val eventType: String,
+    val caseId: UUID,
+    val revision: Long,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "fraud.case_opened"
+    }
+}
+
+data class FraudCaseClosedReference(
+    val eventType: String,
+    val caseId: UUID,
+    val revision: Long,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "fraud.case_closed"
     }
 }

@@ -4,20 +4,17 @@
 # ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
 #
 # WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
-# nothing validates its content against what the code actually sends, and no schema is registered
-# in Apicurio. Everything below is DERIVED from `FraudHoldService.emitHoldChanged`, the only
-# producer, and each claim names its source — same convention as the engagement-service contract.
+# The hold and investigation-reference feeds have independent payloads and topic ACLs.
 
 asyncapi: 3.0.0
 
 info:
   title: OpenBank Fraud Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    fraud-service's first-ever published topic (ADR-0220 D3.5, issue #2749). Everything else the
-    service does — `POST /api/v1/fraud/score` — is synchronous request/response with no event;
-    this is the sole exception, a side-effect signal for the fraud-hold marketing-suppression
-    exclusion, not a scoring-decision feed.
+    The fraud-hold topic is a marketing-suppression signal. The separate investigation-reference
+    topic carries only human-opened case lifecycle references for Context. Scores themselves
+    are never published as investigation findings.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -54,8 +51,27 @@ channels:
     messages:
       fraud.hold_changed:
         $ref: '#/components/messages/fraud.hold_changed'
+  fraudInvestigationCaseReferences:
+    address: openbank.fraud.investigation.case.references
+    title: Human-reviewed fraud investigation case lifecycle references
+    description: |
+      Three partitions, one sandbox replica, seven-day retention. Partition key is caseId;
+      transitions for one case remain ordered. Fraud has Write/Describe and Context has
+      Read/Describe. No customer, account, counterparty, score or reason appears in the payload.
+    messages:
+      fraud.case_opened:
+        $ref: '#/components/messages/fraud.case_opened'
+      fraud.case_closed:
+        $ref: '#/components/messages/fraud.case_closed'
 
 operations:
+  publishFraudInvestigationCaseReferences:
+    action: send
+    channel:
+      $ref: '#/channels/fraudInvestigationCaseReferences'
+    messages:
+      - $ref: '#/channels/fraudInvestigationCaseReferences/messages/fraud.case_opened'
+      - $ref: '#/channels/fraudInvestigationCaseReferences/messages/fraud.case_closed'
   publishFraudHoldChanged:
     action: send
     title: Publish a fraud-hold state transition
@@ -99,6 +115,23 @@ components:
               `active`/`reason` state rather than accumulating.
 
   schemas:
+    fraudCaseReference:
+      type: object
+      additionalProperties: false
+      required: [eventType, caseId, revision, occurredAt]
+      properties:
+        eventType:
+          type: string
+          enum: [fraud.case_opened, fraud.case_closed]
+        caseId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        occurredAt:
+          type: string
+          format: date-time
     holdReason:
       type: string
       description: >-
@@ -110,6 +143,16 @@ components:
       enum: [repeated_review, expired]
 
   messages:
+    fraud.case_opened:
+      name: fraud.case_opened
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/fraudCaseReference'
+    fraud.case_closed:
+      name: fraud.case_closed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/fraudCaseReference'
     fraud.hold_changed:
       name: fraud.hold_changed
       title: A fraud-hold was raised or cleared for a party

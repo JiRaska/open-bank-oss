@@ -31,6 +31,9 @@ spec:
       - resource: { type: topic, name: openbank.sepa.payment.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      - resource: { type: topic, name: openbank.fraud.investigation.case.references, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.dispute-events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
@@ -50,6 +53,9 @@ spec:
         operations: [Write, Describe]
         host: "*"
       - resource: { type: topic, name: openbank.dlq.context-service.sepa-payment-events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.dlq.context-service.fraud-case-references, patternType: literal }
         operations: [Write, Describe]
         host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }

@@ -45,7 +45,8 @@ class FraudInvestigationCaseIT {
             .post("/api/v1/fraud/cases").then().statusCode(201)
             .body("caseId", equalTo(caseId.toString()))
         assertThat(caseCount(scoreId)).isEqualTo(1)
-        assertThat(outboxCount(caseId)).isZero()
+        assertThat(outboxCount(caseId)).isEqualTo(1)
+        assertReference(caseId, 1, "fraud.case_opened", accountId, counterpartyId)
 
         given().header("X-Investigation-Purpose", PURPOSE)
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
@@ -54,6 +55,8 @@ class FraudInvestigationCaseIT {
         given().header("X-Investigation-Purpose", PURPOSE)
             .post("/api/v1/fraud/cases/$caseId/close-without-finding").then().statusCode(200)
             .body("revision", equalTo(2))
+        assertThat(outboxCount(caseId)).isEqualTo(2)
+        assertReference(caseId, 2, "fraud.case_closed", accountId, counterpartyId)
         given().header("X-Investigation-Purpose", PURPOSE)
             .get("/api/v1/fraud/cases/$caseId").then().statusCode(200)
             .body("status", equalTo("CLOSED_NO_FINDING"))
@@ -137,6 +140,27 @@ class FraudInvestigationCaseIT {
             stmt.executeQuery().use { rows ->
                 rows.next()
                 rows.getInt(1)
+            }
+        }
+    }
+
+    private fun assertReference(caseId: UUID, revision: Int, type: String, accountId: UUID, counterpartyId: UUID) {
+        connection().use { connection ->
+            connection.prepareStatement(
+                "SELECT payload FROM fraud_outbox WHERE aggregate_id = ? AND event_type = ?",
+            ).use { stmt ->
+                stmt.setObject(1, caseId)
+                stmt.setString(2, type)
+                stmt.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val payload = rows.getString(1)
+                    val fields = com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+                    assertThat(fields.fieldNames().asSequence().toSet())
+                        .containsExactlyInAnyOrder("eventType", "caseId", "revision", "occurredAt")
+                    assertThat(fields.get("caseId").asText()).isEqualTo(caseId.toString())
+                    assertThat(fields.get("revision").asInt()).isEqualTo(revision)
+                    assertThat(payload).doesNotContain(accountId.toString(), counterpartyId.toString())
+                }
             }
         }
     }
