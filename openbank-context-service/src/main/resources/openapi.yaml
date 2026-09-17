@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.0.0
+  version: 1.1.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/assignment-proposals:
@@ -90,7 +90,11 @@ paths:
         - $ref: '#/components/parameters/purpose'
         - $ref: '#/components/parameters/asOf'
       responses:
-        '200': { description: Authorized aggregate impact }
+        '200':
+          description: Authorized aggregate projection; missing evidence is not zero business impact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentImpact' }
         '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
         '503': { description: Authorization decision unavailable }
@@ -122,6 +126,23 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    IncidentImpact:
+      type: object
+      required: [incidentRef, affectedByType, total, drilldownAvailable, projectionStatus]
+      properties:
+        incidentRef: { type: string, maxLength: 200 }
+        affectedByType:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        total:
+          type: integer
+          minimum: 0
+          description: Count in the retrieved projection slice, never a claim of total business impact
+        drilldownAvailable: { type: boolean, const: false }
+        projectionStatus:
+          type: string
+          enum: [MISSING, PARTIAL, AVAILABLE]
+          description: MISSING means no root projection; PARTIAL means a query limit was reached; AVAILABLE describes the retrieved projection only, not telemetry coverage
     ProposeAssignment:
       type: object
       required: [principalId, caseId, purpose, validTo]
