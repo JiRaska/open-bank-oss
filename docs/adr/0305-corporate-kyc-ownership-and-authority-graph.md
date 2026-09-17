@@ -2,6 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
+followup: "#10233 — complete ownership and representation source evidence, corrections, erasure and the case-scoped lens"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

@@ -310,7 +310,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0302](0302-asset-interest-split-for-co-owned-and-look-through-wealth.md) | Asset and Interest: separating the object from the claim on it | Proposed | Planned | architecture,analytics,privacy-gdpr | — |
 | [0303](0303-banking-context-graph-and-authorized-hybrid-retrieval.md) | Banking context graph and authorized hybrid retrieval | Accepted | Partial | admin-ui,database,authz,ai-agents | open-bank-oss |
 | [0304](0304-fraud-and-aml-relationship-investigation.md) | Fraud and AML relationship investigation | Accepted | Planned | fraud,aml-sanctions,authz,admin-ui | — |
-| [0305](0305-corporate-kyc-ownership-and-authority-graph.md) | Corporate KYC ownership and authority graph | Accepted | Planned | kyc,onboarding,authz,admin-ui | — |
+| [0305](0305-corporate-kyc-ownership-and-authority-graph.md) | Corporate KYC ownership and authority graph | Accepted | Partial | kyc,onboarding,authz,admin-ui | — |
 | [0306](0306-payment-complaint-and-return-trace.md) | Payment complaint and return trace | Accepted | Partial | disputes,payments,admin-ui,audit | open-bank-oss |
 | [0307](0307-lending-exposure-guarantor-and-collateral-graph.md) | Lending exposure, guarantor and collateral graph | Accepted | Planned | lending,compliance,authz,admin-ui | — |
 | [0308](0308-effective-time-authorization-evidence-graph.md) | Effective-time authorization evidence graph | Accepted | Partial | authz,audit,security,admin-ui | open-bank-oss |
