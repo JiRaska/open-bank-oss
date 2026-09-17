@@ -15,32 +15,40 @@ const CORE_ROUTES = [
 
 test.describe.configure({ mode: 'parallel' })
 
-for (const theme of ['light', 'dark'] as const) {
-  for (const routePath of CORE_ROUTES) {
-    test(`${routePath} has readable first-paint fallback in ${theme} theme`, async ({ page, context, baseURL }) => {
-      await signInAsOperator(context, baseURL!)
-      await context.addCookies([{ name: 'ob-admin-theme', value: theme, url: baseURL! }])
-      await page.route('**/api/**', route => {
-        const pathname = new URL(route.request().url()).pathname
-        return pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')
-          ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
-          : route.continue()
+for (const width of [1280, 320] as const) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const routePath of CORE_ROUTES) {
+      test(`${routePath} has readable first-paint fallback in ${theme} theme at ${width}px`, async ({ page, context, baseURL }) => {
+        await signInAsOperator(context, baseURL!)
+        await context.addCookies([{ name: 'ob-admin-theme', value: theme, url: baseURL! }])
+        await page.setViewportSize({ width, height: 900 })
+        await page.route('**/api/**', route => {
+          const pathname = new URL(route.request().url()).pathname
+          return pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')
+            ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
+            : route.continue()
+        })
+
+        const response = await page.goto(routePath, { waitUntil: 'domcontentloaded' })
+        expect(response?.status()).toBeLessThan(400)
+        await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
+        // App Router can briefly retain a hidden outgoing tree; only the active main is exposed.
+        const main = page.locator('#main-content:visible')
+        await expect(main).toHaveCount(1)
+        await expect.poll(async () => (await main.innerText()).trim().length).toBeGreaterThan(20)
+        await page.waitForTimeout(300)
+
+        if (width === 320) {
+          const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+          expect(documentWidth).toBeLessThanOrEqual(width + 1)
+        }
+
+        const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
+        expect(scan.violations.flatMap(violation => violation.nodes.map(node => ({
+          target: node.target.join(' > '),
+          message: node.any[0]?.message,
+        })))).toEqual([])
       })
-
-      const response = await page.goto(routePath, { waitUntil: 'domcontentloaded' })
-      expect(response?.status()).toBeLessThan(400)
-      await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
-      // App Router can briefly retain a hidden outgoing tree; only the active main is exposed.
-      const main = page.locator('#main-content:visible')
-      await expect(main).toHaveCount(1)
-      await expect.poll(async () => (await main.innerText()).trim().length).toBeGreaterThan(20)
-      await page.waitForTimeout(300)
-
-      const scan = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze()
-      expect(scan.violations.flatMap(violation => violation.nodes.map(node => ({
-        target: node.target.join(' > '),
-        message: node.any[0]?.message,
-      })))).toEqual([])
-    })
+    }
   }
 }
