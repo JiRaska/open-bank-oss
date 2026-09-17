@@ -17,6 +17,10 @@
       "response": {
         "body": [
           {
+            "mandate": {
+              "authority": "SOLE",
+              "requiredSignatures": 1
+            },
             "partyId": "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
           }
         ],
