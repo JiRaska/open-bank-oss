@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.77.0
+  version: 1.78.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -745,6 +745,112 @@ paths:
                   currencies: {type: array, items: {type: string}, example: [EUR, USD]}
         '403':
           description: Not the owner
+
+  /accounts/{accountId}/pockets/resolve:
+    get:
+      tags: [Pockets]
+      summary: Resolve the pocket used for a payment currency
+      description: >-
+        Owner-only passthrough to account-service. The edge uppercases and validates currency;
+        it does not expose the backend's optional routing-policy override.
+      operationId: resolvePocket
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: currency, in: query, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+      responses:
+        '200':
+          description: Pocket routing decision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketResolution'}
+        '400': {description: Missing or invalid currency}
+        '403': {description: Account does not belong to the caller}
+
+  /accounts/{accountId}/pockets/{currency}/convert/quote:
+    get:
+      tags: [Pockets]
+      summary: Preview converting the whole currency pocket to the account's primary currency
+      description: No money moves. The quote can change before conversion is submitted.
+      operationId: quotePocketConversion
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: currency, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+      responses:
+        '200':
+          description: Current sell and buy amounts and quoted rate
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketFxQuote'}
+        '400': {description: Invalid currency or pocket cannot be converted}
+        '403': {description: Account does not belong to the caller}
+
+  /accounts/{accountId}/pockets/{currency}/convert:
+    post:
+      tags: [Pockets]
+      summary: Convert the entire currency pocket into the account's primary currency
+      description: >-
+        Own-account, sell-specified FX transfer. The source pocket's current full balance is
+        priced again at submission; a prior quote is informative, not a locked price.
+      operationId: convertPocket
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: currency, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string}
+          description: Supply a stable key for retries; if absent, the edge generates a fresh key.
+      responses:
+        '200':
+          description: Accepted transfer's priced sell and buy legs
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketFxQuote'}
+        '400': {description: Invalid currency or unavailable conversion plan}
+        '403': {description: Account does not belong to the caller}
+
+  /accounts/{accountId}/pockets/{fromCurrency}/exchange:
+    post:
+      tags: [Pockets]
+      summary: Exchange a specified amount between two pockets on the same account
+      description: >-
+        The amount is the exact sell leg in fromCurrency major units. The target pocket is
+        opened first if necessary; settlement remains an own-account ledger transfer.
+      operationId: exchangePocket
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: fromCurrency, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string}
+          description: Supply a stable key for retries; if absent, the edge generates a fresh key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toCurrency, amount]
+              properties:
+                toCurrency: {type: string, minLength: 3, maxLength: 3, example: EUR}
+                amount: {type: string, description: Positive sell amount in major units, example: '1000.00'}
+      responses:
+        '200':
+          description: Accepted transfer's priced sell and buy legs
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketFxQuote'}
+        '400': {description: Missing or invalid target currency or amount}
+        '403': {description: Account does not belong to the caller}
 
   /accounts/{accountId}/pockets/{currency}:
     delete:
@@ -3060,6 +3166,45 @@ paths:
           description: Malformed request or unknown/expired challenge
         '401':
           description: Unknown credential or assertion verification failed
+
+  /webauthn/session/refresh:
+    post:
+      tags: [WebAuthn]
+      summary: Rotate a native-passkey device session and mint fresh tokens
+      description: >-
+        Public endpoint: the opaque device-session id is the credential. Refresh consumes it
+        once and returns a rotated id; an invalid or replayed id cannot start a session.
+      operationId: webauthnSessionRefresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceSessionRequest'}
+      responses:
+        '200':
+          description: Fresh access token and rotated device-session id
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TokenPair'}
+        '401': {description: Invalid or already consumed device-session id}
+
+  /webauthn/session/revoke:
+    post:
+      tags: [WebAuthn]
+      summary: Revoke a native-passkey device session on logout
+      description: >-
+        Public and idempotent. Revoking a missing or already consumed id is a no-op; this
+        endpoint can only end a session, never mint one.
+      operationId: webauthnSessionRevoke
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceSessionRequest'}
+      responses:
+        '204': {description: Session revoked or already absent}
 
   # --- Cards (lifecycle) ---------------------------------------------------
   # PCI: every card read is masked-PAN only, with exactly one exception — POST /cards/{id}/details,
@@ -6469,6 +6614,30 @@ components:
           type: string
           description: base64url
 
+    DeviceSessionRequest:
+      type: object
+      required: [device_session_id]
+      properties:
+        device_session_id:
+          type: string
+          description: Opaque device-bound session credential issued by passkey login.
+    PocketResolution:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: {type: string, enum: [USE_EXISTING, CREATE_NEW, CONVERT_TO_PRIMARY, REJECTED]}
+        pocketCurrency: {type: string, nullable: true}
+        convertFrom: {type: string, nullable: true}
+        reason: {type: string, nullable: true}
+    PocketFxQuote:
+      type: object
+      required: [sellCurrency, sellAmount, buyCurrency, buyAmount, rate]
+      properties:
+        sellCurrency: {type: string, minLength: 3, maxLength: 3}
+        sellAmount: {type: string, description: Decimal major-unit amount}
+        buyCurrency: {type: string, minLength: 3, maxLength: 3}
+        buyAmount: {type: string, description: Decimal major-unit amount}
+        rate: {type: string, description: Decimal bid rate applied to the sell leg}
     TokenPair:
       type: object
       required: [access_token]
