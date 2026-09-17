@@ -75,6 +75,8 @@ data class ConsumeScaCommand(
     val ceremonyId: String? = null,
     val cardId: String? = null,
     val cardAction: String? = null,
+    val operationId: String? = null,
+    val operationHash: String? = null,
 )
 
 /**

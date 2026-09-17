@@ -31,6 +31,16 @@ import java.util.UUID
 class ScaResourceAuthzTest {
 
     @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_CUSTOMER"])
+    fun `customer cannot enumerate another party's pending approvals in advisory mode`() {
+        Given { this } When {
+            get("/api/v1/sca/parties/00000000-0000-0000-0000-000000000098/challenges/pending")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
     fun `anonymous request is rejected before it reaches the Authorize interceptor`() {
         // Previously this reached the handler (404) — get() had @Authorize but no
         // @RolesAllowed pairing, so JAX-RS never rejected an unauthenticated caller.

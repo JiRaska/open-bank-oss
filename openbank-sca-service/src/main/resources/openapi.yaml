@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -101,6 +101,50 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '429':
           description: Max attempts exceeded
+
+  /api/v1/sca/challenges/{id}/consume:
+    post:
+      tags: [SCA]
+      summary: Atomically spend a completed challenge on the exact signed operation
+      operationId: consumeScaChallenge
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumeScaRequest'
+      responses:
+        '200':
+          description: Challenge consumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '409':
+          description: Linking mismatch or challenge already consumed
+
+  /api/v1/sca/parties/{partyId}/challenges/pending:
+    get:
+      tags: [SCA]
+      summary: Pending approvals for the authenticated party
+      operationId: listPendingScaChallenges
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Pending approvals with their signed operation context
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PendingScaResponse' }
+        '403':
+          description: Customer may read only their own approvals
 
   /api/v1/sca/parties/{partyId}/devices:
     get:
@@ -230,11 +274,11 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 SAVINGS_WITHDRAW_APPROVAL]
+                 SAVINGS_WITHDRAW_APPROVAL, DELEGATION_STATUTORY_APPROVAL]
         preferredMethod:
           type: string
         dynamicLinkingData:
-          type: string
+          $ref: '#/components/schemas/DynamicLinkingData'
         redirectUrl:
           type: string
           nullable: true
@@ -247,6 +291,53 @@ components:
         otp:
           type: string
           nullable: true
+    ConsumeScaRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditor: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        operationId: { type: string, format: uuid, nullable: true }
+        operationHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+    PendingScaResponse:
+      type: object
+      required: [id, purpose, method, expiresAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string }
+        method: { type: string }
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        operationId: { type: string, format: uuid, nullable: true }
+        operationHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    DynamicLinkingData:
+      type: object
+      description: >-
+        Signed operation context. DELEGATION_STATUTORY_APPROVAL requires operationId and
+        operationHash together; the other operation families remain unchanged.
+      properties:
+        amount: { type: string, nullable: true }
+        currency: { type: string, nullable: true }
+        creditorIban: { type: string, nullable: true }
+        creditorName: { type: string, nullable: true }
+        reference: { type: string, nullable: true }
+        documentSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, nullable: true }
+        cardId: { type: string, nullable: true }
+        cardAction: { type: string, nullable: true }
+        operationId: { type: string, format: uuid, nullable: true }
+        operationHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
     ScaChallengeResponse:
       type: object
       properties:

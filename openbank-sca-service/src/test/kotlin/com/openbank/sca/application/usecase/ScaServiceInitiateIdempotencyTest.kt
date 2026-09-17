@@ -26,6 +26,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -130,6 +131,70 @@ class ScaServiceInitiateIdempotencyTest {
         assertThat(result).isEqualTo(live)
         coVerify(exactly = 0) { repository.save(any()) }
         coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any()) }
+    }
+
+    @Test
+    fun `statutory challenge refuses an absent partial or mixed binding before persistence`(): Unit = runBlocking {
+        val operationId = UUID.randomUUID().toString()
+        val valid = DynamicLinkingData(
+            null,
+            null,
+            null,
+            null,
+            null,
+            operationId = operationId,
+            operationHash = "a".repeat(64),
+        )
+        val command = InitiateScaCommand(
+            UUID.randomUUID(),
+            ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            ScaMethod.PUSH_NOTIFICATION,
+            valid,
+            null,
+        )
+
+        listOf(
+            command.copy(dynamicLinkingData = null),
+            command.copy(dynamicLinkingData = valid.copy(operationHash = null)),
+            command.copy(dynamicLinkingData = valid.copy(amount = "1")),
+            command.copy(dynamicLinkingData = valid.copy(operationId = "not-a-uuid")),
+            command.copy(dynamicLinkingData = valid.copy(operationHash = "bad")),
+            command.copy(purpose = ScaPurpose.DELEGATION_GRANT),
+        ).forEach { invalid ->
+            assertThatThrownBy { runBlocking { service.initiate(invalid) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        coVerify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
+    fun `statutory challenge deduplication key includes proposal hash`(): Unit = runBlocking {
+        val operationId = UUID.randomUUID().toString()
+        val binding = DynamicLinkingData(
+            null,
+            null,
+            null,
+            null,
+            null,
+            operationId = operationId,
+            operationHash = "a".repeat(64),
+        )
+        val command = InitiateScaCommand(
+            UUID.randomUUID(),
+            ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            ScaMethod.PUSH_NOTIFICATION,
+            binding,
+            null,
+        )
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+
+        service.initiate(command)
+        service.initiate(command.copy(dynamicLinkingData = binding.copy(operationHash = "b".repeat(64))))
+
+        coVerify(exactly = 1) { idempotencyStore.get(match { it.contains("a".repeat(64)) }) }
+        coVerify(exactly = 1) { idempotencyStore.get(match { it.contains("b".repeat(64)) }) }
     }
 
     private fun stubReuseOf(existing: ScaChallenge) {

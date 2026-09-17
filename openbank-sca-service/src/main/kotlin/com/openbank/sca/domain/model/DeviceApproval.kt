@@ -91,7 +91,8 @@ fun ScaChallenge.dynamicLinkingPayload(decision: DeviceDecisionType): ByteArray 
         dl?.currency.orEmpty(),
         dl?.creditorIban.orEmpty(),
         dl?.reference.orEmpty(),
-    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction)
+    ) + optionalPair(dl?.documentSha256, dl?.ceremonyId) + optionalPair(dl?.cardId, dl?.cardAction) +
+        optionalPair(dl?.operationId, dl?.operationHash)
     return segments.joinToString("|").toByteArray(Charsets.UTF_8)
 }
 

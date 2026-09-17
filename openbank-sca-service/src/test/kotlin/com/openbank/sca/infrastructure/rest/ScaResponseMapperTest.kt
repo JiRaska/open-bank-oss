@@ -120,6 +120,33 @@ class ScaResponseMapperTest {
     }
 
     @Test
+    fun `PendingScaResponse includes statutory proposal identity and exact hash`() {
+        val operationId = UUID.randomUUID().toString()
+        val hash = "a".repeat(64)
+        val challenge = ScaChallenge(
+            partyId = UUID.randomUUID(),
+            purpose = ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            method = ScaMethod.PUSH_NOTIFICATION,
+            expiresAt = now.plusMinutes(5),
+            dynamicLinkingData = DynamicLinkingData(
+                null,
+                null,
+                null,
+                null,
+                null,
+                operationId = operationId,
+                operationHash = hash,
+            ),
+            createdAt = now,
+        )
+
+        val dto = PendingScaResponse.from(challenge)
+
+        assertThat(dto.operationId).isEqualTo(operationId)
+        assertThat(dto.operationHash).isEqualTo(hash)
+    }
+
+    @Test
     fun `PendingScaResponse null-safely projects a challenge with no dynamic-linking data`() {
         val challenge = ScaChallenge(
             partyId = UUID.randomUUID(),

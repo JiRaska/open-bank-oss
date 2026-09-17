@@ -44,6 +44,9 @@ enum class ScaPurpose {
      * spendable as the grantee's acceptance, and purpose equality is what enforces that. */
     DELEGATION_ACCEPT,
 
+    /** One statutory representative's device-signed decision on an immutable delegation proposal. */
+    DELEGATION_STATUTORY_APPROVAL,
+
     /** The account owner approving a delegate's propose-only savings withdrawal (ADR-0232 D8).
      * The delegate holds SAVINGS_PROPOSE_WITHDRAW and can never execute; this challenge IS the
      * owner's half of that maker-checker split, so it must be its own purpose — a challenge
@@ -127,6 +130,9 @@ data class DynamicLinkingData(
      * lock-step deployment of two services. It is opaque here and compared byte-for-byte.
      */
     val cardAction: String? = null,
+    /** Immutable delegation proposal identifier and its exact payload hash; both are required together. */
+    val operationId: String? = null,
+    val operationHash: String? = null,
 ) {
     /**
      * Does this signed linking data authorise exactly the operation the caller is about to
@@ -154,6 +160,8 @@ data class DynamicLinkingData(
         ceremonyId: String? = null,
         cardId: String? = null,
         cardAction: String? = null,
+        operationId: String? = null,
+        operationHash: String? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
@@ -162,6 +170,8 @@ data class DynamicLinkingData(
         if (this.ceremonyId != ceremonyId) return false
         if (!normEq(this.cardId, cardId)) return false
         if (this.cardAction != cardAction) return false
+        if (this.operationId != operationId) return false
+        if (!normEq(this.operationHash, operationHash)) return false
         return true
     }
 }

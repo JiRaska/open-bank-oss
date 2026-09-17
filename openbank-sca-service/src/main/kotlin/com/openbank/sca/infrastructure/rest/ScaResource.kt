@@ -141,6 +141,8 @@ data class PendingScaResponse(
     val creditorIban: String?,
     val creditorName: String?,
     val reference: String?,
+    val operationId: String?,
+    val operationHash: String?,
     val expiresAt: String,
     val createdAt: String,
 ) {
@@ -154,6 +156,8 @@ data class PendingScaResponse(
             creditorIban = c.dynamicLinkingData?.creditorIban,
             creditorName = c.dynamicLinkingData?.creditorName,
             reference = c.dynamicLinkingData?.reference,
+            operationId = c.dynamicLinkingData?.operationId,
+            operationHash = c.dynamicLinkingData?.operationHash,
             expiresAt = c.expiresAt.toString(),
             createdAt = c.createdAt.toString(),
         )
@@ -179,6 +183,9 @@ data class ConsumeScaRequest(
     val cardId: String? = null,
     /** The card operation being executed (`LIMIT_INCREASE`, `REVEAL_DETAILS`, ...), for a CARD_MANAGEMENT challenge. */
     val cardAction: String? = null,
+    /** Immutable statutory proposal id and its SHA-256 content hash. */
+    val operationId: String? = null,
+    val operationHash: String? = null,
 )
 
 @Path("/api/v1/sca")
@@ -268,8 +275,16 @@ class ScaResource(
     @Path("/parties/{partyId}/challenges/pending")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.read", resource = "#partyId")
-    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
-        getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> {
+        if (identity.hasRole("ROLE_CUSTOMER") &&
+            !identity.hasRole("ROLE_OPERATOR") &&
+            !identity.hasRole("ROLE_ADMIN")
+        ) {
+            val authenticatedPartyId = runCatching { UUID.fromString(identity.principal.name) }.getOrNull()
+            if (authenticatedPartyId != partyId) throw ForbiddenException("Cannot read another party's approvals")
+        }
+        return getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    }
 
     /**
      * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
@@ -375,6 +390,8 @@ class ScaResource(
                 ceremonyId = request.ceremonyId,
                 cardId = request.cardId,
                 cardAction = request.cardAction,
+                operationId = request.operationId,
+                operationHash = request.operationHash,
             ),
         )
         return ScaChallengeResponse.from(challenge)

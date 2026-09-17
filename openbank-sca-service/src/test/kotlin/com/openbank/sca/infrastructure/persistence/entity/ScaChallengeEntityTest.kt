@@ -73,6 +73,29 @@ class ScaChallengeEntityTest {
     }
 
     @Test
+    fun `statutory operation identity and hash survive persistence mapping`() {
+        val binding = DynamicLinkingData(
+            amount = null,
+            currency = null,
+            creditorIban = null,
+            creditorName = null,
+            reference = null,
+            operationId = UUID.randomUUID().toString(),
+            operationHash = "a".repeat(64),
+        )
+        val challenge = ScaChallenge(
+            partyId = UUID.randomUUID(),
+            purpose = ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            method = ScaMethod.PUSH_NOTIFICATION,
+            expiresAt = now.plusMinutes(5),
+            dynamicLinkingData = binding,
+            createdAt = now,
+        )
+
+        assertThat(ScaChallengeEntity.fromDomain(challenge).toDomain().dynamicLinkingData).isEqualTo(binding)
+    }
+
+    @Test
     fun `challenge with no dynamic linking data round-trips to null`() {
         val challenge = ScaChallenge(
             partyId = UUID.randomUUID(),

@@ -151,6 +151,7 @@ class ScaService(
         // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
+        requireValidStatutoryBinding(command)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -392,21 +393,11 @@ class ScaService(
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
-        val linking = challenge.dynamicLinkingData
         // A challenge that signed nothing cannot authorise a money movement, a document
         // signature OR a card operation; one that signed amount+payee (or a document
         // hash+ceremony, or a card+action) must match the operation exactly (RTS Art. 5 dynamic
         // linking, extended to documents by ADR-0169 D2 and to card management here).
-        val authorised = linking?.authorises(
-            command.amount,
-            command.currency,
-            command.creditor,
-            command.documentSha256,
-            command.ceremonyId,
-            command.cardId,
-            command.cardAction,
-        ) ?: (command.amount == null && command.documentSha256 == null && command.cardId == null)
-        if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
+        if (!challenge.authorises(command)) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
         }
@@ -433,6 +424,8 @@ class ScaService(
             "Potvrďte sdílení přístupu k vašemu produktu"
         ScaPurpose.DELEGATION_ACCEPT ->
             "Potvrďte přijetí sdíleného přístupu"
+        ScaPurpose.DELEGATION_STATUTORY_APPROVAL ->
+            "Potvrďte společné schválení firemní dispozice ${data?.operationId}"
         ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
             "Potvrďte výběr ze spořicího cíle"
     }
@@ -460,9 +453,57 @@ class ScaService(
         } else {
             emptyList()
         }
-        return (base + cardSegments).joinToString(":") { it?.toString() ?: "-" }
+        val operationSegments = if (dl?.operationId != null || dl?.operationHash != null) {
+            listOf(dl.operationId, dl.operationHash)
+        } else {
+            emptyList()
+        }
+        return (base + cardSegments + operationSegments).joinToString(":") { it?.toString() ?: "-" }
+    }
+
+    private fun requireValidStatutoryBinding(command: InitiateScaCommand) {
+        val data = command.dynamicLinkingData
+        if (command.purpose != ScaPurpose.DELEGATION_STATUTORY_APPROVAL) {
+            require(data?.operationId == null && data?.operationHash == null) {
+                "statutory operation binding requires statutory approval purpose"
+            }
+            return
+        }
+        require(
+            data != null &&
+                runCatching { java.util.UUID.fromString(data.operationId).toString() == data.operationId }
+                    .getOrDefault(false) &&
+                data.operationHash?.matches(Regex("[0-9a-f]{64}")) == true &&
+                data.amount == null &&
+                data.currency == null &&
+                data.creditorIban == null &&
+                data.creditorName == null &&
+                data.reference == null &&
+                data.documentSha256 == null &&
+                data.ceremonyId == null &&
+                data.cardId == null &&
+                data.cardAction == null,
+        ) { "statutory approval requires one complete, unmixed operation binding" }
     }
 }
+
+private fun ScaChallenge.authorises(command: ConsumeScaCommand): Boolean = dynamicLinkingData?.authorises(
+    command.amount,
+    command.currency,
+    command.creditor,
+    command.documentSha256,
+    command.ceremonyId,
+    command.cardId,
+    command.cardAction,
+    command.operationId,
+    command.operationHash,
+) ?: (
+    command.amount == null &&
+        command.documentSha256 == null &&
+        command.cardId == null &&
+        command.operationId == null &&
+        command.operationHash == null
+    )
 
 /**
  * An idempotent challenge may be replayed only while it is still actionable: still PENDING,

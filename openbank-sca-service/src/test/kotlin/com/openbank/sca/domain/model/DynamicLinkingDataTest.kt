@@ -14,6 +14,42 @@ class DynamicLinkingDataTest {
     inner class Authorises {
 
         @Test
+        fun `statutory approval requires same operation and hash and cannot spend as bare challenge`() {
+            val operationId = java.util.UUID.randomUUID().toString()
+            val hash = "a".repeat(64)
+            val dl = DynamicLinkingData(
+                null,
+                null,
+                null,
+                null,
+                null,
+                operationId = operationId,
+                operationHash = hash,
+            )
+            assertThat(dl.authorises(null, null, null, operationId = operationId, operationHash = hash)).isTrue()
+            assertThat(dl.authorises(null, null, null)).isFalse()
+            assertThat(
+                dl.authorises(
+                    null,
+                    null,
+                    null,
+                    operationId = java.util.UUID.randomUUID().toString(),
+                    operationHash = hash,
+                ),
+            ).isFalse()
+            assertThat(
+                dl.authorises(
+                    null,
+                    null,
+                    null,
+                    operationId = operationId,
+                    operationHash = "b".repeat(64),
+                ),
+            ).isFalse()
+            assertThat(dl.authorises("1", "CZK", null, operationId = operationId, operationHash = hash)).isFalse()
+        }
+
+        @Test
         fun `all null fields authorise any call with null fields`() {
             val dl = DynamicLinkingData(null, null, null, null, null)
             assertThat(dl.authorises(null, null, null)).isTrue()

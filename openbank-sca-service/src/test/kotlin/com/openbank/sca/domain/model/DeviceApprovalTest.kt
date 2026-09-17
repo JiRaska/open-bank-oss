@@ -110,6 +110,38 @@ class DeviceApprovalTest {
             .isEqualTo("${document.id}|APPROVED|||||abc123|ceremony-1")
     }
 
+    @Test
+    fun `statutory decision signs both operation identity and exact content hash`() {
+        val operationId = UUID.randomUUID().toString()
+        val hash = "a".repeat(64)
+        val base = ScaChallenge(
+            partyId = UUID.randomUUID(),
+            purpose = ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+            method = ScaMethod.PUSH_NOTIFICATION,
+            expiresAt = now.plusMinutes(5),
+            dynamicLinkingData = DynamicLinkingData(
+                null,
+                null,
+                null,
+                null,
+                null,
+                operationId = operationId,
+                operationHash = hash,
+            ),
+            createdAt = now,
+        )
+        val signed = String(base.dynamicLinkingPayload(DeviceDecisionType.APPROVED))
+        assertThat(signed).isEqualTo("${base.id}|APPROVED|||||$operationId|$hash")
+        assertThat(
+            base.copy(dynamicLinkingData = base.dynamicLinkingData?.copy(operationHash = "b".repeat(64)))
+                .dynamicLinkingPayload(DeviceDecisionType.APPROVED),
+        ).isNotEqualTo(base.dynamicLinkingPayload(DeviceDecisionType.APPROVED))
+        assertThat(
+            base.copy(dynamicLinkingData = base.dynamicLinkingData?.copy(operationId = UUID.randomUUID().toString()))
+                .dynamicLinkingPayload(DeviceDecisionType.APPROVED),
+        ).isNotEqualTo(base.dynamicLinkingPayload(DeviceDecisionType.APPROVED))
+    }
+
     private fun paymentChallenge(id: UUID = UUID.randomUUID(), amount: String = "100.00") = ScaChallenge(
         id = id,
         partyId = UUID.randomUUID(),

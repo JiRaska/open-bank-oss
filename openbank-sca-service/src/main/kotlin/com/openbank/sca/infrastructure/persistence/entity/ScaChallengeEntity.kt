@@ -77,6 +77,12 @@ class ScaChallengeEntity : PanacheEntityBase() {
     @Column(name = "dynamic_card_action")
     var dynamicCardAction: String? = null
 
+    @Column(name = "dynamic_operation_id")
+    var dynamicOperationId: String? = null
+
+    @Column(name = "dynamic_operation_hash")
+    var dynamicOperationHash: String? = null
+
     @Column(name = "redirect_url")
     var redirectUrl: String? = null
 
@@ -109,6 +115,8 @@ class ScaChallengeEntity : PanacheEntityBase() {
                 dynamicCeremonyId,
                 dynamicCardId,
                 dynamicCardAction,
+                dynamicOperationId,
+                dynamicOperationHash,
             )
         } else {
             null
@@ -123,7 +131,9 @@ class ScaChallengeEntity : PanacheEntityBase() {
         dynamicDocumentSha256 != null ||
         dynamicCeremonyId != null ||
         dynamicCardId != null ||
-        dynamicCardAction != null
+        dynamicCardAction != null ||
+        dynamicOperationId != null ||
+        dynamicOperationHash != null
 
     companion object {
         fun fromDomain(c: ScaChallenge): ScaChallengeEntity = ScaChallengeEntity().apply {
@@ -147,6 +157,8 @@ class ScaChallengeEntity : PanacheEntityBase() {
             dynamicCeremonyId = c.dynamicLinkingData?.ceremonyId
             dynamicCardId = c.dynamicLinkingData?.cardId
             dynamicCardAction = c.dynamicLinkingData?.cardAction
+            dynamicOperationId = c.dynamicLinkingData?.operationId
+            dynamicOperationHash = c.dynamicLinkingData?.operationHash
             redirectUrl = c.redirectUrl
             consumedAt = c.consumedAt
             createdAt = c.createdAt
