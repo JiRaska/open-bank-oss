@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -274,7 +274,8 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 SAVINGS_WITHDRAW_APPROVAL, DELEGATION_STATUTORY_APPROVAL]
+                 SAVINGS_WITHDRAW_APPROVAL, DELEGATION_STATUTORY_APPROVAL,
+                 DELEGATION_STATUTORY_ACCEPTANCE]
         preferredMethod:
           type: string
         dynamicLinkingData:
@@ -324,7 +325,8 @@ components:
     DynamicLinkingData:
       type: object
       description: >-
-        Signed operation context. DELEGATION_STATUTORY_APPROVAL requires operationId and
+        Signed operation context. DELEGATION_STATUTORY_APPROVAL and
+        DELEGATION_STATUTORY_ACCEPTANCE require operationId and
         operationHash together; the other operation families remain unchanged.
       properties:
         amount: { type: string, nullable: true }

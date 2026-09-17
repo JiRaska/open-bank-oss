@@ -426,6 +426,8 @@ class ScaService(
             "Potvrďte přijetí sdíleného přístupu"
         ScaPurpose.DELEGATION_STATUTORY_APPROVAL ->
             "Potvrďte společné schválení firemní dispozice ${data?.operationId}"
+        ScaPurpose.DELEGATION_STATUTORY_ACCEPTANCE ->
+            "Potvrďte společné přijetí firemní dispozice ${data?.operationId}"
         ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
             "Potvrďte výběr ze spořicího cíle"
     }
@@ -463,9 +465,9 @@ class ScaService(
 
     private fun requireValidStatutoryBinding(command: InitiateScaCommand) {
         val data = command.dynamicLinkingData
-        if (command.purpose != ScaPurpose.DELEGATION_STATUTORY_APPROVAL) {
+        if (command.purpose !in STATUTORY_BINDING_PURPOSES) {
             require(data?.operationId == null && data?.operationHash == null) {
-                "statutory operation binding requires statutory approval purpose"
+                "statutory operation binding requires a statutory decision purpose"
             }
             return
         }
@@ -483,7 +485,7 @@ class ScaService(
                 data.ceremonyId == null &&
                 data.cardId == null &&
                 data.cardAction == null,
-        ) { "statutory approval requires one complete, unmixed operation binding" }
+        ) { "statutory decision requires one complete, unmixed operation binding" }
     }
 }
 
@@ -532,6 +534,11 @@ private const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLLED"
  * list), so this field is forward-looking rather than fixing a live "unknown" row today.
  */
 private const val SOURCE_SERVICE = "sca-service"
+
+private val STATUTORY_BINDING_PURPOSES = setOf(
+    ScaPurpose.DELEGATION_STATUTORY_APPROVAL,
+    ScaPurpose.DELEGATION_STATUTORY_ACCEPTANCE,
+)
 
 private fun Throwable.causedByUniqueViolation(): Boolean {
     var t: Throwable? = this

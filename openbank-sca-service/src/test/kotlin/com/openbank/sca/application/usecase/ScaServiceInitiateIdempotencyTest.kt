@@ -197,6 +197,43 @@ class ScaServiceInitiateIdempotencyTest {
         coVerify(exactly = 1) { idempotencyStore.get(match { it.contains("b".repeat(64)) }) }
     }
 
+    @Test
+    fun `joint acceptance has its own bound challenge purpose and customer wording`(): Unit = runBlocking {
+        val party = UUID.randomUUID()
+        val operationId = UUID.randomUUID().toString()
+        val binding = DynamicLinkingData(
+            null,
+            null,
+            null,
+            null,
+            null,
+            operationId = operationId,
+            operationHash = "a".repeat(64),
+        )
+        val acceptance = InitiateScaCommand(
+            party,
+            ScaPurpose.DELEGATION_STATUTORY_ACCEPTANCE,
+            ScaMethod.PUSH_NOTIFICATION,
+            binding,
+            null,
+        )
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+
+        service.initiate(acceptance.copy(purpose = ScaPurpose.DELEGATION_STATUTORY_APPROVAL))
+        service.initiate(acceptance)
+
+        coVerify(exactly = 1) { idempotencyStore.get(match { it.contains("DELEGATION_STATUTORY_APPROVAL") }) }
+        coVerify(exactly = 1) { idempotencyStore.get(match { it.contains("DELEGATION_STATUTORY_ACCEPTANCE") }) }
+        coVerify(exactly = 1) {
+            notificationDispatchGuard.sendPushNotification(party, any(), match { it.contains("společné přijetí") })
+        }
+        assertThatThrownBy {
+            runBlocking { service.initiate(acceptance.copy(dynamicLinkingData = binding.copy(operationHash = null))) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private fun stubReuseOf(existing: ScaChallenge) {
         coEvery { idempotencyStore.get(any()) } returns existing.id.toString()
         coEvery { repository.findById(existing.id) } returns existing

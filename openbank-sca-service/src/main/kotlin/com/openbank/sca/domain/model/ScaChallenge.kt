@@ -47,6 +47,9 @@ enum class ScaPurpose {
     /** One statutory representative's device-signed decision on an immutable delegation proposal. */
     DELEGATION_STATUTORY_APPROVAL,
 
+    /** One statutory representative accepting an OFFERED grant for a JOINT-represented company. */
+    DELEGATION_STATUTORY_ACCEPTANCE,
+
     /** The account owner approving a delegate's propose-only savings withdrawal (ADR-0232 D8).
      * The delegate holds SAVINGS_PROPOSE_WITHDRAW and can never execute; this challenge IS the
      * owner's half of that maker-checker split, so it must be its own purpose — a challenge
