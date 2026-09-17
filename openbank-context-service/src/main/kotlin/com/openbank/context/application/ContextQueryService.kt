@@ -3,6 +3,7 @@ package com.openbank.context.application
 
 import com.openbank.context.domain.ContextNamespace
 import com.openbank.context.domain.ContextNeighborhood
+import com.openbank.context.domain.ImpactProjectionStatus
 import com.openbank.context.domain.IncidentImpact
 import com.openbank.context.domain.InvestigationContext
 import com.openbank.context.domain.Investigator
@@ -52,7 +53,12 @@ class ContextQueryService(
         val affected = view?.nodes.orEmpty().filter {
             it.key != "incident:$ref"
         }.groupingBy { it.type }.eachCount().toSortedMap()
-        IncidentImpact(ref, affected, affected.values.sum(), drilldownAvailable = false)
+        val status = when {
+            view == null -> ImpactProjectionStatus.MISSING
+            view.truncated -> ImpactProjectionStatus.PARTIAL
+            else -> ImpactProjectionStatus.AVAILABLE
+        }
+        IncidentImpact(ref, affected, affected.values.sum(), drilldownAvailable = false, projectionStatus = status)
     }
 
     @Suppress("ThrowsCount")

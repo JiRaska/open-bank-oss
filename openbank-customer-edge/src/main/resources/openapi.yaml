@@ -14,9 +14,11 @@ info:
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
   # Additive recertification review and evidence routes.
-  # 1.67.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
-  # FATCA/CRS self-certification). 1.68.0 is claimed by two open PRs (#10197 business agreement
-  # routes, #10016 capabilities), so this takes the next free minor on top of both.
+  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
+  # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
+  # decisions are always the human signer's.
+  # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
+  # FATCA/CRS self-certification).
   version: 1.69.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
@@ -2660,13 +2662,20 @@ paths:
   /documents:
     get:
       tags: [Documents]
-      summary: List the authenticated customer's documents
+      summary: List the authenticated customer's (or the acted-for entity's) documents
       description: >-
-        partyRef is taken from the JWT, never the query (IDOR). Object-store coordinates
-        (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
+        partyRef is taken from the JWT, never the query (IDOR); with X-Acting-For it is the
+        entity, after party-service confirms an active mandate (403 otherwise). Object-store
+        coordinates (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
       operationId: listDocuments
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: The caller's documents, newest first
@@ -2713,11 +2722,16 @@ paths:
   /documents/{id}/content:
     get:
       tags: [Documents]
-      summary: Stream a document's PDF bytes (owner only)
+      summary: Stream a document's PDF bytes (owner, acted-for entity, or share grantee)
       operationId: getDocumentContent
       security:
         - customerOidc: [accounts:read]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
         - name: id
           in: path
           required: true
@@ -2754,8 +2768,10 @@ paths:
       tags: [Documents]
       summary: Record the caller's signing decision (SCA-bound, ADR-0169)
       description: >-
-        partyRef is forced to the JWT; evidenceRef (the SCA challenge id) is verified upstream by
-        document-service against sca-service (ADR-0021).
+        partyRef is forced to the JWT's human party, also under X-Acting-For (a business agreement's
+        signers are natural persons; the header is still validated and a missing mandate is a 403);
+        evidenceRef (the SCA challenge id) is verified upstream by document-service against
+        sca-service (ADR-0021).
       operationId: recordDecision
       security:
         - customerOidc: [accounts:read]
@@ -3848,6 +3864,152 @@ paths:
       responses:
         '200': {description: Case}
 
+  /business/onboarding/{id}/questionnaire:
+    put:
+      tags: [Business]
+      summary: Answer the AML (Act 253/2008 §9) and FATCA/CRS questionnaire for the case
+      description: >-
+        Proxied to kyb-service as the authenticated human (never X-Acting-For). kyb-service
+        requires the caller to be the initiator or an invited signer.
+      operationId: putBusinessQuestionnaire
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessQuestionnaire' }
+      responses:
+        '200': {description: Case}
+        '400': {description: Invalid answers}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts the questionnaire}
+
+  /business/onboarding/{id}/questionnaire/prefill:
+    get:
+      tags: [Business]
+      summary: Persons already known for the case and any earlier questionnaire answers
+      operationId: getBusinessQuestionnairePrefill
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Prefill
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessQuestionnairePrefill' }
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/documents/{documentId}/content:
+    get:
+      tags: [Business]
+      summary: Stream a document of this onboarding case (agreement or disclosure) to a case participant
+      description: >-
+        Works before any mandate exists; X-Acting-For is ignored. The case is read from kyb-service
+        as the authenticated human (initiator or invited signer only). The document must carry
+        caseRef equal to the case id, otherwise 404, so the existence of other documents is never revealed.
+      operationId: getBusinessCaseDocumentContent
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': {description: kyb-service refused the caller for this case}
+        '404': {description: Case not visible to the caller, or the document does not belong to this case}
+
+  /business/onboarding/{id}/declarations:
+    put:
+      tags: [Business]
+      summary: Confirm beneficial owners, PEP status and truthfulness for the case
+      operationId: putBusinessDeclarations
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessDeclarations' }
+      responses:
+        '200': {description: Case}
+        '400': {description: truthful is false, a discrepancy note is missing, or a listed person has no PEP entry}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts declarations}
+
+  /business/onboarding/{id}/agreement:
+    post:
+      tags: [Business]
+      summary: Render (or return) the business framework agreement, its disclosures and signing ceremony
+      operationId: ensureBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: lang
+          in: query
+          required: false
+          schema: { type: string, enum: [cs, en] }
+      responses:
+        '200':
+          description: The agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessAgreement' }
+        '400': {description: lang is not cs or en}
+        '404': {description: Not involved}
+        '409': {description: Questionnaire or declarations missing, or the agreement is already signed}
+
+  /business/onboarding/{id}/agreement/accept:
+    post:
+      tags: [Business]
+      summary: Accept the disclosures, each bound to code, version and sha256
+      operationId: acceptBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisclosureAcceptance' }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+        '409': {description: The accepted set does not match the current disclosures exactly (stale)}
+
   /business/invitations/{token}/claim:
     post:
       tags: [Business]
@@ -4449,6 +4611,104 @@ components:
         fatcaStatus: {type: string, enum: [US_PERSON, NON_US]}
         crsStatus: {type: string, enum: [REPORTABLE, NON_REPORTABLE]}
 
+    BusinessQuestionnaire:
+      type: object
+      required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]
+      properties:
+        purpose: { type: string, enum: [OPERATING_ACCOUNT, SAVINGS, PAYMENTS_ESHOP, HOLDING, OTHER] }
+        purposeNote: { type: string, nullable: true }
+        expectedMonthlyTurnover: { type: string, enum: [UP_TO_100K, UP_TO_1M, UP_TO_10M, OVER_10M], description: CZK }
+        sourceOfFunds:
+          type: array
+          items: { type: string, enum: [BUSINESS_REVENUE, SHARE_CAPITAL, LOANS, INVESTMENTS, OTHER] }
+        sourceOfFundsNote: { type: string, nullable: true }
+        cashIntensive: { type: boolean }
+        countries:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        taxResidencies:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        fatcaStatus: { type: string, enum: [ACTIVE_NFFE, PASSIVE_NFFE, FINANCIAL_INSTITUTION, US_PERSON] }
+        crsStatus: { type: string, enum: [ACTIVE_NFE, PASSIVE_NFE, FINANCIAL_INSTITUTION] }
+        answeredAt: { type: string, format: date-time, readOnly: true }
+        answeredBy: { type: string, format: uuid, readOnly: true }
+    BusinessQuestionnairePrefill:
+      type: object
+      properties:
+        knownPersons:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              partyId: { type: string, format: uuid }
+              pep: { type: boolean, nullable: true }
+        previousQuestionnaire:
+          allOf:
+            - $ref: '#/components/schemas/BusinessQuestionnaire'
+          nullable: true
+    BusinessDeclarations:
+      type: object
+      required: [uboConfirmed, peps, truthful]
+      properties:
+        uboConfirmed: { type: boolean, description: true = the register's beneficial-owner list is correct }
+        uboDiscrepancyNote: { type: string, nullable: true, description: Required when uboConfirmed is false }
+        peps:
+          type: array
+          description: One entry for every listed beneficial owner and representative
+          items:
+            type: object
+            required: [name, isPep]
+            properties:
+              name: { type: string }
+              isPep: { type: boolean }
+              detail: { type: string, nullable: true }
+        truthful: { type: boolean, description: Must be true }
+        declaredAt: { type: string, format: date-time, readOnly: true }
+        declaredBy: { type: string, format: uuid, readOnly: true }
+    BusinessAgreement:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string, example: RAMCOVA_SMLOUVA_PO_CS }
+        templateVersion: { type: string }
+        sha256: { type: string, description: Hash of the PDF the signers sign over }
+        sealedSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, format: uuid }
+        ceremonyStatus: { type: string, enum: [PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED] }
+        signers:
+          type: array
+          items:
+            type: object
+            properties:
+              partyRef: { type: string, format: uuid }
+              status: { type: string, enum: [PENDING, SIGNED, DECLINED] }
+              signedAt: { type: string, format: date-time, nullable: true }
+        disclosures:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string, example: VOP_CS }
+              version: { type: string }
+              title: { type: string }
+              sha256: { type: string }
+              documentId: { type: string, format: uuid }
+    DisclosureAcceptance:
+      type: object
+      required: [disclosures]
+      properties:
+        disclosures:
+          type: array
+          items:
+            type: object
+            required: [code, version, sha256]
+            properties:
+              code: { type: string }
+              version: { type: string }
+              sha256: { type: string }
     LoyaltySummary:
       type: object
       required: [balance, earnedThisYear, history]

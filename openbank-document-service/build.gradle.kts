@@ -75,6 +75,14 @@ dependencies {
 // (ADR-0063). pactbroker.* / pact.provider.* props are injected by CI with -D; on a pull request
 // none of them are set, and DocumentPactProviderVerificationTest is @PactFolder-sourced, so it
 // runs regardless — that is the point (issue #2338).
+// Test heap: the default fork heap was enough while fewer @TestProfile classes each forced their
+// own Quarkus boot. The business-agreement ITs add two more boots (one with remote stubs, one with
+// a denying PDP), and a local full-suite run died with `OutOfMemoryError: Java heap space` inside
+// the test executor. Same shape and same per-module remedy as account-service.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 // Pact rootDir + Pact Broker property forwarding centralised into
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
