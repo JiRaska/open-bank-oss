@@ -10,7 +10,8 @@ CREATE TABLE context_kyb_observation_restrictions (
     revision BIGINT NOT NULL CHECK (revision > 0),
     source_sha256 CHAR(64) NOT NULL,
     restricted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (bank_scope, observation_id)
+    PRIMARY KEY (bank_scope, observation_id),
+    CONSTRAINT uq_context_kyb_restriction_event UNIQUE (bank_scope, event_id)
 );
 
 CREATE TRIGGER context_kyb_observation_restrictions_append_only

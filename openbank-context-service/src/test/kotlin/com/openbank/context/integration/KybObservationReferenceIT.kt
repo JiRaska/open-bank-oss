@@ -89,6 +89,9 @@ class KybObservationReferenceIT {
             assertThatThrownBy {
                 onVertx { repository.restrict(restricted.copy(sourceSha256 = "b".repeat(64))) }
             }.hasStackTraceContaining("conflicting KYB observation restriction")
+            assertThatThrownBy {
+                onVertx { repository.restrict(restricted.copy(observationId = UUID.randomUUID())) }
+            }.hasStackTraceContaining("conflicting KYB observation restriction")
         }
     }
 
