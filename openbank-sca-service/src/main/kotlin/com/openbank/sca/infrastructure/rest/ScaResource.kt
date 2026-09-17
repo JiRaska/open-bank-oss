@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
@@ -67,6 +68,8 @@ data class InitiateScaRequest(
     val partyId: UUID,
     val purpose: ScaPurpose,
     val preferredMethod: ScaMethod?,
+    @param:JsonDeserialize(using = DynamicLinkingInputDeserializer::class)
+    @field:JsonDeserialize(using = DynamicLinkingInputDeserializer::class)
     val dynamicLinkingData: DynamicLinkingData?,
     val redirectUrl: String?,
 )
