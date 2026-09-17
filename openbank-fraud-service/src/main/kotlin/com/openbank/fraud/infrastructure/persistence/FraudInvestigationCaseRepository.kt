@@ -93,7 +93,7 @@ class FraudInvestigationCaseRepository(
                     if (score == null || score.verdict != "REVIEW" || score.accountId == null) {
                         Uni.createFrom().nullItem<FraudInvestigationCase>()
                     } else {
-                        val caseId = UUID.randomUUID()
+                        val caseId = Ids.newId()
                         session.createNativeMutationQuery(
                             """INSERT INTO fraud_investigation_cases
                                (case_id, score_id, account_id, counterparty_id, status, revision, opened_by, opened_at)

@@ -284,3 +284,31 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   lands, since output stays shadow-only), D2 (native inference engine DoS — bounded by a
   fixed/repo-bundled model and try/catch degrade-to-null). Rollback: revert this commit
   (`BaselineFraudModel` restored verbatim); no data migration, no config change.
+
+- **2026-09-17** — ADR-0304 investigation case source (#10236). New inbound
+  `/api/v1/fraud/cases` surface opens one case only from a persisted `REVIEW` score and
+  closes it without a fraud finding. `ROLE_ADMIN`, policy authorization and an exact
+  `FRAUD_INVESTIGATION` purpose gate every operation; the response omits account,
+  counterparty, amount and scoring reasons and is `no-store`. The case table retains
+  the source score/account/counterparty identifiers and opening/closing actors for
+  source authority. A case transition and its four-field Kafka reference commit
+  atomically through the transactional outbox. The dedicated topic carries only
+  event type, case ID, revision and time; it cannot itself prove fraud or establish
+  a cross-customer relationship.
+
+  **New trust boundaries and mitigations:** S4 (forged case opener or reader):
+  role, policy, purpose and source-score checks; T5 (replay, reordered or conflicting
+  transitions): one case per score, monotonic revision and idempotent outbox creation;
+  I4 (case-index disclosure): mTLS topic ACLs restrict writing to Fraud and reading
+  to the approved service identities, with no sensitive source IDs in the payload;
+  D3 (Context or broker unavailable): the case write commits independently and the
+  outbox retries without blocking scoring; E3 (using a mere REVIEW lead as a finding):
+  only a human-opened case is emitted, and close explicitly records no finding.
+  Before Context exposes any case detail, it must verify live case-scoped access and
+  audit each read. The Context DLQ is separate, retains records for 14 days, and must
+  be access controlled before its consumer is enabled. Sandbox uses one Kafka replica
+  because that cluster has one broker; production replication follows broker capacity.
+
+  Rollback: disable the new producer, leave the additive case table and outbox rows
+  intact for investigation history, then remove its topic grants after pending
+  references are resolved. Do not delete case evidence merely to reverse a deployment.
