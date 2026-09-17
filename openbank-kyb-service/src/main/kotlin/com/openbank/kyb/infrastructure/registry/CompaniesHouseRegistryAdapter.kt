@@ -80,6 +80,14 @@ interface CompaniesHouseRestClient {
         @HeaderParam("Authorization") authorization: String,
         @QueryParam("items_per_page") itemsPerPage: Int,
     ): JsonNode
+
+    @GET
+    @Path("/company/{number}/persons-with-significant-control-statements")
+    suspend fun personsWithSignificantControlStatements(
+        @PathParam("number") number: String,
+        @HeaderParam("Authorization") authorization: String,
+        @QueryParam("items_per_page") itemsPerPage: Int,
+    ): JsonNode
 }
 
 /**
