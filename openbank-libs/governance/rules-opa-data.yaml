@@ -489,7 +489,8 @@ authz:
       # One-line diff benefit: ADMIN = OPERATOR's full matrix (single level of inheritance,
       # see rest.rego matrix_grants) — no duplicated grant list to drift apart.
       inherits: ROLE_OPERATOR
-      grant: []
+      grant:
+        - kyb.ubo.restrict                 # ADR-0305: evidence restriction requires admin authority
     ROLE_COMPLIANCE:
       grant:
         - account.read

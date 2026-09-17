@@ -45,6 +45,8 @@ channels:
     messages:
       KybUboObservationRecorded:
         $ref: '#/components/messages/KybUboObservationRecorded'
+      KybUboObservationRestricted:
+        $ref: '#/components/messages/KybUboObservationRestricted'
   kybEvents:
     address: openbank.kyb.events
     title: Business onboarding case lifecycle
@@ -92,6 +94,11 @@ components:
     KybUboObservationRecorded:
       name: KybUboObservationRecorded
       summary: "A versioned ownership finding was recorded for this KYB case."
+      payload:
+        $ref: '#/components/schemas/UboObservationReference'
+    KybUboObservationRestricted:
+      name: KybUboObservationRestricted
+      summary: "A source observation is permanently restricted; Context must stop returning its reference."
       payload:
         $ref: '#/components/schemas/UboObservationReference'
     BusinessOnboardingStarted:
@@ -149,7 +156,7 @@ components:
           const: 1
         eventType:
           type: string
-          const: KybUboObservationRecorded
+          enum: [KybUboObservationRecorded, KybUboObservationRestricted]
         caseId:
           type: string
           format: uuid

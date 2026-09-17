@@ -1,7 +1,7 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -61,6 +61,17 @@ No owner name, date of birth, address or free text goes on the topic. Context re
 from KYB's durable observation API under service authorization, never from Kafka
 retention alone. This is an egress and access review gate, not permission to publish
 before the contract, ACLs, threat model and consumer are tested together.
+
+The first bounded slice stores versioned PSC observations in KYB and emits only
+`caseId`, `observationId`, `revision` and `sourceSha256` on the dedicated topic. A
+separate `KybUboObservationRestricted` reference event has the same minimized fields.
+KYB retains the original evidence and records a fixed restriction reason, actor and
+time in a separate table; subsequent detail reads fail closed. Context persists a
+durable, bank-scoped tombstone and excludes the observation from every history read,
+including when the restriction event arrives before the recorded event. Replays are
+idempotent and conflicting references fail. This slice does not yet implement
+erasure, corrected-observation lineage, indirect ownership or the complete authority
+lens; those remain acceptance gates before full delivery.
 
 The historical observation read names both the onboarding case and the observation.
 It requires KYC/admin authorization and the exact `KYB_OWNERSHIP_REVIEW` purpose. KYB

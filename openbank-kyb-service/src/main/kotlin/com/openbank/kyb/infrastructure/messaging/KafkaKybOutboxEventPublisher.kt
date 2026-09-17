@@ -24,7 +24,7 @@ class KafkaKybOutboxEventPublisher(
 
     override suspend fun publish(entry: OutboxEntry) {
         val emitter = when (entry.eventType) {
-            UboObservationReference.EVENT_TYPE -> ownershipReferences
+            UboObservationReference.EVENT_TYPE, UboObservationRestrictionReference.EVENT_TYPE -> ownershipReferences
             in LIFECYCLE_TYPES -> lifecycle
             else -> throw IllegalArgumentException("unsupported KYB outbox event type")
         }

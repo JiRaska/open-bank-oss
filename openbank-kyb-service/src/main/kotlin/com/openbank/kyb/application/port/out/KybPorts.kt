@@ -94,6 +94,15 @@ interface UboObservationRepository {
         purpose: String,
         readAt: Instant,
     )
+
+    /** Null = observation/case pair absent; false = already restricted; true = restricted and event committed. */
+    suspend fun restrictUboObservation(
+        caseId: UUID,
+        observationId: UUID,
+        reasonCode: String,
+        actorId: String,
+        restrictedAt: Instant,
+    ): Boolean?
 }
 
 /** Live case-root assignment decision from Context; source evidence never trusts a UI-only check. */

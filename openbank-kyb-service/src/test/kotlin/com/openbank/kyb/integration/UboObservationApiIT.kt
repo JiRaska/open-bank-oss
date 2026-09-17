@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboSource
+import com.openbank.kyb.infrastructure.persistence.repository.KybJson
 import com.openbank.kyb.infrastructure.persistence.repository.KybUboJson
 import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubContextOwnershipAccess
@@ -106,6 +107,66 @@ class UboObservationApiIT {
         Given {
             header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
         } When { get(url) } Then { statusCode(403) }
+    }
+
+    @Test
+    @TestSecurity(user = "kyb-admin", roles = ["ROLE_ADMIN"])
+    fun `restriction immediately hides source detail and commits one reference-only event`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        seed(caseId, observationId)
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
+        val url = "/api/v1/kyb/cases/$caseId/ubo-observations/$observationId"
+        val restriction = "$url/restrict"
+
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(204) }
+        Given {
+            contentType("application/json")
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            body("""{"reasonCode":"EVIDENCE_CHALLENGED"}""")
+        } When { post(restriction) } Then { statusCode(204) }
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-admin")
+        } When { get(url) } Then { statusCode(404) }
+
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                "SELECT reason_code, actor_id FROM kyb_ubo_observation_restrictions WHERE observation_id = ?",
+            ).use { statement ->
+                statement.setObject(1, observationId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString("reason_code")).isEqualTo("EVIDENCE_CHALLENGED")
+                    assertThat(rows.getString("actor_id")).isEqualTo("kyb-admin")
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+            connection.prepareStatement(
+                "SELECT payload FROM kyb_outbox WHERE aggregate_id = ? " +
+                    "AND event_type = 'KybUboObservationRestricted'",
+            ).use { statement ->
+                statement.setObject(1, caseId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val event = KybJson.mapper.readTree(rows.getString("payload"))
+                    assertThat(event.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                        "schemaVersion",
+                        "eventType",
+                        "caseId",
+                        "observationId",
+                        "revision",
+                        "sourceSha256",
+                    )
+                    assertThat(event.path("observationId").asText()).isEqualTo(observationId.toString())
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
     }
 
     @Test

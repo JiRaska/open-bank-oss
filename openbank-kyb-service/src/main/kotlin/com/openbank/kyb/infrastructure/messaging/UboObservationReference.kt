@@ -39,3 +39,27 @@ internal data class UboObservationReference(
         )
     }
 }
+
+/** Same minimized wire fields, but a distinct event type that never carries a reason or identity. */
+internal data class UboObservationRestrictionReference(
+    val schemaVersion: Int,
+    val eventType: String,
+    val caseId: UUID,
+    val observationId: UUID,
+    val revision: Long,
+    val sourceSha256: String,
+) {
+    fun toOutboxMessage(restrictedAt: Instant) = OutboxMessage(
+        aggregateId = caseId,
+        eventType = eventType,
+        payload = KybJson.mapper.writeValueAsString(this),
+        createdAt = restrictedAt,
+    )
+
+    companion object {
+        const val EVENT_TYPE = "KybUboObservationRestricted"
+
+        fun from(caseId: UUID, observationId: UUID, revision: Long, sourceSha256: String) =
+            UboObservationRestrictionReference(1, EVENT_TYPE, caseId, observationId, revision, sourceSha256)
+    }
+}

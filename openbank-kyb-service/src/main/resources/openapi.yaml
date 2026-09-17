@@ -7,7 +7,8 @@ info:
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
   # 1.7.0 -> 1.8.0: additive — case-scoped historical UBO observation read for authorised staff.
-  version: 1.8.0
+  # 1.8.0 -> 1.9.0: additive — administrative restriction of a historical observation.
+  version: 1.9.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -240,6 +241,45 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/kyb/cases/{id}/ubo-observations/{observationId}/restrict:
+    post:
+      tags: [KYB]
+      summary: Permanently restrict a historical ownership observation from further reads
+      operationId: restrictUboObservation
+      description: >-
+        ADMIN-only protective action. Repeating the same restriction is idempotent; no owner
+        attributes or free text enter its reference-only event. There is no unrestrict route.
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: observationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, enum: [KYB_OWNERSHIP_REVIEW] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reasonCode]
+              properties:
+                reasonCode:
+                  type: string
+                  enum: [SOURCE_WITHDRAWN, EVIDENCE_CHALLENGED, PRIVACY_RESTRICTION]
+      responses:
+        '204':
+          description: Restricted or already restricted; no source detail returned
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kyb/cases/{id}/initiator:
     post:
       tags: [KYB]

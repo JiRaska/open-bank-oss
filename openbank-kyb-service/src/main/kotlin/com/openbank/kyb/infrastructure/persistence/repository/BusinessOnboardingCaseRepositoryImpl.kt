@@ -17,6 +17,7 @@ import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.kyb.infrastructure.messaging.UboObservationReference
+import com.openbank.kyb.infrastructure.messaging.UboObservationRestrictionReference
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
 import com.openbank.kyb.infrastructure.persistence.entity.UboObservationEntity
@@ -113,7 +114,9 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
     override suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation? = Panache.withSession {
         Panache.getSession().flatMap { session ->
             session.createQuery(
-                "from UboObservationEntity o where o.caseId = :caseId and o.observationId = :observationId",
+                "from UboObservationEntity o where o.caseId = :caseId and o.observationId = :observationId " +
+                    "and not exists (select r.observationId from UboObservationRestrictionEntity r " +
+                    "where r.observationId = o.observationId)",
                 UboObservationEntity::class.java,
             ).setParameter("caseId", caseId).setParameter("observationId", observationId)
                 .resultList.map { rows -> rows.firstOrNull() }
@@ -151,6 +154,45 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
             }
         }.awaitSuspending()
     }
+
+    override suspend fun restrictUboObservation(
+        caseId: UUID,
+        observationId: UUID,
+        reasonCode: String,
+        actorId: String,
+        restrictedAt: Instant,
+    ): Boolean? = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.find(UboObservationEntity::class.java, observationId).flatMap { row ->
+                if (row == null || row.caseId != caseId) {
+                    Uni.createFrom().nullItem<Boolean>()
+                } else {
+                    session.createNativeMutationQuery(
+                        """INSERT INTO kyb_ubo_observation_restrictions
+                           (observation_id, case_id, reason_code, actor_id, restricted_at)
+                           VALUES (:observation, :case, :reason, :actor, :restrictedAt)
+                           ON CONFLICT DO NOTHING
+                        """.trimIndent(),
+                    ).setParameter("observation", observationId).setParameter("case", caseId)
+                        .setParameter("reason", reasonCode).setParameter("actor", actorId)
+                        .setParameter("restrictedAt", restrictedAt).executeUpdate().flatMap { inserted ->
+                            if (inserted == 0) {
+                                Uni.createFrom().item(false)
+                            } else {
+                                outbox.persistInTransaction(
+                                    UboObservationRestrictionReference.from(
+                                        caseId,
+                                        observationId,
+                                        row.revision,
+                                        row.sourceSha256,
+                                    ).toOutboxMessage(restrictedAt),
+                                ).replaceWith(true)
+                            }
+                        }
+                }
+            }
+        }
+    }.awaitSuspending()
 
     private fun withEvent(event: KybEvent?): Uni<Void> =
         if (event == null) Uni.createFrom().voidItem() else outbox.persistInTransaction(event.toOutboxMessage())

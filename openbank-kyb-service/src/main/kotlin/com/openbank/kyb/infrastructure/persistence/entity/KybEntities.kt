@@ -179,6 +179,27 @@ class UboObservationEntity {
     lateinit var recordedAt: Instant
 }
 
+/** Permanent read restriction; the original observation and its source hash remain evidentiary. */
+@Entity
+@Table(name = "kyb_ubo_observation_restrictions")
+class UboObservationRestrictionEntity {
+    @Id
+    @Column(name = "observation_id", nullable = false)
+    lateinit var observationId: UUID
+
+    @Column(name = "case_id", nullable = false)
+    lateinit var caseId: UUID
+
+    @Column(name = "reason_code", nullable = false)
+    lateinit var reasonCode: String
+
+    @Column(name = "actor_id", nullable = false)
+    lateinit var actorId: String
+
+    @Column(name = "restricted_at", nullable = false)
+    lateinit var restrictedAt: Instant
+}
+
 /** Append-only evidence that a staff principal read a case-scoped ownership observation. */
 @Entity
 @Table(name = "kyb_ubo_observation_reads")

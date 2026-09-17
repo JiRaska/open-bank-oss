@@ -264,6 +264,28 @@ class KybResource {
     }
 
     @POST
+    @Path("/cases/{id}/ubo-observations/{observationId}/restrict")
+    @RolesAllowed(Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.restrict", resource = "#caseId")
+    @Operation(summary = "Permanently restrict a historical ownership observation from further reads")
+    suspend fun restrictUboObservation(
+        @PathParam("id") caseId: UUID,
+        @PathParam("observationId") observationId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        request: RestrictUboObservationRequest?,
+    ): Response {
+        require(purpose == "KYB_OWNERSHIP_REVIEW") { "KYB_OWNERSHIP_REVIEW is required" }
+        val reason = requireNotNull(request?.reasonCode) { "reasonCode is required" }
+        require(reason in RESTRICTION_REASONS) { "unsupported restriction reasonCode" }
+        return when (
+            observations.restrictUboObservation(caseId, observationId, reason, identity.principal.name, clock.instant())
+        ) {
+            null -> notFound()
+            else -> Response.noContent().header("Cache-Control", "no-store").build()
+        }
+    }
+
+    @POST
     @Path("/cases")
     @Authorize(action = "kyb.case.start", resource = "#request.initiatorPartyId")
     @Operation(summary = "Start a business onboarding case for the authenticated human as initiator")
@@ -627,8 +649,11 @@ class KybResource {
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        private val RESTRICTION_REASONS = setOf("SOURCE_WITHDRAWN", "EVIDENCE_CHALLENGED", "PRIVACY_RESTRICTION")
         private const val MAX_PAGE = 100
         private const val MIN_REASON = 10
         private const val DEFAULT_LANG = "cs"
     }
 }
+
+data class RestrictUboObservationRequest(val reasonCode: String?)
