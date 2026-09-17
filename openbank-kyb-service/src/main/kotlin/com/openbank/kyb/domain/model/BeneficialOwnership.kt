@@ -117,6 +117,8 @@ data class UboObservation(
 )
 
 /** An explicit proposal to correct the mapped finding of one case observation. */
+enum class UboCorrectionStatus { PENDING, APPROVED, REJECTED }
+
 data class UboCorrection(
     val id: UUID,
     val caseId: UUID,
@@ -126,7 +128,7 @@ data class UboCorrection(
     val reasonCode: String,
     val proposedBy: String,
     val proposedAt: Instant,
-    val status: String,
+    val status: UboCorrectionStatus,
     val decidedBy: String?,
     val decidedAt: Instant?,
 )
