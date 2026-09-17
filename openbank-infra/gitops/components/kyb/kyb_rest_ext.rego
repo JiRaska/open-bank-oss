@@ -45,6 +45,24 @@ allowed_reasons contains "operator-kyb-review" if {
 	startswith(input.action, "kyb.")
 }
 
+human_restriction_admin if {
+    input.principal.type == "HUMAN"
+    "ROLE_ADMIN" in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+}
+
+allowed_reasons contains "admin-kyb-observation-restriction" if {
+    input.action == "kyb.ubo.restrict"
+    human_restriction_admin
+}
+
+# The general staff `kyb.` reason also admits KYC and operators. A veto at the
+# final decision prevents that or a future matrix grant from widening restriction.
+prohibited if {
+    input.action == "kyb.ubo.restrict"
+    not human_restriction_admin
+}
+
 # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,
 # not a `kyb.` prefix: review.resolve and reject are bank acts and must not be reachable on the
 # edge principal, which has no route for them.
