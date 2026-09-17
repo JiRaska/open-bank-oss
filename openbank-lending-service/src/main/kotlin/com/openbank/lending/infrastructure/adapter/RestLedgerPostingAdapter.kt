@@ -54,7 +54,7 @@ class RestLedgerPostingAdapter(
             // unseeded currency rather than mis-posting.
             accounts = LendingGlChart.accountsFor(posting.amount.currency.code),
             systemActorId = config.systemActorId(),
-            date = LocalDate.now(clock),
+            date = posting.accountingDate ?: LocalDate.now(clock),
         )
         return guard.postJournal(request)
             .invoke { response ->

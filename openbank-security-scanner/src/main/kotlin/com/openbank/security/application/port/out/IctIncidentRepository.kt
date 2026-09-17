@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.security.application.port.out
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.securityscanner.domain.IctIncident
 import com.openbank.securityscanner.domain.IncidentSeverity
 import com.openbank.securityscanner.domain.IncidentStatus
@@ -18,8 +19,8 @@ import java.util.UUID
  */
 interface IctIncidentRepository {
 
-    /** Upserts [incident]; used for both the initial report and every subsequent transition. */
-    suspend fun save(incident: IctIncident): IctIncident
+    /** Atomically persists [incident] and its durable broker hand-off [event]. */
+    suspend fun save(incident: IctIncident, event: OutboxMessage): IctIncident
 
     suspend fun findIncident(id: UUID): IctIncident?
 

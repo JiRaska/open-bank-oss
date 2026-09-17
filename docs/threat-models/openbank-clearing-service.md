@@ -86,6 +86,19 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-14** — Clearing acknowledgement evidence (ADR-0306): every item transition increments
+  its persisted `aggregate_revision`, and batch settlement commits one
+  `openbank.clearing.item.cleared` outbox row per settled item in the same database transaction as
+  the batch, item rows and net-settlement command. The payload exposes only existing opaque item,
+  payment and batch references, status, currency, amount and revision; context-service minimizes
+  this further to references and a bounded label. Risk class = integrity and bounded
+  confidentiality. `V10` is additive; rollback is to stop consuming the field/event and leave the
+  column in place, avoiding a destructive down migration. Availability is bounded by the existing
+  1,000-item cycle ceiling plus a 250-row atomic outbox claim every 2 seconds: one maximum cycle is
+  four claims rather than forty default claims, while each claim remains bounded and cross-pod safe
+  through `FOR UPDATE SKIP LOCKED`. The 30-second scheduler timeout remains the overload fuse;
+  rollback is a configuration-only reduction of `openbank.outbox.batch-size`.
+
 - **2026-09-02** — Doc correction, no behavior change: §3 credited the role-gating regression guard
   to `ClearingResourceSecurityTest`, a class that is in no Kotlin source in this repository. **The
   guard is real** and is `ClearingSecurityContractTest`, which asserts by reflection that

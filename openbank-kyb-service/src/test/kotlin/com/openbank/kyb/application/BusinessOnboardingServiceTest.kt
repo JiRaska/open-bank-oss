@@ -30,16 +30,19 @@ import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.InitiatorIdentity
+import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
+import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.kyb.infrastructure.registry.DemoEntity
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -55,6 +58,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.Optional
 import java.util.UUID
 
 class BusinessOnboardingServiceTest {
@@ -385,5 +389,70 @@ class BusinessOnboardingServiceTest {
         assertThat(mandates)
             .describedAs("an entity that reaches SIGNED must carry a mandate per signature")
             .hasSize(2)
+    }
+
+    // --- fully digital onboarding of the sandbox demo company (single jednatel, SOLE rule) ------
+
+    private val demoIco = LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, DemoEntity.ICO)
+    private val demoAddress = RegisteredAddress("Ukázková 1", "Praha", "11000", "CZ")
+
+    /** The same service, but with the REAL attestation service — no pre-confirmation. */
+    private fun withRealAttestation(): BusinessOnboardingService {
+        val clock = Clock.fixed(now, ZoneOffset.UTC)
+        val demo = DemoEntity(true, "Oldřich Vaněk", "Ukázková 1", "Praha", "11000", "CZ", clock)
+        coEvery { registry.lookup(demoIco, null) } returns demo.extract()
+        coEvery { parties.createEntityParty(any()) } returns entityParty
+        val saved = mutableListOf<RepresentationAttestation>()
+        val attestationStore = object : RepresentationAttestationRepository {
+            override suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String) =
+                saved.firstOrNull { it.identifier == identifier && it.ruleTextHash == ruleTextHash }
+            override suspend fun findLatestFor(identifier: LegalEntityIdentifier) =
+                saved.lastOrNull { it.identifier == identifier }
+            override suspend fun attest(attestation: RepresentationAttestation) = attestation.also(saved::add)
+            override suspend fun listFor(identifier: LegalEntityIdentifier) = saved.toList()
+        }
+        val lookup = service.lookup
+        service.representation = RepresentationAttestationService().apply {
+            this.attestations = attestationStore
+            this.lookup = lookup
+            this.clock = clock
+            this.autoConfirmSingleMember = Optional.of(true)
+        }
+        return service
+    }
+
+    @Test
+    fun `the demo company verifies without review and its jednatel at the same address is ready to sign`(): Unit =
+        runBlocking {
+            val svc = withRealAttestation()
+            val started = svc.start(StartCaseCommand(IdentifierScheme.CZ_ICO, DemoEntity.ICO, initiator))
+            assertThat(started.status).isEqualTo(CaseStatus.REGISTRY_VERIFIED)
+            assertThat(started.requiredSignatures).isEqualTo(1)
+
+            coEvery { parties.initiatorIdentity(any()) } returns
+                InitiatorIdentity("Oldřich Vaněk", demoAddress, verified = true)
+            val matched = svc.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Oldřich Vaněk", null))
+            assertThat(matched.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+        }
+
+    @Test
+    fun `the demo jednatel at a different postal code goes to review`(): Unit = runBlocking {
+        val svc = withRealAttestation()
+        val started = svc.start(StartCaseCommand(IdentifierScheme.CZ_ICO, DemoEntity.ICO, initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns
+            InitiatorIdentity("Oldřich Vaněk", demoAddress.copy(postalCode = "60200"), verified = true)
+        val matched = svc.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Oldřich Vaněk", null))
+        assertThat(matched.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+    }
+
+    @Test
+    fun `someone other than the demo jednatel is refused`(): Unit = runBlocking {
+        val svc = withRealAttestation()
+        val started = svc.start(StartCaseCommand(IdentifierScheme.CZ_ICO, DemoEntity.ICO, initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns
+            InitiatorIdentity("Jana Nováková", demoAddress, verified = true)
+        assertThatThrownBy {
+            runBlocking { svc.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Nováková", null)) }
+        }.isInstanceOf(InitiatorIdentityMismatchException::class.java)
     }
 }

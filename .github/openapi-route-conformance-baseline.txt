@@ -35,8 +35,3 @@ openbank-psd2-service served-not-published POST /open-banking/sandbox/v2/payment
 openbank-psd2-service served-not-published POST /open-banking/v2/consents
 openbank-sca-service served-not-published GET /api/v1/sca/parties/{partyId}/challenges/pending
 openbank-sca-service served-not-published POST /api/v1/sca/challenges/{id}/consume
-openbank-security-scanner served-not-published GET /api/v1/ict-incidents
-openbank-security-scanner served-not-published GET /api/v1/ict-incidents/{id}
-openbank-security-scanner served-not-published PATCH /api/v1/ict-incidents/{id}/status
-openbank-security-scanner served-not-published POST /api/v1/ict-incidents
-openbank-security-scanner served-not-published POST /api/v1/ict-incidents/{id}/regulatory-report

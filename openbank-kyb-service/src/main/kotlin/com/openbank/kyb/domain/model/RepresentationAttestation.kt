@@ -16,8 +16,11 @@ import java.util.UUID
  * withheld whenever any second-person, condition, amount or negation marker is present — but that
  * guarantees only that a text carrying a *known* marker cannot read as solo. A phrasing whose
  * second-signature clause uses none of them would still parse SOLE, and nothing downstream could
- * tell. So no machine verdict binds an agreement on its own: an operator confirms it once per
- * entity, and that confirmation is what the case uses from then on.
+ * tell. So a machine verdict binds an agreement only where that failure cannot occur: when the
+ * register lists exactly one statutory member there is no second person whose signature the text
+ * could be demanding, and `RepresentationAttestationService` records a system attestation
+ * (`attestedBy = system:single-statutory-member`, one signature). Every other rule is confirmed by
+ * an operator once per entity, and that confirmation is what the case uses from then on.
  *
  * ## Why the text is hashed into the key
  *

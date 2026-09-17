@@ -174,6 +174,15 @@ openbank:
     demo-entity:
       enabled: ${OPENBANK_KYB_DEMO_ENTITY_ENABLED:false}
       representative-name: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE:Oldřich Vaněk}
+      representative-address:
+        street: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_STREET:Ukázková 1}
+        city: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_CITY:Praha}
+        postal-code: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_POSTAL_CODE:11000}
+        country: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_COUNTRY:CZ}
+    representation:
+      # A single statutory member with a SOLE rule is confirmed without an operator (no second
+      # signatory can exist). Kill switch: false sends every rule to human confirmation.
+      auto-confirm-single-member: ${OPENBANK_KYB_REPRESENTATION_AUTO_CONFIRM_SINGLE_MEMBER:true}
   temporal:
     # ⚠ BUILD-TIME PROPERTY (lending #6085): TemporalBusinessOnboardingWorkflowAdapter is selected
     # with @IfBuildProperty, resolved during augmentation and frozen into the image — a container

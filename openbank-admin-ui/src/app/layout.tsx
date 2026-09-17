@@ -7,6 +7,7 @@ import './globals.css'
 import { cookies, headers } from 'next/headers'
 import { AppProviders } from '@/components/layout/AppProviders'
 import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
+import { THEME_COOKIE_KEY, parseTheme } from '@/lib/theme/theme'
 
 export const metadata: Metadata = {
   title: 'OpenBank Admin',
@@ -24,13 +25,15 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Calling headers() opts the layout out of static pre-rendering (side-effect only).
   await headers()
-  const persistedLanguage = parseLanguage((await cookies()).get(LANG_COOKIE)?.value)
+  const requestCookies = await cookies()
+  const persistedLanguage = parseLanguage(requestCookies.get(LANG_COOKIE)?.value)
   const initialLanguage = persistedLanguage ?? 'en'
+  const initialTheme = parseTheme(requestCookies.get(THEME_COOKIE_KEY)?.value) ?? 'light'
 
   return (
-    <html lang={initialLanguage} suppressHydrationWarning>
+    <html lang={initialLanguage} className={initialTheme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <body>
-        <AppProviders initialLanguage={persistedLanguage}>{children}</AppProviders>
+        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme}>{children}</AppProviders>
       </body>
     </html>
   )
