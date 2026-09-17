@@ -55,6 +55,8 @@ data class OpenCeremonyCommand(
     val documentId: UUID,
     val signerPartyRefs: List<String>,
     val signatureLevel: SignatureLevel,
+    // See [SignatureCeremony.parallel]; retail callers keep the sequential default.
+    val parallel: Boolean = false,
 )
 
 data class IssueOnboardingDocumentCommand(val accountId: UUID, val partyRef: String, val productId: UUID)

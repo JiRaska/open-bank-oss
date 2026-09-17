@@ -68,6 +68,7 @@ class SignatureCeremonyService(
             status = CeremonyStatus.DRAFT,
             signatureLevel = cmd.signatureLevel,
             createdAt = Instant.now(clock),
+            parallel = cmd.parallel,
         ).open()
         return ceremonyRepo.save(ceremony)
     }

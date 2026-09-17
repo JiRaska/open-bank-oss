@@ -169,7 +169,7 @@ internal const val BUSINESS_FEES_CS_BODY = """$LETTERHEAD_CS
 <table style="width:100%;border-collapse:collapse;font-size:12px;">
 <thead><tr><th style="text-align:left;border-bottom:1px solid #cbd5e1;">Položka</th><th style="text-align:left;border-bottom:1px solid #cbd5e1;">Četnost</th><th style="text-align:right;border-bottom:1px solid #cbd5e1;">Poplatek</th></tr></thead>
 <tbody>
-{{#each fees}}<tr><td>{{name}}{{#if description}}<br/><span style="color:#64748b;">{{description}}</span>{{/if}}{{#if waiveCondition}}<br/><span style="color:#64748b;">Promíjí se: {{waiveCondition}}</span>{{/if}}</td><td>{{frequency}}</td><td style="text-align:right;">{{amount}}</td></tr>
+{{#each fees}}<tr><td>{{label}}</td><td>{{frequency}}</td><td style="text-align:right;">{{amount}}</td></tr>
 {{/each}}
 </tbody>
 </table>
@@ -185,7 +185,7 @@ internal const val BUSINESS_FEES_EN_BODY = """$LETTERHEAD_EN
 <table style="width:100%;border-collapse:collapse;font-size:12px;">
 <thead><tr><th style="text-align:left;border-bottom:1px solid #cbd5e1;">Item</th><th style="text-align:left;border-bottom:1px solid #cbd5e1;">Frequency</th><th style="text-align:right;border-bottom:1px solid #cbd5e1;">Fee</th></tr></thead>
 <tbody>
-{{#each fees}}<tr><td>{{name}}{{#if description}}<br/><span style="color:#64748b;">{{description}}</span>{{/if}}{{#if waiveCondition}}<br/><span style="color:#64748b;">Waived: {{waiveCondition}}</span>{{/if}}</td><td>{{frequency}}</td><td style="text-align:right;">{{amount}}</td></tr>
+{{#each fees}}<tr><td>{{label}}</td><td>{{frequency}}</td><td style="text-align:right;">{{amount}}</td></tr>
 {{/each}}
 </tbody>
 </table>

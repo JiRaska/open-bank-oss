@@ -99,20 +99,8 @@ class DocumentTemplateSeedTest {
             mapOf("title" to "Sazebník poplatků pro podnikatele", "code" to "SAZEBNIK_PO_CS", "version" to "1.0.0"),
         ),
         "fees" to listOf(
-            mapOf(
-                "name" to "Monthly Fee",
-                "frequency" to "měsíčně",
-                "amount" to "19,99 EUR",
-                "description" to null,
-                "waiveCondition" to null,
-            ),
-            mapOf(
-                "name" to "Cash Deposit",
-                "frequency" to "z částky transakce",
-                "amount" to "0,5 %",
-                "description" to "0.5% of deposit amount",
-                "waiveCondition" to "never",
-            ),
+            mapOf("label" to "Vedení účtu", "frequency" to "měsíčně", "amount" to "19,99 EUR"),
+            mapOf("label" to "Vklad hotovosti", "frequency" to "z částky transakce", "amount" to "0,5 %"),
         ),
         // ADR-0248 payment confirmation fields (POTVRZENI_O_PLATBE_CS/EN).
         "payment" to mapOf(
@@ -239,7 +227,7 @@ class DocumentTemplateSeedTest {
                     assertThat(rendered).contains("Stavby Horák s.r.o.")
                 }
                 if (code.startsWith("SAZEBNIK_PO")) {
-                    assertThat(rendered).contains("Monthly Fee", "19,99 EUR", "0,5 %", "0.5% of deposit amount")
+                    assertThat(rendered).contains("Vedení účtu", "19,99 EUR", "Vklad hotovosti", "0,5 %")
                 }
                 if (code.startsWith("INFORMACE_POJISTENI_VKLADU")) {
                     assertThat(rendered).containsAnyOf("100 000 EUR", "EUR 100,000")

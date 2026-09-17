@@ -131,8 +131,19 @@ class BusinessAgreementServiceTest {
             .containsExactly("Petr Horák", "Eva Horáková")
         @Suppress("UNCHECKED_CAST")
         val fees = renders.dataFor("SAZEBNIK_PO_CS")["fees"] as List<Map<String, Any?>>
-        assertThat(fees.map { it["amount"] }).containsExactly("19,99 EUR", "0,5 %")
-        assertThat(fees.map { it["frequency"] }).containsExactly("měsíčně", "z částky transakce")
+        assertThat(fees.map { it["amount"] }).containsExactly("19,99 EUR", "0,25 EUR", "15 EUR", "0,5 %", "2,5 EUR")
+        assertThat(fees.map { it["label"] }).containsExactly(
+            "Vedení účtu",
+            "Odchozí platba SEPA",
+            "Odchozí zahraniční platba SWIFT",
+            "Vklad hotovosti",
+            "Vedení platební karty (za kartu)",
+        )
+        // Nothing English reaches a Czech fee schedule: no catalogue name, no description.
+        val catalogueText = catalog.schedule!!.fees.flatMap { listOfNotNull(it.name, it.description) }
+        assertThat(fees.flatMap { it.values }.map { it.toString() }).doesNotContainAnyElementsOf(catalogueText)
+        assertThat(fees.map { it["frequency"] })
+            .containsExactly("měsíčně", "za transakci", "za transakci", "z částky transakce", "měsíčně")
     }
 
     @Test
@@ -259,6 +270,41 @@ class BusinessAgreementServiceTest {
         assertThat(docs.all().map { it.templateCode }).doesNotContain("RAMCOVA_SMLOUVA_PO_CS")
     }
 
+    @Test
+    fun `the english fee schedule uses english labels`(): Unit = runBlocking {
+        service.ensure(cmd(lang = "en"))
+        @Suppress("UNCHECKED_CAST")
+        val fees = renders.dataFor("SAZEBNIK_PO_EN")["fees"] as List<Map<String, Any?>>
+        assertThat(fees.map { it["label"] }).first().isEqualTo("Account maintenance")
+        assertThat(fees.map { it["amount"] }).first().isEqualTo("EUR 19.99")
+    }
+
+    @Test
+    fun `a catalogue fee with no label in the requested language refuses the fee schedule`() {
+        catalog.schedule = catalog.schedule!!.copy(
+            fees =
+            catalog.schedule!!.fees + ProductFee("Paper Statement", BigDecimal("1"), "EUR", "MONTHLY", null, null),
+        )
+        assertThatThrownBy { runBlocking { service.ensure(cmd()) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("No cs label for product-catalogue fee 'Paper Statement'")
+        assertThat(docs.all().map { it.templateCode }).doesNotContain("SAZEBNIK_PO_CS", "RAMCOVA_SMLOUVA_PO_CS")
+    }
+
+    @Test
+    fun `joint signers may sign in any order and the ceremony completes only when all have signed`(): Unit =
+        runBlocking {
+            val agreement = service.ensure(cmd())
+            assertThat(ceremonies.opened.single().parallel).isTrue()
+
+            // bob is second in the request, and signs first.
+            ceremonies.sign(agreement.ceremonyId, bob)
+            assertThat(ceremonies.byId(agreement.ceremonyId)!!.status).isEqualTo(CeremonyStatus.PARTIALLY_SIGNED)
+
+            ceremonies.sign(agreement.ceremonyId, alice)
+            assertThat(service.find(caseId, "cs")!!.ceremonyStatus).isEqualTo(CeremonyStatus.COMPLETED)
+        }
+
     // ── in-memory ports ─────────────────────────────────────────────────────────────────────────
 
     private class InMemoryDocuments : DocumentRepositoryPort {
@@ -333,6 +379,7 @@ class BusinessAgreementServiceTest {
                 status = CeremonyStatus.DRAFT,
                 signatureLevel = cmd.signatureLevel,
                 createdAt = Instant.EPOCH,
+                parallel = cmd.parallel,
             ).open()
             return save(ceremony)
         }
@@ -369,8 +416,12 @@ class BusinessAgreementServiceTest {
             code = "CURRENT_BUSINESS",
             currency = "EUR",
             fees = listOf(
+                // prod-004 "Business Current Account" exactly as product-catalog seeds it.
                 ProductFee("Monthly Fee", BigDecimal("19.99"), "EUR", "MONTHLY", null, null),
+                ProductFee("SEPA Transfer", BigDecimal("0.25"), "EUR", "PER_TRANSACTION", null, null),
+                ProductFee("SWIFT Transfer", BigDecimal("15.0"), "EUR", "PER_TRANSACTION", null, null),
                 ProductFee("Cash Deposit", BigDecimal("0.5"), "EUR", "PERCENTAGE", "0.5% of deposit amount", null),
+                ProductFee("Card Fee (per card/month)", BigDecimal("2.50"), "EUR", "MONTHLY", null, null),
             ),
         )
         override suspend fun findDocumentTemplateCode(productId: UUID): String? = null

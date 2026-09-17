@@ -90,6 +90,7 @@ fun SignatureCeremonyEntity.toDomain(mapper: ObjectMapper) = SignatureCeremony(
     signatureLevel = signatureLevel,
     createdAt = createdAt,
     version = version,
+    parallel = parallelSigning,
 )
 
 fun SignatureCeremony.toEntity(mapper: ObjectMapper) = SignatureCeremonyEntity().also {
@@ -100,4 +101,5 @@ fun SignatureCeremony.toEntity(mapper: ObjectMapper) = SignatureCeremonyEntity()
     it.signatureLevel = signatureLevel
     it.createdAt = createdAt
     it.version = version
+    it.parallelSigning = parallel
 }

@@ -104,7 +104,7 @@ class BusinessAgreementIT {
         }
         assertThat(agreementHtml).contains("Stavby Horák s.r.o.", "27074358", "Petr Horák", "Eva Horáková")
         val feeHtml = RemoteStubs.renderedHtml.single { it.contains("<h1>Sazebník poplatků pro podnikatele") }
-        assertThat(feeHtml).contains("Monthly Fee", "19,99 EUR")
+        assertThat(feeHtml).contains("Vedení účtu", "19,99 EUR", "Vklad hotovosti").doesNotContain("Monthly Fee")
         val content = given().get("/api/v1/documents/$documentId/content").then().statusCode(200)
             .extract().asByteArray()
         assertThat(sha256Of(content)).isEqualTo(sha256)
@@ -122,12 +122,15 @@ class BusinessAgreementIT {
         }
 
         // Humans sign a document owned by the entity; SCA is checked against the agreement sha256.
-        sign(ceremonyId, alice).then().statusCode(200)
-        assertThat(RemoteStubs.consumed.last()).contains(alice, sha256, ceremonyId)
+        // Joint signers sign in any order: bob (second in the request) signs first.
+        sign(ceremonyId, bob).then().statusCode(200)
+        assertThat(RemoteStubs.consumed.last()).contains(bob, sha256, ceremonyId)
 
         ensure(body(signingRule = "Za společnost jedná každý jednatel samostatně.")).then().statusCode(409)
 
-        sign(ceremonyId, bob).then().statusCode(200)
+        given().get("/api/v1/business-agreements/$caseId?lang=cs").then().statusCode(200)
+            .body("ceremonyStatus", org.hamcrest.Matchers.equalTo("PARTIALLY_SIGNED"))
+        sign(ceremonyId, alice).then().statusCode(200)
         val done = given().get("/api/v1/business-agreements/$caseId?lang=cs").then().statusCode(200)
             .extract().jsonPath()
         assertThat(done.getString("ceremonyStatus")).isEqualTo("COMPLETED")

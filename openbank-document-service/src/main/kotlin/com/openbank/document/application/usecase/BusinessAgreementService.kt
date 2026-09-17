@@ -22,6 +22,7 @@ import com.openbank.document.application.port.out.DuplicateDocumentException
 import com.openbank.document.application.port.out.ProductCatalogPort
 import com.openbank.document.application.port.out.ProductFee
 import com.openbank.document.application.port.out.TemplateRepositoryPort
+import com.openbank.document.domain.FeeLabels
 import com.openbank.document.domain.model.CeremonyStatus
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
@@ -222,7 +223,13 @@ class BusinessAgreementService(
     @Suppress("SwallowedException")
     private suspend fun openCeremony(documentId: UUID, cmd: EnsureBusinessAgreementCommand): SignatureCeremony = try {
         ceremonyUseCase.openCeremony(
-            OpenCeremonyCommand(documentId, cmd.signers.map { it.partyRef }, SignatureLevel.ADVANCED),
+            OpenCeremonyCommand(
+                documentId = documentId,
+                signerPartyRefs = cmd.signers.map { it.partyRef },
+                signatureLevel = SignatureLevel.ADVANCED,
+                // Joint representatives sign whenever each of them gets to it.
+                parallel = true,
+            ),
         )
     } catch (e: DuplicateCeremonyException) {
         ceremonyUseCase.findByDocumentId(documentId)
@@ -254,10 +261,12 @@ class BusinessAgreementService(
     private fun feeRow(fee: ProductFee, locale: String): Map<String, Any?> {
         val cs = locale == "CS"
         val amount = amountFormat(cs).format(fee.amount)
+        val label = FeeLabels.labelFor(fee.name, locale)
+        check(label != null) {
+            "No ${locale.lowercase()} label for product-catalogue fee '${fee.name}'; the fee schedule cannot be issued"
+        }
         return mapOf(
-            "name" to fee.name,
-            "description" to fee.description,
-            "waiveCondition" to fee.waiveCondition,
+            "label" to label,
             "frequency" to ((if (cs) FREQUENCY_CS else FREQUENCY_EN)[fee.frequency] ?: fee.frequency),
             "amount" to when {
                 fee.frequency == PERCENTAGE -> "$amount %"
