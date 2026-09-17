@@ -23,6 +23,7 @@ export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
 export { EmptyState } from './EmptyState'
 export { Tabs, type TabItem } from './Tabs'
+export { TableScrollRegion } from './TableScrollRegion'
 export {
   BADGE_CLASS,
   DOT_CLASS,

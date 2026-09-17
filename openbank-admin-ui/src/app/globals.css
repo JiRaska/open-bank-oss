@@ -1279,6 +1279,9 @@ main {
     min-width: 100%;
     overflow: visible;
   }
+  .table-scroll-region > table {
+    min-width: max-content;
+  }
   .incident-filters { grid-template-columns: 1fr !important; }
 }
 

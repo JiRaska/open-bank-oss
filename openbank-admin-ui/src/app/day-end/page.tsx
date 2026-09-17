@@ -30,7 +30,7 @@ import {
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, TableScrollRegion } from '@/components/ui'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 import {
@@ -307,7 +307,7 @@ function EodPanel() {
                 {t('Vyrovnání po měnách (EoD)', 'Per-currency tie-out (EoD)')}
               </span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <TableScrollRegion label={t('Posuvná tabulka vyrovnání po měnách', 'Scrollable per-currency tie-out table')}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', textAlign: 'right', color: 'var(--text-tertiary)' }}>
@@ -340,7 +340,7 @@ function EodPanel() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScrollRegion>
           </div>
         </>
       ) : null}
@@ -736,7 +736,7 @@ function EomPanel() {
                 {t(`posledních ${runs.length}`, `last ${runs.length}`)}
               </span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <TableScrollRegion label={t('Posuvná tabulka měsíčních závěrek', 'Scrollable month-end close table')}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: 'var(--surface-2)', textAlign: 'left', color: 'var(--text-tertiary)' }}>
@@ -775,7 +775,7 @@ function EomPanel() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScrollRegion>
           </div>
         </>
       )}
