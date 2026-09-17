@@ -5,6 +5,7 @@
 package com.openbank.delegation.infrastructure.persistence.repository
 
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
+import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationState
@@ -51,9 +52,7 @@ class StatutoryDelegationOperationRepositoryImpl :
                                     "statutory operation insert/replay produced no row"
                                 }
                                     .toDomain()
-                                require(persisted.sameEvidenceAs(operation)) {
-                                    "request key already belongs to different statutory evidence"
-                                }
+                                if (!persisted.sameEvidenceAs(operation)) throw StatutoryOperationCreateConflict()
                                 if (inserted == 1) {
                                     StatutoryOperationCreateOutcome.Created(persisted)
                                 } else {

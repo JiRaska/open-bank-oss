@@ -109,6 +109,20 @@ test_edge_may_preview if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.preview"}
 }
 
+test_only_edge_may_propose_joint_delegation if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.propose"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.propose"}
+    }
+}
+
+test_only_edge_may_read_joint_proposal if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.read"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.read"}
+    }
+}
+
 test_shared_backend_identity_may_not_preview if {
 	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.preview"}
 }

@@ -17,6 +17,7 @@
 #   delegation.check      — "does an active grant cover this?" for services with no projection
 #   delegation.recertification.read    — customer reads own pending review tasks
 #   delegation.recertification.confirm — customer records an authority-neutral review
+#   delegation.statutory.{propose,read} — JOINT proposal evidence, customer-edge only
 #
 # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
 # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -48,6 +49,7 @@ allowed_reasons contains "operator-delegation-write" if {
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
     input.action != "delegation.recertification.confirm"
+    not startswith(input.action, "delegation.statutory.")
 }
 
 # Durable lifecycle approvals are enumerated rather than inheriting the broad delegation prefix:
@@ -96,6 +98,8 @@ allowed_reasons contains "edge-service-delegation" if {
 		"delegation.revoke",
         "delegation.recertification.read",
         "delegation.recertification.confirm",
+        "delegation.statutory.propose",
+        "delegation.statutory.read",
 		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
 		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
 		# any handler whose claimed party differs from it, so these carry no more authority than
@@ -122,4 +126,11 @@ allowed_reasons contains "service-delegation-check" if {
 prohibited if {
     input.action == "delegation.recertification.confirm"
     not input.principal.id == "service-account-openbank-edge"
+}
+
+# A statutory proposal carries the complete grant draft and legal roster. No generic operator or
+# shared service identity may read or write it, even through base operator-read-any.
+prohibited if {
+    startswith(input.action, "delegation.statutory.")
+    input.principal.id != "service-account-openbank-edge"
 }

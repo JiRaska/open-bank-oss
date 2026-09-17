@@ -11,7 +11,6 @@ import com.openbank.delegation.application.port.`in`.DelegationRecertificationUs
 import com.openbank.delegation.application.port.`in`.GetDelegationUseCase
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationUseCase
-import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.application.port.`in`.PreviewDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RespondDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
@@ -26,6 +25,7 @@ import com.openbank.delegation.infrastructure.rest.dto.OfferDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
+import com.openbank.delegation.infrastructure.rest.dto.toCommand
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
 import io.quarkus.security.identity.SecurityIdentity
@@ -78,25 +78,7 @@ class DelegationResource(
         @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationPreviewResponse {
         requireNotNull(request) { "request body is required" }
-        previewDelegation.preview(
-            PreviewDelegationCommand(
-                callerPartyId = customerPartyId,
-                actorPartyId = customerActorPartyId,
-                grantorPartyId = request.grantorPartyId,
-                granteePartyId = request.granteePartyId,
-                resourceType = request.resourceType,
-                resourceId = request.resourceId,
-                capabilities = request.capabilities,
-                approvalPolicy = request.approvalPolicy,
-                requiredApprovals = request.requiredApprovals,
-                perTransactionLimit = request.perTransactionLimit?.toDomain(),
-                dailyLimit = request.dailyLimit?.toDomain(),
-                monthlyLimit = request.monthlyLimit?.toDomain(),
-                exposure = request.exposure?.toDomain(),
-                recertificationAudience = request.recertificationAudience,
-                validTo = request.validTo,
-            ),
-        )
+        previewDelegation.preview(request.toCommand(customerPartyId, customerActorPartyId))
         return DelegationPreviewResponse()
     }
 

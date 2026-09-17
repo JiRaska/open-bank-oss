@@ -66,10 +66,10 @@ class StatutoryDelegationOperationSchemaIT {
                     retry.copy(payloadJson = changedPayload, requestHash = sha256(changedPayload)),
                 )
             }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict::class.java)
         assertThatThrownBy {
             onVertxContext { operations.create(retry.copy(policyRevision = proposed.policyRevision + 1)) }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict::class.java)
 
         dataSource.connection.use { connection ->
             connection.prepareStatement(

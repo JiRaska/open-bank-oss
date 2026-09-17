@@ -15,6 +15,8 @@ sealed interface StatutoryOperationCreateOutcome {
     data class Replayed(override val operation: StatutoryDelegationOperation) : StatutoryOperationCreateOutcome
 }
 
+class StatutoryOperationCreateConflict : RuntimeException("request key belongs to different statutory evidence")
+
 interface StatutoryDelegationOperationRepository {
     /** Exact replay returns the existing operation id; changed evidence under one request key fails. */
     suspend fun create(operation: StatutoryDelegationOperation): StatutoryOperationCreateOutcome

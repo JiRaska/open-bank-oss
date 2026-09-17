@@ -5,6 +5,7 @@
 package com.openbank.delegation.infrastructure.rest
 
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
+import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
 import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityException
@@ -27,6 +28,10 @@ import com.openbank.delegation.application.usecase.SpendReservationNotFoundExcep
 import com.openbank.delegation.application.usecase.SpendReservationRefusedException
 import com.openbank.delegation.application.usecase.SpendReservationStateException
 import com.openbank.delegation.application.usecase.SpendReservationStateStreamUnavailableException
+import com.openbank.delegation.application.usecase.StatutoryProposalDenied
+import com.openbank.delegation.application.usecase.StatutoryProposalNotFound
+import com.openbank.delegation.application.usecase.StatutoryProposalStale
+import com.openbank.delegation.application.usecase.StatutoryProposalUnavailable
 import com.openbank.delegation.infrastructure.rest.dto.SpendRefusalResponse
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -36,6 +41,39 @@ private fun errorBody(status: Int, message: String?): Map<String, Any?> = mapOf(
     "status" to status,
     "error" to message,
 )
+
+@Provider
+class StatutoryProposalDeniedMapper : ExceptionMapper<StatutoryProposalDenied> {
+    override fun toResponse(exception: StatutoryProposalDenied): Response = Response.status(Response.Status.FORBIDDEN)
+        .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryProposalUnavailableMapper : ExceptionMapper<StatutoryProposalUnavailable> {
+    override fun toResponse(exception: StatutoryProposalUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryProposalNotFoundMapper : ExceptionMapper<StatutoryProposalNotFound> {
+    override fun toResponse(exception: StatutoryProposalNotFound): Response = Response.status(Response.Status.NOT_FOUND)
+        .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryProposalStaleMapper : ExceptionMapper<StatutoryProposalStale> {
+    override fun toResponse(exception: StatutoryProposalStale): Response = Response.status(Response.Status.CONFLICT)
+        .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryOperationCreateConflictMapper : ExceptionMapper<StatutoryOperationCreateConflict> {
+    override fun toResponse(exception: StatutoryOperationCreateConflict): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
 
 @Provider
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {

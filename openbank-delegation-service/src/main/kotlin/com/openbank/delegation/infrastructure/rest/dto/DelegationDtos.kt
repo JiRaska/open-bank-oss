@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.rest.dto
 
+import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
@@ -73,6 +74,25 @@ data class PreviewDelegationRequest(
     val recertificationAudience: DelegationRecertificationAudience? = null,
     val validTo: OffsetDateTime? = null,
 )
+
+fun PreviewDelegationRequest.toCommand(callerPartyId: UUID?, actorPartyId: UUID?): PreviewDelegationCommand =
+    PreviewDelegationCommand(
+        callerPartyId = callerPartyId,
+        actorPartyId = actorPartyId,
+        grantorPartyId = grantorPartyId,
+        granteePartyId = granteePartyId,
+        resourceType = resourceType,
+        resourceId = resourceId,
+        capabilities = capabilities,
+        approvalPolicy = approvalPolicy,
+        requiredApprovals = requiredApprovals,
+        perTransactionLimit = perTransactionLimit?.toDomain(),
+        dailyLimit = dailyLimit?.toDomain(),
+        monthlyLimit = monthlyLimit?.toDomain(),
+        exposure = exposure?.toDomain(),
+        recertificationAudience = recertificationAudience,
+        validTo = validTo,
+    )
 
 data class DelegationPreviewResponse(val valid: Boolean = true)
 

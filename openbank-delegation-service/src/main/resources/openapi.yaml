@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.19.0
+  version: 1.20.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -14,6 +14,7 @@ tags:
   - name: Delegation portfolios
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
+  - name: Statutory delegation proposals
 paths:
   /api/v1/delegation-portfolios:
     post:
@@ -189,6 +190,58 @@ paths:
         '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
         '422': { description: Eligibility gate, or resource ownership could not be established }
         '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
+  /api/v1/delegations/statutory-operations:
+    post:
+      tags: [Statutory delegation proposals]
+      summary: Propose an immutable company delegation for joint statutory approval
+      description: >-
+        Creates pending evidence only. No grant, event, SCA consumption or product capability is
+        issued. Customer-edge supplies the company profile and authenticated human actor; the
+        service checks the live Party roster and KYB attestation plus ordinary grant constraints.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewDelegationRequest' }
+      responses:
+        '201':
+          description: Pending proposal created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        '200':
+          description: Identical request key and evidence replayed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        '403': { description: Actor lacks a current JOINT mandate or profile mismatch }
+        '409': { description: Request key belongs to different immutable evidence }
+        '503': { description: Current statutory authority cannot be verified }
+  /api/v1/delegations/statutory-operations/{id}:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Read one pending proposal as a currently authorized company representative
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Immutable proposal and legal-rule evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        '403': { description: Actor lacks a current JOINT mandate or profile mismatch }
+        '404': { description: Proposal not found under this company }
+        '409': { description: Proposal expired or its rule changed }
+        '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/recertifications/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -790,6 +843,24 @@ components:
           enum: [PERSONAL, FOP, SME, CORPORATE]
           description: Review-only context; validated as it will be on offer, without SCA.
         validTo: { type: string, format: date-time }
+    StatutoryProposalResponse:
+      type: object
+      required: [id, principalPartyId, initiatorPartyId, requestHash, payload, ruleHash, rule, state, createdAt, expiresAt]
+      description: >-
+        Frozen offer and legal-rule evidence. A PENDING proposal grants no access. The app must
+        display the payload and rule before a representative signs requestHash through SCA.
+      properties:
+        id: { type: string, format: uuid }
+        principalPartyId: { type: string, format: uuid }
+        initiatorPartyId: { type: string, format: uuid }
+        requestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        payload: { type: object }
+        ruleHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        rule: { type: object }
+        state: { type: string, enum: [PENDING, EXECUTED, CANCELLED, EXPIRED] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        grantId: { type: [string, 'null'], format: uuid }
     DelegationPreviewResponse:
       type: object
       required: [valid]

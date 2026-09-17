@@ -190,10 +190,21 @@ class DelegationService(
         // this exact draft is currently offerable; offer repeats every authoritative check.
     }
 
-    private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
+    /** Proposal-only checks after a live JOINT roster lookup; this never mints or consumes authority. */
+    internal suspend fun validateStatutoryProposal(command: DelegationCandidate) {
+        require(command.callerPartyId != null && command.actorPartyId != null) {
+            "statutory proposal requires authenticated customer profile and human actor"
+        }
+        validateCandidate(command, GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, partyType = "COMPANY"))
+    }
+
+    private suspend fun validateCandidate(
+        command: DelegationCandidate,
+        statutoryProposalAuthority: GrantorAuthority? = null,
+    ): CounterpartyNames {
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
-        val grantorAuthority = verifyGrantorAuthority(command)
+        val grantorAuthority = statutoryProposalAuthority ?: verifyGrantorAuthority(command)
         rejectUnenforcedCeilings(command)
         rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
