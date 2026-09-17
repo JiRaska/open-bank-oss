@@ -23,6 +23,7 @@ import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
+import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -94,6 +95,8 @@ class KybResource {
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
 
     @Inject lateinit var ubo: BeneficialOwnershipPort
+
+    @Inject lateinit var cases: BusinessOnboardingCaseRepository
 
     @Inject lateinit var representation: RepresentationAttestationUseCase
 
@@ -213,6 +216,32 @@ class KybResource {
         // analyst has to act on, not an error: 404 here would read as "this company has no owners",
         // which is the one conclusion none of the three sources supports.
         return Response.ok(UboResponse.from(ubo.lookup(parsed))).build()
+    }
+
+    @GET
+    @Path("/cases/{id}/ubo-observations/{observationId}")
+    @RolesAllowed(Roles.KYC, Roles.ADMIN)
+    @Authorize(action = "kyb.ubo.read", resource = "#caseId")
+    @Operation(summary = "Read one historical UBO observation for an authorised KYB investigation")
+    suspend fun uboObservation(
+        @PathParam("id") caseId: UUID,
+        @PathParam("observationId") observationId: UUID,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+    ): Response {
+        requireNotNull(purpose?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_PURPOSE_LENGTH }) {
+            "X-Investigation-Purpose is required and must not exceed $MAX_PURPOSE_LENGTH characters"
+        }
+        val observation = cases.findUboObservation(caseId, observationId) ?: return notFound()
+        return Response.ok(
+            mapOf(
+                "id" to observation.id,
+                "caseId" to observation.caseId,
+                "revision" to observation.revision,
+                "sourceSha256" to observation.sourceSha256,
+                "recordedAt" to observation.recordedAt,
+                "finding" to UboResponse.from(observation.finding),
+            ),
+        ).build()
     }
 
     @POST
@@ -579,6 +608,7 @@ class KybResource {
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        private const val MAX_PURPOSE_LENGTH = 80
         private const val MAX_PAGE = 100
         private const val MIN_REASON = 10
         private const val DEFAULT_LANG = "cs"

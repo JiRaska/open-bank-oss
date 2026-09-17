@@ -72,6 +72,9 @@ interface BusinessOnboardingCaseRepository {
         recordedAt: Instant,
     ): UboObservation
 
+    /** Exact case and observation pair; never resolve a reference across cases. */
+    suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation?
+
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?
     suspend fun findByInvitationToken(token: String): BusinessOnboardingCase?

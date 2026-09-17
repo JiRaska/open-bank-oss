@@ -6,7 +6,8 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: additive — case-scoped historical UBO observation read for authorised staff.
+  version: 1.8.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -204,6 +205,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/ubo-observations/{observationId}:
+    get:
+      tags: [KYB]
+      summary: Historical beneficial-ownership observation for an authorised KYB investigation
+      operationId: getUboObservation
+      description: >-
+        Staff-only; the observation must belong to the exact case in the path. The purpose header
+        is mandatory. The source finding stays in KYB and is never included in the Context topic.
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: observationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Investigation-Purpose
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '200':
+          description: Versioned mapped finding and source hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboObservation' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/kyb/cases/{id}/initiator:
@@ -808,6 +839,16 @@ components:
           allOf: [{ $ref: '#/components/schemas/Attestation' }]
           nullable: true
           description: The confirmation that was superseded, so the reviewer is told what changed.
+    UboObservation:
+      type: object
+      required: [id, caseId, revision, sourceSha256, recordedAt, finding]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 1 }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        recordedAt: { type: string, format: date-time }
+        finding: { $ref: '#/components/schemas/UboFinding' }
     UboFinding:
       type: object
       properties:

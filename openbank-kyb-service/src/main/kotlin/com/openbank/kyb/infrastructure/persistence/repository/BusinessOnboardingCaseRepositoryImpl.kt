@@ -102,6 +102,25 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         }.awaitSuspending()
     }
 
+    override suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "from UboObservationEntity o where o.caseId = :caseId and o.observationId = :observationId",
+                UboObservationEntity::class.java,
+            ).setParameter("caseId", caseId).setParameter("observationId", observationId)
+                .resultList.map { rows -> rows.firstOrNull() }
+        }
+    }.awaitSuspending()?.let { row ->
+        UboObservation(
+            id = row.observationId,
+            caseId = row.caseId,
+            revision = row.revision,
+            finding = KybUboJson.read(row.findingJson),
+            sourceSha256 = row.sourceSha256,
+            recordedAt = row.recordedAt,
+        )
+    }
+
     private fun withEvent(event: KybEvent?): Uni<Void> =
         if (event == null) Uni.createFrom().voidItem() else outbox.persistInTransaction(event.toOutboxMessage())
 

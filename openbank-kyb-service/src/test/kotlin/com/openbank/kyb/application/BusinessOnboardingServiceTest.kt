@@ -133,6 +133,8 @@ class BusinessOnboardingServiceTest {
                 recordedAt,
             ).also(observations::add)
         }
+        override suspend fun findUboObservation(caseId: UUID, observationId: UUID) =
+            observations.firstOrNull { it.caseId == caseId && it.id == observationId }
         override suspend fun findById(id: UUID) = store[id]
         override suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier) =
             store.values.firstOrNull { it.identifier == identifier && !it.status.isTerminal }
