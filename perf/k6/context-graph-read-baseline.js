@@ -47,8 +47,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority or aml");
+  if (!["complaint", "incident", "authority", "aml", "aml-network"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml or aml-network");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -69,6 +69,7 @@ export default function () {
     incident: `/api/v1/context/incidents/${reference}/impact`,
     authority: `/api/v1/context/authorizations/${reference}`,
     aml: `/api/v1/context/aml-cases/${reference}`,
+    "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -108,12 +109,22 @@ export default function () {
       if (lens === "incident") {
         return body.projectionStatus === "AVAILABLE" && Number.isInteger(body.total) && body.total > 0;
       }
-      return typeof body.root === "string" && body.root.length > 0 &&
-        Array.isArray(body.observations) && body.observations.length > 0 && body.observations.length <= 100 &&
-        body.observations.every((item) => typeof item.evidenceRef === "string" &&
-          /^[0-9a-f]{64}$/.test(item.contentHash)) &&
-        typeof body.truncated === "boolean" &&
+      if (lens === "aml-network") {
+        return Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
+          hasEvidence(body.root, 100) && body.related.every((caseHistory) => hasEvidence(caseHistory, 20));
+      }
+      return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
     },
   });
+}
+
+function hasEvidence(history, limit) {
+  return history !== null && typeof history === "object" &&
+    typeof history.root === "string" && history.root.length > 0 &&
+    Array.isArray(history.observations) && history.observations.length > 0 &&
+    history.observations.length <= limit &&
+    history.observations.every((item) => typeof item.evidenceRef === "string" &&
+      /^[0-9a-f]{64}$/.test(item.contentHash)) &&
+    typeof history.truncated === "boolean";
 }
