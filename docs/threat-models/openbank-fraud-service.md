@@ -312,3 +312,14 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   Rollback: disable the new producer, leave the additive case table and outbox rows
   intact for investigation history, then remove its topic grants after pending
   references are resolved. Do not delete case evidence merely to reverse a deployment.
+
+- **2026-09-17** — Source-owned case association read. The new `/cases/{id}/evidence`
+  returns the REVIEW score's account and optional counterparty only after Fraud's
+  role/purpose/policy check and a live Context check for that exact case using the
+  investigator's bearer. Context commits the case-scoped read audit before returning
+  204; a missing token, denied assignment, policy/audit outage or unexpected response
+  yields no source identifiers. The call uses a bounded HTTPS client with a mounted
+  CA and explicit Fraud-to-Context network edge. A service identity cannot replace
+  the investigator's token. Associations are leads, not a finding or payment action.
+  Rollback: disable this detail route and remove the outbound Context edge and trust
+  mount; preserve the source cases and minimal reference feed for audit continuity.

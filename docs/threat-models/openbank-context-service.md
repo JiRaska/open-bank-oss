@@ -140,10 +140,13 @@ revision fails instead of rewriting prior knowledge. PostgreSQL forces bank-scop
 RLS, and the application sets scope and statement timeout within each transaction.
 No read endpoint or inferred customer edge is introduced by this ingestion step.
 
-The remaining disclosure boundary is deliberately closed: a future Fraud lens must
-verify a live, open source case, current investigator assignment, purpose and OPA
-decision, then commit a read audit before returning even a case reference. A case
-pointer is not a finding, identity match or permission to inspect another customer.
+Context now exposes a data-free 204/403/503 access decision for one exact Fraud case
+root. It requires the investigator's current root assignment, FRAUD_INVESTIGATION
+purpose, human-admin policy allow and committed read audit. Fraud passes the human
+bearer to this decision endpoint before its source-owned evidence route returns any
+account or counterparty identifier. Context itself still exposes no Fraud graph lens;
+that lens must verify current source state and independently authorize every related
+case. A case pointer is not a finding, identity match or permission to inspect another customer.
 The source case and outbox remain authoritative if the topic or Context consumer
 lags. A malformed or unauthorized broker record is nacked to the dedicated DLQ.
 

@@ -94,6 +94,8 @@ class FraudInvestigationCaseIT {
             .post("/api/v1/fraud/cases").then().statusCode(403)
         given().header("X-Investigation-Purpose", PURPOSE)
             .get("/api/v1/fraud/cases/${UUID.randomUUID()}").then().statusCode(403)
+        given().header("X-Investigation-Purpose", PURPOSE)
+            .get("/api/v1/fraud/cases/${UUID.randomUUID()}/evidence").then().statusCode(403)
     }
 
     @Test
@@ -113,6 +115,9 @@ class FraudInvestigationCaseIT {
     @TestSecurity(user = "fraud-admin", roles = ["ROLE_ADMIN"])
     fun `missing purpose is rejected before case lookup`() {
         given().get("/api/v1/fraud/cases/${UUID.randomUUID()}").then().statusCode(400)
+        given().get("/api/v1/fraud/cases/${UUID.randomUUID()}/evidence").then().statusCode(400)
+        given().header("X-Investigation-Purpose", PURPOSE)
+            .get("/api/v1/fraud/cases/${UUID.randomUUID()}/evidence").then().statusCode(403)
     }
 
     @Test
@@ -178,7 +183,9 @@ class FraudInvestigationCaseIT {
         connection: java.sql.Connection,
         close: CompletableFuture<io.restassured.response.Response>,
     ) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        // A cold Quarkus/OPA client can delay this request before it reaches PostgreSQL.
+        // Keep the assertion about the lock, but allow its startup path to settle in CI.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
         while (System.nanoTime() < deadline) {
             if (blockedCloseCount(connection) >= 1) return
             if (close.isDone) error("close finished before the row lock with HTTP ${close.get().statusCode}")

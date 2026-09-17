@@ -122,6 +122,8 @@ spec:
             # simply never raises — the fail-open contract by design, but silently so).
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            - name: CONTEXT_SERVICE_URL
+              value: https://context-service.context.svc:8443
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -150,6 +152,10 @@ spec:
               readOnly: true
             - name: msg-override
               mountPath: /mnt/msg-config
+              readOnly: true
+            - name: context-tls-trust
+              mountPath: /mnt/context-tls/ca.crt
+              subPath: ca.crt
               readOnly: true
           resources:
             requests: {cpu: 250m, memory: 310Mi}
@@ -244,6 +250,9 @@ spec:
         - name: msg-override
           configMap:
             name: fraud-service-msg-override
+        - name: context-tls-trust
+          secret:
+            secretName: fraud-context-trust
   strategy:
     canary:
       stableService: fraud-service

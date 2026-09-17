@@ -82,6 +82,10 @@ quarkus:
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
       scope: jakarta.inject.Singleton
+    context-service:
+      url: ${CONTEXT_SERVICE_URL:http://localhost:8149}
+      connect-timeout: 1000
+      read-timeout: 3000
   management:
     enabled: true
     port: 8085
@@ -171,6 +175,18 @@ mp:
         json: false
     oidc:
       enabled: false
+"%prod":
+  quarkus:
+    tls:
+      context-case-access:
+        trust-store:
+          pem:
+            certs: /mnt/context-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      context-service:
+        tls-configuration-name: context-case-access
+
 "%test":
   quarkus:
     management:

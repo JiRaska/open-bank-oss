@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -68,6 +68,29 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Case not found }
+  /api/v1/fraud/cases/{caseId}/evidence:
+    get:
+      tags: [Fraud]
+      operationId: getFraudInvestigationEvidence
+      summary: Read source-owned score associations after live case-scoped Context authorization
+      description: Account and counterparty identifiers are evidence leads, never a fraud finding.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+        - $ref: '#/components/parameters/InvestigationPurpose'
+      responses:
+        '200':
+          description: Source-owned associations for this exact assigned case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudInvestigationEvidence'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role, policy, assignment or current open-case check denied }
+        '404': { description: Case not found after authorization }
+        '503': { description: Context assignment or policy check unavailable }
   /api/v1/fraud/cases/{caseId}/close-without-finding:
     post:
       tags: [Fraud]
@@ -192,6 +215,18 @@ components:
       properties:
         caseId: { type: string, format: uuid }
         scoreId: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, CLOSED_NO_FINDING] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true }
+    FraudInvestigationEvidence:
+      type: object
+      required: [caseId, scoreId, accountId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        counterpartyId: { type: string, format: uuid, nullable: true }
         status: { type: string, enum: [OPEN, CLOSED_NO_FINDING] }
         revision: { type: integer, format: int64, minimum: 1 }
         openedAt: { type: string, format: date-time }
