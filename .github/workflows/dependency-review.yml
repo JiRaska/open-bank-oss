@@ -48,6 +48,9 @@ jobs:
       # Same merge-base resolution as ci.yml's shared diff-base step, and for the same
       # reason: pull_request.base.sha is frozen at PR creation and misclassifies once a
       # competing PR merges first.
+      - name: Test dependency review basis guard
+        run: python3 .github/scripts/tests/test_dependency_review_basis.py
+
       - name: Detect dependency-manifest changes
         id: deps
         env:
@@ -256,8 +259,8 @@ jobs:
           mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
                   --jq '.merge_base_commit.sha' 2>/dev/null || true)"
           if [ -z "${mb}" ]; then
-            echo "::warning title=basis unverified::Could not resolve the merge-base; skipping the basis assertion rather than failing on an API hiccup."
-            exit 0
+            echo "::error title=basis unverified::Could not resolve the merge-base; dependency review has no verified basis."
+            exit 1
           fi
 
           # Checks API, not the Actions "list workflow runs" endpoint — see the header note
@@ -265,26 +268,31 @@ jobs:
           # returns check runs for ONE commit, and a SHA is re-checked at most a handful of
           # times (submission itself, plus any manual re-runs).
           count() {
-            # shellcheck disable=SC2016  # $name is jq's own --arg binding, not a shell var
-            gh api "repos/${GITHUB_REPOSITORY}/commits/$1/check-runs?per_page=100" \
-              --jq --arg name "${SUBMIT_JOB_NAME}" \
-              '[.check_runs[] | select(.name == $name and .conclusion == "success")] | length' \
-              2>/dev/null || echo ""
+            local response
+            # Keep failed API output out of the parser, including a partial page
+            # emitted before a later pagination request failed.
+            response="$(gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/commits/$1/check-runs?per_page=100" 2>/dev/null)" || return 1
+            # --arg belongs to jq, not gh's --jq option. Slurp all API pages so
+            # a successful submission beyond the first 100 checks is still seen.
+            jq -s --arg name "${SUBMIT_JOB_NAME}" '
+              if length > 0 and all(.[]; (.check_runs | type) == "array") then
+                [.[] | .check_runs[] | select(.name == $name and .conclusion == "success")] | length
+              else error("invalid check-run response") end
+            ' <<< "${response}" 2>/dev/null
           }
 
-          # Bounded retry, defense in depth against residual Checks-API propagation lag —
-          # see the header note for why this is expected to be minutes, not the 18-27+ min
-          # observed against the old endpoint. Only retries a genuine zero; an API read
-          # failure (empty string from count()) still exits via the warning path below on
-          # the last attempt, unchanged from before #5066.
+          # Retry missing graphs and API failures within the existing bound.
+          # Exhausted retries fail closed: an unavailable basis is not a verdict.
+
           delays=(0 15 30 60 90)
           for delay in "${delays[@]}"; do
             if [ "${delay}" -gt 0 ]; then
               echo "Basis not yet visible via the Checks API — retrying in ${delay}s (issue #5066)."
               sleep "${delay}"
             fi
-            base_runs="$(count "${mb}")"
-            head_runs="$(count "${HEAD_SHA}")"
+            base_runs="$(count "${mb}")" || base_runs=""
+            head_runs="$(count "${HEAD_SHA}")" || head_runs=""
             if [ -n "${base_runs}" ] && [ -n "${head_runs}" ] \
                && [ "${base_runs}" -gt 0 ] && [ "${head_runs}" -gt 0 ]; then
               break
@@ -292,8 +300,8 @@ jobs:
           done
 
           if [ -z "${base_runs}" ] || [ -z "${head_runs}" ]; then
-            echo "::warning title=basis unverified::Could not query dependency-submission check runs; skipping the assertion."
-            exit 0
+            echo "::error title=basis unverified::Could not verify dependency-submission check runs after bounded retries."
+            exit 1
           fi
 
           echo "merge-base ${mb}: ${base_runs} successful submission check-run(s)"
