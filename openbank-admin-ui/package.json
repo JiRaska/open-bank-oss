@@ -14,7 +14,7 @@
     "generate:catalog-types": "node scripts/generate-product-catalog-v2-types.mjs",
     "type-check": "tsc --noEmit",
     "pretest": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs",
-    "test": "vitest run",
+    "test": "node --test scripts/test-gate-health-run-source.mjs && vitest run",
     "test:contract": "vitest run src/test/*-pact.contract.test.ts",
     "pretest:coverage": "npm run pretest",
     "test:coverage": "vitest run --coverage",

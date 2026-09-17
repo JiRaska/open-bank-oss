@@ -37,6 +37,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
+import { requireTrustedMainRuns, trustedRunQuery } from './gate-health-run-source.mjs'
 
 const args = process.argv.slice(2)
 const getArg = (flag, dflt) => {
@@ -118,10 +119,11 @@ try {
     throw new Error('GITHUB_TOKEN not set')
   }
 
-  const runsResp = await ghJson(
-    `/repos/${REPO}/actions/workflows/ci.yml/runs?status=completed&per_page=${RUNS}`,
-  )
-  const runs = runsResp.workflow_runs || []
+  // This snapshot describes the deployed gate estate, not the latest PR's candidate
+  // gates. The API has returned old pages despite branch/event filters; bind the query
+  // to a time window and validate every run before downloading any of its artifacts.
+  const runsResp = await ghJson(`/repos/${REPO}${trustedRunQuery(now, RUNS)}`)
+  const runs = requireTrustedMainRuns(runsResp, now)
 
   // --- Tier: shard timing/pass-rate, Jobs API only, no artifact download -------------------
   const shardHistory = [] // [{runId, sha, event, createdAt, shards: [{name, conclusion, seconds}]}]
