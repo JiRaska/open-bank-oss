@@ -497,7 +497,9 @@ class ContextApiIT {
         const val ACTOR = "context-investigator"
         const val CASE = "case-context-it"
         const val PURPOSE = "PAYMENT_COMPLAINT"
-        val NOW: Instant = Instant.now()
+
+        // Lifecycle fixtures add seconds per revision; keep every event before the default asOf query.
+        val NOW: Instant = Instant.now().minusSeconds(60)
     }
 }
 
