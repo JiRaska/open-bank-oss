@@ -91,20 +91,42 @@ class StatutoryDelegationOperationRepositoryImpl(
         ruleHash: String,
         after: Instant,
         limit: Int,
+        beforeCreatedAt: Instant?,
+        beforeId: UUID?,
     ): List<StatutoryDelegationOperation> = Panache.withSession {
         Panache.getSession().flatMap { session ->
-            session.createQuery(
-                "from StatutoryDelegationOperationEntity " +
-                    "where principalPartyId = :principal and ruleHash = :ruleHash " +
-                    "and state = :state and expiresAt > :after order by createdAt desc, id desc",
+            require((beforeCreatedAt == null) == (beforeId == null)) { "incomplete statutory inbox cursor" }
+            val cursorPredicate = if (beforeCreatedAt == null) {
+                ""
+            } else {
+                "and (created_at < :beforeCreatedAt or " +
+                    "(created_at = :beforeCreatedAt and operation_id < :beforeId)) "
+            }
+            // Keep PENDING literal so PostgreSQL can reliably use V30's partial index even
+            // after the driver switches from custom to generic prepared-statement plans.
+            val query = session.createNativeQuery(
+                "SELECT * FROM delegation_statutory_operations " +
+                    "WHERE principal_party_id = :principal AND rule_hash = :ruleHash " +
+                    "AND state = 'PENDING' AND expires_at > :after $cursorPredicate" +
+                    "ORDER BY created_at DESC, operation_id DESC",
                 StatutoryDelegationOperationEntity::class.java,
             )
                 .setParameter("principal", principalPartyId)
                 .setParameter("ruleHash", ruleHash)
-                .setParameter("state", StatutoryOperationState.PENDING)
                 .setParameter("after", after)
-                .setMaxResults(limit.coerceIn(1, MAX_PENDING_RESULTS))
-                .resultList
+            if (beforeCreatedAt != null && beforeId != null) {
+                query.setParameter("beforeCreatedAt", beforeCreatedAt).setParameter("beforeId", beforeId)
+            }
+            query.setMaxResults(limit.coerceIn(1, MAX_PENDING_RESULTS + 1)).resultList
+        }
+    }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun decisions(operationId: UUID): List<StatutoryDelegationDecision> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "from StatutoryDelegationDecisionEntity where operationId = :operation order by decidedAt asc, actorPartyId asc",
+                StatutoryDelegationDecisionEntity::class.java,
+            ).setParameter("operation", operationId).resultList
         }
     }.awaitSuspending().map { it.toDomain() }
 

@@ -13,6 +13,8 @@ import com.openbank.delegation.application.port.out.StatutoryRuleResolution
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.delegation.domain.model.StatutoryRepresentative
 import com.openbank.delegation.domain.model.StatutoryRuleMode
@@ -135,6 +137,53 @@ class StatutoryDelegationProposalServiceTest {
         coVerify(exactly = 1) { repository.pending(principal, current.ruleHash, clock.instant(), 50) }
         assertThatThrownBy { runBlocking { service.pending(principal, UUID.randomUUID(), actor) } }
             .isInstanceOf(StatutoryProposalDenied::class.java)
+    }
+
+    @Test
+    fun `paged inbox traverses a stable keyset and rejects a cursor from another rule`(): Unit = runBlocking {
+        val newest = operation()
+        val second = operation().copy(createdAt = clock.instant().minusSeconds(1))
+        val third = operation().copy(createdAt = clock.instant().minusSeconds(2))
+        coEvery { rules.resolve(principal, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
+        coEvery { repository.pending(principal, newest.ruleHash, clock.instant(), 3, null, null) } returns
+            listOf(newest, second, third)
+        coEvery {
+            repository.pending(principal, newest.ruleHash, clock.instant(), 3, second.createdAt, second.id)
+        } returns
+            listOf(third)
+
+        val first = service.page(principal, principal, actor, null, 2)
+        assertThat(first.operations).containsExactly(newest, second)
+        assertThat(first.nextCursor).isNotBlank()
+        val next = service.page(principal, principal, actor, first.nextCursor, 2)
+        assertThat(next.operations).containsExactly(third)
+        assertThat(next.nextCursor).isNull()
+        assertThatThrownBy { runBlocking { service.page(principal, principal, actor, "invalid", 2) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        coEvery { rules.resolve(principal, actor) } returns
+            StatutoryRuleResolution.RosterMatched(rule.copy(revision = 2))
+        assertThatThrownBy { runBlocking { service.page(principal, principal, actor, first.nextCursor, 2) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `decision progress requires current roster and original company scope`(): Unit = runBlocking {
+        val proposal = operation()
+        val rejection = StatutoryDelegationDecision(
+            proposal.id,
+            otherSigner,
+            StatutoryDecisionVerdict.REJECT,
+            null,
+            clock.instant(),
+        )
+        coEvery { repository.find(proposal.id, principal) } returns proposal
+        coEvery { rules.resolve(principal, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
+        coEvery { repository.decisions(proposal.id) } returns listOf(rejection)
+
+        assertThat(service.decisions(proposal.id, principal, principal, actor)).containsExactly(rejection)
+        assertThatThrownBy { runBlocking { service.decisions(proposal.id, principal, UUID.randomUUID(), actor) } }
+            .isInstanceOf(StatutoryProposalDenied::class.java)
+        coVerify(exactly = 1) { repository.decisions(proposal.id) }
     }
 
     @Test

@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.24.0
+  version: 1.25.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -262,6 +262,34 @@ paths:
         '404': { description: Proposal not found under this company }
         '409': { description: Proposal expired or its rule changed }
         '503': { description: Current statutory authority cannot be verified }
+  /api/v1/delegations/statutory-operations/pages:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Page through actionable company proposals with a stable keyset cursor
+      description: >-
+        Returns only PENDING, unexpired proposals under the current legal-rule snapshot.
+        The cursor is bound to that snapshot; a changed rule requires restarting at page one.
+        Old unpaged readers remain compatible. Deploy V30 before enabling this route.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Current page, with null nextCursor after the final page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryProposalPageResponse' }
+        '400': { description: Invalid or obsolete cursor, or limit outside 1–50 }
+        '403': { description: Actor lacks current joint representation }
+        '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/statutory-operations/{id}/approval-intent:
     get:
       tags: [Statutory delegation proposals]
@@ -280,6 +308,25 @@ paths:
         '409': { description: Proposal expired, changed or no longer pending }
         '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/statutory-operations/{id}/decisions:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Read immutable signing progress without exposing device challenge identifiers
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Signer decisions in recorded order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StatutoryDecisionSummaryResponse' }
+        '403': { description: Actor lacks current joint representation }
+        '404': { description: Proposal not found under this company }
+        '409': { description: Pending proposal expired or its rule changed }
+        '503': { description: Current statutory authority cannot be verified }
     post:
       tags: [Statutory delegation proposals]
       summary: Record one immutable company signer's approval or refusal
@@ -951,6 +998,22 @@ components:
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         grantId: { type: [string, 'null'], format: uuid }
+    StatutoryProposalPageResponse:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        nextCursor: { type: [string, 'null'], maxLength: 256 }
+    StatutoryDecisionSummaryResponse:
+      type: object
+      required: [actorPartyId, verdict, decidedAt]
+      description: Signing progress only; SCA session identifiers are not disclosed here.
+      properties:
+        actorPartyId: { type: string, format: uuid }
+        verdict: { type: string, enum: [APPROVE, REJECT] }
+        decidedAt: { type: string, format: date-time }
     StatutoryApprovalIntentResponse:
       type: object
       required: [operationId, purpose, operationHash]

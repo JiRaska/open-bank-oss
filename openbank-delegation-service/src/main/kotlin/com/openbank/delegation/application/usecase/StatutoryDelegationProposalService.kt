@@ -10,6 +10,7 @@ import com.openbank.delegation.application.port.out.StatutoryDelegationOperation
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
@@ -23,6 +24,8 @@ class StatutoryProposalDenied(message: String) : RuntimeException(message)
 class StatutoryProposalUnavailable : RuntimeException("statutory representation cannot be verified now")
 class StatutoryProposalNotFound(id: UUID) : RuntimeException("statutory proposal $id not found")
 class StatutoryProposalStale(id: UUID) : RuntimeException("statutory proposal $id needs a fresh legal rule")
+
+data class StatutoryProposalPage(val operations: List<StatutoryDelegationOperation>, val nextCursor: String?)
 
 /** Creates only inert, immutable proposal evidence; a separate quorum executor may later issue a grant. */
 @ApplicationScoped
@@ -98,6 +101,43 @@ class StatutoryDelegationProposalService(
             .filter { it.ruleSnapshotJson == snapshot }
     }
 
+    suspend fun page(
+        principalPartyId: UUID,
+        callerPartyId: UUID?,
+        actorPartyId: UUID?,
+        cursor: String?,
+        limit: Int?,
+    ): StatutoryProposalPage {
+        val actor = requireActor(principalPartyId, callerPartyId, actorPartyId)
+        val rule = resolve(principalPartyId, actor)
+        val snapshot = evidence.rule(rule)
+        val hash = evidence.hash(snapshot)
+        val pageSize = limit ?: DEFAULT_PAGE_SIZE
+        require(pageSize in 1..MAX_PENDING_RESULTS) { "limit must be between 1 and $MAX_PENDING_RESULTS" }
+        val position = cursor?.let { StatutoryInboxCursor.decode(it, hash) }
+        val fetched = repository.pending(
+            principalPartyId,
+            hash,
+            clock.instant(),
+            pageSize + 1,
+            position?.first,
+            position?.second,
+        )
+        val visible = fetched.take(pageSize).filter { it.ruleSnapshotJson == snapshot }
+        val next = if (fetched.size > pageSize) fetched[pageSize - 1] else null
+        return StatutoryProposalPage(visible, next?.let { StatutoryInboxCursor.encode(hash, it) })
+    }
+
+    suspend fun decisions(
+        id: UUID,
+        principalPartyId: UUID,
+        callerPartyId: UUID?,
+        actorPartyId: UUID?,
+    ): List<StatutoryDelegationDecision> {
+        current(id, principalPartyId, callerPartyId, actorPartyId)
+        return repository.decisions(id)
+    }
+
     internal suspend fun current(
         id: UUID,
         principalPartyId: UUID,
@@ -134,6 +174,7 @@ class StatutoryDelegationProposalService(
     private companion object {
         const val MAX_REQUEST_KEY_LENGTH = 200
         const val MAX_PENDING_RESULTS = 50
+        const val DEFAULT_PAGE_SIZE = 20
         val PROPOSAL_LIFETIME: Duration = Duration.ofHours(24)
     }
 }

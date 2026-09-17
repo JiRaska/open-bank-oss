@@ -38,7 +38,12 @@ interface StatutoryDelegationOperationRepository {
         ruleHash: String,
         after: Instant,
         limit: Int,
+        beforeCreatedAt: Instant? = null,
+        beforeId: UUID? = null,
     ): List<StatutoryDelegationOperation>
+
+    /** Decisions belong to an operation already principal-scoped and roster-checked by the caller. */
+    suspend fun decisions(operationId: UUID): List<StatutoryDelegationDecision>
 
     /** Insert only while PENDING and unexpired; exact same-actor retry returns original evidence. */
     suspend fun recordDecision(decision: StatutoryDelegationDecision): StatutoryDelegationDecision

@@ -27,6 +27,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.time.Instant
@@ -84,6 +85,14 @@ data class StatutoryDecisionResponse(
     }
 }
 
+data class StatutoryProposalPageResponse(val items: List<StatutoryProposalResponse>, val nextCursor: String?)
+
+data class StatutoryDecisionSummaryResponse(
+    val actorPartyId: UUID,
+    val verdict: StatutoryDecisionVerdict,
+    val decidedAt: Instant,
+)
+
 /** Customer-edge-only JOINT proposal surface. PENDING is evidence, never a usable delegation. */
 @Path("/api/v1/delegations/statutory-operations")
 @Produces(MediaType.APPLICATION_JSON)
@@ -106,6 +115,24 @@ class StatutoryDelegationResource(
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         return service.pending(principal, customerPartyId, actorPartyId)
             .map { StatutoryProposalResponse.from(it, mapper) }
+    }
+
+    @GET
+    @Path("/pages")
+    @Authorize(action = "delegation.statutory.read", resource = "#customerPartyId")
+    suspend fun page(
+        @QueryParam("cursor") cursor: String?,
+        @QueryParam("limit") limit: Int?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryProposalPageResponse {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        val result = service.page(principal, customerPartyId, actorPartyId, cursor, limit)
+        return StatutoryProposalPageResponse(
+            result.operations.map { StatutoryProposalResponse.from(it, mapper) },
+            result.nextCursor,
+        )
     }
 
     @POST
@@ -177,6 +204,20 @@ class StatutoryDelegationResource(
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         val actor = requireNotNull(actorPartyId) { "human actor is required" }
         return StatutoryDecisionResponse.from(decisions.decide(id, principal, actor, verdict, body.scaSessionId))
+    }
+
+    @GET
+    @Path("/{id}/decisions")
+    @Authorize(action = "delegation.statutory.read", resource = "#id")
+    suspend fun decisionSummaries(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): List<StatutoryDecisionSummaryResponse> {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        return service.decisions(id, principal, customerPartyId, actorPartyId)
+            .map { StatutoryDecisionSummaryResponse(it.actorPartyId, it.verdict, it.decidedAt) }
     }
 
     @POST

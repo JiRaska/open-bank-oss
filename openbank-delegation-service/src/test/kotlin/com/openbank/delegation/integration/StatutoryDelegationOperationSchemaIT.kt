@@ -130,6 +130,47 @@ class StatutoryDelegationOperationSchemaIT {
     }
 
     @Test
+    fun `keyset inbox and decision progress read only committed evidence`() {
+        val first = operation()
+        val second = first.copy(
+            id = UUID.randomUUID(),
+            requestKey = UUID.randomUUID().toString(),
+            createdAt = first.createdAt.plusSeconds(1),
+            expiresAt = first.expiresAt.plusSeconds(1),
+        )
+        onVertxContext { operations.create(first) }
+        onVertxContext { operations.create(second) }
+        val newest = onVertxContext { operations.pending(first.principalPartyId, first.ruleHash, first.createdAt, 1) }
+        assertThat(newest).containsExactly(second)
+        val older = onVertxContext {
+            operations.pending(first.principalPartyId, first.ruleHash, first.createdAt, 1, second.createdAt, second.id)
+        }
+        assertThat(older).containsExactly(first)
+
+        val decision = StatutoryDelegationDecision(
+            first.id,
+            UUID.randomUUID(),
+            StatutoryDecisionVerdict.REJECT,
+            null,
+            first.createdAt.plusSeconds(2),
+        )
+        onVertxContext { operations.recordDecision(decision) }
+        assertThat(onVertxContext { operations.decisions(first.id) }).containsExactly(decision)
+        assertThat(onVertxContext { operations.decisions(second.id) }).isEmpty()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM pg_indexes WHERE tablename = 'delegation_statutory_operations' " +
+                    "AND indexname = 'idx_delegation_statutory_inbox_page'",
+            ).use { statement ->
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `proposal evidence and SCA decisions cannot be rewritten or reused`() {
         val proposed = operation()
         onVertxContext { operations.create(proposed) }
