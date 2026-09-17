@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.247.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.1...admin-ui-v0.247.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** harden and accelerate operator workflows ([#10138](https://github.com/JiRaska/open-bank-oss/issues/10138)) ([2828fa1](https://github.com/JiRaska/open-bank-oss/commit/2828fa10ffdee9d5bd5d7916951c5b52f4301360))
+
 ## [0.247.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.0...admin-ui-v0.247.1) (2026-09-16)
 
 
