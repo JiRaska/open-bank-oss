@@ -30,7 +30,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       },
     })
     if (!response.ok) return fail([401, 403, 404, 429, 503].includes(response.status) ? response.status : 502)
-    const detail = parseOwnershipDetail(await response.json(), reference, caseId)
+    const detail = parseOwnershipDetail(await response.json(), reference, caseId, result.history)
     return NextResponse.json(detail, { headers: { 'Cache-Control': 'no-store' } })
   } catch { return fail(502) }
 }

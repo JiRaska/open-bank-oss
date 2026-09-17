@@ -24,6 +24,9 @@ export interface OwnershipDetail {
   sourceSha256: string
   source: string
   fetchedAt: string
+  correctsEarlierObservation: boolean
+  supersedesObservationId: string | null
+  supersedesRevision: number | null
   owners: Array<{ fullName: string; band: string; corporate: boolean; natureOfControl: string[] }>
 }
 
@@ -56,15 +59,26 @@ export function parseOwnershipHistory(value: unknown): OwnershipHistory {
   }
 }
 
-export function parseOwnershipDetail(value: unknown, reference: OwnershipReference, caseId: string): OwnershipDetail {
+export function parseOwnershipDetail(value: unknown, reference: OwnershipReference, caseId: string,
+  history: OwnershipHistory): OwnershipDetail {
   const row = object(value), finding = object(row.finding)
   if (row.caseId !== caseId || row.id !== reference.observationId || row.revision !== reference.revision ||
       row.sourceSha256 !== reference.sourceSha256 || typeof finding.source !== 'string' ||
       !['REGISTER', 'SELF_DECLARATION', 'UNAVAILABLE'].includes(finding.source) ||
       !Array.isArray(finding.owners) || finding.owners.length > 100) throw new Error('Source mismatch')
+  const predecessor = row.supersedesObservationId
+  if (predecessor !== null && predecessor !== undefined &&
+      (typeof predecessor !== 'string' || !KYB_UUID.test(predecessor) || predecessor === reference.observationId)) {
+    throw new Error('Invalid correction lineage')
+  }
+  const priorReference = history.observations.find(item => item.observationId === predecessor)
+  if (priorReference && priorReference.revision >= reference.revision) throw new Error('Invalid correction order')
   return {
     caseId, observationId: reference.observationId, revision: reference.revision,
     sourceSha256: reference.sourceSha256, source: finding.source, fetchedAt: date(finding.fetchedAt),
+    correctsEarlierObservation: typeof predecessor === 'string',
+    supersedesObservationId: priorReference?.observationId ?? null,
+    supersedesRevision: priorReference?.revision ?? null,
     owners: finding.owners.map(value => {
       const owner = object(value)
       if (typeof owner.fullName !== 'string' || owner.fullName.length > 200 ||

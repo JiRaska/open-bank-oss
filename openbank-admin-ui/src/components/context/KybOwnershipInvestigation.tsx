@@ -74,6 +74,13 @@ export function KybOwnershipInvestigation({ initialCaseId = '' }: { initialCaseI
           <rect x="333" y="71" width="240" height="82" rx="13" fill="#132642" stroke="#8d9afa" strokeWidth="2" />
           <text x="349" y="101" fill="#b1bafa" fontSize="14" fontWeight="700">{t('Vybrané pozorování', 'Selected observation')}</text>
           <text x="349" y="127" fill="#eef3ff" fontSize="11">{detail ? `${t('Revize', 'Revision')} ${detail.revision}` : t('Zvolte revizi níže', 'Choose a revision below')}</text>
+          {detail?.correctsEarlierObservation && <g>
+            <path d="M453 184V153" stroke="#f7c86f" strokeWidth="2" strokeDasharray="5 4" />
+            <rect x="333" y="184" width="240" height="43" rx="10" fill="#3c2d1e" stroke="#f7c86f" strokeWidth="1.5" />
+            <text x="349" y="210" fill="#ffe1a3" fontSize="12">{detail.supersedesRevision
+              ? `${t('Opravuje revizi', 'Corrects revision')} ${detail.supersedesRevision}`
+              : t('Opravuje starší pozorování', 'Corrects an earlier observation')}</text>
+          </g>}
           {owners.map((owner, index) => <g key={`${owner.fullName}-${index}`}><rect x="648" y={37 + index * 58} width="245" height="52" rx="10" fill="#0d3a3b" stroke="#48e2c0" strokeWidth="1.5" /><text x="662" y={61 + index * 58} fill="#aef5e4" fontSize="12" fontWeight="600">{owner.fullName.slice(0, 31)}</text><text x="662" y={77 + index * 58} fill="#9cd9d1" fontSize="10">{owner.corporate ? t('Právnická osoba', 'Legal entity') : t('Fyzická osoba', 'Person')} · {owner.band}</text></g>)}
         </svg>
       </div>}
@@ -86,6 +93,9 @@ export function KybOwnershipInvestigation({ initialCaseId = '' }: { initialCaseI
       {detail && detail.owners.length > owners.length && <p role="status">{t('Graf zobrazuje prvních osm vlastníků této revize; detail zůstává úplný.', 'The graph shows the first eight owners in this revision; the evidence detail remains complete.')}</p>}
       {detail && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
         <p>{t('Zdroj', 'Source')}: {detail.source} · {t('Zjištěno', 'Fetched')}: {detail.fetchedAt} · {t('SHA-256 mapovaného nálezu', 'Mapped finding SHA-256')}: {detail.sourceSha256}</p>
+        {detail.correctsEarlierObservation && <p>{detail.supersedesRevision
+          ? `${t('Schválená oprava revize', 'Reviewed correction of revision')} ${detail.supersedesRevision}.`
+          : t('Schválená oprava staršího pozorování, které není v tomto výřezu dostupné.', 'Reviewed correction of an earlier observation outside this visible slice.')}</p>}
         <p>{t('Hash nepotvrzuje původní odpověď registru.', 'The hash does not verify the original register response.')}</p>
         <ol aria-label={t('Vlastníci ve vybrané revizi', 'Owners in the selected revision')} style={{ maxHeight: 280, overflowY: 'auto', paddingLeft: 22 }}>
           {detail.owners.map((owner, index) => <li key={`${owner.fullName}-${index}`} style={{ marginBottom: 5 }}><strong>{owner.fullName}</strong> · {owner.band} · {owner.natureOfControl.join(', ')}</li>)}
