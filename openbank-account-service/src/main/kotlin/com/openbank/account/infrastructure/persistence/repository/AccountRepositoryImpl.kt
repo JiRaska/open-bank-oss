@@ -56,19 +56,30 @@ class AccountRepositoryImpl(
         Panache.withSession { find("accountNumber", iban.value).firstResult() }.awaitSuspending()?.toDomain()
 
     override suspend fun findByPartyId(partyId: UUID, limit: Int, afterId: UUID?): List<Account> = Panache.withSession {
-        val query = if (afterId != null) {
-            find(
-                "partyId = ?1 AND id > ?2 ORDER BY CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END, id",
-                partyId,
-                afterId,
-            )
+        // Keep the account-type-first display order and the existing UUID-only cursor format.
+        // The cursor's type must be read back: id > cursor alone skips lower-UUID SAVINGS rows
+        // after a CURRENT row, even though those rows sort after it (#10260).
+        val typeOrder = "CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END"
+        if (afterId == null) {
+            find("partyId = ?1 ORDER BY $typeOrder, id", partyId).page(0, limit).list()
         } else {
-            find(
-                "partyId = ?1 ORDER BY CASE accountType WHEN 'CURRENT' THEN 0 WHEN 'SAVINGS' THEN 1 ELSE 2 END, id",
-                partyId,
-            )
+            find("partyId = ?1 AND id = ?2", partyId, afterId).firstResult()
+                .flatMap { cursorRow ->
+                    val cursor = requireNotNull(cursorRow) { "Invalid account cursor for party" }
+                    val cursorOrder = when (cursor.accountType) {
+                        "CURRENT" -> 0
+                        "SAVINGS" -> 1
+                        else -> 2
+                    }
+                    find(
+                        "partyId = ?1 AND ($typeOrder > ?2 OR ($typeOrder = ?2 AND id > ?3)) " +
+                            "ORDER BY $typeOrder, id",
+                        partyId,
+                        cursorOrder,
+                        afterId,
+                    ).page(0, limit).list()
+                }
         }
-        query.page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun searchByIban(normalizedFragment: String, limit: Int, afterId: UUID?): List<Account> =
