@@ -72,9 +72,6 @@ interface BusinessOnboardingCaseRepository {
         recordedAt: Instant,
     ): UboObservation
 
-    /** Exact case and observation pair; never resolve a reference across cases. */
-    suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation?
-
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?
     suspend fun findByInvitationToken(token: String): BusinessOnboardingCase?
@@ -83,6 +80,20 @@ interface BusinessOnboardingCaseRepository {
     /** Cases the party initiated OR is a signer on. */
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
+}
+
+interface UboObservationRepository {
+    /** Exact case and observation pair; never resolve a reference across cases. */
+    suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation?
+
+    /** Must commit before the HTTP layer releases the sensitive finding. */
+    suspend fun recordUboObservationRead(
+        caseId: UUID,
+        observationId: UUID,
+        principalId: String,
+        purpose: String,
+        readAt: Instant,
+    )
 }
 
 /**

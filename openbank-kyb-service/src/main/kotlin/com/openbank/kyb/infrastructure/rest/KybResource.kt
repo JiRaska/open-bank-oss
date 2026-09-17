@@ -23,7 +23,7 @@ import com.openbank.kyb.application.port.`in`.SearchRegistryCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
-import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
+import com.openbank.kyb.application.port.out.UboObservationRepository
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -96,7 +96,7 @@ class KybResource {
 
     @Inject lateinit var ubo: BeneficialOwnershipPort
 
-    @Inject lateinit var cases: BusinessOnboardingCaseRepository
+    @Inject lateinit var observations: UboObservationRepository
 
     @Inject lateinit var representation: RepresentationAttestationUseCase
 
@@ -228,10 +228,18 @@ class KybResource {
         @PathParam("observationId") observationId: UUID,
         @HeaderParam("X-Investigation-Purpose") purpose: String?,
     ): Response {
-        requireNotNull(purpose?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_PURPOSE_LENGTH }) {
-            "X-Investigation-Purpose is required and must not exceed $MAX_PURPOSE_LENGTH characters"
-        }
-        val observation = cases.findUboObservation(caseId, observationId) ?: return notFound()
+        val investigationPurpose = purpose?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_PURPOSE_LENGTH }
+            ?: throw IllegalArgumentException(
+                "X-Investigation-Purpose is required and must not exceed $MAX_PURPOSE_LENGTH characters",
+            )
+        val observation = observations.findUboObservation(caseId, observationId) ?: return notFound()
+        observations.recordUboObservationRead(
+            caseId,
+            observationId,
+            identity.principal.name,
+            investigationPurpose,
+            clock.instant(),
+        )
         return Response.ok(
             mapOf(
                 "id" to observation.id,

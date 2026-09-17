@@ -16,6 +16,7 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.security.MessageDigest
@@ -57,6 +58,19 @@ class UboObservationApiIT {
         Given { header("X-Investigation-Purpose", "Ownership review") } When {
             get("/api/v1/kyb/cases/$otherCaseId/ubo-observations/$observationId")
         } Then { statusCode(404) }
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            connection.prepareStatement(
+                "SELECT principal_id, purpose FROM kyb_ubo_observation_reads WHERE observation_id = ?",
+            ).use { statement ->
+                statement.setObject(1, observationId)
+                statement.executeQuery().use { reads ->
+                    assertThat(reads.next()).isTrue()
+                    assertThat(reads.getString("principal_id")).isEqualTo("kyc-reviewer")
+                    assertThat(reads.getString("purpose")).isEqualTo("Ownership review")
+                    assertThat(reads.next()).isFalse()
+                }
+            }
+        }
     }
 
     @Test

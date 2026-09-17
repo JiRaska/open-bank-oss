@@ -178,3 +178,27 @@ class UboObservationEntity {
     @Column(name = "recorded_at", nullable = false)
     lateinit var recordedAt: Instant
 }
+
+/** Append-only evidence that a staff principal read a case-scoped ownership observation. */
+@Entity
+@Table(name = "kyb_ubo_observation_reads")
+class UboObservationReadEntity {
+    @Id
+    @Column(name = "read_id", nullable = false)
+    lateinit var readId: UUID
+
+    @Column(name = "case_id", nullable = false)
+    lateinit var caseId: UUID
+
+    @Column(name = "observation_id", nullable = false)
+    lateinit var observationId: UUID
+
+    @Column(name = "principal_id", nullable = false)
+    lateinit var principalId: String
+
+    @Column(name = "purpose", nullable = false)
+    lateinit var purpose: String
+
+    @Column(name = "read_at", nullable = false)
+    lateinit var readAt: Instant
+}

@@ -7,6 +7,7 @@ package com.openbank.kyb.infrastructure.persistence.repository
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.KybOutboxRepository
 import com.openbank.kyb.application.port.out.RegistryExtractCache
+import com.openbank.kyb.application.port.out.UboObservationRepository
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -18,6 +19,7 @@ import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.kyb.infrastructure.persistence.entity.BusinessOnboardingCaseEntity
 import com.openbank.kyb.infrastructure.persistence.entity.RegistryExtractEntity
 import com.openbank.kyb.infrastructure.persistence.entity.UboObservationEntity
+import com.openbank.kyb.infrastructure.persistence.entity.UboObservationReadEntity
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -35,6 +37,7 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // one query per lookup the use cases need, plus the two mappers
 class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxRepository) :
     BusinessOnboardingCaseRepository,
+    UboObservationRepository,
     PanacheRepository<BusinessOnboardingCaseEntity> {
 
     /** Row + outbox entry in ONE transaction — the event is evidence of the state, so they commit together or not at all. */
@@ -119,6 +122,29 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
             sourceSha256 = row.sourceSha256,
             recordedAt = row.recordedAt,
         )
+    }
+
+    override suspend fun recordUboObservationRead(
+        caseId: UUID,
+        observationId: UUID,
+        principalId: String,
+        purpose: String,
+        readAt: Instant,
+    ) {
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.persist(
+                    UboObservationReadEntity().apply {
+                        readId = Ids.newId()
+                        this.caseId = caseId
+                        this.observationId = observationId
+                        this.principalId = principalId
+                        this.purpose = purpose
+                        this.readAt = readAt
+                    },
+                )
+            }
+        }.awaitSuspending()
     }
 
     private fun withEvent(event: KybEvent?): Uni<Void> =

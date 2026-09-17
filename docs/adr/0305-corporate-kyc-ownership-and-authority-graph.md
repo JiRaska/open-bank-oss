@@ -62,6 +62,13 @@ from KYB's durable observation API under service authorization, never from Kafka
 retention alone. This is an egress and access review gate, not permission to publish
 before the contract, ACLs, threat model and consumer are tested together.
 
+The historical observation read names both the onboarding case and the observation.
+It requires KYC/admin authorization and a bounded investigation purpose; KYB commits
+an actor, purpose, case, observation and timestamp audit row before returning the
+finding. A missing or cross-case observation returns no detail. Assignment validation
+for Context investigations remains a separate gate before Context may resolve a
+reference on an analyst's behalf.
+
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
 current. Indirect ownership calculations show formula, path and source percentages and
