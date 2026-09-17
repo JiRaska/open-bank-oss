@@ -129,14 +129,14 @@ class SanctionsListService(
     // failure here is logged and the list is simply retried on its next due tick.
     suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
-        val enabled = repo.listSanctionsLists().filter { it.enabled }
-        for (list in enabled) {
+        for (list in repo.listSanctionsLists()) {
             try {
-                if (list.isDueForScheduledRefresh(now)) {
+                if (list.enabled && list.isDueForScheduledRefresh(now)) {
                     Log.infof("Scheduled refresh for %s", list.listType)
                     refresh(list.listType)
                 } else {
-                    // Recover committed evidence without waiting for tomorrow's feed.
+                    // A disabled feed can still have committed changes from a previous import.
+                    // Drain its journal without importing or waiting for the feed to be enabled.
                     val type = LIST_TYPES[list.listType] ?: continue
                     publisher.publishPending(list.id, type)
                 }

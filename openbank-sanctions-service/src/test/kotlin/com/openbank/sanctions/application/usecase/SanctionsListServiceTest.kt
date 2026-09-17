@@ -288,6 +288,7 @@ class SanctionsListServiceTest {
         service.scheduledRefresh()
 
         coVerify(exactly = 0) { importer.importList(any(), any()) }
+        coVerify(exactly = 1) { publisher.publishPending(flaggedDisabled.id, SanctionsListType.OFAC_SDN) }
     }
 
     @Test
