@@ -175,7 +175,10 @@ class AssignmentAdministrationService(
             principalId = request.principalId.trim()
             caseId = request.caseId.trim()
             purpose = request.purpose.trim()
-            rootRef = request.rootRef?.let { "delegation:${UUID.fromString(it.removePrefix("delegation:"))}" }
+            rootRef = request.rootRef?.let { root ->
+                val prefix = if (request.purpose == "AML_INVESTIGATION") "aml-case:" else "delegation:"
+                "$prefix${UUID.fromString(root.removePrefix(prefix))}"
+            }
             this.validFrom = validFrom
             validTo = request.validTo
             status = "PENDING"
@@ -276,8 +279,13 @@ class AssignmentAdministrationService(
                 "invalid delegation root"
             }
             UUID.fromString(root.removePrefix("delegation:"))
+        } else if (request.purpose == "AML_INVESTIGATION") {
+            val root = requireNotNull(request.rootRef) { "AML_INVESTIGATION requires an AML case root" }
+            require(root.startsWith("aml-case:") && root.length == AML_CASE_ROOT_LENGTH) { "invalid AML case root" }
+            val id = UUID.fromString(root.removePrefix("aml-case:"))
+            require(request.caseId == id.toString()) { "the investigation case must match the AML source case" }
         } else {
-            require(request.rootRef == null) { "root scope is supported only for AUTHORIZATION_REVIEW" }
+            require(request.rootRef == null) { "root scope is not supported for this purpose" }
         }
         require(
             validFrom >= now.minus(MAX_CLOCK_SKEW) &&
@@ -327,12 +335,14 @@ class AssignmentAdministrationService(
 
     private companion object {
         const val DELEGATION_ROOT_LENGTH = 47
+        const val AML_CASE_ROOT_LENGTH = 45
         const val MAX_QUEUE_SIZE = 200
         const val MAX_PRINCIPAL_LENGTH = 200
         const val MAX_CASE_LENGTH = 200
         const val MAX_VALIDITY_DAYS = 31L
         val MAX_CLOCK_SKEW: Duration = Duration.ofMinutes(5)
-        val ALLOWED_PURPOSES = setOf("PAYMENT_COMPLAINT", "INCIDENT_IMPACT", "AUTHORIZATION_REVIEW")
+        val ALLOWED_PURPOSES =
+            setOf("PAYMENT_COMPLAINT", "INCIDENT_IMPACT", "AUTHORIZATION_REVIEW", "AML_INVESTIGATION")
     }
 }
 

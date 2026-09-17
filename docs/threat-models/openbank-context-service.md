@@ -4,7 +4,7 @@
 - **Status:** Reviewed implementation, staged P0/P1 bounded pilot
 - **Last reviewed:** 2026-09-17
 - **Owner:** context-service CODEOWNERS
-- **Related ADRs:** ADR-0030, ADR-0034, ADR-0303, ADR-0306, ADR-0308, ADR-0309
+- **Related ADRs:** ADR-0030, ADR-0034, ADR-0303, ADR-0304, ADR-0306, ADR-0308, ADR-0309
 
 ## Scope and assets
 
@@ -72,6 +72,31 @@ Queries return at most 100 observations, disclose truncation, and never call sou
 Late arrivals preserve earlier knowledge-cutoff results. Audit/history triggers prohibit normal
 application mutation; governed retention, restriction and erasure workflows remain required before
 expanding to real personal data. This slice introduces neither bulk export nor ownership inference.
+
+## AML source-case evidence boundary
+
+Only `aml.case.created.v1` and `aml.case.status_changed.v1` from the AML transactional
+outbox are admitted. The event ID and type come from broker headers, and the partition
+key must match the body case ID. The append-only projection preserves event time and
+recording time, rejects conflicting event ID replay, and indexes explicit party/account/
+transaction references. Customer references, matched names, free-text reasons and
+analyst identities are not projected. A shared reference is an investigative lead,
+never a finding or automatic adverse decision.
+
+The AML read path requires COMPLIANCE/ADMIN, a maker/checker-approved assignment for the
+exact `aml-case:<uuid>` root, the AML purpose, OPA allowance and durable audit before
+querying the projection. It then reads the current case ID and status directly from the
+owning AML service using service credentials and a bounded, uncached request. A terminal,
+missing, mismatched, malformed or unreachable source cannot release evidence. This check
+prevents Kafka lag and timestamp ties from treating a stale projected OPEN as current
+authority. A live status check still has a time-of-check/time-of-use race if a case closes
+immediately afterward; the response contains source observations, not a synchronous AML
+decision. Source-case updates and investigative assignments remain separate controls.
+
+The new event store also forces bank-scoped RLS and has no general graph traversal or
+cross-case search API. Its event UUIDs and party/account references remain personal
+data: legal retention, restriction and deletion handling must be completed before a
+real-data rollout. The synthetic sandbox exercises do not establish those controls.
 
 ## Invariants
 

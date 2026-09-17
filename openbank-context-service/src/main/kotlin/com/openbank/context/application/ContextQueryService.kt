@@ -44,6 +44,21 @@ class ContextQueryService(
         block,
     )
 
+    internal suspend fun <T> amlCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.aml-case.read",
+        "AML_INVESTIGATION",
+        ContextNamespace.AML,
+        "aml-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
         authorized(
             "context.complaint.read",
@@ -111,7 +126,8 @@ class ContextQueryService(
             decisionMetric(action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        val assigned = if (namespace == ContextNamespace.AUTHORIZATION) {
+        val rootScoped = namespace in setOf(ContextNamespace.AUTHORIZATION, ContextNamespace.AML)
+        val assigned = if (rootScoped) {
             assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
         } else {
             assignments.isAssigned(actor.id, context.caseId, context.purpose, now)
@@ -131,7 +147,7 @@ class ContextQueryService(
                         "caseId" to context.caseId,
                         "purpose" to context.purpose,
                         "assignmentVerified" to true,
-                        "rootScopeVerified" to (namespace == ContextNamespace.AUTHORIZATION),
+                        "rootScopeVerified" to rootScoped,
                         "effectiveAt" to context.asOf.toString(),
                         "knownAt" to context.knownAt?.toString(),
                         "bankScope" to bankScope,

@@ -6,6 +6,39 @@ import rego.v1
 
 bundle := {"version": "v0.0.0-test"}
 
+test_aml_case_read_requires_root_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.aml-case.read",
+		"attributes": {"assignmentVerified": true, "purpose": "AML_INVESTIGATION"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_aml_case_read_allows_assigned_compliance if {
+	decision := rest.allow with input as {
+		"principal": {"id": "analyst-1", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "context.aml-case.read",
+		"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": "AML_INVESTIGATION"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow
+}
+
+test_aml_case_read_denies_operator_and_other_purpose if {
+	every example in [
+		{"roles": ["ROLE_OPERATOR"], "purpose": "AML_INVESTIGATION"},
+		{"roles": ["ROLE_ADMIN"], "purpose": "AUTHORIZATION_REVIEW"},
+	] {
+		not rest.allow with input as {
+			"principal": {"id": "analyst-1", "type": "HUMAN", "roles": example.roles},
+			"action": "context.aml-case.read",
+			"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": example.purpose},
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
 test_authority_history_requires_scoped_assignment_even_for_admin if {
 	not rest.allow with input as {
 		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},

@@ -1,7 +1,7 @@
 ---
 date: 2026-09-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -67,6 +67,37 @@ Acceptance covers cross-case/customer IDOR, hidden-node path leakage, revoked as
 unavailable OPA/audit, timing/count side channels, high-degree nodes, replay, duplicates
 and currency-safe aggregation. Measure task precision/recall and false associations as
 well as latency. Pilot on synthetic data, then a limited investigator group without export.
+
+## Source evidence delivered in the first P2 step
+
+AML case creation and status changes originate from the AML service's transactional outbox.
+The Kafka body carries the case, party, optional account/transaction and observed status;
+`ce-id` and `ce-type` are **headers**, not body fields. The context projector requires those
+headers and a matching idempotency key. It persists a bank-scoped, append-only, event-time
+and recorded-time history with typed indexes for explicit case links. The projector drops
+customer references, matched names, reasons, analyst names and other free text. Duplicate
+event IDs with changed normalized content fail; a late event cannot rewrite an earlier
+knowledge-time view. The consumer has its own group, DLQ and bounded database timeout.
+
+The first read surface is limited to one assigned AML case. Before it returns evidence,
+it checks the current case status with the owning AML service through a bounded,
+uncached service-authenticated call (1.5 s total timeout, 16 in-flight calls per
+context instance, no retry); closed, unknown, overloaded or unavailable status yields no
+evidence. That dependency is configured outside the public repository. Authorization
+also binds the investigator, case, root and AML purpose through the existing assignment,
+OPA and durable audit path. The AML service has case lifecycle events but no monotonic
+revision in their body, so a timestamp alone cannot prove a complete transition
+sequence. Event history presents observations, never a final legal conclusion. No
+cross-case expansion, device-use edge, transaction settlement or inference is delivered.
+
+Fraud's current source emits a temporary fraud-hold change for marketing suppression;
+it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
+signals cannot be reused as an investigative case or an account restriction. A true
+fraud-case source contract, purpose-bound authorization and independent negative tests
+are prerequisites for the Fraud lens.
+
+Cross-case reads, retention/restriction workflow, load evidence and controlled pilot
+remain required. This single-case slice cannot be presented as completion of ADR-0304.
 
 ## Alternatives considered
 

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "fed8324e77412a4e"
+    openbank.tech/policy-checksum: "6c9885b22f3700cb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -600,6 +600,21 @@ data:
 
     prohibited if {
         input.action == "context.authorization.read"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
+        object.get(input.attributes, "purpose", "") != "AML_INVESTIGATION"
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
         count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
     }
 

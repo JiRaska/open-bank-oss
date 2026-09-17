@@ -2,9 +2,32 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.2.0
+  version: 1.3.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/aml-cases/{id}:
+    get:
+      operationId: getAmlCaseEvidence
+      summary: Read source-observed AML case evidence within an approved case root
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Bounded observations after an uncached current-state check with the owning AML service
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmlCaseHistory' }
+        '400': { description: Invalid case, purpose or future timestamp }
+        '403': { description: Role, root assignment, policy or current source case state denied }
+        '503': { description: Authorization or AML case source unavailable }
   /api/v1/context/authorizations/{id}:
     get:
       operationId: getAuthorityHistory
@@ -178,12 +201,46 @@ components:
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required delegation UUID root for AUTHORIZATION_REVIEW; absent for other purposes
+          description: Required delegation UUID root for AUTHORIZATION_REVIEW or aml-case UUID root for AML_INVESTIGATION; absent for other purposes
     DecideAssignment:
       type: object
       required: [approve]
       properties:
         approve: { type: boolean }
+    AmlCaseHistory:
+      type: object
+      required: [root, effectiveAt, knownAt, observations, truncated]
+      properties:
+        root: { type: string, maxLength: 45 }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        observations:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [evidence, recordedAt, evidenceRef, contentHash]
+            properties:
+              recordedAt: { type: string, format: date-time }
+              evidenceRef: { type: string, maxLength: 300 }
+              contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              evidence: { $ref: '#/components/schemas/AmlCaseObservation' }
+    AmlCaseObservation:
+      type: object
+      required: [eventId, caseId, partyId, eventType, status, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        accountId: { type: [string, "null"], format: uuid }
+        transactionId: { type: [string, "null"], format: uuid }
+        eventType: { type: string, enum: [aml.case.created.v1, aml.case.status_changed.v1] }
+        status: { type: string, enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED] }
+        previousStatus: { type: [string, "null"], enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED, null] }
+        riskLevel: { type: [string, "null"], pattern: '^(LOW|MEDIUM|HIGH|CRITICAL)$' }
+        screeningType: { type: [string, "null"], enum: [CUSTOMER_ONBOARDING, TRANSACTION_MONITORING, PERIODIC_REVIEW, MANUAL_INVESTIGATION, null] }
+        occurredAt: { type: string, format: date-time }
     AuthorityHistory:
       type: object
       required: [root, effectiveAt, knownAt, observations, truncated, actionAuthorization]

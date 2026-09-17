@@ -8,6 +8,7 @@ vi.mock('@/auth', () => ({ auth: vi.fn() }))
 vi.mock('@/lib/context/server', () => ({ contextServiceUrl: vi.fn() }))
 import { auth } from '@/auth'
 import { contextServiceUrl } from '@/lib/context/server'
+import { GET as getAml } from '@/app/api/context/aml-cases/[id]/route'
 import { GET as getAuthority } from '@/app/api/context/authorizations/[id]/route'
 import { GET } from '@/app/api/context/incidents/[reference]/impact/route'
 
@@ -118,6 +119,44 @@ describe('Admin UI incident impact consumer contract', () => {
         })
         expect(response.status).toBe(403)
         expect(await response.json()).toEqual({ error: 'context_unavailable' })
+      })
+  })
+
+  it('preserves minimized authorized AML source evidence through the real BFF', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'pact-operator', roles: ['ROLE_COMPLIANCE'] } } as never)
+    const id = '66666666-6666-4666-8666-666666666666'
+    const eventId = '77777777-7777-4777-8777-777777777777'
+    const instant = '2026-03-01T00:00:00Z'
+    const history = {
+      root: `aml-case:${id}`, effectiveAt: instant, knownAt: instant, truncated: false,
+      observations: [{
+        evidence: {
+          eventId, caseId: id, partyId: '88888888-8888-4888-8888-888888888888',
+          accountId: null, transactionId: null, eventType: 'aml.case.created.v1',
+          status: 'OPEN', previousStatus: null, riskLevel: 'LOW', screeningType: 'MANUAL_INVESTIGATION',
+          occurredAt: '2026-02-01T00:00:00Z',
+        },
+        recordedAt: '2026-02-02T00:00:00Z', evidenceRef: `aml-case:${id}:${eventId}`, contentHash: 'a'.repeat(64),
+      }],
+    }
+    await createPact().given('an assigned AML case has open source evidence')
+      .uponReceiving('read minimized AML case evidence under its approved case scope')
+      .withRequest({
+        method: 'GET', path: `/api/v1/context/aml-cases/${id}`,
+        query: { effectiveAt: instant, knownAt: instant },
+        headers: { Authorization: 'Bearer pact-operator', Accept: 'application/json',
+          'X-Investigation-Case-Id': id, 'X-Investigation-Purpose': 'AML_INVESTIGATION' },
+      }).willRespondWith({
+        status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: history,
+      })
+      .executeTest(async server => {
+        vi.mocked(contextServiceUrl).mockImplementation(route => `${server.url}${route}`)
+        const response = await getAml(new NextRequest(`http://localhost/api/context/aml-cases/${id}?effectiveAt=${instant}&knownAt=${instant}`), {
+          params: Promise.resolve({ id }),
+        })
+        expect(response.status).toBe(200)
+        expect(response.headers.get('Cache-Control')).toBe('no-store')
+        expect(await response.json()).toEqual(history)
       })
   })
 

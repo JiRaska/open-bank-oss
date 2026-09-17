@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { contextHeaders, contextServiceUrl } from '@/lib/context/server'
 
 export const dynamic = 'force-dynamic'
@@ -44,7 +45,11 @@ function validProposal(value: unknown): value is Record<string, unknown> {
   const text = (key: string, max: number) => typeof body[key] === 'string' && (body[key] as string).trim().length > 0 && (body[key] as string).length <= max
   const rootValid = body.purpose === 'AUTHORIZATION_REVIEW'
     ? typeof body.rootRef === 'string' && /^delegation:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.rootRef)
-    : body.rootRef == null
+    : body.purpose === 'AML_INVESTIGATION'
+      ? typeof body.caseId === 'string' && AUTHORITY_UUID.test(body.caseId) &&
+        typeof body.rootRef === 'string' && body.rootRef.startsWith('aml-case:') &&
+        AUTHORITY_UUID.test(body.rootRef.slice(9)) && body.rootRef.slice(9).toLowerCase() === body.caseId.toLowerCase()
+      : body.rootRef == null
   return rootValid && text('principalId', 200) && text('caseId', 200) && text('purpose', 80) &&
     typeof body.validTo === 'string' && Number.isFinite(Date.parse(body.validTo))
 }

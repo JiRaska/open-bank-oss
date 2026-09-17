@@ -7,10 +7,14 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.context.infrastructure.AmlCaseSourceStatus
 import com.openbank.context.integration.ContextMessagingTestResource
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -37,6 +41,12 @@ class ContextPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun target(context: PactVerificationContext) {
+        QuarkusMock.installMockForType(
+            mockk<AmlCaseSourceStatus> {
+                coEvery { isOpen(any()) } returns true
+            },
+            AmlCaseSourceStatus::class.java,
+        )
         context.target = HttpTestTarget("localhost", port.toInt())
     }
 
@@ -57,6 +67,9 @@ class ContextPactBrokerProviderVerificationTest {
 
     @State("authority history is unauthorized for another root")
     fun unauthorizedAuthorityRoot() = AuthorityHistoryPactFixtures().seed()
+
+    @State("an assigned AML case has open source evidence")
+    fun amlEvidence() = AmlCasePactFixtures().seed()
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)

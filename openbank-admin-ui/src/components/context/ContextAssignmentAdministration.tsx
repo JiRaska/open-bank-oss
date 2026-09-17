@@ -5,6 +5,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { KeyRound } from 'lucide-react'
+import { AUTHORITY_UUID } from '@/lib/context/authorityHistory'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 type Proposal = { id: string; principalId: string; caseId: string; purpose: string; validTo: string; makerId: string; rootRef?: string | null }
@@ -50,10 +51,12 @@ export function ContextAssignmentAdministration() {
   async function propose(event: FormEvent) {
     event.preventDefault(); setMessage(null); setBusy('propose')
     try {
+      if (purpose === 'AML_INVESTIGATION' && !AUTHORITY_UUID.test(caseId.trim())) throw new Error('Invalid AML case UUID')
+      const proposedCaseId = purpose === 'AML_INVESTIGATION' ? caseId.trim().toLowerCase() : caseId.trim()
       const validTo = new Date(Date.now() + Math.min(Math.max(hours, 1), 24 * 31) * 3_600_000).toISOString()
       const response = await fetch('/api/context/assignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ principalId: principalId.trim(), caseId: caseId.trim(), purpose, validTo, ...(purpose === 'AUTHORIZATION_REVIEW' ? { rootRef: rootRef.trim() } : {}) }),
+        body: JSON.stringify({ principalId: principalId.trim(), caseId: proposedCaseId, purpose, validTo, ...(purpose === 'AUTHORIZATION_REVIEW' ? { rootRef: rootRef.trim() } : purpose === 'AML_INVESTIGATION' ? { rootRef: `aml-case:${proposedCaseId}` } : {}) }),
       })
       if (!response.ok) throw new Error('proposal rejected')
       setPrincipalId(''); setCaseId(''); setMessage(t('Návrh čeká na nezávislé schválení.', 'The proposal awaits independent approval.')); await load()
@@ -89,9 +92,10 @@ export function ContextAssignmentAdministration() {
     <form onSubmit={propose} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 8 }}>
       <input required className="input" value={principalId} onChange={e => setPrincipalId(e.target.value)} placeholder={t('Uživatel', 'Principal')} aria-label={t('Uživatel', 'Principal')} />
       <input required className="input" value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
-      <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option><option>AUTHORIZATION_REVIEW</option></select>
+      <select className="input" value={purpose} onChange={e => setPurpose(e.target.value)} aria-label={t('Účel', 'Purpose')}><option>PAYMENT_COMPLAINT</option><option>INCIDENT_IMPACT</option><option>AUTHORIZATION_REVIEW</option><option>AML_INVESTIGATION</option></select>
       <input className="input" type="number" min={1} max={744} value={hours} onChange={e => setHours(Number(e.target.value))} aria-label={t('Platnost v hodinách', 'Validity in hours')} />
       {purpose === 'AUTHORIZATION_REVIEW' && <input className="input" required value={rootRef} onChange={e => setRootRef(e.target.value)} aria-label={t('Schvalovaný objekt', 'Approved root')} placeholder="delegation:UUID" />}
+      {purpose === 'AML_INVESTIGATION' && <input className="input" readOnly value={caseId.trim() ? `aml-case:${caseId.trim().toLowerCase()}` : ''} aria-label={t('Schvalovaný objekt AML', 'Approved AML root')} placeholder="aml-case:UUID" />}
       <button className="btn btn-primary" disabled={busy !== null} aria-busy={busy === 'propose'}>{busy === 'propose' ? t('Ukládám…', 'Saving…') : t('Navrhnout', 'Propose')}</button>
     </form>
     {message && <p role="status">{message}</p>}
