@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.28.1...ledger-service-v1.29.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [1.28.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.28.0...ledger-service-v1.28.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ledger:** guard ledger_outbox created_at plausibility at INSERT ([#9288](https://github.com/JiRaska/open-bank-oss/issues/9288)) ([f443342](https://github.com/JiRaska/open-bank-oss/commit/f443342b3a4b44614158631f65363d7e4ce9e7b9))
+
 ## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.1...ledger-service-v1.28.0) (2026-09-08)
 
 

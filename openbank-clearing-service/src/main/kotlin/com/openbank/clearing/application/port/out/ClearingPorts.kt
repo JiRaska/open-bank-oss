@@ -119,5 +119,8 @@ interface ClearingEventPublisher {
      */
     fun netSettlementPostMessage(batch: ClearingBatch): OutboxMessage
 
+    /** Ready-made item acknowledgement; the settlement transaction owns persistence. */
+    fun itemClearedMessage(item: ClearingItem): OutboxMessage
+
     fun publishItemCleared(item: ClearingItem): Uni<Void>
 }

@@ -214,6 +214,11 @@ openbank-admin-ui/test-results.json
 # admin-ui image at build time (scripts/collect-quality-report.mjs, ADR-0063).
 # Derived data — never committed; regenerated per build.
 openbank-admin-ui/quality-report.json
+
+# Card capability registry baked into the admin-ui image at build time
+# (scripts/generate-card-capabilities.mjs, ADR-0283 phase 3). Derived from
+# openbank-libs/governance/card-capabilities.yaml — edit the registry, never this.
+openbank-admin-ui/card-capabilities.json
 openbank-admin-ui/test-intelligence.json
 openbank-admin-ui/perf-artifacts/
 openbank-admin-ui/test-intelligence-history/

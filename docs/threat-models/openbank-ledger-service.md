@@ -456,3 +456,8 @@ set) apply equally to the new `ledger.approval.decide` action.
   was harness-environment-only (no fx-service in the single-service lane); loud failure on a down
   ČNB rate dependency stays by design. Risk class = **availability**. Rollback: revert the guard.
 
+- **2026-09-13** — `JournalPosted` adds the constant `sourceService=ledger-service` to its existing
+  transactional-outbox payload. The field lets a shared-topic consumer reject forged or misrouted
+  bodies before projecting the journal reference as complaint evidence. It adds no journal lines,
+  amount, account, actor or description and does not change ledger posting. Risk class = provenance
+  integrity with low additional disclosure. Rollback is wire-compatible because the field is additive.

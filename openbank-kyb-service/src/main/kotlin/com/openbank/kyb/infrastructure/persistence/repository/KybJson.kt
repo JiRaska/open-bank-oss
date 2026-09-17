@@ -10,8 +10,11 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.kyb.domain.model.AgreementRecord
+import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.Signer
 import java.time.Instant
@@ -58,6 +61,8 @@ internal object KybJson {
         val body: String?,
         val role: String?,
         val since: LocalDate?,
+        // Defaulted so every extract stored before this field existed still reads back.
+        val address: AddressDoc? = null,
     )
 
     fun write(extract: RegistryExtract): String = mapper.writeValueAsString(
@@ -72,7 +77,14 @@ internal object KybJson {
             incorporatedOn = extract.incorporatedOn,
             taxId = extract.taxId,
             representatives = extract.representatives.map {
-                RepresentativeDoc(it.fullName, it.dateOfBirth, it.body, it.role, it.since)
+                RepresentativeDoc(
+                    it.fullName,
+                    it.dateOfBirth,
+                    it.body,
+                    it.role,
+                    it.since,
+                    it.address?.let { a -> AddressDoc(a.line1, a.city, a.postalCode, a.countryCode) },
+                )
             },
             ruleMode = extract.representationRule.mode.name,
             ruleRequired = extract.representationRule.requiredSigners,
@@ -99,7 +111,16 @@ internal object KybJson {
             incorporatedOn = d.incorporatedOn,
             taxId = d.taxId,
             representatives = d.representatives.map {
-                com.openbank.kyb.domain.model.Representative(it.fullName, it.dateOfBirth, it.body, it.role, it.since)
+                com.openbank.kyb.domain.model.Representative(
+                    it.fullName,
+                    it.dateOfBirth,
+                    it.body,
+                    it.role,
+                    it.since,
+                    it.address?.let { a ->
+                        com.openbank.kyb.domain.model.RegisteredAddress(a.line1, a.city, a.postalCode, a.countryCode)
+                    },
+                )
             },
             representationRule = com.openbank.kyb.domain.model.RepresentationRule(
                 com.openbank.kyb.domain.model.RepresentationMode.valueOf(d.ruleMode),
@@ -121,4 +142,17 @@ internal object KybJson {
     fun writeSigners(signers: List<Signer>): String = mapper.writeValueAsString(signers)
 
     fun readSigners(json: String): List<Signer> = mapper.readValue(json)
+
+    /**
+     * Questionnaire, declarations and agreement are stored as their domain shape, like the signer
+     * list. Every field added later carries a default, so an older document still reads back;
+     * unknown properties are ignored so a rolled-back release reads a newer one.
+     */
+    fun write(value: Any): String = mapper.writeValueAsString(value)
+
+    fun readQuestionnaire(json: String): Questionnaire = mapper.readValue(json)
+
+    fun readDeclarations(json: String): Declarations = mapper.readValue(json)
+
+    fun readAgreement(json: String): AgreementRecord = mapper.readValue(json)
 }

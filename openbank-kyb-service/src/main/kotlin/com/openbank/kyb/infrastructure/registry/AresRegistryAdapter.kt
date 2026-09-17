@@ -176,6 +176,23 @@ class AresRegistryAdapter : RegistryAdapter {
         else -> EntityStatus.ACTIVE
     }
 
+    /**
+     * A statutory member's own address as ARES VR lists it (`fyzickaOsoba.adresa`). The seat of the
+     * company is [addressOf]; this is the PERSON's, and it is what the initiator's verified address is
+     * compared with. The published fixtures omit it, the live register does not.
+     */
+    /** Visible for tests. */
+    internal fun personAddress(person: JsonNode): RegisteredAddress? {
+        val a = person.path("adresa")
+        if (a.isMissingNode || a.isNull) return null
+        return RegisteredAddress(
+            line1 = a.text("textovaAdresa") ?: a.text("nazevUlice"),
+            city = a.text("nazevObce"),
+            postalCode = a.text("psc") ?: a.text("pscTxt"),
+            countryCode = a.text("kodStatu") ?: "CZ",
+        )
+    }
+
     private fun addressOf(subject: JsonNode): RegisteredAddress? {
         val seat = subject.path("sidlo")
         if (seat.isMissingNode || seat.isNull) return null
@@ -251,6 +268,7 @@ class AresRegistryAdapter : RegistryAdapter {
                         member.path(
                             "clenstvi",
                         ).path("clenstvi").date("vznikClenstvi") ?: member.date("datumZapisu"),
+                        address = personAddress(person),
                     )
                 }
         }

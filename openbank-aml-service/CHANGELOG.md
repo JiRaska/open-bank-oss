@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.3...aml-service-v0.11.0) (2026-09-17)
+
+
+### Features
+
+* **aml:** screen business parties at onboarding ([#10168](https://github.com/JiRaska/open-bank-oss/issues/10168)) ([f1f5ccd](https://github.com/JiRaska/open-bank-oss/commit/f1f5ccde42efde990857627985e2cf6ade216a58))
+
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.2...aml-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **aml:** guard aml_outbox created_at plausibility at INSERT ([#9299](https://github.com/JiRaska/open-bank-oss/issues/9299)) ([792e3e4](https://github.com/JiRaska/open-bank-oss/commit/792e3e46f96043afadf149920ae72af28b685386))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.1...aml-service-v0.10.2) (2026-09-08)
 
 

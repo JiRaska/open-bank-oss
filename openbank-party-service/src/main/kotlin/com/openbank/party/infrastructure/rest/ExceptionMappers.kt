@@ -13,6 +13,7 @@ import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
 import com.openbank.party.application.usecase.PartyNotFoundException
+import com.openbank.party.domain.model.AmlProfileNotApplicableException
 import io.quarkus.security.AuthenticationFailedException
 import io.quarkus.security.ForbiddenException
 import io.quarkus.security.UnauthorizedException
@@ -211,6 +212,15 @@ class QuarkusForbiddenExceptionMapper : ExceptionMapper<ForbiddenException> {
 class PartyMandateRejectedMapper : ExceptionMapper<PartyMandateRejectedException> {
     override fun toResponse(e: PartyMandateRejectedException): Response = Response.status(UNPROCESSABLE)
         .entity(mapOf("error" to "MANDATE_REJECTED", "message" to e.message))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+/** A personal AML profile was declared for a legal entity or a closed/merged party. 422 — well-formed, not applicable. */
+@Provider
+class AmlProfileNotApplicableMapper : ExceptionMapper<AmlProfileNotApplicableException> {
+    override fun toResponse(e: AmlProfileNotApplicableException): Response = Response.status(UNPROCESSABLE)
+        .entity(mapOf("error" to "AML_PROFILE_NOT_APPLICABLE", "message" to e.message))
         .type(MediaType.APPLICATION_JSON)
         .build()
 }

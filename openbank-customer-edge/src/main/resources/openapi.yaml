@@ -13,23 +13,14 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
-  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
-  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
-  # (1.57.0) in the same turn as this edit and confirmed free with
-  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
-  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
-  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
-  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
-  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
-  # takes the next free version (ADR-0048).
-  # 1.61.0 -> 1.62.0 (on main): approval-group snapshot on the delegation draft response.
-  #
-  # 1.62.0 -> 1.63.0 (#9417, this branch): additive — SCA-bound approval groups. This branch held
-  # 1.61.0 and main OVERTOOK it, which `api-contract gate` reads as a bump going backwards. Nothing
-  # open claims 1.63.0. Re-read off live origin/main WITH the open PRs after any rebase — a taken
-  # version is textually identical to a free one, so no merge can catch the collision (ADR-0048).
-  version: 1.63.0
+  # Additive recertification review and evidence routes.
+  # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
+  # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
+  # decisions are always the human signer's.
+  # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
+  # FATCA/CRS self-certification).
+  # 1.69.0 -> 1.70.0 (#9417): additive customer approval-group management.
+  version: 1.70.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1252,6 +1243,59 @@ paths:
           description: Consent does not belong to caller
         '404':
           description: Consent not found
+
+  /me/aml-profile:
+    get:
+      tags: [Profile]
+      summary: The caller's own personal AML profile
+      description: >-
+        AML Act 253/2008 §9 declaration plus the FATCA/CRS self-certification of the HUMAN behind
+        the token. The party id is taken from the token only; X-Acting-For is ignored on this route,
+        so a customer acting for a company still sees their own profile. party-service's status and
+        body are passed through.
+      operationId: getMyAmlProfile
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current profile; declaredAt says when it was last confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '404':
+          description: The customer has not declared an AML profile yet
+    put:
+      tags: [Profile]
+      summary: Declare (or re-confirm) the caller's personal AML profile
+      description: >-
+        Stores a new version (version increments on every change; history is kept). The party id
+        is taken from the token only — a partyId in the body and the X-Acting-For header are
+        ignored. A declaration carrying a risk factor (PEP, US person, cash-intensive, high-risk
+        tax residency, turnover over 500k CZK) is still stored and answers reviewStatus
+        ENHANCED_DUE_DILIGENCE, meaning the account needs a check.
+      operationId: putMyAmlProfile
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmlProfileRequest'
+      responses:
+        '200':
+          description: The stored version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '400':
+          description: >-
+            Body is not a JSON object, or party-service rejected the declaration (the error message
+            names the rule), passed through unchanged
+        '422':
+          description: The caller's party is not a natural person, or is closed
 
   /payees:
     get:
@@ -2619,13 +2663,20 @@ paths:
   /documents:
     get:
       tags: [Documents]
-      summary: List the authenticated customer's documents
+      summary: List the authenticated customer's (or the acted-for entity's) documents
       description: >-
-        partyRef is taken from the JWT, never the query (IDOR). Object-store coordinates
-        (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
+        partyRef is taken from the JWT, never the query (IDOR); with X-Acting-For it is the
+        entity, after party-service confirms an active mandate (403 otherwise). Object-store
+        coordinates (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
       operationId: listDocuments
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: The caller's documents, newest first
@@ -2672,11 +2723,16 @@ paths:
   /documents/{id}/content:
     get:
       tags: [Documents]
-      summary: Stream a document's PDF bytes (owner only)
+      summary: Stream a document's PDF bytes (owner, acted-for entity, or share grantee)
       operationId: getDocumentContent
       security:
         - customerOidc: [accounts:read]
       parameters:
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Business partyId to act for; 403 without an active mandate (ADR-0284 D4).
+          schema: { type: string, format: uuid }
         - name: id
           in: path
           required: true
@@ -2713,8 +2769,10 @@ paths:
       tags: [Documents]
       summary: Record the caller's signing decision (SCA-bound, ADR-0169)
       description: >-
-        partyRef is forced to the JWT; evidenceRef (the SCA challenge id) is verified upstream by
-        document-service against sca-service (ADR-0021).
+        partyRef is forced to the JWT's human party, also under X-Acting-For (a business agreement's
+        signers are natural persons; the header is still validated and a missing mandate is a 403);
+        evidenceRef (the SCA challenge id) is verified upstream by document-service against
+        sca-service (ADR-0021).
       operationId: recordDecision
       security:
         - customerOidc: [accounts:read]
@@ -3432,6 +3490,34 @@ paths:
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granteePartyId, resourceType, resourceId, capabilities, grantScaSessionId]
+              properties:
+                grantorPartyId: {type: string, format: uuid, description: Optional; if present it must match the token party}
+                granteePartyId: {type: string, format: uuid}
+                resourceType: {type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]}
+                resourceId: {type: string, format: uuid}
+                capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+                approvalPolicy: {type: string, default: SOLO}
+                requiredApprovals: {type: integer}
+                perTransactionLimit: {type: object}
+                dailyLimit: {type: object}
+                monthlyLimit: {type: object}
+                exposure: {type: object}
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: >-
+                    A review-only cadence selected by the grantor. It never changes access rights.
+                    FOP is 12 months, SME 6 months and CORPORATE 3 months; company size is not inferred.
+                validTo: {type: string, format: date-time}
+                grantScaSessionId: {type: string, format: uuid}
+                note: {type: string}
       responses:
         '201': {description: Grant offered}
         '400':
@@ -3475,12 +3561,59 @@ paths:
                   type: object
                   deprecated: true
                   description: Non-null is refused with 400 EXPOSURE_UNSUPPORTED; historical metadata is audit-only.
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: Review-only cadence; it never changes access rights.
                 validTo: {type: string, format: date-time}
       responses:
         '200': {description: Draft is currently eligible to proceed to SCA}
         '400': {description: Invalid draft, including non-null exposure (EXPOSURE_UNSUPPORTED)}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
+  /delegations/recertifications:
+    get:
+      tags: [Delegation]
+      summary: List the caller's overdue delegation review tasks
+      description: >-
+        Overdue review never automatically suspends delegated access. The customer can explicitly
+        keep, narrow or revoke each grant from the access-management experience.
+      operationId: listDelegationRecertifications
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Pending review tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DelegationRecertification'}
+        '403': {description: Customer is not authorized for the active profile}
+  /delegations/recertifications/{id}/confirm:
+    post:
+      tags: [Delegation]
+      summary: Confirm that the caller reviewed a current delegation
+      operationId: confirmDelegationRecertification
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200':
+          description: Review recorded; access has not changed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationRecertification'}
+        '404': {description: Task not found}
+        '409': {description: Task already confirmed or the delegation lifecycle changed}
 
   /profiles:
     get:
@@ -3665,6 +3798,7 @@ paths:
                 dateOfBirth: { type: string, format: date, nullable: true }
       responses:
         '200': {description: Case}
+        '422': {description: 'Refused — the verified identity does not match a listed representative (INITIATOR_IDENTITY_MISMATCH)'}
 
   /business/onboarding/{id}/cosigners:
     post:
@@ -3730,6 +3864,152 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': {description: Case}
+
+  /business/onboarding/{id}/questionnaire:
+    put:
+      tags: [Business]
+      summary: Answer the AML (Act 253/2008 §9) and FATCA/CRS questionnaire for the case
+      description: >-
+        Proxied to kyb-service as the authenticated human (never X-Acting-For). kyb-service
+        requires the caller to be the initiator or an invited signer.
+      operationId: putBusinessQuestionnaire
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessQuestionnaire' }
+      responses:
+        '200': {description: Case}
+        '400': {description: Invalid answers}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts the questionnaire}
+
+  /business/onboarding/{id}/questionnaire/prefill:
+    get:
+      tags: [Business]
+      summary: Persons already known for the case and any earlier questionnaire answers
+      operationId: getBusinessQuestionnairePrefill
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Prefill
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessQuestionnairePrefill' }
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/documents/{documentId}/content:
+    get:
+      tags: [Business]
+      summary: Stream a document of this onboarding case (agreement or disclosure) to a case participant
+      description: >-
+        Works before any mandate exists; X-Acting-For is ignored. The case is read from kyb-service
+        as the authenticated human (initiator or invited signer only). The document must carry
+        caseRef equal to the case id, otherwise 404, so the existence of other documents is never revealed.
+      operationId: getBusinessCaseDocumentContent
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403': {description: kyb-service refused the caller for this case}
+        '404': {description: Case not visible to the caller, or the document does not belong to this case}
+
+  /business/onboarding/{id}/declarations:
+    put:
+      tags: [Business]
+      summary: Confirm beneficial owners, PEP status and truthfulness for the case
+      operationId: putBusinessDeclarations
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BusinessDeclarations' }
+      responses:
+        '200': {description: Case}
+        '400': {description: truthful is false, a discrepancy note is missing, or a listed person has no PEP entry}
+        '404': {description: Not involved}
+        '409': {description: Case is not in a state that accepts declarations}
+
+  /business/onboarding/{id}/agreement:
+    post:
+      tags: [Business]
+      summary: Render (or return) the business framework agreement, its disclosures and signing ceremony
+      operationId: ensureBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: lang
+          in: query
+          required: false
+          schema: { type: string, enum: [cs, en] }
+      responses:
+        '200':
+          description: The agreement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessAgreement' }
+        '400': {description: lang is not cs or en}
+        '404': {description: Not involved}
+        '409': {description: Questionnaire or declarations missing, or the agreement is already signed}
+
+  /business/onboarding/{id}/agreement/accept:
+    post:
+      tags: [Business]
+      summary: Accept the disclosures, each bound to code, version and sha256
+      operationId: acceptBusinessAgreement
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisclosureAcceptance' }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+        '409': {description: The accepted set does not match the current disclosures exactly (stale)}
 
   /business/invitations/{token}/claim:
     post:
@@ -3961,6 +4241,273 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /loyalty:
+    get:
+      tags: [Loyalty]
+      summary: The caller's Lístek balance, this year's earnings, next expiry and ledger history
+      description: >-
+        Party-scoped from the token. A projection of loyalty-service's summary: lot-level
+        remainingLeaves, ruleVersion and the party id are not exposed.
+      operationId: getLoyaltySummary
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Summary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltySummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/benefits:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed benefit catalogue (prices in Lístky, never in a currency)
+      operationId: listLoyaltyBenefits
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyBenefit'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/earn-sources:
+    get:
+      tags: [Loyalty]
+      summary: The reviewed earn catalogue
+      description: A listed source is not a claim that anything awards it yet.
+      operationId: listLoyaltyEarnSources
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyEarnSource'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/redemptions:
+    post:
+      tags: [Loyalty]
+      summary: Redeem Lístky for a catalogue benefit
+      description: >-
+        The Idempotency-Key is forwarded unchanged; a retry with the same key answers
+        ALREADY_GRANTED with the original grant and burns nothing. grantStatus GRANTED means the
+        benefit is owed and published for its delivering engine, never that it has been applied.
+      operationId: redeemLoyaltyBenefit
+      security:
+        - customerOidc: [loyalty:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [benefitId]
+              properties:
+                benefitId: {type: string}
+      responses:
+        '200':
+          description: GRANTED or ALREADY_GRANTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyRedemption'}
+        '400': {description: Missing Idempotency-Key or benefitId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown benefit}
+        '409':
+          description: INSUFFICIENT_LEAVES — nothing was burned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LoyaltyInsufficientLeaves'}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /loyalty/grants:
+    get:
+      tags: [Loyalty]
+      summary: The caller's benefit grants, newest first
+      description: >-
+        grantStatus is reported as stored. There is no active/applied state: GRANTED means owed,
+        not delivered.
+      operationId: listLoyaltyGrants
+      security:
+        - customerOidc: [loyalty:read]
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/LoyaltyGrant'}
+        '401': {description: Unauthenticated}
+        '502': {description: Loyalty service unavailable}
+        '503':
+          description: >-
+            LOYALTY_UNAVAILABLE — Lístky are not enabled on this edge (loyalty-service not
+            deployed); body {error, code}. Never answered with a zero balance instead.
+
+  /referrals/program:
+    get:
+      tags: [Referral]
+      summary: The referral programme currently open for invites
+      description: >-
+        The newest PUBLISHED programme whose attribution window has not ended. Maker/checker
+        identities are not exposed.
+      operationId: getOpenReferralProgram
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Open programme
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralProgramSummary'}
+        '401': {description: Unauthenticated}
+        '404': {description: No programme is currently open}
+        '502': {description: Referral service unavailable}
+
+  /referrals/invites:
+    get:
+      tags: [Referral]
+      summary: The caller's own invites, newest first
+      description: >-
+        Never carries the referee's party id or name, nor the invite token. An ISSUED invite whose
+        expiresAt has passed is returned as EXPIRED. createdAt is null when the issue instant was
+        not recorded.
+      operationId: listReferralInvites
+      security:
+        - customerOidc: [referrals:read]
+      responses:
+        '200':
+          description: Invites
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ReferralInviteSummary'}
+        '401': {description: Unauthenticated}
+        '502': {description: Referral service unavailable}
+    post:
+      tags: [Referral]
+      summary: Issue an invite as the caller
+      description: >-
+        The referrer is the token party; a party id in the body is ignored. The token is returned
+        ONCE, here — it is stored only as a hash. A reused Idempotency-Key is therefore a 409
+        IDEMPOTENCY_KEY_REUSED, not a replay: use a fresh key per invite, and after a lost response
+        read GET /referrals/invites instead of retrying.
+      operationId: issueReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [programId]
+              properties:
+                programId: {type: string, format: uuid}
+      responses:
+        '201':
+          description: Invite issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralInviteIssued'}
+        '400': {description: Missing Idempotency-Key or malformed programId}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown programme}
+        '409':
+          description: PROGRAM_UNAVAILABLE or IDEMPOTENCY_KEY_REUSED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '502': {description: Referral service unavailable}
+
+  /referrals/attributions:
+    post:
+      tags: [Referral]
+      summary: Redeem an invite token as the invited customer
+      description: >-
+        The referee is the token party; any party id in the body is ignored. A replay by the same
+        customer answers 200. Attempts are limited per customer per hour (429), counted before the
+        token is looked up, so a miss costs the same as a hit.
+      operationId: attributeReferralInvite
+      security:
+        - customerOidc: [referrals:write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 200}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$'}
+      responses:
+        '200':
+          description: Attributed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [ATTRIBUTED]}
+        '400': {description: Missing Idempotency-Key or malformed token}
+        '401': {description: Unauthenticated}
+        '404': {description: Unknown invite}
+        '409':
+          description: SELF, ALREADY_ATTRIBUTED or REJECTED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
+        '410': {description: Invite has expired}
+        '429': {description: Too many redemption attempts}
+        '502': {description: Referral service unavailable}
+
 components:
   securitySchemes:
     customerOidc:
@@ -3968,6 +4515,312 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    AmlPep:
+      type: object
+      required: [isPep]
+      properties:
+        isPep: {type: boolean}
+        category:
+          type: string
+          nullable: true
+          description: Required when isPep is true; must be empty otherwise.
+          enum: [HEAD_OF_STATE_OR_GOV, MINISTER, MP, JUDGE, CENTRAL_BANK, AMBASSADOR, MILITARY,
+                 STATE_COMPANY_BOARD, INTL_ORG, PARTY_LEADERSHIP, FAMILY_MEMBER, CLOSE_ASSOCIATE]
+        detail: {type: string, nullable: true, maxLength: 500}
+
+    AmlProfileRequest:
+      type: object
+      required: [purpose, incomeSources, occupation, expectedMonthlyTurnover, cashIntensive, pep,
+                 taxResidencies, usPerson, truthful]
+      properties:
+        purpose:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EVERYDAY_BANKING, SALARY, SAVINGS, INVESTMENTS, BUSINESS_SIDE_INCOME, OTHER]
+        purposeNote: {type: string, nullable: true, maxLength: 500, description: Required when purpose includes OTHER}
+        incomeSources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EMPLOYMENT, SELF_EMPLOYMENT, PENSION, STUDENT_SUPPORT, RENTAL, INVESTMENTS, INHERITANCE_GIFT, OTHER]
+        incomeNote: {type: string, nullable: true, maxLength: 500, description: Required when incomeSources includes OTHER}
+        occupation:
+          type: string
+          enum: [EMPLOYED, SELF_EMPLOYED, STUDENT, RETIRED, UNEMPLOYED, OTHER]
+        occupationNote: {type: string, nullable: true, maxLength: 500, description: Required when occupation is OTHER}
+        expectedMonthlyTurnover:
+          type: string
+          description: Monthly turnover band in CZK
+          enum: [UP_TO_30K, UP_TO_100K, UP_TO_500K, OVER_500K]
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: ISO 3166-1 alpha-2 codes, no repeats. A US residency requires usPerson=true.
+          items: {type: string, pattern: '^[A-Za-z]{2}$'}
+        tin:
+          type: object
+          description: >-
+            Taxpayer identification number per NON-CZ residency, keyed by ISO 3166-1 alpha-2 code,
+            e.g. {"SK": "1234567890"}. Keys must be declared taxResidencies and must not include CZ.
+          additionalProperties: {type: string, maxLength: 64}
+        usPerson: {type: boolean, description: FATCA self-certification}
+        truthful: {type: boolean, description: Must be true}
+
+    AmlProfile:
+      type: object
+      required: [partyId, version, declaredAt, purpose, incomeSources, occupation, expectedMonthlyTurnover,
+                 cashIntensive, pep, taxResidencies, tin, usPerson, truthful, riskFactors, eddRequired,
+                 reviewStatus, pepFlag, fatcaStatus, crsStatus]
+      properties:
+        partyId: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        declaredAt: {type: string, format: date-time, description: When this version was confirmed}
+        purpose: {type: array, items: {type: string}}
+        purposeNote: {type: string, nullable: true}
+        incomeSources: {type: array, items: {type: string}}
+        incomeNote: {type: string, nullable: true}
+        occupation: {type: string}
+        occupationNote: {type: string, nullable: true}
+        expectedMonthlyTurnover: {type: string}
+        cashIntensive: {type: boolean}
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies: {type: array, items: {type: string}}
+        tin:
+          type: object
+          additionalProperties: {type: string}
+        usPerson: {type: boolean}
+        truthful: {type: boolean}
+        riskFactors:
+          type: array
+          items:
+            type: string
+            enum: [PEP, US_PERSON, CASH_INTENSIVE, HIGH_RISK_COUNTRY, HIGH_TURNOVER]
+        eddRequired: {type: boolean}
+        reviewStatus:
+          type: string
+          enum: [STANDARD, ENHANCED_DUE_DILIGENCE]
+          description: ENHANCED_DUE_DILIGENCE — tell the customer the account needs a check.
+        pepFlag: {type: boolean}
+        pepCategory: {type: string, nullable: true}
+        fatcaStatus: {type: string, enum: [US_PERSON, NON_US]}
+        crsStatus: {type: string, enum: [REPORTABLE, NON_REPORTABLE]}
+
+    BusinessQuestionnaire:
+      type: object
+      required: [purpose, expectedMonthlyTurnover, sourceOfFunds, cashIntensive, countries, taxResidencies, fatcaStatus, crsStatus]
+      properties:
+        purpose: { type: string, enum: [OPERATING_ACCOUNT, SAVINGS, PAYMENTS_ESHOP, HOLDING, OTHER] }
+        purposeNote: { type: string, nullable: true }
+        expectedMonthlyTurnover: { type: string, enum: [UP_TO_100K, UP_TO_1M, UP_TO_10M, OVER_10M], description: CZK }
+        sourceOfFunds:
+          type: array
+          items: { type: string, enum: [BUSINESS_REVENUE, SHARE_CAPITAL, LOANS, INVESTMENTS, OTHER] }
+        sourceOfFundsNote: { type: string, nullable: true }
+        cashIntensive: { type: boolean }
+        countries:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        taxResidencies:
+          type: array
+          items: { type: string, description: ISO 3166-1 alpha-2 }
+        fatcaStatus: { type: string, enum: [ACTIVE_NFFE, PASSIVE_NFFE, FINANCIAL_INSTITUTION, US_PERSON] }
+        crsStatus: { type: string, enum: [ACTIVE_NFE, PASSIVE_NFE, FINANCIAL_INSTITUTION] }
+        answeredAt: { type: string, format: date-time, readOnly: true }
+        answeredBy: { type: string, format: uuid, readOnly: true }
+    BusinessQuestionnairePrefill:
+      type: object
+      properties:
+        knownPersons:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              partyId: { type: string, format: uuid }
+              pep: { type: boolean, nullable: true }
+        previousQuestionnaire:
+          allOf:
+            - $ref: '#/components/schemas/BusinessQuestionnaire'
+          nullable: true
+    BusinessDeclarations:
+      type: object
+      required: [uboConfirmed, peps, truthful]
+      properties:
+        uboConfirmed: { type: boolean, description: true = the register's beneficial-owner list is correct }
+        uboDiscrepancyNote: { type: string, nullable: true, description: Required when uboConfirmed is false }
+        peps:
+          type: array
+          description: One entry for every listed beneficial owner and representative
+          items:
+            type: object
+            required: [name, isPep]
+            properties:
+              name: { type: string }
+              isPep: { type: boolean }
+              detail: { type: string, nullable: true }
+        truthful: { type: boolean, description: Must be true }
+        declaredAt: { type: string, format: date-time, readOnly: true }
+        declaredBy: { type: string, format: uuid, readOnly: true }
+    BusinessAgreement:
+      type: object
+      properties:
+        caseId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        templateCode: { type: string, example: RAMCOVA_SMLOUVA_PO_CS }
+        templateVersion: { type: string }
+        sha256: { type: string, description: Hash of the PDF the signers sign over }
+        sealedSha256: { type: string, nullable: true }
+        ceremonyId: { type: string, format: uuid }
+        ceremonyStatus: { type: string, enum: [PENDING, PARTIALLY_SIGNED, COMPLETED, DECLINED, EXPIRED] }
+        signers:
+          type: array
+          items:
+            type: object
+            properties:
+              partyRef: { type: string, format: uuid }
+              status: { type: string, enum: [PENDING, SIGNED, DECLINED] }
+              signedAt: { type: string, format: date-time, nullable: true }
+        disclosures:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string, example: VOP_CS }
+              version: { type: string }
+              title: { type: string }
+              sha256: { type: string }
+              documentId: { type: string, format: uuid }
+    DisclosureAcceptance:
+      type: object
+      required: [disclosures]
+      properties:
+        disclosures:
+          type: array
+          items:
+            type: object
+            required: [code, version, sha256]
+            properties:
+              code: { type: string }
+              version: { type: string }
+              sha256: { type: string }
+    LoyaltySummary:
+      type: object
+      required: [balance, earnedThisYear, history]
+      properties:
+        balance: {type: integer, description: Unspent, unexpired Lístky}
+        earnedThisYear: {type: integer}
+        nextExpiry: {type: string, format: date-time, nullable: true}
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/LoyaltyLedgerEntry'}
+    LoyaltyLedgerEntry:
+      type: object
+      required: [id, type, leaves, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, enum: [EARN, BURN, EXPIRE, REVERSE]}
+        leaves: {type: integer}
+        earnSourceId: {type: string, nullable: true}
+        benefitId: {type: string, nullable: true}
+        occurredAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    LoyaltyBenefit:
+      type: object
+      required: [id, engine, priceLeaves, validityDays, description]
+      properties:
+        id: {type: string}
+        engine: {type: string, enum: [FEE_WAIVER, INTEREST_BONUS, FX_REFERENCE_RATE]}
+        priceLeaves: {type: integer}
+        validityDays: {type: integer}
+        description: {type: string}
+    LoyaltyEarnSource:
+      type: object
+      required: [id, leaves, validityDays]
+      properties:
+        id: {type: string}
+        leaves: {type: integer}
+        validityDays: {type: integer}
+    LoyaltyRedemption:
+      type: object
+      required: [outcome, grantId, benefitId, grantStatus]
+      properties:
+        outcome: {type: string, enum: [GRANTED, ALREADY_GRANTED]}
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+    LoyaltyInsufficientLeaves:
+      type: object
+      required: [outcome, requiredLeaves, availableLeaves]
+      properties:
+        outcome: {type: string, enum: [INSUFFICIENT_LEAVES]}
+        requiredLeaves: {type: integer}
+        availableLeaves: {type: integer}
+    LoyaltyGrant:
+      type: object
+      required: [grantId, benefitId, grantStatus]
+      properties:
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus: {type: string, enum: [RESERVED, GRANTED, RELEASED, REVERSED]}
+        grantedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null only for a grant that never reached GRANTED.
+        validUntil: {type: string, format: date-time, nullable: true}
+    ReferralProgramSummary:
+      type: object
+      required: [id, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt]
+      properties:
+        id: {type: string, format: uuid}
+        rewardAmount: {type: string, description: 'Decimal string, e.g. "500"'}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        qualifyingEvent: {type: string}
+        attributionWindowEndsAt: {type: string, format: date-time}
+    ReferralInviteIssued:
+      type: object
+      required: [id, token, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        token: {type: string, description: Shown once; share it with the invitee}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [ISSUED]}
+    ReferralInviteSummary:
+      type: object
+      required: [id, status, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [ISSUED, ATTRIBUTED, EXPIRED, REJECTED]}
+        createdAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time}
+        attributedAt: {type: string, format: date-time, nullable: true}
+        reward:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/ReferralRewardSummary'}]
+    ReferralRewardSummary:
+      type: object
+      required: [status, amount, currency]
+      properties:
+        status: {type: string, enum: [QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVERSED]}
+        amount: {type: string, description: Decimal string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        requestedAt: {type: string, format: date-time, nullable: true}
+        rewardedAt: {type: string, format: date-time, nullable: true}
+    ReferralConflict:
+      type: object
+      required: [error, reason]
+      properties:
+        error: {type: string}
+        reason:
+          type: string
+          enum: [SELF, ALREADY_ATTRIBUTED, REJECTED, PROGRAM_UNAVAILABLE, IDEMPOTENCY_KEY_REUSED]
     CreateDelegationPortfolio:
       type: object
       required: [name, accountIds]
@@ -3998,6 +4851,21 @@ components:
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
     # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
+
+    # Mirrors delegation-service's customer review evidence. A confirmation records only the
+    # review; no capability, lifecycle status or product authority changes through this schema.
+    DelegationRecertification:
+      type: object
+      required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        delegationId: {type: string, format: uuid}
+        expectedLifecycleRevision: {type: integer, format: int64}
+        audience: {type: string, enum: [PERSONAL, FOP, SME, CORPORATE]}
+        sequence: {type: integer, minimum: 1}
+        dueAt: {type: string, format: date-time}
+        status: {type: string, enum: [PENDING, CONFIRMED]}
+        confirmedAt: {type: string, format: date-time, nullable: true}
 
     # Mirrors account-service's PocketResponse (currency-pocket / multi-currency wallet, ADR-0024).
     Pocket:

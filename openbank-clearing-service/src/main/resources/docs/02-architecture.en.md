@@ -113,7 +113,7 @@ sequenceDiagram
 
 **Resilience:** `publishWithResilience` is wrapped with `@Bulkhead(1)`, `@CircuitBreaker(threshold 10, ratio 0.5, delay 5s)`, `@Retry(2, delay 200, jitter 100)`, `@Timeout(3000)`. The scheduler swallows exceptions so it never crashes; failed rows are marked FAILED for retry. Outbox status lifecycle: `PENDING → SENT | FAILED`.
 
-> **Note (current state):** `ClearingEventPublisherImpl.publishBatchSettled` and `publishItemCleared` are NOT stubs — each writes an outbox row via `Panache.withTransaction { outboxRepo.persistInTransaction(...) }` (lines 41 and 85). The production path is the transactional outbox drained by `ClearingOutboxDispatcher` to `clearing-events-out`. Note that `publishBatchSettled` is no longer on the settle path at all — `settleWithEvent` writes the outbox row inside the batch's own transaction — and `publishItemCleared` has no production caller, so its self-opened transaction is a latent trap rather than a live defect.
+> **Note (current state):** `ClearingEventPublisherImpl.publishBatchSettled` and `publishItemCleared` are compatibility entry points that each open their own transaction. The production settlement path does not call either method: `settleWithEvents` builds the batch, net-settlement and per-item acknowledgement messages and commits every outbox row inside the same transaction as the batch and item transitions. `ClearingOutboxDispatcher` then drains those rows to `clearing-events-out`.
 
 ## Components from `openbank-libs`
 

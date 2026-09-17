@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.3.0
+  version: 1.4.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -84,6 +84,10 @@ channels:
         $ref: '#/components/messages/SpendConfirmed'
       SpendReleased:
         $ref: '#/components/messages/SpendReleased'
+      DelegationRecertificationDue:
+        $ref: '#/components/messages/DelegationRecertificationDue'
+      DelegationRecertificationConfirmed:
+        $ref: '#/components/messages/DelegationRecertificationConfirmed'
   approvalGroupRevisions:
     address: openbank.delegation.approval-group-revisions
     title: Immutable approval-group revision bootstrap stream
@@ -138,6 +142,8 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/SpendReserved'
       - $ref: '#/channels/delegationEvents/messages/SpendConfirmed'
       - $ref: '#/channels/delegationEvents/messages/SpendReleased'
+      - $ref: '#/channels/delegationEvents/messages/DelegationRecertificationDue'
+      - $ref: '#/channels/delegationEvents/messages/DelegationRecertificationConfirmed'
   publishApprovalGroupRevisions:
     action: send
     title: Publish immutable approval-group revisions
@@ -493,6 +499,26 @@ components:
                 ISO 4217, flat — NOT the domain `CurrencyCode`, which Jackson renders as
                 `{"code":"CZK"}` while every consumer reads this as text. Matches the fleet's
                 event convention (AccountEvents, LedgerEvents).
+    recertificationEnvelope:
+      type: object
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt, recertificationId, grantorPartyId, expectedLifecycleRevision]
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId:
+          type: string
+          format: uuid
+          description: Delegation grant id and Kafka partition key.
+        aggregateType: { type: string, const: DelegationRecertificationCycle }
+        eventType: { type: string, enum: [DelegationRecertificationDue, DelegationRecertificationConfirmed] }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        recertificationId: { type: string, format: uuid }
+        grantorPartyId: { type: string, format: uuid }
+        expectedLifecycleRevision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The active lifecycle revision reviewed; this is evidence, not an authority transition.
 
   messages:
     ApprovalGroupCreated:
@@ -561,6 +587,33 @@ components:
         - $ref: '#/components/messageTraits/outboxHeaders'
       payload:
         $ref: '#/components/schemas/spendSettled'
+
+    DelegationRecertificationDue:
+      name: DelegationRecertificationDue
+      title: An active delegation is due for an explicit customer review
+      summary: >-
+        Reminder-only. The event does not suspend, narrow, reopen or otherwise change authority;
+        notification consumers send it only to the grantor.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/recertificationEnvelope'
+          - type: object
+            required: [audience]
+            properties:
+              audience: { type: string, enum: [PERSONAL, FOP, SME, CORPORATE] }
+
+    DelegationRecertificationConfirmed:
+      name: DelegationRecertificationConfirmed
+      title: The grantor explicitly reviewed the current delegation revision
+      summary: Evidence only. Capability, status and lifecycle revision remain unchanged.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/recertificationEnvelope'
 
     DelegationOffered:
       name: DelegationOffered

@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.0.0
+  version: 2.2.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -145,15 +145,17 @@ channels:
     address: openbank.sepa.payment.events
     description: |
       SEPA credit-transfer lifecycle. Outbox-relayed: the discriminator is the **`ce-type`**
-      header (`sepa.payment.created`, `sepa.payment.status-changed`) and the body carries no type
-      field whatsoever. The two bodies share a `paymentId` prefix and are otherwise
-      distinguishable only by which optional keys happen to be present — do not attempt that;
-      read the header.
+      header (`sepa.payment.created`, `sepa.payment.status-changed`, `sepa.payment.returned`).
+      Created and status-changed bodies carry no type field; the return evidence deliberately
+      duplicates its discriminator as a **body eventType** for audit attribution. All three carry
+      the persisted aggregate `version`. Consumers must still read the header.
     messages:
       SepaPaymentCreated:
         $ref: '#/components/messages/SepaPaymentCreated'
       SepaPaymentStatusChanged:
         $ref: '#/components/messages/SepaPaymentStatusChanged'
+      SepaPaymentReturned:
+        $ref: '#/components/messages/SepaPaymentReturned'
 
   sepa-instant-events:
     address: openbank.sepa.instant.events
@@ -469,7 +471,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/sepa-payment-events'
-    summary: sepa-payment publishes created / status-changed, discriminated by ce-type
+    summary: sepa-payment publishes created, status-changed and return evidence, discriminated by ce-type
 
   publishSctInstEvent:
     action: send
@@ -644,6 +646,15 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SepaPaymentStatusChangedPayload'
+
+    SepaPaymentReturned:
+      name: SepaPaymentReturned
+      description: >-
+        `ce-type` and body `eventType` both = `sepa.payment.returned`; the evidence is committed in
+        the same transaction as the RETURNED aggregate revision.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SepaPaymentReturnedPayload'
 
     SctInstEvent:
       name: SctInstEvent
@@ -1012,6 +1023,10 @@ components:
                 previous revision declared an `entries` array of debit/credit legs; no ledger
                 event has ever carried one.
 
+            sourceService:
+              type: string
+              const: ledger-service
+
     JournalReversedPayload:
       allOf:
         - $ref: '#/components/schemas/DomainEventEnvelope'
@@ -1028,11 +1043,15 @@ components:
 
     SepaPaymentCreatedPayload:
       type: object
-      required: [paymentId, status, occurredAt]
+      required: [paymentId, version, status, occurredAt, sourceService]
       properties:
         paymentId:
           type: string
           format: uuid
+        version:
+          type: integer
+          format: int64
+          minimum: 0
         idempotencyKey:
           type: string
         type:
@@ -1055,18 +1074,31 @@ components:
         occurredAt:
           type: string
           format: date-time
+        sourceService:
+          type: string
+          const: sepa-payment
 
     SepaPaymentStatusChangedPayload:
       type: object
-      required: [paymentId, previousStatus, newStatus, occurredAt]
+      required: [paymentId, version, occurredAt, sourceService]
       properties:
         paymentId:
           type: string
           format: uuid
+        version:
+          type: integer
+          format: int64
+          minimum: 1
         previousStatus:
           type: string
         newStatus:
           type: string
+        status:
+          type: string
+          description: Compatibility state field emitted by the Temporal activity path.
+        reason:
+          type: string
+          description: Compatibility rejection reason emitted by the Temporal activity path.
         rejectReason:
           type: [string, 'null']
         rejectDetail:
@@ -1074,6 +1106,44 @@ components:
         occurredAt:
           type: string
           format: date-time
+        sourceService:
+          type: string
+          const: sepa-payment
+
+    SepaPaymentReturnedPayload:
+      type: object
+      required:
+        [eventType, paymentId, version, originalEndToEndId, actorId, actorType,
+         reversalPerformed, occurredAt, sourceService]
+      properties:
+        eventType:
+          type: string
+          const: sepa.payment.returned
+        paymentId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+        originalEndToEndId:
+          type: string
+        returnReasonCode:
+          type: [string, 'null']
+        actorId:
+          type: string
+        actorType:
+          type: string
+        correlationId:
+          type: [string, 'null']
+        reversalPerformed:
+          type: boolean
+        occurredAt:
+          type: string
+          format: date-time
+        sourceService:
+          type: string
+          const: sepa-payment
 
     SctInstEventPayload:
       # Three keys, and that is the whole message. The publisher builds this map by hand and
@@ -1190,6 +1260,10 @@ components:
               type: string
             instructionType:
               type: string
+            originatingPaymentId:
+              type: [string, 'null']
+              format: uuid
+              description: Rail payment that caused this booking; absent for non-rail postings.
 
     BalanceEventPayload:
       # A plain data class, not a DomainEvent — `eventType` is declared by the class itself, which
@@ -1645,11 +1719,14 @@ components:
 
     ClearingItemClearedPayload:
       type: object
-      required: [eventType, itemId, batchId, occurredAt]
+      required: [eventType, sourceService, itemId, batchId, version, occurredAt]
       properties:
         eventType:
           type: string
           const: openbank.clearing.item.cleared
+        sourceService:
+          type: string
+          const: clearing-service
         itemId:
           type: string
           format: uuid
@@ -1667,6 +1744,10 @@ components:
           type: string
         status:
           type: string
+        version:
+          type: integer
+          format: int64
+          minimum: 1
         occurredAt:
           type: string
           format: date-time

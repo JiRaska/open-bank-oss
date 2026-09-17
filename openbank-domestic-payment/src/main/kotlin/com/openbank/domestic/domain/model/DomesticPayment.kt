@@ -91,11 +91,14 @@ data class DomesticPayment(
     val delegationId: UUID? = null,
     /** Spend reservation bound one-to-one to this payment; null for an owner-initiated payment. */
     val reservationId: UUID? = null,
+    /** Database-backed ordering token for replay-safe downstream lifecycle projections. */
+    val aggregateRevision: Long = 1,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {
             "delegationId and reservationId must either both be present or both be absent"
         }
+        require(aggregateRevision > 0) { "aggregateRevision must be positive" }
     }
 
     fun transitionTo(
@@ -134,6 +137,7 @@ data class DomesticPayment(
                 else -> settledAt
             },
             updatedAt = now,
+            aggregateRevision = aggregateRevision + 1,
         )
     }
 

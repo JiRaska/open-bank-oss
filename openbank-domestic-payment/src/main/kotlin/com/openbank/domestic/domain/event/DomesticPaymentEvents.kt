@@ -26,6 +26,7 @@ data class DomesticPaymentCreatedEvent(
     val priority: DomesticPaymentPriority,
     val endToEndId: String,
     val occurredAt: Instant,
+    val aggregateRevision: Long = 1,
     /**
      * The authenticated caller who submitted this payment, or `null` when there was none (issue
      * #3994). Named `initiatedByPartyId`, not `actorId`: it is the same spelling
@@ -66,6 +67,7 @@ data class DomesticPaymentStatusChangedEvent(
     val rejectReason: String?,
     val rejectDetail: String?,
     val occurredAt: Instant,
+    val aggregateRevision: Long = 1,
     /** Customer who initiated the payment, preserved across asynchronous status transitions. */
     val initiatedByPartyId: UUID? = null,
     /** Delegation grant that authorized the payment; null for an owner-initiated payment. */
@@ -92,6 +94,7 @@ fun DomesticPayment.toCreatedEvent(clock: Clock) = DomesticPaymentCreatedEvent(
     priority = priority,
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),
+    aggregateRevision = aggregateRevision,
     initiatedByPartyId = initiatedByPartyId,
     delegationId = delegationId,
     reservationId = reservationId,
@@ -106,6 +109,7 @@ fun DomesticPayment.toStatusChangedEvent(previous: DomesticPayment, clock: Clock
     rejectReason = rejectReason?.name,
     rejectDetail = rejectDetail,
     occurredAt = Instant.now(clock),
+    aggregateRevision = aggregateRevision,
     initiatedByPartyId = initiatedByPartyId,
     delegationId = delegationId,
     reservationId = reservationId,

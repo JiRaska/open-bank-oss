@@ -41,7 +41,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-kyb-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b9cccedd9be51186"
+        openbank.tech/policy-checksum: "fa9f8f193398bbeb"
       labels:
         app.kubernetes.io/name: kyb-service
         app.kubernetes.io/part-of: kyb
@@ -57,7 +57,7 @@ spec:
         - name: kyb-service
           # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-99ae8caf
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-c60278a0
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8090 — both read off the service's own
@@ -112,9 +112,18 @@ spec:
             # delegated access silently never works.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
               value: "true"
+            # Sandbox demo company (IČO 00000001, "OpenBank Demo s.r.o."). This cluster is the sandbox;
+            # never set this where real customers are onboarded.
+            - name: OPENBANK_KYB_DEMO_ENTITY_ENABLED
+              value: "true"
             # Entity party + representation mandates (ADR-0284 D3).
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
+            # Business framework agreement + its SCA signature ceremony (business-contract spec).
+            # Declared here, not only in application.yaml, so gen-network-policies.py derives the
+            # documents-namespace ingress edge for kyb.
+            - name: DOCUMENT_SERVICE_URL
+              value: http://document-service.documents.svc:8143
             # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
             - name: ARES_BASE_URL
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest

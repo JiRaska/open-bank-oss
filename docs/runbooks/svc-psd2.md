@@ -30,7 +30,7 @@ triaging an incident that starts on `psd2`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8107` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `psd2`); dashboards in Grafana.
 - Logs: `kubectl logs -n psd2 deploy/psd2-service -f`, or Loki
   `{namespace="psd2"}`.
