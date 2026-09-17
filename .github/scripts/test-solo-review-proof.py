@@ -29,6 +29,39 @@ def bundle():
     return dict(schema=1, subject=subject, reports=reports)
 
 
+class PolicyTransitionTest(unittest.TestCase):
+    def check(self, *, subject=None, base_values=None, parents=None):
+        anchor, parent, base = "d" * 40, "e" * 40, "b" * 40
+        def api(path):
+            if "/branches/" in path:
+                return {"commit": {"sha": base}}
+            if "/commits/" in path:
+                return {"parents": [{"sha": parent}] if parents is None else parents}
+            revision = path.split("?ref=")[1]
+            index = next(i for i, item in enumerate(proof.POLICY_INPUTS) if item in path)
+            values = {base: base_values or ["1" * 40, "2" * 40],
+                      parent: ["1" * 40, "2" * 40], anchor: ["3" * 40, "4" * 40]}
+            return {"type": "file", "sha": values[revision][index]}
+        with patch.object(proof, "gh", side_effect=api):
+            return proof.validate_policy_snapshot("example/bank", "main", anchor, subject)
+
+    def test_only_exact_anchored_policy_can_transition_from_its_parent(self):
+        self.assertEqual(self.check(subject="d" * 40), "b" * 40)
+        for subject in (None, "a" * 40):
+            with self.subTest(subject=subject), self.assertRaises(ValueError):
+                self.check(subject=subject)
+
+    def test_mixed_or_drifted_policy_is_not_a_transition(self):
+        for values in (["1" * 40, "4" * 40], ["5" * 40, "2" * 40]):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                self.check(subject="d" * 40, base_values=values)
+
+    def test_ambiguous_parent_is_refused(self):
+        for parents in ([], [{"sha": "e" * 40}, {"sha": "f" * 40}], [{"sha": "bad"}]):
+            with self.subTest(parents=parents), self.assertRaises(ValueError):
+                self.check(subject="d" * 40, parents=parents)
+
+
 class ReportsTest(unittest.TestCase):
     def test_envelope_rejection_preserves_specific_reason(self):
         for raw, reason in (('{"x":1,"x":2}', "duplicate key"),

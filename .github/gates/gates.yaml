@@ -4808,7 +4808,7 @@ gates:
       python3 .github/scripts/check-workflow-gh-token.py
 
   - id: agent-pr-guard
-    name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
+    name: "agent PR guard (protected changes require verified review, enforced)"
     group: lint
     mode: enforced
     rationale: >-
@@ -4854,6 +4854,7 @@ gates:
       bash .github/scripts/check-agent-review-happened.sh --self-test
       python3 .github/scripts/test-solo-review-proof.py
       python3 .github/scripts/test-solo-review-runner.py
+      python3 .github/scripts/test-agent-pr-review-bridge.py
 
   # ADR-0251's other half: WHICH PRs get reviewed. Both of this rule's clauses were wrong in
   # the first draft, and both failed silently toward reviewing LESS than the ADR claimed —

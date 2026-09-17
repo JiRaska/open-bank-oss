@@ -168,19 +168,28 @@ def live_base_sha(repo, base_ref):
     return sha
 
 
-def validate_policy_snapshot(repo, base_ref, anchor):
+def validate_policy_snapshot(repo, base_ref, anchor, subject_head=None):
     """A pinned classifier must not silently lag changes to the base policy."""
     base = live_base_sha(repo, base_ref)
     require(SHA.fullmatch(anchor or ""), "invalid policy snapshot")
-    for path in POLICY_INPUTS:
+    def snapshot(revision):
         identities = []
-        for revision in (base, anchor):
+        for path in POLICY_INPUTS:
             entry = gh(f"repos/{repo}/contents/{path}?ref={revision}")
             require(isinstance(entry, dict) and entry.get("type") == "file" and SHA.fullmatch(entry.get("sha", "")),
                     "missing classification policy file")
             identities.append(entry["sha"])
-        require(identities[0] == identities[1],
-                f"classification policy changed on base: {path}; reviewed re-anchor required")
+        return identities
+    current = snapshot(base)
+    if current != snapshot(anchor):
+        # Bootstrap is limited to reviewing the EXACT owner-anchored policy commit.
+        # Its single parent must carry the entire current policy; mixed snapshots,
+        # unrelated application PRs and subsequent base-policy drift remain refused.
+        require(subject_head == anchor, "classification policy changed on base; reviewed re-anchor required")
+        parents = gh(f"repos/{repo}/commits/{anchor}").get("parents", [])
+        require(len(parents) == 1 and SHA.fullmatch(parents[0].get("sha", "")),
+                "policy transition requires one immutable parent")
+        require(current == snapshot(parents[0]["sha"]), "classification policy changed beyond transition parent")
     return base
 
 
@@ -192,9 +201,13 @@ def read_bundle(archive):
         return json.loads(z.read("admission.json"))
 
 
-def verify(repo, pr, run_id, *, protected):
+def verify(repo, pr, run_id, *, protected, trusted_anchor=None):
     prefix = f"repos/{repo}"
-    anchor = gh(f"{prefix}/actions/variables/SOLO_REVIEW_POLICY_SHA")["value"]
+    def read_anchor():
+        # CI supplies repository vars from the reviewed workflow. External callers
+        # retain the live REST read; never fall back after a failed API call.
+        return trusted_anchor if trusted_anchor is not None else gh(f"{prefix}/actions/variables/SOLO_REVIEW_POLICY_SHA")["value"]
+    anchor = read_anchor()
     run = gh(f"{prefix}/actions/runs/{run_id}")
     workflow = gh(f"{prefix}/actions/workflows/agent-review.yml")
     validate_run(run, workflow, anchor, repo)
@@ -206,7 +219,7 @@ def verify(repo, pr, run_id, *, protected):
     validate_reports(bundle)
     pull = gh(f"{prefix}/pulls/{pr}")
     validate_subject(bundle["subject"], pull, repo, anchor)
-    policy_base = validate_policy_snapshot(repo, pull["base"]["ref"], anchor)
+    policy_base = validate_policy_snapshot(repo, pull["base"]["ref"], anchor, pull["head"]["sha"])
     files = pages(f"{prefix}/pulls/{pr}/files")
     require(len(files) == pull.get("changed_files"), "GitHub file list incomplete")
     # The producer disables rename detection and includes both sides of a rename.
@@ -231,7 +244,7 @@ def verify(repo, pr, run_id, *, protected):
         found = [j for j in jobs if j.get("name", "").split(" / ")[-1] == name]
         require(len(found) == 1 and found[0].get("conclusion") == "success", f"job {name} did not succeed exactly once")
     # Re-read mutable inputs after all evidence reads. Any error is unresolved, never clean.
-    require(gh(f"{prefix}/actions/variables/SOLO_REVIEW_POLICY_SHA")["value"] == anchor, "anchor changed during verification")
+    require(read_anchor() == anchor, "anchor changed during verification")
     final_pull = gh(f"{prefix}/pulls/{pr}")
     validate_subject(bundle["subject"], final_pull, repo, anchor)
     require(final_pull["base"]["sha"] == pull["base"]["sha"], "base changed during verification; retry the snapshot")

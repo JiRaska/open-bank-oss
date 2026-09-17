@@ -562,3 +562,24 @@ jobs:
           path: admission.json
           if-no-files-found: error
           retention-days: 30
+
+  solo-evidence-locator:
+    needs: [solo-prepare, solo-seal]
+    if: github.event_name == 'workflow_dispatch' && inputs.admission == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Advertise evidence for independent guard verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_POLICY: ${{ vars.SOLO_REVIEW_POLICY_SHA }}
+          SUBJECT_HEAD: ${{ needs.solo-prepare.outputs.head }}
+        run: |
+          test "$GITHUB_SHA" = "$EXPECTED_POLICY"
+          [[ "$SUBJECT_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SUBJECT_HEAD" \
+            -f state=success -f context=solo-review/evidence \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            -f description='Evidence available; agent guard independently verifies admission' >/dev/null

@@ -30,7 +30,9 @@ runner. Take exactly ONE open issue, implement it properly, open ONE draft pull 
 The enforced gate `agent-pr-guard` reds any PR from an `agent/` branch that touches money-path
 services, `.github/workflows` or `.github/actions`, `.github/scripts`, `.github/gates`,
 `openbank-libs/governance`, or authorization policy (rego / OPA / RBAC / NetworkPolicy). You
-cannot clear that red and must not try.
+must not clear that red by editing the classification or overriding a check. The
+solo-owner review policy can admit verified AI reviews plus explicit owner acceptance
+after its documented activation. Never submit that acceptance yourself.
 
 Check this BEFORE writing code, not after: run
 `python3 .github/scripts/check-agent-pr-guard.py --self-test` to confirm the gate is healthy,

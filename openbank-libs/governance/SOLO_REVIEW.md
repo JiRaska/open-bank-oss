@@ -194,3 +194,56 @@ stop condition, not a prepaid reservation or an invoice-level guarantee; an
 in-flight request may already have incurred cost. Shared budget reservation and
 provider reconciliation are required before unattended retries can be enabled.
 Limits also mean a large PR must be split; exceeding one never counts as approval.
+
+
+## Guard integration candidate (2026-09-17)
+
+The owner has selected development review by AI sessions plus the sole owner's
+acceptance instead of requiring additional human maintainers. Runtime maker/checker
+controls are unchanged. This implementation is a candidate, not an activated policy.
+
+The guard discovers `solo-review/evidence` on the current PR head. That status is
+only a locator: its author and its successful state cannot authorize a merge. The
+guard independently verifies the referenced run, complete reports, immutable head
+and diff base, controller identity and protected environment acceptance. Missing,
+stale, failed or unreadable evidence retains the refusal. The existing required
+agent guard remains the admission check; the locator must not replace that check.
+
+The hosted guard receives the repository policy variable through the reviewed CI
+workflow's `vars` context, avoiding an owner PAT in a candidate job. This is a
+job-start configuration snapshot, not a fresh REST read. The external verifier
+continues rereading the variable through REST. Changing the anchor requires
+invalidating/rerunning pending CI; a completed check cannot observe future changes.
+
+For the initial policy transition only, review of the exact externally anchored
+controller commit may observe its single parent's policy on the base branch.
+The entire classifier/rules snapshot must match that parent. This does not apply
+to application PRs, mixed snapshots or later policy drift. The candidate still
+requires both real model reports and explicit owner environment acceptance; it
+cannot grant those to itself. After merge, the base policy must match the anchor.
+
+Activation remains pending. In particular, reconcile this candidate with the spend
+containment work in #10171/#10172 before any hosted invocation. Do not restore the
+removed personal OAuth credential or enable the retired invocation path. The new
+locator job makes no model calls and does not submit owner acceptance. No source
+change here configures an external anchor, changes required contexts or deploys a
+banking service.
+
+
+### Required trust boundary
+
+`solo-review-admission.yml` runs from `main` through `pull_request_target` or a
+main-branch manual dispatch. It checks out only the external policy anchor, never
+the PR head, and publishes `solo-review/admission` on the freshly verified subject
+head. The ordinary PR CI bridge is not an independent authority: candidate code can
+modify its own verifier. Before activating that bridge, require the separately
+trusted admission producer and bind its identity through repository protection.
+A bare status name produced by any workflow sharing the same App is not a source
+identity guarantee. If the repository cannot bind the trusted producer, do not
+claim the candidate CI bridge creates that boundary.
+
+The initial installation still requires explicit owner-controlled activation of
+this reviewed policy. A workflow absent from the default branch cannot protect
+its own installation. The parent-policy transition permits review evidence, not
+self-approval or an administrative merge bypass. Re-dispatch the trusted admission
+workflow after the review workflow completes, then rerun the ordinary failed CI.

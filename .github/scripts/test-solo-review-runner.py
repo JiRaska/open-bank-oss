@@ -36,6 +36,17 @@ def stream(*, content=None, error=False, result=None):
     ])
 
 
+class SupportingContextTest(unittest.TestCase):
+    def test_effective_rules_are_complete_and_other_sources_remain_full(self):
+        root = Path(runner.__file__).resolve().parents[2]
+        supporting = {item["path"]: item for item in runner.supporting_context()}
+        self.assertEqual(json.loads(supporting[runner.guard.RULES]["content"]),
+                         runner.guard.load_rules(root / runner.guard.RULES))
+        for path in (runner.proof.POLICY_INPUTS[0], ".github/scripts/run-gates.py"):
+            self.assertEqual(supporting[path]["content"], (root / path).read_text())
+        self.assertLess(len(json.dumps(list(supporting.values())).encode()), 150_000)
+
+
 class DriverTest(unittest.TestCase):
     def test_usage_is_numeric_allowlisted_and_unknown_is_not_zero(self):
         event = dict(type="result", is_error=True, total_cost_usd=1.25,
@@ -327,7 +338,7 @@ class DriverTest(unittest.TestCase):
                     patch.object(runner.subprocess, "run", side_effect=invoke), \
                     patch.object(runner, "invocation_failure", side_effect=AssertionError("success must not classify failure")):
                 runner.review(source, output, "correctness", "/trusted/claude")
-            policy_check.assert_called_once_with("example/bank", "main", "d" * 40)
+            policy_check.assert_called_once_with("example/bank", "main", "d" * 40, "a" * 40)
             args, kwargs = observed[0]
             self.assertEqual(args[args.index("--tools") + 1], "")
             self.assertIn("--strict-mcp-config", args)

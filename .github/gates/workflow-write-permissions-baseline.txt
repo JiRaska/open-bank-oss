@@ -84,3 +84,6 @@ vex-hotfix.yml|job:vex-hotfix|contents
 vex-hotfix.yml|job:vex-hotfix|issues
 vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
+# Dedicated reviewed publishers: evidence locator and independently checked subject verdict.
+agent-review.yml|job:solo-evidence-locator|statuses
+solo-review-admission.yml|job:admission|statuses

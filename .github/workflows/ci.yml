@@ -288,6 +288,11 @@ jobs:
   # ---------------------------------------------------------------------------
   gates:
     name: gates (${{ matrix.slug }})
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -327,6 +332,7 @@ jobs:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      SOLO_REVIEW_POLICY_SHA: ${{ vars.SOLO_REVIEW_POLICY_SHA }}
       BASE_REF: ${{ github.base_ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical

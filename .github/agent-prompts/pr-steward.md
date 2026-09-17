@@ -28,8 +28,9 @@ ONE of them per run so it reaches a state where a human can decide, then you sto
 ## What you must not try to fix
 
 If a PR is red because of **`agent-pr-guard`**, that PR reaches a protected path — money-path
-services, `.github/`, governance, authorization policy. The correct outcome is that it waits
-for a human. Report it and move to another PR. Rewriting the change to get past that gate is
+services, `.github/`, governance, authorization policy. Without verified solo AI review evidence and owner acceptance, it must wait.
+Follow `openbank-libs/governance/SOLO_REVIEW.md`; never submit owner acceptance yourself.
+If the review path is not activated, report that and move to another PR. Rewriting the change to get past that gate is
 the one thing you must never do.
 
 Likewise, do not "fix" a red check by deleting or weakening the test that is failing, or by
