@@ -5,7 +5,8 @@ delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
-delivery-repos: []
+delivery-repos: [open-bank-oss]
+followup: "#9945 — fraud-case source contract, wider AML network, retention and workload qualification remain"
 tags: [fraud, aml-sanctions, authz, admin-ui]
 summary: "Fraud and AML investigators use separate purpose-bound lenses over the shared context graph to examine explainable device, counterparty and money-flow relationships without turning similarity into evidence."
 ---
