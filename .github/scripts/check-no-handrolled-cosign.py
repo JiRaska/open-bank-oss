@@ -40,9 +40,49 @@ WORKFLOW_DIR = pathlib.Path(".github/workflows")
 LIB_CALL = "cosign_sign_and_attest"
 LIB_FILE = "cosign-attest" + ".sh"
 
-# The sign and attest subcommands only. `sign-blob`, `verify` and `verify-attestation` are
-# different operations and are not restricted -- hence the negative lookahead for a hyphen.
-HANDROLLED = re.compile(r"\bcosign\s+(?:sign|attest)\b(?!-)")
+# The sign and attest subcommands only. The deploy workflow resolves cosign into "$bin"
+# before signing; matching only the literal command name would make its diagnostic echo
+# the sole reason the gate sees that job. This is a syntactic convention check, not a
+# shell interpreter: recognize direct calls through a variable as well as `cosign`.
+HANDROLLED = re.compile(
+    r"(?:\bcosign\b|[\"']?\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[\"']?)"
+    r"\s+(?:sign|attest)\b(?!-)"
+)
+OUTPUT_ONLY = re.compile(r"^\s*(?:echo|printf)\b")
+
+
+def signing_command(script: str) -> re.Match[str] | None:
+    for line in script.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        # Split shell command chains outside quoted strings: an `echo` segment is
+        # output, but `echo ready; "$bin" sign ...` still executes a signer.
+        segments = []
+        start = 0
+        quote = None
+        escaped = False
+        for pos, char in enumerate(line):
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif char == quote:
+                quote = None
+            elif char in ("'", '"') and quote is None:
+                quote = char
+            elif char in ";|&" and quote is None:
+                segments.append(line[start:pos])
+                start = pos + 1
+        segments.append(line[start:])
+        for segment in segments:
+            # Log output is not an invocation. In particular, `echo "cosign sign"`
+            # must not keep this gate green about a separate "$bin" sign.
+            if OUTPUT_ONLY.match(segment):
+                continue
+            match = HANDROLLED.search(segment)
+            if match:
+                return match
+    return None
 
 
 def violations(root: pathlib.Path) -> list[tuple[str, str]]:
@@ -64,7 +104,7 @@ def violations(root: pathlib.Path) -> list[tuple[str, str]]:
                 line for script in scripts for line in script.splitlines()
                 if not line.lstrip().startswith("#")
             )
-            m = HANDROLLED.search(executable)
+            m = signing_command(executable)
             if not m:
                 continue
             # Enforce this convention per job: a different image-producing job
@@ -93,6 +133,12 @@ def self_test() -> int:
     cases = [
         ("hand-rolled sign -- MUST fire", "run: cosign sign --key x $IMAGE\n", 1),
         ("hand-rolled attest -- MUST fire", "run: cosign attest --predicate sbom.json $IMAGE\n", 1),
+        ("resolved cosign binary signs without shared attestation -- MUST fire",
+         'run: |\n  bin=/tmp/cosign\n  "$bin" sign --key key "$IMAGE"\n', 1),
+        ("a diagnostic echo is not signing", 'run: echo "cosign sign"\n', 0),
+        ("a diagnostic printf is not signing", 'run: printf "cosign attest\\n"\n', 0),
+        ("signing after a diagnostic echo is still detected",
+         'run: echo "cosign sign"; "$bin" sign --key key "$IMAGE"\n', 1),
         ("the shared library -- clean",
          f"run: |\n  source {lib}\n  {LIB_CALL} \"$IMAGE\" linux/arm64\n", 0),
         ("a library caller that also names the old commands in a comment stays clean",
@@ -114,6 +160,10 @@ def self_test() -> int:
          "run: |\n  # cosign sign was replaced\n  echo ready\n", 0),
         ("split signing and both shared attestations preserve deploy ordering",
          f"run: |\n  source {lib}\n  cosign sign --key x $IMAGE\n"
+         "  if ! cosign_attest_sbom $IMAGE linux/arm64; then exit 1; fi\n"
+         "  if ! cosign_attest_slsa_provenance $IMAGE; then exit 1; fi\n", 0),
+        ("resolved binary retains the valid split-signing exemption",
+         f'run: |\n  source {lib}\n  bin=/tmp/cosign\n  "$bin" sign --key key "$IMAGE"\n'
          "  if ! cosign_attest_sbom $IMAGE linux/arm64; then exit 1; fi\n"
          "  if ! cosign_attest_slsa_provenance $IMAGE; then exit 1; fi\n", 0),
         ("a split pipeline missing provenance still fails",
