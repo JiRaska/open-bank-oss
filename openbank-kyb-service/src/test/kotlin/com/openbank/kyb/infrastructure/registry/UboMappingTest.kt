@@ -123,6 +123,16 @@ class UboMappingTest {
     }
 
     @Test
+    fun `an unnamed active PSC cannot disappear from the owner finding`() {
+        val body = json.readTree(
+            """{"total_results":1,"items":[{"kind":"super-secure-person-with-significant-control"}]}""",
+        )
+        assertThatThrownBy {
+            adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb)
+        }.isInstanceOf(RegistryUnavailableException::class.java)
+    }
+
+    @Test
     fun `the wire response and OpenAPI expose a nullable source observation reference`() {
         val finding = adapter().map(
             LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"),

@@ -40,6 +40,7 @@ import java.util.Optional
  * analyst has to see it, so it is carried separately from the (then empty) owner list.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Each PSC field and page-completeness rule stays explicit at the source boundary.
 class CompaniesHousePscAdapter : UboAdapter {
 
     @Inject @RestClient
@@ -89,18 +90,10 @@ class CompaniesHousePscAdapter : UboAdapter {
     }
 
     internal fun map(identifier: LegalEntityIdentifier, body: JsonNode, pack: CountryPack): UboFinding {
-        val page = body.path("items")
-        if (!page.isArray) throw RegistryUnavailableException(SOURCE)
-        val items = page.toList()
-        val total = body.path("total_results")
-        // This adapter requests only the first page. Never call a partial list the full UBO
-        // finding: omitted owners would silently satisfy the review's evidence requirement.
-        if (!total.isIntegralNumber || !total.canConvertToInt() || total.asInt() != items.size) {
-            throw RegistryUnavailableException(SOURCE)
-        }
+        val items = completePageItems(body)
         val owners = items
             .filter { it.text("ceased_on") == null && it.text("kind")?.contains("statement") != true }
-            .mapNotNull { toOwner(it, identifier.value) }
+            .map { toOwner(it, identifier.value) ?: throw RegistryUnavailableException(SOURCE) }
         // A statement item ("no individual or entity with significant control identified") is an
         // answer the company filed under s.790 — carried as text so the analyst reads the register's
         // own words rather than our summary of them.
@@ -117,6 +110,19 @@ class CompaniesHousePscAdapter : UboAdapter {
             sourceRef = identifier.value,
             fetchedAt = Instant.now(clock),
         )
+    }
+
+    private fun completePageItems(body: JsonNode): List<JsonNode> {
+        val page = body.path("items")
+        if (!page.isArray) throw RegistryUnavailableException(SOURCE)
+        val items = page.toList()
+        val total = body.path("total_results")
+        // This adapter requests only the first page. Never call a partial list the full UBO
+        // finding: omitted owners would silently satisfy the review's evidence requirement.
+        if (!total.isIntegralNumber || !total.canConvertToInt() || total.asInt() != items.size) {
+            throw RegistryUnavailableException(SOURCE)
+        }
+        return items
     }
 
     private fun empty(identifier: LegalEntityIdentifier, pack: CountryPack) = UboFinding(
