@@ -401,11 +401,11 @@ class ScaService(
             command.amount,
             command.currency,
             command.creditor,
-            command.reference,
             command.documentSha256,
             command.ceremonyId,
             command.cardId,
             command.cardAction,
+            reference = command.reference,
         ) ?: (command.amount == null && command.documentSha256 == null && command.cardId == null)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {

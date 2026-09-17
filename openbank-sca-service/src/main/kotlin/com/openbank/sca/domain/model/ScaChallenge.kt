@@ -153,11 +153,11 @@ data class DynamicLinkingData(
         amount: String?,
         currency: String?,
         creditor: String?,
-        reference: String? = null,
         documentSha256: String? = null,
         ceremonyId: String? = null,
         cardId: String? = null,
         cardAction: String? = null,
+        reference: String? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
