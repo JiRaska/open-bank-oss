@@ -223,7 +223,7 @@ const ALL_NAV: NavItem[] = [
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
-  const { data: session } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const { t, language } = useLanguage()
   const roles: string[] = session?.user?.roles ?? []
   const roleSignature = roles.join('\u0000')
@@ -349,7 +349,11 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       </div>
 
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
-      <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
+      <nav
+        ref={navRef}
+        aria-busy={sessionStatus === 'loading'}
+        className={`ob-sidebar-nav ${styles.nav} ${sessionStatus === 'loading' ? styles.sessionPending : ''}`}
+      >
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
         <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
         <NavSection items={filter(coreNav)} currentHref={currentHref} />

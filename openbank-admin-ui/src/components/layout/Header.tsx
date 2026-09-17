@@ -17,7 +17,7 @@ import styles from './Header.module.css'
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
 export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
-  const { data: session } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -126,7 +126,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* Actions */}
-      <div className={styles.actions}>
+      <div className={`${styles.actions} ${sessionStatus === 'loading' ? styles.sessionPending : ''}`}>
         {build && (
           <Link
             href="/docs/release-notes/admin-ui"
