@@ -3,6 +3,7 @@
   "items": [
     {
       "name": "SMITH, Jane Elizabeth",
+      "links": { "self": "/company/OC123456/persons-with-significant-control/individual/psc-1" },
       "kind": "individual-person-with-significant-control",
       "nationality": "British",
       "country_of_residence": "England",
@@ -15,7 +16,9 @@
     },
     {
       "name": "HOLDINGS EXAMPLE LIMITED",
+      "links": { "self": "/company/OC123456/persons-with-significant-control/corporate-entity/psc-2" },
       "kind": "corporate-entity-person-with-significant-control",
+      "identification": { "registration_number": "12345678", "country_registered": "United Kingdom" },
       "notified_on": "2019-02-01",
       "natures_of_control": ["ownership-of-shares-25-to-50-percent"]
     },
