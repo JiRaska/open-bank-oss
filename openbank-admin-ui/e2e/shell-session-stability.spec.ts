@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-test('keeps the desktop shell visually stable while permissions resolve', async ({ page, context, baseURL }) => {
+for (const width of [1440, 390, 320]) test(`keeps the ${width}px shell visually stable while permissions resolve`, async ({ page, context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
 
   let releaseSession!: () => void
@@ -33,22 +33,39 @@ test('keeps the desktop shell visually stable while permissions resolve', async 
     }).observe({ type: 'layout-shift', buffered: true })
   })
 
-  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.setViewportSize({ width, height: 900 })
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })
   await sessionRequested
   const nav = page.locator('#admin-sidebar nav')
   const userMenu = page.getByRole('button', { name: 'Open user menu' })
+  const search = page.getByRole('button', { name: 'Quick search (⌘K)' })
   await expect(nav).toHaveAttribute('aria-busy', 'true')
   await expect(nav).toBeHidden()
   await expect(userMenu).toBeHidden()
+  const searchBefore = width <= 860 ? await search.boundingBox() : null
 
   releaseSession()
   await expect(nav).toHaveAttribute('aria-busy', 'false')
-  await expect(nav.locator('a[href="/system/tests"]').first()).toBeVisible()
+  if (width > 860) await expect(nav.locator('a[href="/system/tests"]').first()).toBeVisible()
   await expect(userMenu).toBeVisible()
   await page.waitForTimeout(250)
-  const shellShift = await page.evaluate(() => (
-    (Reflect.get(window, '__shellShifts') as number[]).reduce((total, value) => total + value, 0)
-  ))
-  expect(shellShift).toBeLessThan(0.01)
+  if (width > 860) {
+    const shellShift = await page.evaluate(() => (
+      (Reflect.get(window, '__shellShifts') as number[]).reduce((total, value) => total + value, 0)
+    ))
+    expect(shellShift).toBeLessThan(0.01)
+  } else {
+    const searchAfter = await search.boundingBox()
+    expect(searchBefore).not.toBeNull()
+    expect(searchAfter).not.toBeNull()
+    expect(Math.abs(searchAfter!.x - searchBefore!.x)).toBeLessThan(1)
+    // These shortcuts are duplicated in the permission-filtered mobile drawer.
+    await expect(page.locator('header a[href="/docs"]')).toBeHidden()
+    await expect(page.locator('header a[href="/approvals"]')).toBeHidden()
+    await expect(page.locator('header a[href="/docs/release-notes/admin-ui"]')).toBeHidden()
+    await expect(nav.locator('a[href="/docs"]')).toHaveCount(1)
+    await expect(nav.locator('a[href="/approvals"]')).toHaveCount(1)
+    await userMenu.click()
+    await expect(page.getByRole('menuitem', { name: 'Release notes' })).toBeVisible()
+  }
 })

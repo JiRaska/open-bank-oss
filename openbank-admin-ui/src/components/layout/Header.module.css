@@ -32,12 +32,14 @@
 
 .actions { display: flex; align-items: center; gap: 5px; }
 /* User identity and permission-gated actions resolve together after hydration. */
-@media (min-width: 861px) {
-  .sessionPending { visibility: hidden; }
-}
+.sessionPending { visibility: hidden; }
 .headerLink { display: grid; width: 34px; height: 34px; place-items: center; color: var(--text-secondary); text-decoration: none; background: transparent; border-radius: 9px; transition: background 0.12s ease, color 0.12s ease; }
 .headerLink:hover,
 .headerLink:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
+.menuLink { display: flex; align-items: center; gap: 8px; padding: 8px 10px; color: var(--text-secondary); border-radius: 6px; font-size: 13px; text-decoration: none; }
+.menuLink:hover,
+.menuLink:focus-visible { color: var(--accent-text); background: var(--surface-3); outline: 2px solid var(--accent-border); outline-offset: -2px; }
+.userSummary { display: flex; flex-direction: column; align-items: flex-start; }
 
 .mobileMenu { display: none; }
 
@@ -45,6 +47,10 @@
   .header { height: 54px; padding: 0 14px; gap: 10px; }
   .mobileMenu { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
   .mobileMenu:hover, .mobileMenu:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
+  /* Both destinations remain available in the permission-filtered drawer. */
+  .headerLink, .buildLink { display: none; }
+  /* The avatar opens the full identity/role menu without width changes on sign-in. */
+  .userSummary { display: none; }
   .searchTrigger { min-width: auto; }
   .searchTrigger span,
   .searchTrigger kbd { display: none; }
