@@ -182,6 +182,13 @@ data class BusinessSignerIdentified(
 }
 
 /** The required number of distinct verified signers has signed; mandates were granted in party-service. */
+data class SignedMandateHolderEvidence(
+    val signerId: UUID,
+    val partyId: UUID,
+    /** Null only for a manually added signatory whose authority needs separately reviewed evidence. */
+    val registryRepresentativeIndex: Int?,
+)
+
 data class BusinessAgreementSigned(
     override val eventType: String,
     override val caseId: UUID,
@@ -200,6 +207,8 @@ data class BusinessAgreementSigned(
     override val actorType: String,
     override val sourceService: String,
     val statutoryPolicy: StatutoryPolicyEvidence?,
+    /** Null only in pre-rollout events; an empty list is never a valid signed case. */
+    val signedMandateHolders: List<SignedMandateHolderEvidence>?,
 ) : KybEventPayload {
     companion object {
         const val EVENT_TYPE = "BUSINESS_AGREEMENT_SIGNED"

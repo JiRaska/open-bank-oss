@@ -337,11 +337,17 @@ class KybCaseApiIT {
                 st.setObject(1, UUID.fromString(caseId))
                 st.executeQuery().use { rows ->
                     assertThat(rows.next()).isTrue()
-                    val policy = ObjectMapper().readTree(rows.getString(1)).path("statutoryPolicy")
+                    val envelope = ObjectMapper().readTree(rows.getString(1))
+                    val policy = envelope.path("statutoryPolicy")
                     assertThat(policy.path("sourceCaseId").asText()).isEqualTo(caseId)
                     assertThat(policy.path("requiredSignatures").asInt()).isEqualTo(2)
                     assertThat(policy.path("eligibleRepresentatives").size()).isEqualTo(2)
                     assertThat(policy.path("attestationId").asText()).isNotBlank()
+                    val holders = envelope.path("signedMandateHolders")
+                    assertThat(holders.size()).isEqualTo(2)
+                    assertThat(holders.map { it.path("partyId").asText() })
+                        .containsExactlyInAnyOrder(initiator.toString(), cosigner.toString())
+                    assertThat(holders.all { it.path("registryRepresentativeIndex").isIntegralNumber }).isTrue()
                 }
             }
         }

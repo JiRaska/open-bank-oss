@@ -9,7 +9,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank KYB Service — events
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
     verified against its public register and signed for by its listed representatives.
@@ -98,7 +98,7 @@ components:
         $ref: '#/components/schemas/SignerEnvelope'
     BusinessAgreementSigned:
       name: BUSINESS_AGREEMENT_SIGNED
-      summary: "The required distinct signers signed; optional statutoryPolicy carries confirmed registry evidence for party-service."
+      summary: "The required distinct signers signed; the payload carries their party IDs and optional confirmed registry evidence."
       payload:
         $ref: '#/components/schemas/SignedEnvelope'
     BusinessOnboardingCompleted:
@@ -126,6 +126,19 @@ components:
               description: "Null for legacy, manually overridden or incompletely identified rules; it conveys no authority by itself."
               oneOf:
                 - $ref: '#/components/schemas/StatutoryPolicyEvidence'
+                - type: 'null'
+            signedMandateHolders:
+              description: "Null only for events produced before the atomic party projection rollout. Every entry represents a signed, identity-verified person; no names or signature references are sent."
+              oneOf:
+                - type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [signerId, partyId, registryRepresentativeIndex]
+                    properties:
+                      signerId: { type: string, format: uuid }
+                      partyId: { type: string, format: uuid }
+                      registryRepresentativeIndex: { type: [integer, 'null'], minimum: 0 }
                 - type: 'null'
     StatutoryPolicyEvidence:
       type: object

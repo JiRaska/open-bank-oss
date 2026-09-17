@@ -668,10 +668,13 @@ class BusinessOnboardingServiceTest {
                     it.source == "REGISTRY"
             }
             val signedEvent = events.last { it.eventType == KybEvents.AGREEMENT_SIGNED }
-            val policy = (signedEvent.payload as BusinessAgreementSigned).statutoryPolicy
+            val signedPayload = signedEvent.payload as BusinessAgreementSigned
+            val policy = signedPayload.statutoryPolicy
             assertThat(policy).isNotNull()
             assertThat(policy!!.attestationId).isEqualTo(signed.representationAttestationId)
             assertThat(policy.eligibleRepresentatives.map { it.partyId })
+                .containsExactlyInAnyOrder(initiator, cosigner)
+            assertThat(signedPayload.signedMandateHolders!!.map { it.partyId })
                 .containsExactlyInAnyOrder(initiator, cosigner)
 
             service.entityPartyActivated(entityParty)

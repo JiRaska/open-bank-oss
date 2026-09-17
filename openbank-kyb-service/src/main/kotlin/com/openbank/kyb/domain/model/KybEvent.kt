@@ -250,6 +250,15 @@ object KybEvents {
                 actorType = actorType(actor),
                 sourceService = SOURCE_SERVICE,
                 statutoryPolicy = statutoryPolicy,
+                signedMandateHolders = case.signers
+                    .filter { it.status == SignerStatus.SIGNED && it.partyId != null }
+                    .map {
+                        SignedMandateHolderEvidence(
+                            signerId = it.id,
+                            partyId = requireNotNull(it.partyId),
+                            registryRepresentativeIndex = it.representativeIndex,
+                        )
+                    },
             ),
         )
     }
