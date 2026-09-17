@@ -15,25 +15,41 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
-      - "openbank-admin-ui/src/test/**/*-pact.contract.test.ts"
-      - "openbank-admin-ui/src/app/api/approvals/pending/**"
-      - "openbank-admin-ui/package.json"
-      - "openbank-admin-ui/package-lock.json"
+      - "openbank-admin-ui/**"
+      - "openbank-case-coordinator-agent/**"
+      - "openbank-flaky-test-hunter/**"
+      - "openbank-product-catalog/**"
+      - "openbank-libs*/**"
+      - "build-logic/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
       - ".github/scripts/derive-pact-drift-scope.sh"
       - ".github/scripts/pact-js-contracts.py"
+      - ".github/scripts/publish-admin-ui-pacts.py"
+      - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/workflows/pact-drift-check.yml"
+      - ".github/workflows/verify-provider.yml"
   push:
     branches: [main]
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
-      - "openbank-admin-ui/src/test/**/*-pact.contract.test.ts"
-      - "openbank-admin-ui/src/app/api/approvals/pending/**"
-      - "openbank-admin-ui/package.json"
-      - "openbank-admin-ui/package-lock.json"
+      - "openbank-admin-ui/**"
+      - "openbank-case-coordinator-agent/**"
+      - "openbank-flaky-test-hunter/**"
+      - "openbank-product-catalog/**"
+      - "openbank-libs*/**"
+      - "build-logic/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
       - ".github/scripts/derive-pact-drift-scope.sh"
       - ".github/scripts/pact-js-contracts.py"
+      - ".github/scripts/publish-admin-ui-pacts.py"
+      - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/workflows/pact-drift-check.yml"
+      - ".github/workflows/verify-provider.yml"
 
 permissions:
   contents: read
@@ -119,6 +135,9 @@ jobs:
       # discovers every `*-pact.contract.test.ts`. Together they map tests to pacts/ outputs and
       # fail on an orphan pact, an uncommitted pact, or a consumer dropped silently from scope.
       # It is bash-3.2 clean, so it runs (and can be fed a failing case) on a dev machine too.
+      - name: Verify publication boundaries
+        run: python3 .github/scripts/test-publish-admin-ui-pacts.py
+
       - name: Derive the set of modules to regenerate
         run: |
           set -euo pipefail
@@ -229,3 +248,70 @@ jobs:
           name: regenerated-pacts
           path: pacts/
           retention-days: 7
+
+      - name: Prepare verified admin UI contracts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: >-
+          python3 .github/scripts/publish-admin-ui-pacts.py prepare
+          --marker "${RUNNER_TEMP}/pact-regen-marker"
+          --bundle "${RUNNER_TEMP}/admin-ui-pacts.json"
+
+      - name: Hand off verified admin UI contracts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: admin-ui-pacts-${{ github.sha }}
+          path: ${{ runner.temp }}/admin-ui-pacts.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-admin-ui:
+    name: Publish verified admin UI contracts
+    needs: drift-check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: openbank-build
+    timeout-minutes: 5
+    outputs:
+      providers: ${{ steps.publish.outputs.providers }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v6.2.1
+        with:
+          name: admin-ui-pacts-${{ github.sha }}
+          path: ${{ runner.temp }}/admin-ui-pact-handoff
+      - name: Publish exact revision
+        id: publish
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/publish-admin-ui-pacts.py publish \
+            --bundle "${RUNNER_TEMP}/admin-ui-pact-handoff/admin-ui-pacts.json" \
+            --providers-output "${RUNNER_TEMP}/admin-ui-providers.json"
+          echo "providers=$(cat "${RUNNER_TEMP}/admin-ui-providers.json")" >> "$GITHUB_OUTPUT"
+
+  verify-admin-ui-providers:
+    name: Verify published admin UI contracts (${{ matrix.service }})
+    needs: publish-admin-ui
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.publish-admin-ui.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.publish-admin-ui.outputs.providers) }}
+    # Reuse the same required provider test and wait for its actual result. A dispatch-only
+    # step would turn green before verification finishes and lose the failure signal.
+    uses: ./.github/workflows/verify-provider.yml
+    with:
+      service: ${{ matrix.service }}
+      ref: ${{ github.sha }}
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
