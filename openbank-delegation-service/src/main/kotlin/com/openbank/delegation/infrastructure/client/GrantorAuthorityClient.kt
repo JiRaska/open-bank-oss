@@ -8,6 +8,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.GrantorAuthority
 import com.openbank.delegation.application.port.out.GrantorAuthorityClient
 import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
+import com.openbank.delegation.application.port.out.StatutoryRuleClient
+import com.openbank.delegation.application.port.out.StatutoryRuleResolution
+import com.openbank.delegation.domain.model.StatutoryRepresentationRule
+import com.openbank.delegation.domain.model.StatutoryRepresentative
+import com.openbank.delegation.domain.model.StatutoryRuleMode
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.logging.Log
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -20,6 +25,8 @@ import jakarta.ws.rs.PathParam
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -36,6 +43,42 @@ data class ActingForMandateResponse(val authority: String? = null, val requiredS
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ActingForResponse(val partyId: UUID, val mandate: ActingForMandateResponse? = null)
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StatutoryRepresentativeResponse(
+    val partyId: UUID,
+    val registryRepresentativeIndices: Set<Int>,
+    val officeTags: Set<String>,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RepresentationPolicyResponse(
+    val id: UUID,
+    val principalPartyId: UUID,
+    val revision: Long,
+    val sourceCaseId: UUID,
+    val attestationId: UUID,
+    val ruleTextHash: String,
+    val mode: String,
+    val requiredSignatures: Int,
+    val requiredOffices: List<String>,
+    val registryRepresentativeCount: Int,
+    val eligibleRepresentatives: List<StatutoryRepresentativeResponse>,
+    val effectiveFrom: Instant,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class StatutoryMandateResponse(
+    val principalPartyId: UUID,
+    val agentPartyId: UUID,
+    val role: String,
+    val authority: String,
+    val requiredSignatures: Int?,
+    val status: String,
+    val evidenceRef: String?,
+    val validFrom: Instant,
+    val validTo: Instant?,
+)
+
 @Path("/api/v1/parties")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "party-service")
@@ -48,6 +91,14 @@ interface PartyAuthorityRestClient {
     @GET
     @Path("/{id}/acting-for")
     suspend fun actingFor(@PathParam("id") actorPartyId: UUID): List<ActingForResponse>
+
+    @GET
+    @Path("/{id}/representation-policy")
+    suspend fun representationPolicy(@PathParam("id") principalPartyId: UUID): RepresentationPolicyResponse
+
+    @GET
+    @Path("/{id}/mandates")
+    suspend fun mandates(@PathParam("id") principalPartyId: UUID): List<StatutoryMandateResponse>
 }
 
 /**
@@ -87,4 +138,74 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         Log.errorf(e, "grantor authority lookup for principal %s failed — refusing", principalPartyId)
         GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)
     }
+}
+
+/** Fail-closed JOINT rule resolver; never derives a quorum from one acting-for mandate. */
+@ApplicationScoped
+class RestStatutoryRuleClient(@RestClient private val client: PartyAuthorityRestClient, private val clock: Clock) :
+    StatutoryRuleClient {
+    @Inject
+    constructor(@RestClient client: PartyAuthorityRestClient) : this(client, Clock.systemUTC())
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    override suspend fun resolve(principalPartyId: UUID, actorPartyId: UUID): StatutoryRuleResolution = try {
+        val principal = client.getParty(principalPartyId)
+        if (principal.id != principalPartyId || principal.status != "ACTIVE" || principal.partyType != "COMPANY") {
+            StatutoryRuleResolution.Denied
+        } else {
+            val policy = client.representationPolicy(principalPartyId)
+            val mandates = client.mandates(principalPartyId)
+            val rule = policy.toRule()
+            val now = clock.instant()
+            val policyIsEffective = policy.principalPartyId == principalPartyId && !now.isBefore(policy.effectiveFrom)
+            val actorIsInRoster = rule.eligibleRepresentatives.any { it.partyId == actorPartyId }
+            if (policyIsEffective && actorIsInRoster && rule.hasCurrentRoster(mandates, now)) {
+                StatutoryRuleResolution.RosterMatched(rule)
+            } else {
+                StatutoryRuleResolution.Denied
+            }
+        }
+    } catch (e: NotFoundException) {
+        StatutoryRuleResolution.Denied
+    } catch (e: Exception) {
+        Log.errorf(e, "statutory rule lookup for principal %s failed — refusing", principalPartyId)
+        StatutoryRuleResolution.Unverifiable
+    }
+
+    private fun StatutoryRepresentationRule.hasCurrentRoster(
+        mandates: List<StatutoryMandateResponse>,
+        now: Instant,
+    ): Boolean = eligibleRepresentatives.all { representative ->
+        mandates.any { it.isCurrentFor(this, representative.partyId, now) }
+    }
+
+    private fun StatutoryMandateResponse.isCurrentFor(
+        rule: StatutoryRepresentationRule,
+        representativePartyId: UUID,
+        now: Instant,
+    ): Boolean {
+        val identityMatches = principalPartyId == rule.principalPartyId && agentPartyId == representativePartyId
+        val authorityMatches = role == "LEGAL_REPRESENTATIVE" &&
+            authority == "JOINT" &&
+            requiredSignatures == rule.requiredSignatures
+        val sourceMatches = evidenceRef?.startsWith("kyb-case:${rule.sourceCaseId}:signer:") == true
+        val timeMatches = !now.isBefore(validFrom) && (validTo == null || now.isBefore(validTo))
+        return identityMatches && authorityMatches && sourceMatches && status == "ACTIVE" && timeMatches
+    }
+
+    private fun RepresentationPolicyResponse.toRule(): StatutoryRepresentationRule = StatutoryRepresentationRule(
+        policyId = id,
+        principalPartyId = principalPartyId,
+        revision = revision,
+        sourceCaseId = sourceCaseId,
+        attestationId = attestationId,
+        ruleTextHash = ruleTextHash,
+        mode = StatutoryRuleMode.valueOf(mode),
+        requiredSignatures = requiredSignatures,
+        requiredOffices = requiredOffices,
+        registryRepresentativeCount = registryRepresentativeCount,
+        eligibleRepresentatives = eligibleRepresentatives.map {
+            StatutoryRepresentative(it.partyId, it.registryRepresentativeIndices, it.officeTags)
+        },
+    )
 }
