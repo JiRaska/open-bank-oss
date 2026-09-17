@@ -125,9 +125,9 @@ class FraudInvestigationCaseIT {
     private fun seedScore(scoreId: UUID, verdict: String, accountId: UUID?, counterpartyId: UUID?) {
         connection().use { connection ->
             connection.prepareStatement(
-                """INSERT INTO fraud_scores (score_id, amount, currency, rail, account_id,
+                """INSERT INTO fraud_scores (id, score_id, amount, currency, rail, account_id,
                    counterparty_id, verdict, score, reasons_json, rule_version)
-                   VALUES (?, 100.00, 'CZK', 'TEST', ?, ?, ?, 1, '[]', 'test')
+                   VALUES (nextval('fraud_scores_seq'), ?, 100.00, 'CZK', 'TEST', ?, ?, ?, 1, '[]', 'test')
                 """.trimIndent(),
             ).use { stmt ->
                 stmt.setObject(1, scoreId)
