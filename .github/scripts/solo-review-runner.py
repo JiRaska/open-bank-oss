@@ -258,6 +258,10 @@ def invocation_failure(proc):
 
 
 def review(input_path, output, slot, cli):
+    require(os.environ.get("AGENT_REVIEW_API_ENABLED") == "true",
+            "dedicated API review is disabled; no provider invocation")
+    require(bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+            "dedicated API credential is missing; no provider invocation")
     repo, anchor = anchored()
     data = json.loads(Path(input_path).read_text())
     require(proof.digest(data["payload"]) == data["subject"]["input_digest"], "input digest mismatch")
@@ -284,8 +288,8 @@ def review(input_path, output, slot, cli):
     )
     # The provider credential is required by the CLI, but repository, artifact and
     # future workflow credentials must never be inherited by the model process.
-    allowed_env = ("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
-                   "CLAUDE_CODE_OAUTH_TOKEN")
+    allowed_env = ("PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+                   "ANTHROPIC_API_KEY")
     env = {key: os.environ[key] for key in allowed_env if key in os.environ}
     env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = MAX_OUTPUT_TOKENS
     # Persist an unknown record before egress so interruption cannot look like zero spend.
@@ -295,6 +299,10 @@ def review(input_path, output, slot, cli):
     write(usage_path, accounting)
     try:
         with tempfile.TemporaryDirectory(prefix="solo-review-") as directory:
+            # Never discover a personal subscription login or user-level CLI settings.
+            env["HOME"] = directory
+            env["CLAUDE_CONFIG_DIR"] = str(Path(directory) / ".claude")
+            env["XDG_CONFIG_HOME"] = str(Path(directory) / ".config")
             proc = subprocess.run(
                 [str(Path(cli).resolve()), "--safe-mode", "-p", "--model", model, "--tools", "", "--strict-mcp-config",
                  "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--no-session-persistence",

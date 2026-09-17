@@ -39,8 +39,8 @@ the evidence provenance.
 
 The hosted entry point is a distinct admission mode on the existing
 `agent-review.yml` workflow, allowing a pinned candidate revision to be exercised
-before default-branch installation. Its existing advisory mode is insufficient:
-it is title-scoped, permits truncated input and only proves that one review happened.
+before default-branch installation. The legacy advisory mode has been removed: it permitted truncated input and
+used a personal subscription credential. Only explicit admission dispatch remains.
 
 The pilot never publishes a merge-admission success or changes the existing guard.
 It produces evidence for an external reader. Before cutover, a trusted required
@@ -222,8 +222,17 @@ to application PRs, mixed snapshots or later policy drift. The candidate still
 requires both real model reports and explicit owner environment acceptance; it
 cannot grant those to itself. After merge, the base policy must match the anchor.
 
-Activation remains pending. In particular, reconcile this candidate with the spend
-containment work in #10171/#10172 before any hosted invocation. Do not restore the
+Activation remains pending. The unmerged #10172 is closed; #10171 tracks the
+remaining provider spending controls. Each invocation now requires repository
+variable `AGENT_REVIEW_API_ENABLED=true` and secret
+`AGENT_REVIEW_ANTHROPIC_API_KEY` for a dedicated API project. Set a provider-enforced
+spending limit on that project before enabling it. The runner fails before any
+provider call when either prerequisite is absent. Its temporary HOME and config
+paths prevent discovery of a personal CLI login; OAuth credentials are excluded.
+The complete workflow serializes dispatches through `agent-provider-budget` and
+never cancels an active paid run for a newer dispatch. Serialization is not a
+rolling spend cap or failure circuit breaker. Automatic retries remain disabled;
+unknown usage must be reconciled before another paid dispatch. Do not restore the
 removed personal OAuth credential or enable the retired invocation path. The new
 locator job makes no model calls and does not submit owner acceptance. No source
 change here configures an external anchor, changes required contexts or deploys a

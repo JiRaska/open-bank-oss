@@ -3,7 +3,6 @@ _service-ci.yml|job:contract|id-token
 admin-ui-deploy.yml|job:build-push|contents
 admin-ui-deploy.yml|job:build-push|id-token
 admin-ui-deploy.yml|job:build-push|pull-requests
-agent-review.yml|top|pull-requests
 alert-rca-weekly.yml|top|contents
 alert-rca-weekly.yml|top|issues
 alert-rca-weekly.yml|top|pull-requests

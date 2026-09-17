@@ -48,6 +48,22 @@ class SupportingContextTest(unittest.TestCase):
 
 
 class DriverTest(unittest.TestCase):
+    def setUp(self):
+        credentials = patch.dict(os.environ, AGENT_REVIEW_API_ENABLED="true", ANTHROPIC_API_KEY="api-fixture")
+        credentials.start()
+        self.addCleanup(credentials.stop)
+
+    def test_disabled_or_missing_api_never_invokes_provider(self):
+        for enabled, key in (("", "api-fixture"), ("false", "api-fixture"), ("true", ""), ("true", "  ")):
+            with self.subTest(enabled=enabled, key_present=bool(key.strip())), \
+                    patch.dict(os.environ, AGENT_REVIEW_API_ENABLED=enabled, ANTHROPIC_API_KEY=key), \
+                    patch.object(runner.subprocess, "run") as invoke, \
+                    patch.object(runner, "anchored") as anchor, \
+                    self.assertRaisesRegex(ValueError, "no provider invocation"):
+                runner.review("missing-input.json", "unused.json", "correctness", "/trusted/claude")
+            invoke.assert_not_called()
+            anchor.assert_not_called()
+
     def test_usage_is_numeric_allowlisted_and_unknown_is_not_zero(self):
         event = dict(type="result", is_error=True, total_cost_usd=1.25,
                      usage=dict(input_tokens=120, output_tokens=30, cache_read_input_tokens=0,
@@ -351,7 +367,11 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn("GITHUB_TOKEN", kwargs["env"])
             self.assertNotIn("ACTIONS_RUNTIME_TOKEN", kwargs["env"])
             self.assertNotIn("FUTURE_JOB_SECRET", kwargs["env"])
-            self.assertEqual(kwargs["env"]["CLAUDE_CODE_OAUTH_TOKEN"], "provider-fixture")
+            self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", kwargs["env"])
+            self.assertEqual(kwargs["env"]["ANTHROPIC_API_KEY"], "api-fixture")
+            self.assertEqual(kwargs["env"]["HOME"], kwargs["cwd"])
+            self.assertEqual(kwargs["env"]["CLAUDE_CONFIG_DIR"], str(Path(kwargs["cwd"]) / ".claude"))
+            self.assertEqual(kwargs["env"]["XDG_CONFIG_HOME"], str(Path(kwargs["cwd"]) / ".config"))
             self.assertNotEqual(kwargs["cwd"], str(source.parent))
             self.assertEqual(json.loads(kwargs["input"]), data)
             self.assertTrue(output.exists())
@@ -443,7 +463,13 @@ class SourceAndAcceptanceTest(unittest.TestCase):
     def test_workflow_enforces_readonly_models_and_acceptance_order(self):
         import yaml
         workflow = Path(__file__).resolve().parents[1] / "workflows" / "agent-review.yml"
-        jobs = yaml.safe_load(workflow.read_text())["jobs"]
+        config = yaml.safe_load(workflow.read_text())
+        self.assertEqual(config["permissions"], {})
+        self.assertEqual(config["concurrency"], dict(group="agent-provider-budget", **{"cancel-in-progress": False}))
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", workflow.read_text())
+        self.assertIn("secrets.AGENT_REVIEW_ANTHROPIC_API_KEY", workflow.read_text())
+        jobs = config["jobs"]
+        self.assertNotIn("review", jobs)
         for name in ("solo-prepare", "solo-review", "solo-proof", "solo-seal"):
             self.assertTrue(jobs[name]["permissions"])
             self.assertTrue(all(value == "read" for value in jobs[name]["permissions"].values()))
