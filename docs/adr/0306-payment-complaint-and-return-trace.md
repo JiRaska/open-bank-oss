@@ -90,7 +90,13 @@ The staged production manifest requires explicit revisions from the first replic
 remains a local compatibility aid for controlled legacy replay only. Other rails, timeout evidence and
 an authoritative reversal result remain follow-up work, so this ADR stays `partial`.
 
+The investigation UI invalidates displayed and in-flight evidence whenever the
+complaint reference, assignment case or purpose changes. A late response for the
+previous investigation cannot populate the newly selected context. This client-side
+lifecycle safeguard complements the server's assignment, OPA and read-audit checks.
+
 ## Alternatives considered
+
 
 - **Live service fan-out:** rejected; it adds money-path load and cannot guarantee one snapshot.
 - **Derive correlation from amount/time:** rejected; common values create false links.
