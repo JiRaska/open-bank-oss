@@ -649,6 +649,11 @@ def check(root: Path) -> list[str]:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
     if "project.delete(testIntelligenceRuntimeDir)" not in convention:
         errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
+    if 'test-intelligence/runtime/$name' not in convention:
+        errors.append("Test tasks must have distinct runtime-evidence directories")
+    collector = text(root / ".github/scripts/collect-test-run-evidence.py")
+    if '.rglob("*.jsonl")' not in collector:
+        errors.append("runtime collector does not read evidence from every Test task directory")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.

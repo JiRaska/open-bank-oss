@@ -102,10 +102,13 @@ tasks.withType<Test>().configureEach {
     // A shared Testcontainers resource emits a deliberately secret-free lifecycle
     // observation here. The CI envelope is evidence, not a container inventory:
     // ports, hosts, credentials and ids must never leave the test runner.
-    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime")
+    // Each Test task owns its evidence. `providerPactTest` can run after `test` in
+    // :build; resetting a shared directory there erased the integration tests'
+    // already-recorded container lifecycle before the collector ran.
+    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime/$name")
     environment("OPENBANK_TEST_EVIDENCE_DIR", testIntelligenceRuntimeDir.get().asFile.absolutePath)
     // Recorder output is append-only within one test task so concurrently managed resources do
-    // not lose transitions. Reset only this generated task directory before each invocation:
+    // not lose transitions. Reset only this Test task's directory before each invocation:
     // otherwise a local re-run mixes prior lifecycle evidence into the next envelope.
     doFirst {
         project.delete(testIntelligenceRuntimeDir)

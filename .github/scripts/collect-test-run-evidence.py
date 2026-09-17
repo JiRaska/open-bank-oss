@@ -594,7 +594,7 @@ def public_runtime_image(resource: str, image: object) -> str:
 
 def observations(service: Path) -> list[dict]:
     result = []
-    for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
+    for file in (service / "build" / "test-intelligence" / "runtime").rglob("*.jsonl"):
         for line in file.read_text().splitlines():
             try:
                 item = json.loads(line)
@@ -829,7 +829,9 @@ def main() -> None:
             # The shared recorder and daemon event stream observe the same
             # lifecycle at slightly different instants. Keep one event per
             # lifecycle rather than inflating the UI's runtime evidence count.
-            (runtime / "testcontainers.jsonl").write_text(
+            test_runtime = runtime / "test"
+            test_runtime.mkdir()
+            (test_runtime / "testcontainers.jsonl").write_text(
                 # The shared recorder may be configured through an internal image
                 # mirror. Its hostname/namespace are not allowed in the aggregate.
                 '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
@@ -1124,6 +1126,13 @@ def main() -> None:
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
             assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
+            pact_runtime = runtime / "providerPactTest"
+            pact_runtime.mkdir()
+            (pact_runtime / "testcontainers.jsonl").write_text(
+                '{"schemaVersion":1,"resource":"valkey","image":"valkey/valkey:7.2-alpine","lifecycle":"started","observedAt":"2026-08-22T21:12:00Z"}\n'
+                '{"schemaVersion":1,"resource":"valkey","image":"valkey/valkey:7.2-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:13:00Z"}\n'
+            )
+            assert [item["lifecycle"] for item in observations(service) if item["resource"] == "valkey"] == ["started", "stopped"]
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
             assert "target 70%" in specialized[1]["detail"]
