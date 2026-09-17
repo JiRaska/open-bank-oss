@@ -63,11 +63,13 @@ retention alone. This is an egress and access review gate, not permission to pub
 before the contract, ACLs, threat model and consumer are tested together.
 
 The historical observation read names both the onboarding case and the observation.
-It requires KYC/admin authorization and a bounded investigation purpose; KYB commits
-an actor, purpose, case, observation and timestamp audit row before returning the
-finding. A missing or cross-case observation returns no detail. Assignment validation
-for Context investigations remains a separate gate before Context may resolve a
-reference on an analyst's behalf.
+It requires KYC/admin authorization and the exact `KYB_OWNERSHIP_REVIEW` purpose. KYB
+checks the caller's still-active, approved case-root assignment with Context over an
+authenticated HTTPS connection on every direct read; a denial or unavailable check
+releases no finding. KYB commits an actor, purpose, case, observation and timestamp
+audit row before returning detail. A missing or cross-case observation returns no detail.
+Context independently repeats its assignment decision before resolving a reference
+on an analyst's behalf.
 
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
