@@ -231,6 +231,19 @@ class ApprovalGroupServiceTest {
     }
 
     @Test
+    fun `revoked organization actor cannot deactivate a group before ownership is read`(): Unit = runBlocking {
+        coEvery { authority.authorityFor(owner, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+
+        assertThatThrownBy {
+            runBlocking { service.deactivate(UUID.randomUUID(), owner, owner, organizationActor) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { repository.findById(any()) }
+        coVerify(exactly = 0) { repository.update(any(), any(), any()) }
+    }
+
+    @Test
     fun `SCA binding is deterministic but changes with authority-relevant content`() {
         val first = ApprovalGroupScaBinding.create(owner, " Treasury ", setOf(memberB, memberA), 2)
         val reordered = ApprovalGroupScaBinding.create(owner, "Treasury", setOf(memberA, memberB), 2)
