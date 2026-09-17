@@ -124,6 +124,8 @@ spec:
             # documents-namespace ingress edge for kyb.
             - name: DOCUMENT_SERVICE_URL
               value: http://document-service.documents.svc:8143
+            - name: CONTEXT_SERVICE_URL
+              value: https://context-service.context.svc:8443
             # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
             - name: ARES_BASE_URL
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest
@@ -201,6 +203,10 @@ spec:
               readOnly: true
             - name: msg-override
               mountPath: /mnt/msg-override
+              readOnly: true
+            - name: context-tls-trust
+              mountPath: /mnt/context-tls/ca.crt
+              subPath: ca.crt
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from
@@ -293,6 +299,9 @@ spec:
         - name: msg-override
           configMap:
             name: kyb-service-msg-override
+        - name: context-tls-trust
+          secret:
+            secretName: kyb-context-trust
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle

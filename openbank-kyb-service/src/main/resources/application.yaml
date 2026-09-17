@@ -100,6 +100,10 @@ quarkus:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
       connect-timeout: 2000
       read-timeout: 10000
+    context-service:
+      url: ${CONTEXT_SERVICE_URL:http://localhost:8149}
+      connect-timeout: 1000
+      read-timeout: 3000
     # Public registers (ADR-0284 D1). Free, no key. Egress from the pod goes through the NAT
     # gateway; the NetworkPolicy generator sees these as external edges.
     ares:
@@ -242,6 +246,18 @@ authz:
   enforce: "${AUTHZ_ENFORCE:true}"
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  quarkus:
+    tls:
+      context-ownership:
+        trust-store:
+          pem:
+            certs: /mnt/context-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      context-service:
+        tls-configuration-name: context-ownership
 
 "%dev":
   quarkus:

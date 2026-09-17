@@ -4,18 +4,21 @@
 
 package com.openbank.kyb.integration
 
+import com.openbank.kyb.application.port.out.UboObservationAccessDecision
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.persistence.repository.KybUboJson
 import com.openbank.kyb.it.PostgresTestResource
+import com.openbank.kyb.it.StubContextOwnershipAccess
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
@@ -30,6 +33,8 @@ import java.util.UUID
 @QuarkusTestResource(KybBootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 class UboObservationApiIT {
+    @Inject lateinit var access: StubContextOwnershipAccess
+
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.jdbc.url")
     lateinit var jdbcUrl: String
 
@@ -46,16 +51,24 @@ class UboObservationApiIT {
         val otherCaseId = UUID.randomUUID()
         val observationId = UUID.randomUUID()
         seed(caseId, observationId)
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
         val url = "/api/v1/kyb/cases/$caseId/ubo-observations/$observationId"
 
-        Given { header("X-Investigation-Purpose", "Ownership review") } When { get(url) } Then {
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+        } When { get(url) } Then {
             statusCode(200)
             body("caseId", equalTo(caseId.toString()))
             body("id", equalTo(observationId.toString()))
             body("finding.source", equalTo("SELF_DECLARATION"))
         }
         Given { this } When { get(url) } Then { statusCode(400) }
-        Given { header("X-Investigation-Purpose", "Ownership review") } When {
+        access.decisions[otherCaseId] = UboObservationAccessDecision.ALLOWED
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+        } When {
             get("/api/v1/kyb/cases/$otherCaseId/ubo-observations/$observationId")
         } Then { statusCode(404) }
         DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
@@ -66,7 +79,7 @@ class UboObservationApiIT {
                 statement.executeQuery().use { reads ->
                     assertThat(reads.next()).isTrue()
                     assertThat(reads.getString("principal_id")).isEqualTo("kyc-reviewer")
-                    assertThat(reads.getString("purpose")).isEqualTo("Ownership review")
+                    assertThat(reads.getString("purpose")).isEqualTo("KYB_OWNERSHIP_REVIEW")
                     assertThat(reads.next()).isFalse()
                 }
             }
@@ -74,9 +87,31 @@ class UboObservationApiIT {
     }
 
     @Test
+    @TestSecurity(user = "kyc-reviewer", roles = ["ROLE_KYC"])
+    fun `direct source read fails closed without live assignment`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        seed(caseId, observationId)
+        val url = "/api/v1/kyb/cases/$caseId/ubo-observations/$observationId"
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+        } When { get(url) } Then { statusCode(403) }
+        access.decisions[caseId] = UboObservationAccessDecision.UNAVAILABLE
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+            header("Authorization", "Bearer synthetic-reviewer")
+        } When { get(url) } Then { statusCode(503) }
+        access.decisions[caseId] = UboObservationAccessDecision.ALLOWED
+        Given {
+            header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW")
+        } When { get(url) } Then { statusCode(403) }
+    }
+
+    @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `shared API service identity cannot read an observation`() {
-        Given { header("X-Investigation-Purpose", "Ownership review") } When {
+        Given { header("X-Investigation-Purpose", "KYB_OWNERSHIP_REVIEW") } When {
             get("/api/v1/kyb/cases/${UUID.randomUUID()}/ubo-observations/${UUID.randomUUID()}")
         } Then { statusCode(403) }
     }

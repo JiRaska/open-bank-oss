@@ -213,8 +213,9 @@ paths:
       summary: Historical beneficial-ownership observation for an authorised KYB investigation
       operationId: getUboObservation
       description: >-
-        Staff-only; the observation must belong to the exact case in the path. The purpose header
-        is mandatory. The source finding stays in KYB and is never included in the Context topic.
+        Staff-only; the observation must belong to the exact case in the path. KYB checks the
+        caller's still-active, approved case-root assignment with Context on every read and fails
+        closed if that check is unavailable. The source finding stays in KYB and never enters Context.
       parameters:
         - $ref: '#/components/parameters/caseId'
         - name: observationId
@@ -224,7 +225,7 @@ paths:
         - name: X-Investigation-Purpose
           in: header
           required: true
-          schema: { type: string, minLength: 1, maxLength: 80 }
+          schema: { type: string, enum: [KYB_OWNERSHIP_REVIEW] }
       responses:
         '200':
           description: Versioned mapped finding and source hash
@@ -237,6 +238,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/kyb/cases/{id}/initiator:
     post:
       tags: [KYB]
@@ -734,6 +737,8 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ServiceUnavailable:
+      description: Live Context assignment check is unavailable; evidence was not released
     Conflict:
       description: The transition is not valid in the case's current state
       content:

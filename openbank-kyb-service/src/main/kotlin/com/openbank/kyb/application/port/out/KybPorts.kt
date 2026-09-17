@@ -96,6 +96,13 @@ interface UboObservationRepository {
     )
 }
 
+/** Live case-root assignment decision from Context; source evidence never trusts a UI-only check. */
+interface UboObservationAccess {
+    suspend fun check(caseId: UUID, bearer: String): UboObservationAccessDecision
+}
+
+enum class UboObservationAccessDecision { ALLOWED, DENIED, UNAVAILABLE }
+
 /**
  * The per-entity store of human confirmations of a representation rule (#9711).
  *
