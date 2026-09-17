@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.application.port.out
 
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import java.util.UUID
 
@@ -16,6 +17,8 @@ sealed interface StatutoryOperationCreateOutcome {
 }
 
 class StatutoryOperationCreateConflict : RuntimeException("request key belongs to different statutory evidence")
+class StatutoryDecisionConflict : RuntimeException("representative already decided differently")
+class StatutoryDecisionClosed : RuntimeException("statutory proposal is no longer pending")
 
 interface StatutoryDelegationOperationRepository {
     /** Exact replay returns the existing operation id; changed evidence under one request key fails. */
@@ -23,4 +26,9 @@ interface StatutoryDelegationOperationRepository {
 
     /** Principal scope is mandatory so a guessed operation id never reveals another company. */
     suspend fun find(id: UUID, principalPartyId: UUID): StatutoryDelegationOperation?
+
+    /** Insert only while PENDING and unexpired; exact same-actor retry returns original evidence. */
+    suspend fun recordDecision(decision: StatutoryDelegationDecision): StatutoryDelegationDecision
+
+    suspend fun findDecision(operationId: UUID, actorPartyId: UUID): StatutoryDelegationDecision?
 }

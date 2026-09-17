@@ -5,6 +5,8 @@
 package com.openbank.delegation.infrastructure.rest
 
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
+import com.openbank.delegation.application.port.out.StatutoryDecisionClosed
+import com.openbank.delegation.application.port.out.StatutoryDecisionConflict
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
@@ -28,6 +30,7 @@ import com.openbank.delegation.application.usecase.SpendReservationNotFoundExcep
 import com.openbank.delegation.application.usecase.SpendReservationRefusedException
 import com.openbank.delegation.application.usecase.SpendReservationStateException
 import com.openbank.delegation.application.usecase.SpendReservationStateStreamUnavailableException
+import com.openbank.delegation.application.usecase.StatutoryDecisionUnavailable
 import com.openbank.delegation.application.usecase.StatutoryProposalDenied
 import com.openbank.delegation.application.usecase.StatutoryProposalNotFound
 import com.openbank.delegation.application.usecase.StatutoryProposalStale
@@ -73,6 +76,26 @@ class StatutoryOperationCreateConflictMapper : ExceptionMapper<StatutoryOperatio
     override fun toResponse(exception: StatutoryOperationCreateConflict): Response =
         Response.status(Response.Status.CONFLICT)
             .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryDecisionConflictMapper : ExceptionMapper<StatutoryDecisionConflict> {
+    override fun toResponse(exception: StatutoryDecisionConflict): Response = Response.status(Response.Status.CONFLICT)
+        .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryDecisionClosedMapper : ExceptionMapper<StatutoryDecisionClosed> {
+    override fun toResponse(exception: StatutoryDecisionClosed): Response = Response.status(Response.Status.CONFLICT)
+        .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryDecisionUnavailableMapper : ExceptionMapper<StatutoryDecisionUnavailable> {
+    override fun toResponse(exception: StatutoryDecisionUnavailable): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "2")
+            .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message)).build()
 }
 
 @Provider

@@ -123,6 +123,20 @@ test_only_edge_may_read_joint_proposal if {
     }
 }
 
+test_only_edge_may_request_joint_approval_intent if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.intent"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.intent"}
+    }
+}
+
+test_only_edge_may_record_joint_decision if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.decide"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.decide"}
+    }
+}
+
 test_shared_backend_identity_may_not_preview if {
 	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.preview"}
 }

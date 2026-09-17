@@ -107,6 +107,14 @@ interface ScaChallengeClient {
      * stays true forever, which is what made one ceremony reusable for unlimited grants.
      */
     suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot
+
+    /** Spend only the device approval bound to this exact statutory decision fingerprint. */
+    suspend fun consumeStatutoryApproval(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        operationId: UUID,
+        decisionHash: String,
+    ): ScaChallengeSnapshot
 }
 
 /**

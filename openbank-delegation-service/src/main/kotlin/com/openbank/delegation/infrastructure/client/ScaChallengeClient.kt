@@ -39,7 +39,11 @@ data class ScaChallengeClientResponse(
 /** Mirrors sca-service's ConsumeScaRequest. Only the party is stated: a delegation challenge
  *  carries no dynamic-linking data, and sca-service authorises an unlinked challenge exactly
  *  when the consume states no operation. */
-data class ConsumeScaChallengeRequest(val partyId: UUID)
+data class ConsumeScaChallengeRequest(
+    val partyId: UUID,
+    val operationId: String? = null,
+    val operationHash: String? = null,
+)
 
 @Path("/api/v1/sca/challenges")
 /**
@@ -85,6 +89,18 @@ class ResilientScaChallengeClient @Inject constructor(@RestClient private val cl
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
     override suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot =
         client.consumeChallenge(challengeId, ConsumeScaChallengeRequest(expectedPartyId)).toSnapshot()
+
+    @Timeout(2000)
+    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
+    override suspend fun consumeStatutoryApproval(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        operationId: UUID,
+        decisionHash: String,
+    ): ScaChallengeSnapshot = client.consumeChallenge(
+        challengeId,
+        ConsumeScaChallengeRequest(expectedPartyId, operationId.toString(), decisionHash),
+    ).toSnapshot()
 
     private fun ScaChallengeClientResponse.toSnapshot() = ScaChallengeSnapshot(
         id = id,

@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.20.0
+  version: 1.21.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -242,6 +242,48 @@ paths:
         '404': { description: Proposal not found under this company }
         '409': { description: Proposal expired or its rule changed }
         '503': { description: Current statutory authority cannot be verified }
+  /api/v1/delegations/statutory-operations/{id}/approval-intent:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Get the exact device-bound approval intent for one current human representative
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Operation id, statutory SCA purpose and decision-specific SHA-256 binding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryApprovalIntentResponse' }
+        '403': { description: No current joint mandate }
+        '409': { description: Proposal expired, changed or no longer pending }
+        '503': { description: Current statutory authority cannot be verified }
+  /api/v1/delegations/statutory-operations/{id}/decisions:
+    post:
+      tags: [Statutory delegation proposals]
+      summary: Record one immutable company signer's approval or refusal
+      description: >-
+        APPROVE requires a completed and consumed SCA challenge bound to the exact approval intent;
+        REJECT is an authenticated refusal and must not carry a session. A decision never creates a grant.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatutoryDecisionRequest' }
+      responses:
+        '200':
+          description: Immutable decision evidence, including exact replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryDecisionResponse' }
+        '403': { description: No current joint mandate }
+        '409': { description: Stale proposal, conflicting decision or mismatched SCA binding }
+        '503': { description: Current legal rule or SCA consumption cannot be verified }
   /api/v1/delegations/recertifications/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -864,6 +906,28 @@ components:
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         grantId: { type: [string, 'null'], format: uuid }
+    StatutoryApprovalIntentResponse:
+      type: object
+      required: [operationId, purpose, operationHash]
+      properties:
+        operationId: { type: string, format: uuid }
+        purpose: { type: string, enum: [DELEGATION_STATUTORY_APPROVAL] }
+        operationHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    StatutoryDecisionRequest:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: { type: string, enum: [APPROVE, REJECT] }
+        scaSessionId: { type: [string, 'null'], format: uuid }
+    StatutoryDecisionResponse:
+      type: object
+      required: [operationId, actorPartyId, verdict, decidedAt]
+      properties:
+        operationId: { type: string, format: uuid }
+        actorPartyId: { type: string, format: uuid }
+        verdict: { type: string, enum: [APPROVE, REJECT] }
+        scaSessionId: { type: [string, 'null'], format: uuid }
+        decidedAt: { type: string, format: date-time }
     DelegationPreviewResponse:
       type: object
       required: [valid]

@@ -7,7 +7,10 @@ package com.openbank.delegation.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.application.usecase.StatutoryDelegationDecisionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationProposalService
+import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.toCommand
@@ -57,6 +60,28 @@ data class StatutoryProposalResponse(
     }
 }
 
+data class StatutoryApprovalIntentResponse(val operationId: UUID, val purpose: String, val operationHash: String)
+
+data class StatutoryDecisionRequest(val verdict: StatutoryDecisionVerdict?, val scaSessionId: UUID? = null)
+
+data class StatutoryDecisionResponse(
+    val operationId: UUID,
+    val actorPartyId: UUID,
+    val verdict: StatutoryDecisionVerdict,
+    val scaSessionId: UUID?,
+    val decidedAt: Instant,
+) {
+    companion object {
+        fun from(decision: StatutoryDelegationDecision) = StatutoryDecisionResponse(
+            decision.operationId,
+            decision.actorPartyId,
+            decision.verdict,
+            decision.scaSessionId,
+            decision.decidedAt,
+        )
+    }
+}
+
 /** Customer-edge-only JOINT proposal surface. PENDING is evidence, never a usable delegation. */
 @Path("/api/v1/delegations/statutory-operations")
 @Produces(MediaType.APPLICATION_JSON)
@@ -64,6 +89,7 @@ data class StatutoryProposalResponse(
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class StatutoryDelegationResource(
     private val service: StatutoryDelegationProposalService,
+    private val decisions: StatutoryDelegationDecisionService,
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
@@ -101,6 +127,41 @@ class StatutoryDelegationResource(
         requireEdge()
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         return StatutoryProposalResponse.from(service.get(id, principal, customerPartyId, actorPartyId), mapper)
+    }
+
+    @GET
+    @Path("/{id}/approval-intent")
+    @Authorize(action = "delegation.statutory.intent", resource = "#id")
+    suspend fun approvalIntent(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryApprovalIntentResponse {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        val actor = requireNotNull(actorPartyId) { "human actor is required" }
+        return StatutoryApprovalIntentResponse(
+            id,
+            "DELEGATION_STATUTORY_APPROVAL",
+            decisions.approvalIntent(id, principal, actor),
+        )
+    }
+
+    @POST
+    @Path("/{id}/decisions")
+    @Authorize(action = "delegation.statutory.decide", resource = "#id")
+    suspend fun decide(
+        @PathParam("id") id: UUID,
+        request: StatutoryDecisionRequest?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryDecisionResponse {
+        requireEdge()
+        val body = requireNotNull(request) { "decision body is required" }
+        val verdict = requireNotNull(body.verdict) { "verdict is required" }
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        val actor = requireNotNull(actorPartyId) { "human actor is required" }
+        return StatutoryDecisionResponse.from(decisions.decide(id, principal, actor, verdict, body.scaSessionId))
     }
 
     private fun requireEdge() {

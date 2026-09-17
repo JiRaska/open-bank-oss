@@ -4,11 +4,15 @@
 
 package com.openbank.delegation.infrastructure.persistence.repository
 
+import com.openbank.delegation.application.port.out.StatutoryDecisionClosed
+import com.openbank.delegation.application.port.out.StatutoryDecisionConflict
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationState
+import com.openbank.delegation.infrastructure.persistence.entity.StatutoryDelegationDecisionEntity
 import com.openbank.delegation.infrastructure.persistence.entity.StatutoryDelegationOperationEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
@@ -69,6 +73,52 @@ class StatutoryDelegationOperationRepositoryImpl :
             .firstResult<StatutoryDelegationOperationEntity>()
     }.awaitSuspending()?.toDomain()
 
+    override suspend fun findDecision(operationId: UUID, actorPartyId: UUID): StatutoryDelegationDecision? =
+        Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "from StatutoryDelegationDecisionEntity where operationId = :operation and actorPartyId = :actor",
+                    StatutoryDelegationDecisionEntity::class.java,
+                )
+                    .setParameter("operation", operationId)
+                    .setParameter("actor", actorPartyId)
+                    .singleResultOrNull
+            }
+        }.awaitSuspending()?.toDomain()
+
+    override suspend fun recordDecision(decision: StatutoryDelegationDecision): StatutoryDelegationDecision =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(INSERT_DECISION_SQL)
+                    .setParameter("operation", decision.operationId)
+                    .setParameter("actor", decision.actorPartyId)
+                    .setParameter("sca", decision.scaSessionId)
+                    .setParameter("verdict", decision.verdict.name)
+                    .setParameter("decidedAt", decision.decidedAt)
+                    .executeUpdate()
+                    .flatMap { inserted ->
+                        session.createQuery(
+                            "from StatutoryDelegationDecisionEntity where operationId = :operation and actorPartyId = :actor",
+                            StatutoryDelegationDecisionEntity::class.java,
+                        )
+                            .setParameter("operation", decision.operationId)
+                            .setParameter("actor", decision.actorPartyId)
+                            .singleResultOrNull
+                            .map { found ->
+                                val persisted = found?.toDomain()
+                                if (persisted == null) throw StatutoryDecisionClosed()
+                                if (persisted.verdict != decision.verdict ||
+                                    persisted.scaSessionId != decision.scaSessionId
+                                ) {
+                                    throw StatutoryDecisionConflict()
+                                }
+                                require(inserted in 0..1) { "unexpected statutory decision insert count" }
+                                persisted
+                            }
+                    }
+            }
+        }.awaitSuspending()
+
     private fun StatutoryDelegationOperation.sameEvidenceAs(other: StatutoryDelegationOperation): Boolean =
         principalPartyId == other.principalPartyId &&
             initiatorPartyId == other.initiatorPartyId &&
@@ -82,6 +132,14 @@ class StatutoryDelegationOperationRepositoryImpl :
             ruleSnapshotJson == other.ruleSnapshotJson
 
     private companion object {
+        const val INSERT_DECISION_SQL = """
+            INSERT INTO delegation_statutory_decisions
+                (operation_id, actor_party_id, sca_session_id, decision, decided_at)
+            SELECT operation_id, :actor, :sca, :verdict, :decidedAt
+            FROM delegation_statutory_operations
+            WHERE operation_id = :operation AND state = 'PENDING' AND expires_at > :decidedAt
+            ON CONFLICT DO NOTHING
+        """
         const val INSERT_SQL = """
             INSERT INTO delegation_statutory_operations
                 (operation_id, principal_party_id, initiator_party_id, request_key, request_hash,

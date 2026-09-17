@@ -6,6 +6,8 @@ package com.openbank.delegation.integration
 
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -128,6 +130,67 @@ class StatutoryDelegationOperationSchemaIT {
                     .isInstanceOf(SQLException::class.java)
                     .hasMessageContaining("immutable")
             }
+        }
+    }
+
+    @Test
+    fun `approval requires SCA evidence while an immutable rejection must not claim one`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO delegation_statutory_decisions " +
+                    "(operation_id, actor_party_id, sca_session_id, decision, decided_at) " +
+                    "VALUES (?, ?, ?, ?, now())",
+            ).use { statement ->
+                statement.setObject(1, proposed.id)
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, null)
+                statement.setString(4, "REJECT")
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+
+                statement.setObject(2, UUID.randomUUID())
+                statement.setString(4, "APPROVE")
+                assertThatThrownBy { statement.executeUpdate() }.isInstanceOf(SQLException::class.java)
+
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, UUID.randomUUID())
+                statement.setString(4, "REJECT")
+                assertThatThrownBy { statement.executeUpdate() }.isInstanceOf(SQLException::class.java)
+            }
+        }
+    }
+
+    @Test
+    fun `decision repository stores an exact retry once and never creates a grant`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+        val actor = UUID.randomUUID()
+        val first = StatutoryDelegationDecision(
+            proposed.id,
+            actor,
+            StatutoryDecisionVerdict.APPROVE,
+            UUID.randomUUID(),
+            proposed.createdAt.plusSeconds(60),
+        )
+
+        assertThat(onVertxContext { operations.recordDecision(first) }).isEqualTo(first)
+        assertThat(onVertxContext { operations.recordDecision(first.copy(decidedAt = first.decidedAt.plusSeconds(1))) })
+            .isEqualTo(first)
+        assertThat(onVertxContext { operations.findDecision(proposed.id, actor) }).isEqualTo(first)
+        assertThatThrownBy {
+            onVertxContext { operations.recordDecision(first.copy(scaSessionId = UUID.randomUUID())) }
+        }.isInstanceOf(com.openbank.delegation.application.port.out.StatutoryDecisionConflict::class.java)
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT count(*) FROM delegation_grants WHERE grantor_party_id = ?")
+                .use { statement ->
+                    statement.setObject(1, proposed.principalPartyId)
+                    statement.executeQuery().use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getInt(1)).isZero()
+                    }
+                }
         }
     }
 
