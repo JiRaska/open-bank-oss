@@ -128,6 +128,7 @@ interface RespondDelegationUseCase {
         granteePartyId: UUID,
         scaSessionId: UUID,
         callerPartyId: CallerPartyId,
+        actorPartyId: UUID? = null,
     ): DelegationGrant
 
     suspend fun decline(delegationId: UUID, granteePartyId: UUID, callerPartyId: CallerPartyId): DelegationGrant

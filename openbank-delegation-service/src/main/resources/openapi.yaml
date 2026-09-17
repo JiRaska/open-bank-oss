@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  # 1.19.0 -> 1.20.0 (#9417): additive SCA-bound approval-group management and revision reads.
+  # 1.19.0 -> 1.20.0 (#9417): additive approval-group management and human-actor company acceptance.
   version: 1.20.0
 servers:
   - url: http://localhost:8126
@@ -327,6 +327,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       responses:
         '200':
           description: Grant activated
@@ -334,7 +335,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '400': { description: SCA invalid or expired, or EXPOSURE_UNSUPPORTED for a historical exposure grant }
-        '403': { description: The authenticated party is not the grantee }
+        '403': { description: The authenticated party is not the grantee, or its actor lacks sole authority }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
     post:
@@ -665,9 +666,10 @@ components:
       required: false
       description: |
         The natural person authenticated by customer-edge. Required together with
-        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
-        individual profile; for an organization profile it differs and the service verifies the
-        actor's active PartyMandate before accepting the request. Never supplied by the app.
+        X-Customer-Party-Id on customer preview, offer, accept and approval-group mutation calls.
+        It equals the principal for an individual profile; for an organization profile it differs
+        and the service verifies the actor's active PartyMandate before accepting the request.
+        Never supplied by the app.
       schema: { type: string, format: uuid }
     ApprovalId:
       name: approvalId

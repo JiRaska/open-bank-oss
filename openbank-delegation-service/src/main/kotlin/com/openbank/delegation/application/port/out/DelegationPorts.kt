@@ -81,7 +81,7 @@ data class GrantorAuthority(
     val partyType: String? = null,
 )
 
-/** ADR-0232 D5 / ADR-0284: may this authenticated human create authority for this principal? */
+/** ADR-0232 D5 / ADR-0284: may this authenticated human decide grant issuance or acceptance for this principal? */
 interface GrantorAuthorityClient {
     suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority
 }
