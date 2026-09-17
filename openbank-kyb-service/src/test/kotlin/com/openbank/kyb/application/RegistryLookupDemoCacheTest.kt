@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.application
 
+import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.out.BusinessRegistryPort
 import com.openbank.kyb.application.port.out.RegistryExtractCache
 import com.openbank.kyb.application.usecase.RegistryLookupService
@@ -73,5 +74,18 @@ class RegistryLookupDemoCacheTest {
         val real = extract("ares", "45274649")
         service(real, cache).lookup(real.identifier, null)
         coVerify(exactly = 1) { cache.put(real) }
+    }
+
+    @Test
+    fun `authority freshness bypasses even a valid twenty-four-hour cache entry`(): Unit = runBlocking {
+        val cache = mockk<RegistryExtractCache>(relaxed = true)
+        val old = extract("ares", "45274649")
+        val amended = old.copy(representationRule = RepresentationRule.SOLE.copy(sourceText = "amended rule"))
+        coEvery { cache.find(any(), any()) } returns old
+        val lookup = service(amended, cache)
+
+        assertThat(lookup.fresh(LookupCommand(IdentifierScheme.CZ_ICO, "45274649"))).isEqualTo(amended)
+        coVerify(exactly = 0) { cache.find(any(), any()) }
+        coVerify(exactly = 0) { cache.put(any()) }
     }
 }

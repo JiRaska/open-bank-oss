@@ -82,6 +82,8 @@ interface BusinessOnboardingCaseRepository {
  * only to TELL a reviewer that the rule changed — never to make a decision.
  */
 interface RepresentationAttestationRepository {
+    suspend fun findById(id: UUID): RepresentationAttestation?
+
     suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String): RepresentationAttestation?
 
     /** The most recent active attestation for the entity, whatever rule text it was about. */

@@ -40,6 +40,49 @@ class RepresentationAttestationApiIT {
     private val stored = "63183609"
     private val stale = "12345679"
     private val superseded = "27182819"
+    private val currentStatus = "65432100"
+
+    @Test
+    @TestSecurity(user = "operator-anna", roles = ["ROLE_OPERATOR"])
+    fun `current-status route binds the exact attestation and hides register text`() {
+        val hash = currentHash(currentStatus)
+        val originalId = Given {
+            contentType("application/json")
+            body("""{"confirmedSigners":2,"ruleTextHash":"$hash"}""")
+        } When {
+            post("/api/v1/kyb/representation/CZ_ICO/$currentStatus")
+        } Then {
+            statusCode(200)
+        } Extract {
+            path<String>("id")
+        }
+
+        Given { accept("application/json") } When {
+            get("/api/v1/kyb/representation/attestations/$originalId/current")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(originalId))
+            body("current", equalTo(true))
+            body("ruleTextHash", equalTo(hash))
+            body("confirmedSigners", equalTo(2))
+            body("ruleText", org.hamcrest.Matchers.nullValue())
+        }
+
+        Given {
+            contentType("application/json")
+            body("""{"confirmedSigners":3,"ruleTextHash":"$hash"}""")
+        } When {
+            post("/api/v1/kyb/representation/CZ_ICO/$currentStatus")
+        } Then {
+            statusCode(200)
+        }
+        Given { accept("application/json") } When {
+            get("/api/v1/kyb/representation/attestations/$originalId/current")
+        } Then {
+            statusCode(200)
+            body("current", equalTo(false))
+        }
+    }
 
     @Test
     @TestSecurity(user = "operator-anna", roles = ["ROLE_OPERATOR"])

@@ -734,24 +734,14 @@ data class BusinessOnboardingCase(
      * publishing this historical evidence.
      */
     fun statutoryPolicyEvidence(at: Instant): StatutoryPolicyEvidence? {
-        if (status != CaseStatus.SIGNED && status != CaseStatus.ACTIVE) return null
         val ex = extract ?: return null
         val attestationId = representationAttestationId ?: return null
         val principal = entityPartyId ?: return null
         val quorum = requiredSignatures ?: return null
         val ceremony = agreement?.ceremonyId ?: return null
-        if (ex.verification != ExtractVerification.VERIFIED) return null
-        if (ex.status != EntityStatus.ACTIVE) return null
-        if (ex.source == RegistryExtract.SANDBOX_DEMO_SOURCE) return null
-
-        val statutory = signers.filter { it.status == SignerStatus.SIGNED && it.representativeIndex != null }
+        if (!isSignedVerifiedStatutorySource(ex)) return null
+        val statutory = completeStatutorySigners(ex, quorum) ?: return null
         val indices = statutory.mapNotNull { it.representativeIndex }
-        val people = statutory.mapNotNull { it.partyId }
-        if (statutory.size < quorum) return null
-        if (people.size != statutory.size || people.distinct().size != people.size) return null
-        if (indices.distinct().size != indices.size) return null
-        if (indices.any { it !in ex.representatives.indices }) return null
-        if (officeShortfall(statutory).isNotEmpty()) return null
 
         val eligible = statutory.map { signer ->
             val index = requireNotNull(signer.representativeIndex)
@@ -784,6 +774,24 @@ data class BusinessOnboardingCase(
             evidenceRef = "kyb-case:$id:ceremony:$ceremony",
             effectiveFrom = at,
         )
+    }
+
+    private fun isSignedVerifiedStatutorySource(ex: RegistryExtract): Boolean =
+        (status == CaseStatus.SIGNED || status == CaseStatus.ACTIVE) &&
+            ex.verification == ExtractVerification.VERIFIED &&
+            ex.status == EntityStatus.ACTIVE &&
+            ex.source != RegistryExtract.SANDBOX_DEMO_SOURCE
+
+    private fun completeStatutorySigners(ex: RegistryExtract, quorum: Int): List<Signer>? {
+        val statutory = signers.filter { it.status == SignerStatus.SIGNED && it.representativeIndex != null }
+        val indices = statutory.mapNotNull { it.representativeIndex }
+        val people = statutory.mapNotNull { it.partyId }
+        if (statutory.size < quorum) return null
+        if (people.size != statutory.size || people.distinct().size != people.size) return null
+        if (indices.distinct().size != indices.size) return null
+        if (indices.any { it !in ex.representatives.indices }) return null
+        if (officeShortfall(statutory).isNotEmpty()) return null
+        return statutory
     }
 
     companion object {

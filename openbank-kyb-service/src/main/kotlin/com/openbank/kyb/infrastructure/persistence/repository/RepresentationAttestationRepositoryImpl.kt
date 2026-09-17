@@ -14,11 +14,15 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.util.UUID
 
 @ApplicationScoped
 class RepresentationAttestationRepositoryImpl :
     RepresentationAttestationRepository,
     PanacheRepository<RepresentationAttestationEntity> {
+
+    override suspend fun findById(id: UUID): RepresentationAttestation? =
+        Panache.withSession { find("attestationId", id).firstResult() }.awaitSuspending()?.toDomain()
 
     override suspend fun findActive(
         identifier: LegalEntityIdentifier,

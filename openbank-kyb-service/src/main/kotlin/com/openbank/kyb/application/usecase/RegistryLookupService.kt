@@ -33,6 +33,9 @@ class RegistryLookupService : RegistryLookupUseCase {
     override suspend fun lookup(cmd: LookupCommand): RegistryExtract? =
         lookup(LegalEntityIdentifier.of(cmd.scheme, cmd.identifier), cmd)
 
+    override suspend fun fresh(cmd: LookupCommand): RegistryExtract? =
+        registry.lookup(LegalEntityIdentifier.of(cmd.scheme, cmd.identifier), cmd.declared)
+
     internal suspend fun lookup(identifier: LegalEntityIdentifier, cmd: LookupCommand?): RegistryExtract? {
         val now = Instant.now(clock)
         cache.find(identifier, now.minus(cacheTtl))?.let { return it }

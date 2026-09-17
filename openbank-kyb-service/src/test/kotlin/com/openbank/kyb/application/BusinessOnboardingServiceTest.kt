@@ -526,6 +526,8 @@ class BusinessOnboardingServiceTest {
     }
 
     private class NoStore : RepresentationAttestationRepository {
+        override suspend fun findById(id: UUID): RepresentationAttestation? = null
+
         override suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String) = null
 
         override suspend fun findLatestFor(identifier: LegalEntityIdentifier) = null
@@ -805,6 +807,7 @@ class BusinessOnboardingServiceTest {
         coEvery { parties.createEntityParty(any()) } returns entityParty
         val saved = mutableListOf<RepresentationAttestation>()
         val attestationStore = object : RepresentationAttestationRepository {
+            override suspend fun findById(id: UUID) = saved.firstOrNull { it.id == id }
             override suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String) =
                 saved.firstOrNull { it.identifier == identifier && it.ruleTextHash == ruleTextHash }
             override suspend fun findLatestFor(identifier: LegalEntityIdentifier) =

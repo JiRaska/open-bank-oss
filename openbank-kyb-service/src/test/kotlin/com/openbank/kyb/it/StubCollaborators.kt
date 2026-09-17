@@ -60,11 +60,11 @@ class StubAresAdapter : RegistryAdapter {
                 RepresentationRule(RepresentationMode.JOINT_N, 2, "dva jednatelé společně"),
                 listOf("Jana Nováková", "Eva Dvořáková"),
             )
-            // Four entities reserved for RepresentationAttestationApiIT, one per test that WRITES.
+            // Five entities reserved for RepresentationAttestationApiIT, one per test that WRITES.
             // The module's ITs share one database and one Quarkus instance, so a test that confirms
             // an entity another test reads makes both order-dependent — and an order-dependent test
             // is green until the day the runner reorders them.
-            "63183609", "76543218", "12345679", "27182819" -> extract(
+            "63183609", "76543218", "12345679", "27182819", "65432100" -> extract(
                 identifier,
                 LegalFormClass.LIMITED_COMPANY,
                 RepresentationRule(RepresentationMode.JOINT_N, 2, "dva jednatelé společně"),

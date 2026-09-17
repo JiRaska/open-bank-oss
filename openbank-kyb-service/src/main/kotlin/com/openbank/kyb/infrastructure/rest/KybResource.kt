@@ -471,6 +471,15 @@ class KybResource {
     // --- representation attestation (#9711) --------------------------------------------------
 
     @GET
+    @Path("/representation/attestations/{attestationId}/current")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
+    @Authorize(action = "kyb.representation.current.read")
+    @Operation(summary = "Whether one attestation still matches the live verified register rule")
+    suspend fun currentRepresentationAttestation(@PathParam("attestationId") attestationId: UUID): Response =
+        representation.currentById(attestationId)?.let { Response.ok(it).build() }
+            ?: Response.status(Response.Status.NOT_FOUND).build()
+
+    @GET
     @Path("/representation/{scheme}/{identifier}")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, Roles.KYC)
     @Authorize(action = "kyb.case.review.resolve")

@@ -19,6 +19,7 @@
 #   kyb.case.abandon           — POST /kyb/cases/{id}/abandon
 #   kyb.case.review.resolve    — POST /kyb/cases/{id}/review/resolve (staff)
 #   kyb.case.reject            — POST /kyb/cases/{id}/reject (staff)
+#   kyb.representation.current.read — GET /kyb/representation/attestations/{id}/current (M2M)
 #
 # kyb.ubo.read is covered by the staff `kyb.` prefix rule below and is deliberately ABSENT from the
 # edge list: a beneficial-ownership extract is personal data about third parties who are not the
@@ -35,6 +36,14 @@
 package openbank.rest
 
 import rego.v1
+
+# Read-only status without register text. The shared M2M identity is still a fleet-wide
+# limitation; the KYB service role and network policy remain independent boundaries.
+allowed_reasons contains "service-statutory-attestation-current" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-services"
+    input.action == "kyb.representation.current.read"
+}
 
 # Real staff working the review queue.
 allowed_reasons contains "operator-kyb-review" if {

@@ -29,6 +29,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Optional
+import java.util.UUID
 
 /** Per-entity human confirmation, and what happens when the register text moves (#9711). */
 class RepresentationAttestationServiceTest {
@@ -39,6 +40,7 @@ class RepresentationAttestationServiceTest {
 
     private class InMemoryAttestations : RepresentationAttestationRepository {
         val rows = mutableListOf<RepresentationAttestation>()
+        override suspend fun findById(id: UUID) = rows.firstOrNull { it.id == id }
         override suspend fun findActive(identifier: LegalEntityIdentifier, ruleTextHash: String) =
             rows.firstOrNull { it.identifier == identifier && it.ruleTextHash == ruleTextHash && it.isActive }
 
@@ -65,6 +67,8 @@ class RepresentationAttestationServiceTest {
 
     private class FixedLookup(var extract: RegistryExtract?) : RegistryLookupUseCase {
         override suspend fun lookup(cmd: LookupCommand): RegistryExtract? = extract
+
+        override suspend fun fresh(cmd: LookupCommand): RegistryExtract? = extract
     }
 
     private fun extract(
@@ -96,6 +100,38 @@ class RepresentationAttestationServiceTest {
             this.lookup = lookup
             this.clock = this@RepresentationAttestationServiceTest.clock
         }
+
+    @Test
+    fun `currency follows today's verified register and the exact stored attestation`(): Unit = runBlocking {
+        val original = extract("Jednají vždy dva jednatelé společně.", RepresentationMode.JOINT_N, 2)
+        val lookup = FixedLookup(original)
+        val store = InMemoryAttestations()
+        val svc = service(lookup, store)
+        val saved = svc.attest(
+            AttestRepresentationCommand(
+                scheme = IdentifierScheme.CZ_ICO,
+                identifier = ico.value,
+                ruleTextHash = RepresentationAttestation.hashOf(original.representationRule.sourceText),
+                confirmedSigners = 2,
+                confirmedRoles = listOf("jednatel"),
+                operator = "operator-anna",
+            ),
+        )
+        val status = svc.currentById(saved.id)
+        assertThat(status?.current).isTrue()
+        assertThat(status?.ruleTextHash).isEqualTo(saved.ruleTextHash)
+        assertThat(status?.confirmedSigners).isEqualTo(2)
+        assertThat(svc.currentById(UUID.randomUUID())).isNull()
+
+        lookup.extract = extract("Nyní jednatel jedná samostatně.")
+        assertThat(svc.currentById(saved.id)?.current).isFalse()
+        lookup.extract = original.copy(status = EntityStatus.DISSOLVED)
+        assertThat(svc.currentById(saved.id)?.current).isFalse()
+        lookup.extract = original.copy(status = EntityStatus.ACTIVE, verification = ExtractVerification.UNVERIFIED)
+        assertThat(svc.currentById(saved.id)?.current).isFalse()
+        lookup.extract = null
+        assertThat(svc.currentById(saved.id)?.current).isFalse()
+    }
 
     @Test
     fun `an unconfirmed rule is Unattested and confirming it makes the same text Attested`() {

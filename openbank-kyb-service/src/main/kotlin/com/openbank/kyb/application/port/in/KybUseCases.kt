@@ -97,10 +97,21 @@ interface RepresentationAttestationUseCase {
     /** What the store says about this entity's CURRENT register text, for rendering the review form. */
     suspend fun decisionFor(scheme: IdentifierScheme, identifier: String): RepresentationDecision?
 
+    /** Re-read the registry; no historical attestation becomes authority merely by still existing. */
+    suspend fun currentById(attestationId: UUID): CurrentRepresentationAttestation?
+
     suspend fun attest(cmd: AttestRepresentationCommand): RepresentationAttestation
 
     suspend fun history(scheme: IdentifierScheme, identifier: String): List<RepresentationAttestation>
 }
+
+data class CurrentRepresentationAttestation(
+    val id: UUID,
+    val current: Boolean,
+    val ruleTextHash: String,
+    val confirmedSigners: Int,
+    val confirmedRoles: List<String>,
+)
 
 data class RejectCaseCommand(val caseId: UUID, val reason: String, val operator: String)
 
@@ -130,6 +141,9 @@ interface RegistryLookupUseCase {
      * `RegistryUnavailableException` instead, so the two can never be confused by a caller.
      */
     suspend fun lookup(cmd: LookupCommand): RegistryExtract?
+
+    /** Bypass the 24-hour extract cache for an authority decision about today's register rule. */
+    suspend fun fresh(cmd: LookupCommand): RegistryExtract?
 }
 
 // One method per state transition: the count belongs to the state machine, not to this interface.

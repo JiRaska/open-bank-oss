@@ -5,6 +5,7 @@
 package com.openbank.kyb.application.usecase
 
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
+import com.openbank.kyb.application.port.`in`.CurrentRepresentationAttestation
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.RegistryLookupUseCase
 import com.openbank.kyb.application.port.`in`.RepresentationAttestationUseCase
@@ -26,6 +27,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.Optional
+import java.util.UUID
 
 /** Raised when the rule text moved between rendering the confirmation form and submitting it. */
 class StaleAttestationException(message: String) : RuntimeException(message)
@@ -70,6 +72,30 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
         val extract = lookup.lookup(LookupCommand(scheme, identifier)) ?: return null
         return decide(extract)
     }
+
+    override suspend fun currentById(attestationId: UUID): CurrentRepresentationAttestation? {
+        val attestation = attestations.findById(attestationId) ?: return null
+        if (!attestation.isActive) return attestation.toCurrency(current = false)
+        val extract = lookup.fresh(LookupCommand(attestation.identifier.scheme, attestation.identifier.value))
+            ?: return attestation.toCurrency(current = false)
+        val eligibleExtract = extract.identifier == attestation.identifier &&
+            extract.verification == ExtractVerification.VERIFIED &&
+            extract.status == EntityStatus.ACTIVE
+        if (!eligibleExtract) return attestation.toCurrency(current = false)
+        val decision = decide(extract)
+        val current = decision is RepresentationDecision.Attested &&
+            decision.attestation.id == attestationId &&
+            decision.attestation.ruleTextHash == attestation.ruleTextHash
+        return attestation.toCurrency(current)
+    }
+
+    private fun RepresentationAttestation.toCurrency(current: Boolean) = CurrentRepresentationAttestation(
+        id = id,
+        current = current,
+        ruleTextHash = ruleTextHash,
+        confirmedSigners = confirmedSigners,
+        confirmedRoles = confirmedRoles,
+    )
 
     /**
      * The one place the three outcomes are derived. Kept here rather than in the case so the review

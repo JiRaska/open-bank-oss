@@ -28,6 +28,15 @@ test_shared_service_account_gets_no_kyb_reason_from_this_file if {
 	not "edge-service-kyb" in rest.allowed_reasons with input as {"principal": shared, "action": "kyb.case.reject"}
 }
 
+test_shared_backend_may_read_only_current_attestation_status if {
+	"service-statutory-attestation-current" in rest.allowed_reasons with input as {"principal": shared, "action": "kyb.representation.current.read"}
+	not "service-statutory-attestation-current" in rest.allowed_reasons with input as {"principal": shared, "action": "kyb.case.review.resolve"}
+}
+
+test_customer_edge_cannot_read_attestation_status if {
+	not "service-statutory-attestation-current" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.representation.current.read"}
+}
+
 # ADR-0284 D5. A beneficial-ownership extract is personal data about third parties who are not the
 # caller: the analyst working the review queue may read it, the customer edge may not. The second
 # case is the one worth a test — it holds only because kyb.ubo.read is absent from an enumerated

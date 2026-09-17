@@ -5,7 +5,7 @@ info:
   # search (#9707); this is the next free minor as of live main.
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
-  version: 1.6.0
+  version: 1.7.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -543,6 +543,30 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/representation/attestations/{attestationId}/current:
+    get:
+      tags: [KYB]
+      summary: Does this attestation still match the live verified register rule?
+      description: >-
+        Internal status only; no register text or personal data. False means superseded,
+        amended, unverified, inactive, or absent from the current register. Registry outage
+        is an error, never a false assurance. Deploy this provider before delegation consumes it.
+      operationId: currentRepresentationAttestation
+      parameters:
+        - name: attestationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current-status evidence for a known attestation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentRepresentationAttestation' }
+        '404':
+          description: Unknown attestation
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
   /api/v1/kyb/representation/{scheme}/{identifier}:
     get:
       tags: [KYB]
@@ -783,6 +807,17 @@ components:
           type: string
           description: Hash of the text the operator actually read; a mismatch answers 409.
         note: { type: string }
+    CurrentRepresentationAttestation:
+      type: object
+      required: [id, current, ruleTextHash, confirmedSigners, confirmedRoles]
+      properties:
+        id: { type: string, format: uuid }
+        current: { type: boolean }
+        ruleTextHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        confirmedSigners: { type: integer, minimum: 1 }
+        confirmedRoles:
+          type: array
+          items: { type: string }
     RepresentationDecision:
       type: object
       required: [state, ruleTextHash, parserMode, parserSuggestsRoles]
