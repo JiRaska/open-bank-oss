@@ -20,4 +20,3 @@ openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/it/PostgresRedpan
 openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresTestResource.kt
 openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/PostgresRedisTestResource.kt
 openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
-openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt
