@@ -9,7 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.usecase.StatutoryDelegationDecisionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationExecutionService
+import com.openbank.delegation.application.usecase.StatutoryDelegationProgressService
 import com.openbank.delegation.application.usecase.StatutoryDelegationProposalService
+import com.openbank.delegation.application.usecase.StatutorySigningProgress
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
@@ -102,6 +104,7 @@ class StatutoryDelegationResource(
     private val service: StatutoryDelegationProposalService,
     private val decisions: StatutoryDelegationDecisionService,
     private val execution: StatutoryDelegationExecutionService,
+    private val progress: StatutoryDelegationProgressService,
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
@@ -218,6 +221,20 @@ class StatutoryDelegationResource(
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         return service.decisions(id, principal, customerPartyId, actorPartyId)
             .map { StatutoryDecisionSummaryResponse(it.actorPartyId, it.verdict, it.decidedAt) }
+    }
+
+    @GET
+    @Path("/{id}/progress")
+    @Authorize(action = "delegation.statutory.read", resource = "#id")
+    suspend fun signingProgress(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutorySigningProgress {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        val actor = requireNotNull(actorPartyId) { "human actor is required" }
+        return progress.get(id, principal, actor)
     }
 
     @POST

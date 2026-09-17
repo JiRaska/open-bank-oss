@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.25.0
+  version: 1.26.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -375,6 +375,28 @@ paths:
         '409': { description: Quorum incomplete, proposal stale or already closed }
         '422': { description: Grant eligibility or resource ownership failed fresh validation }
         '503': { description: Legal rule or an authoritative validation source is unavailable }
+  /api/v1/delegations/statutory-operations/{id}/progress:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Evaluate company signing progress with the current office-aware legal rule
+      description: >-
+        Advisory display state only. APPROVE/execute still recheck the live rule and immutable
+        decisions. quorumPossible is false when recorded rejections make the original quorum
+        impossible; a fresh proposal is then required. A raw approval count alone is not legal sufficiency.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Current signing counts and server-evaluated quorum flags
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutorySigningProgress' }
+        '403': { description: Actor lacks current joint representation }
+        '404': { description: Proposal not found under this company }
+        '409': { description: Proposal is expired, stale or no longer pending }
+        '503': { description: Current statutory authority cannot be verified }
   /api/v1/delegations/recertifications/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -1014,6 +1036,17 @@ components:
         actorPartyId: { type: string, format: uuid }
         verdict: { type: string, enum: [APPROVE, REJECT] }
         decidedAt: { type: string, format: date-time }
+    StatutorySigningProgress:
+      type: object
+      required: [operationId, requiredSignatures, approvalCount, rejectionCount, quorumSatisfied, quorumPossible, myVerdict]
+      properties:
+        operationId: { type: string, format: uuid }
+        requiredSignatures: { type: integer, minimum: 2 }
+        approvalCount: { type: integer, minimum: 0 }
+        rejectionCount: { type: integer, minimum: 0 }
+        quorumSatisfied: { type: boolean }
+        quorumPossible: { type: boolean }
+        myVerdict: { type: [string, 'null'], enum: [APPROVE, REJECT, null] }
     StatutoryApprovalIntentResponse:
       type: object
       required: [operationId, purpose, operationHash]
