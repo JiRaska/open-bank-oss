@@ -126,26 +126,9 @@ jobs:
             || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
-          is_inert_service_path ".github/scripts/publish-admin-ui-pacts.py" \
-            || { echo "selector self-test: Admin UI Pact publication must not full-fleet" >&2; exit 1; }
-          is_inert_service_path ".github/gates/workflow-write-permissions-baseline.txt" \
-            || { echo "selector self-test: Pact gate permission baseline is service-inert" >&2; exit 1; }
-
-          # Main and PR both use the last '-openbank-' delimiter. The Admin UI is a
-          # consumer, but not a Gradle module; only its provider belongs in this matrix.
-          pact_build_modules() {
-            local base prov cons
-            base=$(basename "$1" .json)
-            case "$base" in *-openbank-*) ;; *) return 1 ;; esac
-            prov="openbank-${base##*-openbank-}"
-            cons="${base%-openbank-*}"
-            if [ "$cons" != "openbank-admin-ui" ]; then printf '%s\n' "$cons"; fi
-            printf '%s\n' "$prov"
-          }
-          [ "$(pact_build_modules pacts/openbank-admin-ui-openbank-context-service.json)" = "openbank-context-service" ] \
-            || { echo "selector self-test: Admin UI Pact must select its provider only" >&2; exit 1; }
-          [ "$(pact_build_modules pacts/openbank-ledger-service-openbank-balance-service.json)" = $'openbank-ledger-service\nopenbank-balance-service' ] \
-            || { echo "selector self-test: service Pact must select both sides" >&2; exit 1; }
+          # shellcheck source=.github/scripts/service-ci-pact-modules.sh
+          source .github/scripts/service-ci-pact-modules.sh
+          pact_build_modules_self_test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -213,7 +196,7 @@ jobs:
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
                       done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
-                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) : ;;
+                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh) : ;;
                     openbank-*/*)
                       m="${f%%/*}"
                       if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
@@ -235,7 +218,7 @@ jobs:
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
-                     && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
+                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/service-ci-pact-modules\.sh)$' <<< "$FILES"; then
                     CHANGED="openbank-libs"
                   fi
                   echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
@@ -379,7 +362,7 @@ jobs:
               # Skip the canary if a real service is already in the matrix (it validates
               # the recipe too).
               if [ -z "${CHANGED// /}" ] \
-                 && grep -qE '^\.github/workflows/(services-ci|_service-ci)\.yml' <<< "$FILES"; then
+                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/service-ci-pact-modules\.sh)$' <<< "$FILES"; then
                 echo "Decision: recipe-only change -> build canary openbank-libs."
                 CHANGED="openbank-libs"
               fi
