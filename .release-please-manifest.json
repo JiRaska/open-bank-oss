@@ -1,8 +1,8 @@
 {
-  "openbank-account-service": "0.29.0",
-  "openbank-admin-ui": "0.246.1",
+  "openbank-account-service": "0.30.0",
+  "openbank-admin-ui": "0.248.0",
   "openbank-agent-service": "1.26.0",
-  "openbank-aml-service": "0.10.3",
+  "openbank-aml-service": "0.11.0",
   "openbank-anacredit-service": "0.9.4",
   "openbank-ap2-service": "0.3.1",
   "openbank-audit-service": "0.18.5",
@@ -32,7 +32,7 @@
   "openbank-interest-service": "0.20.3",
   "openbank-kyc-service": "0.15.2",
   "openbank-ledger-service": "1.29.0",
-  "openbank-lending-service": "0.33.1",
+  "openbank-lending-service": "0.33.4",
   "openbank-mcp-service": "0.17.0",
   "openbank-notification-service": "0.32.0",
   "openbank-onboarding-service": "0.10.1",
@@ -59,9 +59,9 @@
   "openbank-campaign-service": "0.40.0",
   "openbank-tax-reporting-service": "0.40.0",
   "openbank-delegation-service": "0.16.0",
-  "openbank-kyb-service": "0.4.0",
+  "openbank-kyb-service": "0.5.0",
   "openbank-case-coordinator-agent": "0.8.1",
   "openbank-loyalty-service": "0.3.0",
   "openbank-wealth-service": "0.2.0",
-  "openbank-context-service": "0.2.0"
+  "openbank-context-service": "0.3.0"
 }

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.3...lending-service-v0.33.4) (2026-09-17)
+
+
+### Bug Fixes
+
+* **lending:** inject demonstration risk flag into CDI adapter ([#10170](https://github.com/JiRaska/open-bank-oss/issues/10170)) ([de1c479](https://github.com/JiRaska/open-bank-oss/commit/de1c479b6869adfa893e2052938d7c8af4f58e47)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
+## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.2...lending-service-v0.33.3) (2026-09-16)
+
+
+### Bug Fixes
+
+* **lending:** bind risk model environment flag ([#10125](https://github.com/JiRaska/open-bank-oss/issues/10125)) ([7dd034b](https://github.com/JiRaska/open-bank-oss/commit/7dd034b322e48d44c4a8f88f18bc2a969f326c68)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.1...lending-service-v0.33.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* **lending:** bind pessimistic loan lock ([#10117](https://github.com/JiRaska/open-bank-oss/issues/10117)) ([57bd6de](https://github.com/JiRaska/open-bank-oss/commit/57bd6de40095c9fdb6038e7ff7c860af14e569a4)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+* **lending:** preserve credit risk evidence and reconcile allowances ([#9466](https://github.com/JiRaska/open-bank-oss/issues/9466)) ([1f8b96c](https://github.com/JiRaska/open-bank-oss/commit/1f8b96c7d7f00c3900392dd080b1c9d34e886179)), closes [#9464](https://github.com/JiRaska/open-bank-oss/issues/9464)
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.33.0...lending-service-v0.33.1) (2026-09-13)
 
 

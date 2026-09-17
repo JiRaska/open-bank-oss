@@ -84,6 +84,16 @@ customer identifiers. Production relay activation, replay-boundary evidence, wor
 business-case correlation remain activation prerequisites, so this ADR stays `partial` and the
 deployment stays at zero replicas.
 
+The aggregate API now distinguishes a missing root (`MISSING`), a bounded slice
+(`PARTIAL`) and an available projection (`AVAILABLE`). Availability describes the
+projection, not completeness of telemetry or confirmed customer impact. The admin
+impact map presents counts by type only, labels partial results and never renders a
+missing projection as zero impact. Older responses without coverage metadata remain
+explicitly unknown during a staged rollout. The BFF copies only approved aggregate
+fields, dropping unexpected upstream identifiers. Changing the incident or case clears
+the view and invalidates in-flight responses. HTTP/PostgreSQL tests and browser tests
+cover these distinctions; this does not activate business-case drill-down.
+
 ## Alternatives considered
 
 - **Use the service map as observed impact:** rejected; dependency is possibility, not evidence.

@@ -26,7 +26,7 @@ import java.time.LocalDate
 /**
  * A SANDBOX-ONLY fictitious company, so business onboarding can be demonstrated end to end without
  * borrowing a real one: search finds it, the case opens on it, and once the representation rule is
- * attested (the human step is kept, not skipped) the configured person can sign and act for it.
+ * confirmed (automatically: it has a single jednatel and a sole rule) the configured person can sign and act for it.
  *
  * Every datum is deliberately impossible, so nobody mistakes it for a register record:
  *  - IČO `00000001` — the lowest IČO that passes the mod-11 checksum (`00000000` does not), and one
@@ -44,6 +44,14 @@ class DemoEntity(
     private val enabled: Boolean,
     @ConfigProperty(name = "openbank.kyb.demo-entity.representative-name", defaultValue = "Oldřich Vaněk")
     private val representativeName: String,
+    @ConfigProperty(name = "openbank.kyb.demo-entity.representative-address.street", defaultValue = "Ukázková 1")
+    private val representativeStreet: String,
+    @ConfigProperty(name = "openbank.kyb.demo-entity.representative-address.city", defaultValue = "Praha")
+    private val representativeCity: String,
+    @ConfigProperty(name = "openbank.kyb.demo-entity.representative-address.postal-code", defaultValue = "11000")
+    private val representativePostalCode: String,
+    @ConfigProperty(name = "openbank.kyb.demo-entity.representative-address.country", defaultValue = "CZ")
+    private val representativeCountry: String,
     private val clock: Clock,
 ) {
 
@@ -65,7 +73,23 @@ class DemoEntity(
         registeredAddress = ADDRESS,
         incorporatedOn = FOUNDED,
         taxId = null,
-        representatives = listOf(Representative(representativeName, null, "jednatelé", "jednatel", FOUNDED)),
+        representatives = listOf(
+            Representative(
+                representativeName,
+                null,
+                "jednatelé",
+                "jednatel",
+                FOUNDED,
+                // Fictitious, and the same address the sandbox demo user's profile carries, so the
+                // initiator's address comparison is exercised and matches.
+                address = RegisteredAddress(
+                    representativeStreet,
+                    representativeCity,
+                    representativePostalCode,
+                    representativeCountry,
+                ),
+            ),
+        ),
         representationRule = RepresentationRule(RepresentationMode.SOLE, 1, RULE_TEXT),
         source = RegistryExtract.SANDBOX_DEMO_SOURCE,
         sourceRef = "SANDBOX DEMO — fictitious entity, not in any register",

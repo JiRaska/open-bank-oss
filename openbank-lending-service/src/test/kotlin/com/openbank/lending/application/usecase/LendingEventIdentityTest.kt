@@ -77,7 +77,10 @@ class LendingEventIdentityTest {
     fun `the eleven event types are the ones this test speaks for`() {
         // A new event type must consciously join this list, which is what makes the scan above a
         // ratchet rather than a snapshot. Nine are literals; two arrive as a parameter.
-        val text = sources.joinToString("\n") { it.readText() }
+        val publisher = Path.of(
+            "src/main/kotlin/com/openbank/lending/infrastructure/outbox/KafkaLendingOutboxEventPublisher.kt",
+        )
+        val text = (sources + listOf(publisher)).joinToString("\n") { it.readText() }
         val literals = Regex(""""(credit|loan)\.[a-z._]+"""").findAll(text)
             .map { it.value.trim('"') }.toSet()
         assertThat(literals).containsExactlyInAnyOrder(
