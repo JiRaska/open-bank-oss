@@ -4,6 +4,27 @@
   },
   "interactions": [
     {
+      "description": "read authority history for an unassigned delegation root",
+      "providerStates": [
+        {
+          "name": "authority history is unauthorized for another root"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "history-case",
+          "X-Investigation-Purpose": "AUTHORIZATION_REVIEW"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/authorizations/55555555-5555-5555-5555-555555555555"
+      },
+      "response": {
+        "status": 403
+      }
+    },
+    {
       "description": "read available incident impact from Customer 360 admin",
       "providerStates": [
         {
@@ -114,6 +135,46 @@
           "incidentRef": "incident-1",
           "projectionStatus": "PARTIAL",
           "total": 2
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "read unknown historical authority for an approved delegation root",
+      "providerStates": [
+        {
+          "name": "root-scoped authority history has no recorded evidence"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "history-case",
+          "X-Investigation-Purpose": "AUTHORIZATION_REVIEW"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/authorizations/44444444-4444-4444-4444-444444444444",
+        "query": {
+          "effectiveAt": [
+            "2026-03-01T00:00:00Z"
+          ],
+          "knownAt": [
+            "2026-03-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "actionAuthorization": "UNKNOWN",
+          "effectiveAt": "2026-03-01T00:00:00Z",
+          "knownAt": "2026-03-01T00:00:00Z",
+          "observations": [],
+          "root": "delegation:44444444-4444-4444-4444-444444444444",
+          "truncated": false
         },
         "headers": {
           "Content-Type": "application/json"
