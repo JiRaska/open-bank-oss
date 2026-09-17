@@ -325,7 +325,7 @@ export default function TransactionsPage() {
               </span>
               <span>{t(`Stránka ${Math.floor(result.offset / PAGE_SIZE) + 1}`, `Page ${Math.floor(result.offset / PAGE_SIZE) + 1}`)}</span>
             </div>
-            <div role="region" aria-label={t('Posuvná tabulka výsledků transakcí', 'Scrollable transaction results table')} tabIndex={0} style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-region" role="region" aria-label={t('Posuvná tabulka výsledků transakcí', 'Scrollable transaction results table')} tabIndex={0}>
               <table className="table" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
