@@ -47,8 +47,8 @@ export function setup() {
     "CONTEXT_PERF_LENS",
   ];
   if (required.some((key) => !__ENV[key])) fail("Context Graph baseline requires every CONTEXT_PERF_* setting");
-  if (!["complaint", "incident", "authority", "aml", "aml-network"].includes(lens)) {
-    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml or aml-network");
+  if (!["complaint", "incident", "authority", "aml", "aml-network", "kyb"].includes(lens)) {
+    fail("CONTEXT_PERF_LENS must be complaint, incident, authority, aml, aml-network or kyb");
   }
   // Force an explicit local port-forward into the disposable target. This prevents a typo in an
   // environment variable from load-testing the shared sandbox or a production investigation.
@@ -70,6 +70,7 @@ export default function () {
     authority: `/api/v1/context/authorizations/${reference}`,
     aml: `/api/v1/context/aml-cases/${reference}`,
     "aml-network": `/api/v1/context/aml-cases/${reference}/network`,
+    kyb: `/api/v1/context/kyb-cases/${reference}/ownership-observations`,
   };
   const path = paths[lens];
   const response = http.get(`${baseUrl}${path}`, {
@@ -112,6 +113,13 @@ export default function () {
       if (lens === "aml-network") {
         return Array.isArray(body.related) && body.related.length > 0 && body.related.length <= 4 &&
           hasEvidence(body.root, 100) && body.related.every((caseHistory) => hasEvidence(caseHistory, 20));
+      }
+      if (lens === "kyb") {
+        return body.root === `kyb-case:${__ENV.CONTEXT_PERF_REFERENCE}` &&
+          Array.isArray(body.observations) && body.observations.length > 0 &&
+          body.observations.length <= 50 && typeof body.truncated === "boolean" &&
+          body.observations.every((item) => Number.isInteger(item.revision) && item.revision > 0 &&
+            /^[0-9a-f]{64}$/.test(item.sourceSha256));
       }
       return hasEvidence(body, 100) &&
         (lens !== "authority" || body.actionAuthorization === "UNKNOWN");
