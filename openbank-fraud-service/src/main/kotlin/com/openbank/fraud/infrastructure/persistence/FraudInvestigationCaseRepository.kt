@@ -146,9 +146,20 @@ class FraudInvestigationCaseRepository(
                         ).setParameter("nextRevision", next.revision).setParameter("actor", actorId)
                             .setParameter("at", now).setParameter("caseId", caseId)
                             .setParameter("previousRevision", row.revision).executeUpdate().flatMap { changed ->
-                                check(changed == 1) { "fraud case changed concurrently" }
-                                outbox.persistInTransaction(reference(next, FraudCaseClosedReference.EVENT_TYPE))
-                                    .replaceWith(next)
+                                if (changed == 1) {
+                                    outbox.persistInTransaction(reference(next, FraudCaseClosedReference.EVENT_TYPE))
+                                        .replaceWith(next)
+                                } else {
+                                    // A competing close won the row update. PostgreSQL waits for that
+                                    // transaction before reporting zero changed rows; refresh clears the
+                                    // session's previously loaded OPEN entity before returning its result.
+                                    session.refresh(row).replaceWith(row).map { current ->
+                                        check(current.status == FraudInvestigationStatus.CLOSED_NO_FINDING.name) {
+                                            "fraud case changed concurrently to an unexpected state"
+                                        }
+                                        current.toDomain()
+                                    }
+                                }
                             }
                     }
                 }
