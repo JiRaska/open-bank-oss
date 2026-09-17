@@ -4,7 +4,9 @@
 
 package com.openbank.party.application.port.out
 
+import com.openbank.party.domain.model.AmlDerivedFacts
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyAmlProfile
 import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
@@ -220,4 +222,18 @@ interface PartyMandateRepository {
     suspend fun findByAgent(agentPartyId: UUID): List<PartyMandate>
 
     suspend fun findActive(principalPartyId: UUID, agentPartyId: UUID, role: String): PartyMandate?
+}
+
+/** Outbound persistence port for the versioned personal AML profile (V25). */
+interface PartyAmlProfileRepository {
+    suspend fun findCurrent(partyId: UUID): PartyAmlProfile?
+
+    /** Every version, oldest first — the audit history of what was declared. */
+    suspend fun findHistory(partyId: UUID): List<PartyAmlProfile>
+
+    /**
+     * In ONE transaction: demote the current row, insert [profile] as the new current version,
+     * write the derived facts onto the `parties` row, and append [event] to `party_outbox`.
+     */
+    suspend fun saveNewVersion(profile: PartyAmlProfile, facts: AmlDerivedFacts, event: PartyEvent): PartyAmlProfile
 }
