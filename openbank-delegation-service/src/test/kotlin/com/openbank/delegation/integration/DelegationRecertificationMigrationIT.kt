@@ -23,8 +23,11 @@ class DelegationRecertificationMigrationIT {
         val source = Path.of(initialMigration.toURI()).parent
         val scripts = Files.list(source).use { paths -> paths.filter { it.toString().endsWith(".sql") }.toList() }
         val recertification = scripts.filter { it.fileName.toString().contains("__delegation_recertification_") }
+        val approvalGroups = scripts.filter { it.fileName.toString().contains("__approval_group") }
         assertThat(recertification).hasSize(2)
-        scripts.filterNot { it in recertification }.forEach { Files.copy(it, migrations.resolve(it.fileName)) }
+        assertThat(approvalGroups).hasSize(3)
+        scripts.filterNot { it in recertification || it in approvalGroups }
+            .forEach { Files.copy(it, migrations.resolve(it.fileName)) }
 
         PostgreSQLContainer("postgres:16-alpine").withUsername("openbank").use { postgres ->
             postgres.start()
@@ -35,11 +38,16 @@ class DelegationRecertificationMigrationIT {
                 .load()
             flyway.migrate()
             assertThat(flyway.info().current().version.version).isEqualTo("19")
-            verifyUpgrade(postgres, flyway, recertification)
+            verifyUpgrade(postgres, flyway, recertification, approvalGroups)
         }
     }
 
-    private fun verifyUpgrade(postgres: PostgreSQLContainer<*>, flyway: Flyway, recertification: List<Path>) {
+    private fun verifyUpgrade(
+        postgres: PostgreSQLContainer<*>,
+        flyway: Flyway,
+        recertification: List<Path>,
+        approvalGroups: List<Path>,
+    ) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.executeUpdate(
@@ -52,6 +60,10 @@ class DelegationRecertificationMigrationIT {
             }
             recertification.forEach { Files.copy(it, migrations.resolve(it.fileName)) }
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2)
+            assertThat(flyway.migrate().migrationsExecuted).isZero()
+            flyway.validate()
+            approvalGroups.forEach { Files.copy(it, migrations.resolve(it.fileName)) }
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3)
             assertThat(flyway.migrate().migrationsExecuted).isZero()
             flyway.validate()
             connection.createStatement().use { statement ->
