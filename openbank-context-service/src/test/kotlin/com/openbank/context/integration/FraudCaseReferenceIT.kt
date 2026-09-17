@@ -84,13 +84,24 @@ class FraudCaseReferenceIT {
         val assigned = UUID.randomUUID()
         val wrongRoot = UUID.randomUUID()
         val expired = UUID.randomUUID()
+        val closed = UUID.randomUUID()
         val now = Instant.now()
-        for (id in listOf(root, assigned, wrongRoot, expired)) {
+        for (id in listOf(root, assigned, wrongRoot, expired, closed)) {
             onVertx { repository.append(decoder.decode(body(id), UUID.randomUUID().toString(), OPENED)) }
+        }
+        onVertx {
+            repository.append(
+                decoder.decode(
+                    """{"eventType":"fraud.case_closed","caseId":"$closed","revision":2,"occurredAt":"2026-09-17T00:01:00Z"}""",
+                    UUID.randomUUID().toString(),
+                    "fraud.case_closed",
+                ),
+            )
         }
         seedAssignment(assigned, "fraud-case:$assigned", "investigator-1", now.plusSeconds(3600))
         seedAssignment(wrongRoot, "fraud-case:${UUID.randomUUID()}", "investigator-1", now.plusSeconds(3600))
         seedAssignment(expired, "fraud-case:$expired", "investigator-1", now.minusSeconds(1))
+        seedAssignment(closed, "fraud-case:$closed", "investigator-1", now.plusSeconds(3600))
 
         val candidates = onVertx { repository.assignedCandidates(root, "investigator-1", now) }
         assertThat(candidates.ids).containsExactly(assigned)

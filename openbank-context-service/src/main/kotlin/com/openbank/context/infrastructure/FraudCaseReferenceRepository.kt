@@ -79,6 +79,13 @@ class FraudCaseReferenceRepository(
                         AND assignment.root_ref = 'fraud-case:' || cast(reference.case_id as text)
                        WHERE reference.bank_scope = :bank
                          AND reference.case_id <> :root
+                         AND reference.event_type = 'fraud.case_opened'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM context_fraud_case_references newer
+                           WHERE newer.bank_scope = reference.bank_scope
+                             AND newer.case_id = reference.case_id
+                             AND newer.revision > reference.revision
+                         )
                          AND assignment.principal_id = :principal
                          AND assignment.purpose = 'FRAUD_INVESTIGATION'
                          AND assignment.valid_from <= :now AND assignment.valid_to > :now
