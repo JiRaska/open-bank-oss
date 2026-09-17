@@ -274,6 +274,32 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** Cursor-based inbox for companies with more proposals than the compatibility list returns. */
+    @GET
+    @Path("/statutory-operations/pages")
+    @Blocking
+    fun statutoryPage(@QueryParam("cursor") cursor: String?, @QueryParam("limit") limit: Int?): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        if (limit != null && limit !in 1..MAX_STATUTORY_PAGE) {
+            return refuse(Response.Status.BAD_REQUEST, "limit must be between 1 and $MAX_STATUTORY_PAGE")
+        }
+        if (cursor != null && (cursor.isBlank() || cursor.length > MAX_STATUTORY_CURSOR_LENGTH)) {
+            return refuse(Response.Status.BAD_REQUEST, "invalid statutory inbox cursor")
+        }
+        val query = buildList {
+            cursor?.let { add("cursor=${URLEncoder.encode(it, StandardCharsets.UTF_8)}") }
+            limit?.let { add("limit=$it") }
+        }.joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/pages$query",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /** A company signer may propose an exact grant for co-signature; this cannot create access. */
     @POST
     @Path("/statutory-operations")
@@ -355,6 +381,22 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             context.principal.toString(),
             json.writeValueAsString(decision),
             null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    /** Live-roster-gated signing progress; upstream deliberately omits device SCA identifiers. */
+    @GET
+    @Path("/statutory-operations/{id}/decisions")
+    @Blocking
+    fun statutoryDecisions(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id/decisions",
+            context.principal.toString(),
             mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
         )
     }
@@ -534,5 +576,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
         /** Matches audit-service's own customer-facing page cap; a larger value is clamped there too. */
         const val MAX_ACTIVITY_PAGE = 500
+        const val MAX_STATUTORY_PAGE = 50
+        const val MAX_STATUTORY_CURSOR_LENGTH = 256
     }
 }

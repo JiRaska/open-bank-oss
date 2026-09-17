@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.73.0
+  version: 1.74.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3658,6 +3658,29 @@ paths:
         '403': {description: Caller is not a current statutory representative}
         '404': {description: Proposal not found for this company}
         '409': {description: Proposal expired or its legal rule changed}
+  /delegations/statutory-operations/pages:
+    get:
+      tags: [Delegation]
+      summary: Page through pending company approvals without a fixed 50-item ceiling
+      description: >-
+        Requires the selected company profile. The next cursor is bound to the current
+        legal-rule snapshot; discard it and reload after an authority change. Deploy the
+        delegation-service V30 index and paged route before this customer edge route.
+      operationId: pageStatutoryDelegations
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Current page and next cursor, if more proposals remain
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationProposalPage'}
+        '400': {description: Invalid or obsolete cursor or limit}
+        '403': {description: No selected company or current joint representation}
+        '503': {description: Live company representation cannot be verified}
   /delegations/statutory-operations/{id}/approval-intent:
     get:
       tags: [Delegation]
@@ -3676,6 +3699,26 @@ paths:
         '403': {description: Caller is not a current company representative}
         '409': {description: Proposal is stale or no longer pending}
   /delegations/statutory-operations/{id}/decisions:
+    get:
+      tags: [Delegation]
+      summary: Read company signing progress without device SCA identifiers
+      operationId: getStatutoryDelegationDecisions
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Immutable signer verdicts and decision times
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/StatutoryDecisionSummary'}
+        '403': {description: Caller is not a current company representative}
+        '404': {description: Proposal not found for this company}
+        '409': {description: Pending proposal is stale}
+        '503': {description: Live company representation cannot be verified}
     post:
       tags: [Delegation]
       summary: Record an immutable approval or refusal by the authenticated representative
@@ -5017,7 +5060,7 @@ components:
       description: >-
         Pending evidence, not a usable grant. Show payload and rule to each signer before SCA;
         requestHash fingerprints the payload only; it is not a decision-specific SCA binding.
-        A future signing flow must bind the displayed operation, rule, actor and explicit decision.
+        Approval intent binds the displayed operation, rule, actor and explicit decision.
       properties:
         id: {type: string, format: uuid}
         principalPartyId: {type: string, format: uuid}
@@ -5030,6 +5073,21 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+    StatutoryDelegationProposalPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StatutoryDelegationProposal'}
+        nextCursor: {type: [string, 'null'], maxLength: 256}
+    StatutoryDecisionSummary:
+      type: object
+      required: [actorPartyId, verdict, decidedAt]
+      properties:
+        actorPartyId: {type: string, format: uuid}
+        verdict: {type: string, enum: [APPROVE, REJECT]}
+        decidedAt: {type: string, format: date-time}
     StatutoryApprovalIntent:
       type: object
       required: [operationId, purpose, operationHash]
