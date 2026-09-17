@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.70.0
+  version: 1.70.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -4926,7 +4926,8 @@ components:
       required: [id, principalPartyId, initiatorPartyId, requestHash, payload, ruleHash, rule, state, createdAt, expiresAt]
       description: >-
         Pending evidence, not a usable grant. Show payload and rule to each signer before SCA;
-        requestHash is the content address the enrolled device must sign.
+        requestHash fingerprints the payload only; it is not a decision-specific SCA binding.
+        A future signing flow must bind the displayed operation, rule, actor and explicit decision.
       properties:
         id: {type: string, format: uuid}
         principalPartyId: {type: string, format: uuid}
