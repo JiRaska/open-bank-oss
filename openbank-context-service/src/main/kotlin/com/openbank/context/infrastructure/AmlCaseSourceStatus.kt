@@ -3,7 +3,7 @@ package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -12,11 +12,15 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import kotlinx.coroutines.CancellationException
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import org.jboss.resteasy.reactive.client.spi.ResteasyReactiveClientRequestContext
+import org.jboss.resteasy.reactive.client.spi.ResteasyReactiveClientRequestFilter
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Semaphore
@@ -26,7 +30,7 @@ import java.util.concurrent.Semaphore
 data class AmlCaseSourceSnapshot(val id: UUID? = null, val status: String? = null)
 
 @RegisterRestClient(configKey = "aml-service")
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(AmlUserTokenPropagationFilter::class)
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)
@@ -34,6 +38,15 @@ interface AmlCaseSourceClient {
     @GET
     @Path("/{id}")
     fun getCase(@PathParam("id") id: UUID): Uni<AmlCaseSourceSnapshot>
+}
+
+/** AML evaluates the investigator's own token, including its current source-side policy. */
+@ApplicationScoped
+class AmlUserTokenPropagationFilter(private val identity: SecurityIdentity) : ResteasyReactiveClientRequestFilter {
+    override fun filter(requestContext: ResteasyReactiveClientRequestContext) {
+        val token = (identity.principal as? JsonWebToken)?.rawToken ?: return
+        requestContext.headers.putSingle(HttpHeaders.AUTHORIZATION, "Bearer $token")
+    }
 }
 
 /** Bounded, uncached source check; historical observations never decide current case eligibility. */

@@ -86,7 +86,9 @@ never a finding or automatic adverse decision.
 The AML read path requires COMPLIANCE/ADMIN, a maker/checker-approved assignment for the
 exact `aml-case:<uuid>` root, the AML purpose, OPA allowance and durable audit before
 querying the projection. It then reads the current case ID and status directly from the
-owning AML service using service credentials and a bounded, uncached request. A terminal,
+owning AML service with the investigator's authenticated bearer and a bounded, uncached
+request. The source applies its own roles and OPA policy; no shared M2M identity gains
+case-read permission through this lens. A terminal,
 missing, mismatched, malformed or unreachable source cannot release evidence. This check
 prevents Kafka lag and timestamp ties from treating a stale projected OPEN as current
 authority. A live status check still has a time-of-check/time-of-use race if a case closes

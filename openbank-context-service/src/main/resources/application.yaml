@@ -21,15 +21,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-  oidc-client:
-    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
-    client-id: openbank-services
-    credentials:
-      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    grant:
-      type: client
-    tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
   rest-client:
     aml-service:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
@@ -48,8 +39,6 @@ quarkus:
 "%test":
   quarkus:
     oidc:
-      enabled: false
-    oidc-client:
       enabled: false
   openbank:
     context:
