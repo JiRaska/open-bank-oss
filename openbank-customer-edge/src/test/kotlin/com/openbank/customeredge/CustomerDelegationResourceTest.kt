@@ -274,6 +274,62 @@ class CustomerDelegationResourceTest {
         verify(exactly = 0) { upstream.post(any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `joint decision forwards only the authenticated principal and actor plus verdict evidence`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        val party = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(any(), capture(party), capture(body), any(), capture(headers)) } returns
+            Response.ok().build()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        val response = resource.decideStatutory(
+            GRANT_ID,
+            """{"verdict":"REJECT","actorPartyId":"$stranger","grantorPartyId":"$stranger"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(party.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+        assertThat(body.captured).isEqualTo("""{"verdict":"REJECT"}""")
+    }
+
+    @Test
+    fun `approval intent refuses personal profile before contacting delegation`() {
+        val upstream = mockk<UpstreamClient>()
+
+        assertThat(resource(upstream).statutoryApprovalIntent(GRANT_ID).status).isEqualTo(403)
+        verify(exactly = 0) { upstream.get(any(), any(), any()) }
+    }
+
+    @Test
+    fun `approval intent carries the company profile and human signer to delegation`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.get(capture(url), capture(party), capture(headers)) } returns Response.ok("{}").build()
+        val resource = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource.statutoryApprovalIntent(GRANT_ID).status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/statutory-operations/$GRANT_ID/approval-intent")
+        assertThat(party.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+    }
+
     /**
      * A preview exists to tell the customer whether the grant they are about to sign for can
      * succeed. Answering 400 to a cumulative ceiling would now be a lie — delegation-service both

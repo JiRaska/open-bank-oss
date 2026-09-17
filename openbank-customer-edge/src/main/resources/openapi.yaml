@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.70.1
+  version: 1.71.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3638,6 +3638,46 @@ paths:
         '403': {description: Caller is not a current statutory representative}
         '404': {description: Proposal not found for this company}
         '409': {description: Proposal expired or its legal rule changed}
+  /delegations/statutory-operations/{id}/approval-intent:
+    get:
+      tags: [Delegation]
+      summary: Get this representative's exact statutory approval binding before device SCA
+      operationId: getStatutoryApprovalIntent
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Operation id, SCA purpose and decision-specific SHA-256 binding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryApprovalIntent'}
+        '403': {description: Caller is not a current company representative}
+        '409': {description: Proposal is stale or no longer pending}
+  /delegations/statutory-operations/{id}/decisions:
+    post:
+      tags: [Delegation]
+      summary: Record an immutable approval or refusal by the authenticated representative
+      operationId: decideStatutoryDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StatutoryDecisionRequest'}
+      responses:
+        '200':
+          description: Immutable decision evidence; a retry with the same verdict/session returns the original
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDecisionResponse'}
+        '403': {description: Caller is not a current company representative}
+        '409': {description: Stale proposal, conflicting decision or wrong SCA binding}
+        '503': {description: Legal rule or SCA consumption cannot be verified}
   /delegations/recertifications:
     get:
       tags: [Delegation]
@@ -4940,6 +4980,28 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+    StatutoryApprovalIntent:
+      type: object
+      required: [operationId, purpose, operationHash]
+      properties:
+        operationId: {type: string, format: uuid}
+        purpose: {type: string, enum: [DELEGATION_STATUTORY_APPROVAL]}
+        operationHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+    StatutoryDecisionRequest:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: {type: string, enum: [APPROVE, REJECT]}
+        scaSessionId: {type: [string, 'null'], format: uuid}
+    StatutoryDecisionResponse:
+      type: object
+      required: [operationId, actorPartyId, verdict, decidedAt]
+      properties:
+        operationId: {type: string, format: uuid}
+        actorPartyId: {type: string, format: uuid}
+        verdict: {type: string, enum: [APPROVE, REJECT]}
+        scaSessionId: {type: [string, 'null'], format: uuid}
+        decidedAt: {type: string, format: date-time}
     DelegationRecertification:
       type: object
       required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]

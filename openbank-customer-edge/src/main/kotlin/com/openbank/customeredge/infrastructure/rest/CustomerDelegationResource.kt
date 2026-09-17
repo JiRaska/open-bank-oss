@@ -303,6 +303,46 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** Exact APPROVE fingerprint to put in the signer's device challenge. */
+    @GET
+    @Path("/statutory-operations/{id}/approval-intent")
+    @Blocking
+    fun statutoryApprovalIntent(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id/approval-intent",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    /** A signer records APPROVE with bound SCA, or a refusal without a borrowed SCA session. */
+    @POST
+    @Path("/statutory-operations/{id}/decisions")
+    @Blocking
+    fun decideStatutory(@PathParam("id") id: UUID, body: String?): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val decision = json.createObjectNode().apply {
+            requested.get("verdict")?.let { set<com.fasterxml.jackson.databind.JsonNode>("verdict", it) }
+            requested.get("scaSessionId")?.let { set<com.fasterxml.jackson.databind.JsonNode>("scaSessionId", it) }
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-operations/$id/decisions",
+            context.principal.toString(),
+            json.writeValueAsString(decision),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
