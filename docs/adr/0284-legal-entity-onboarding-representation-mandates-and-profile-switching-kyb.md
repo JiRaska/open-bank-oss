@@ -133,8 +133,12 @@ applies unchanged. A `PartyMandate` links a human (`agentPartyId`) to an entity
 `ACTIVE → REVOKED | EXPIRED`. It also preserves the register's exact `requiredSignatures`: `SOLE`
 is exactly 1 and `JOINT` is at least 2. A historical `JOINT` mandate whose exact threshold was lost
 stays explicitly unknown and is ineligible for quorum-based execution; it is never guessed as 2.
-kyb-service grants one mandate per signer the moment the case reaches
-`SIGNED`; grants and revocations leave through the party outbox as `PARTY_MANDATE_GRANTED` /
+When a case reaches `SIGNED`, kyb-service commits one signed event containing the identified
+signers and any attested statutory rule with its case transition. Party-service projects the
+case marker, every signer mandate, the optional rule and every mandate outbox event in one
+transaction. Until that projection commits, `SIGNED` is evidence of the ceremony, not authority
+to issue a delegation; duplicate delivery is idempotent and a partial grant cannot commit.
+Grants and revocations leave through the party outbox as `PARTY_MANDATE_GRANTED` /
 `PARTY_MANDATE_REVOKED`, keyed on the entity. `GET /api/v1/parties/{agent}/acting-for` is the
 profile switcher's source of truth. A mandate is a *fact about the register*; employee-level
 access (treasurer, accountant, viewer) is **not** a mandate — it is an ADR-0232 delegation grant
