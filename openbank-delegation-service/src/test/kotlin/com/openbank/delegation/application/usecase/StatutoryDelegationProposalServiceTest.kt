@@ -15,6 +15,7 @@ import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.delegation.domain.model.StatutoryRepresentative
 import com.openbank.delegation.domain.model.StatutoryRuleMode
@@ -117,6 +118,20 @@ class StatutoryDelegationProposalServiceTest {
 
         assertThatThrownBy { runBlocking { service.get(operation.id, principal, principal, actor) } }
             .isInstanceOf(StatutoryProposalStale::class.java)
+    }
+
+    @Test
+    fun `issuance paths refuse an acceptance operation even for the same company`(): Unit = runBlocking {
+        val acceptance = operation().copy(
+            operationKind = StatutoryOperationKind.ACCEPT,
+            targetGrantId = UUID.randomUUID(),
+            expectedLifecycleRevision = 0,
+        )
+        coEvery { repository.find(acceptance.id, principal) } returns acceptance
+
+        assertThatThrownBy { runBlocking { service.get(acceptance.id, principal, principal, actor) } }
+            .isInstanceOf(StatutoryProposalNotFound::class.java)
+        coVerify(exactly = 0) { rules.resolve(any(), any()) }
     }
 
     @Test

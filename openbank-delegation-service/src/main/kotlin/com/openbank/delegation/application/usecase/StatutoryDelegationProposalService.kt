@@ -12,6 +12,7 @@ import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import jakarta.enterprise.context.ApplicationScoped
@@ -145,7 +146,9 @@ class StatutoryDelegationProposalService(
         actorPartyId: UUID?,
     ): Pair<StatutoryDelegationOperation, StatutoryRepresentationRule> {
         val actor = requireActor(principalPartyId, callerPartyId, actorPartyId)
-        val operation = repository.find(id, principalPartyId) ?: throw StatutoryProposalNotFound(id)
+        val operation = repository.find(id, principalPartyId)
+            ?.takeIf { it.operationKind == StatutoryOperationKind.ISSUE }
+            ?: throw StatutoryProposalNotFound(id)
         val currentRule = resolve(principalPartyId, actor)
         if (operation.state == StatutoryOperationState.PENDING &&
             (clock.instant() >= operation.expiresAt || evidence.rule(currentRule) != operation.ruleSnapshotJson)

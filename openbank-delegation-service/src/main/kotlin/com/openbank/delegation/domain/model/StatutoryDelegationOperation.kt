@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 enum class StatutoryOperationState { PENDING, EXECUTED, CANCELLED, EXPIRED }
+enum class StatutoryOperationKind { ISSUE, ACCEPT }
 
 /** Frozen authority requirement for one exact delegation offer; PENDING grants no capability. */
 data class StatutoryDelegationOperation(
@@ -29,6 +30,9 @@ data class StatutoryDelegationOperation(
     val state: StatutoryOperationState = StatutoryOperationState.PENDING,
     val executedAt: Instant? = null,
     val grantId: UUID? = null,
+    val operationKind: StatutoryOperationKind = StatutoryOperationKind.ISSUE,
+    val targetGrantId: UUID? = null,
+    val expectedLifecycleRevision: Long? = null,
 ) {
     init {
         require(requestKey.isNotBlank() && requestKey.length <= MAX_REQUEST_KEY_LENGTH) {
@@ -47,6 +51,14 @@ data class StatutoryDelegationOperation(
             "statutory operation evidence does not match its fingerprint"
         }
         require(policyRevision > 0) { "statutory policy revision must be positive" }
+        val targetMatchesKind = when (operationKind) {
+            StatutoryOperationKind.ISSUE -> targetGrantId == null && expectedLifecycleRevision == null
+            StatutoryOperationKind.ACCEPT ->
+                targetGrantId != null &&
+                    expectedLifecycleRevision != null &&
+                    expectedLifecycleRevision >= 0
+        }
+        require(targetMatchesKind) { "statutory operation target does not match its kind" }
         require(
             expiresAt.isAfter(createdAt) &&
                 !expiresAt.isAfter(createdAt.plus(MAX_LIFETIME_DAYS, ChronoUnit.DAYS)),
@@ -60,6 +72,11 @@ data class StatutoryDelegationOperation(
         require(executionEvidenceMatchesState) {
             "executed statutory operation must identify its grant and execution time"
         }
+        require(
+            operationKind != StatutoryOperationKind.ACCEPT ||
+                state != StatutoryOperationState.EXECUTED ||
+                grantId == targetGrantId,
+        ) { "executed statutory acceptance must link the target grant" }
     }
 
     private companion object {

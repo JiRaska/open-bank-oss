@@ -5,6 +5,7 @@
 package com.openbank.delegation.infrastructure.persistence.entity
 
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryOperationState
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -68,6 +69,16 @@ class StatutoryDelegationOperationEntity {
     @Column(name = "grant_id")
     var grantId: UUID? = null
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "operation_kind", nullable = false, updatable = false, length = 16)
+    lateinit var operationKind: StatutoryOperationKind
+
+    @Column(name = "target_grant_id", updatable = false)
+    var targetGrantId: UUID? = null
+
+    @Column(name = "expected_lifecycle_revision", updatable = false)
+    var expectedLifecycleRevision: Long? = null
+
     fun toDomain() = StatutoryDelegationOperation(
         id = id,
         principalPartyId = principalPartyId,
@@ -85,5 +96,8 @@ class StatutoryDelegationOperationEntity {
         state = state,
         executedAt = executedAt,
         grantId = grantId,
+        operationKind = operationKind,
+        targetGrantId = targetGrantId,
+        expectedLifecycleRevision = expectedLifecycleRevision,
     )
 }

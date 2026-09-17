@@ -17,6 +17,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryOperationState
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
@@ -56,6 +57,9 @@ class StatutoryDelegationOperationRepositoryImpl(
                     .setParameter("ruleSnapshot", operation.ruleSnapshotJson)
                     .setParameter("createdAt", operation.createdAt)
                     .setParameter("expiresAt", operation.expiresAt)
+                    .setParameter("kind", operation.operationKind.name)
+                    .setParameter("targetGrant", operation.targetGrantId)
+                    .setParameter("expectedRevision", operation.expectedLifecycleRevision)
                     .executeUpdate()
                     .flatMap { inserted ->
                         find(
@@ -107,7 +111,8 @@ class StatutoryDelegationOperationRepositoryImpl(
             val query = session.createNativeQuery(
                 "SELECT * FROM delegation_statutory_operations " +
                     "WHERE principal_party_id = :principal AND rule_hash = :ruleHash " +
-                    "AND state = 'PENDING' AND expires_at > :after $cursorPredicate" +
+                    "AND state = 'PENDING' AND operation_kind = 'ISSUE' " +
+                    "AND expires_at > :after $cursorPredicate" +
                     "ORDER BY created_at DESC, operation_id DESC",
                 StatutoryDelegationOperationEntity::class.java,
             )
@@ -193,6 +198,8 @@ class StatutoryDelegationOperationRepositoryImpl(
                 .flatMap { operation ->
                     when {
                         operation == null -> Uni.createFrom().failure(StatutoryDecisionClosed())
+                        operation.operationKind != StatutoryOperationKind.ISSUE ->
+                            Uni.createFrom().failure(StatutoryDecisionClosed())
                         operation.state == StatutoryOperationState.EXECUTED -> {
                             session.find(DelegationGrantEntity::class.java, operation.grantId)
                                 .map { persisted ->
@@ -266,7 +273,10 @@ class StatutoryDelegationOperationRepositoryImpl(
             policyRevision == other.policyRevision &&
             sourceCaseId == other.sourceCaseId &&
             ruleHash == other.ruleHash &&
-            ruleSnapshotJson == other.ruleSnapshotJson
+            ruleSnapshotJson == other.ruleSnapshotJson &&
+            operationKind == other.operationKind &&
+            targetGrantId == other.targetGrantId &&
+            expectedLifecycleRevision == other.expectedLifecycleRevision
 
     private companion object {
         const val MAX_PENDING_RESULTS = 50
@@ -298,10 +308,12 @@ class StatutoryDelegationOperationRepositoryImpl(
             INSERT INTO delegation_statutory_operations
                 (operation_id, principal_party_id, initiator_party_id, request_key, request_hash,
                  payload_json, policy_id, policy_revision, source_case_id, rule_hash,
-                 rule_snapshot_json, state, created_at, expires_at)
+                 rule_snapshot_json, state, created_at, expires_at,
+                 operation_kind, target_grant_id, expected_lifecycle_revision)
             VALUES (:id, :principal, :initiator, :key, :requestHash,
                     :payload, :policyId, :policyRevision, :sourceCase, :ruleHash,
-                    :ruleSnapshot, 'PENDING', :createdAt, :expiresAt)
+                    :ruleSnapshot, 'PENDING', :createdAt, :expiresAt,
+                    :kind, :targetGrant, :expectedRevision)
             ON CONFLICT (principal_party_id, request_key) DO NOTHING
         """
     }

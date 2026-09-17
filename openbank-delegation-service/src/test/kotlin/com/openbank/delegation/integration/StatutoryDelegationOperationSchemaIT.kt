@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.integration
 
+import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.domain.event.DelegationOffered
@@ -13,6 +14,7 @@ import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.delegation.domain.model.StatutoryRepresentative
 import com.openbank.delegation.domain.model.StatutoryRuleMode
@@ -50,6 +52,8 @@ class StatutoryDelegationOperationSchemaIT {
     }
 
     @Inject lateinit var operations: StatutoryDelegationOperationRepository
+
+    @Inject lateinit var grants: DelegationRepository
 
     @Inject lateinit var dataSource: DataSource
 
@@ -166,6 +170,68 @@ class StatutoryDelegationOperationSchemaIT {
                     assertThat(rows.next()).isTrue()
                     assertThat(rows.getInt(1)).isEqualTo(1)
                 }
+            }
+        }
+    }
+
+    @Test
+    fun `acceptance target and lifecycle revision are immutable and absent from issuance inbox`() {
+        val at = OffsetDateTime.ofInstant(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC)
+        val grant = DelegationGrant(
+            grantorPartyId = UUID.randomUUID(),
+            granteePartyId = UUID.randomUUID(),
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            validFrom = at,
+            validTo = null,
+            createdAt = at,
+            updatedAt = at,
+        )
+        onVertxContext {
+            grants.save(
+                grant,
+                DelegationOffered(
+                    aggregateId = grant.id,
+                    lifecycleRevision = grant.lifecycleRevision,
+                    grantorPartyId = grant.grantorPartyId,
+                    granteePartyId = grant.granteePartyId,
+                    resourceType = grant.resourceType,
+                    resourceId = grant.resourceId,
+                    capabilities = grant.capabilities,
+                    approvalPolicy = grant.approvalPolicy,
+                    requiredApprovals = grant.requiredApprovals,
+                    validFrom = grant.validFrom,
+                    validTo = grant.validTo,
+                    occurredAt = at.toInstant(),
+                ),
+            )
+        }
+        val payload = """{"kind":"ACCEPT","grantId":"${grant.id}"}"""
+        val acceptance = operation().copy(
+            principalPartyId = grant.granteePartyId,
+            payloadJson = payload,
+            requestHash = sha256(payload),
+            operationKind = StatutoryOperationKind.ACCEPT,
+            targetGrantId = grant.id,
+            expectedLifecycleRevision = grant.lifecycleRevision,
+        )
+        onVertxContext { operations.create(acceptance) }
+
+        assertThat(onVertxContext { operations.find(acceptance.id, grant.granteePartyId) }).isEqualTo(acceptance)
+        assertThat(
+            onVertxContext {
+                operations.pending(grant.granteePartyId, acceptance.ruleHash, acceptance.createdAt, 50)
+            },
+        ).doesNotContain(acceptance)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "UPDATE delegation_statutory_operations SET expected_lifecycle_revision = 9 WHERE operation_id = ?",
+            ).use { update ->
+                update.setObject(1, acceptance.id)
+                assertThatThrownBy { update.executeUpdate() }
+                    .isInstanceOf(SQLException::class.java)
+                    .hasMessageContaining("immutable")
             }
         }
     }
