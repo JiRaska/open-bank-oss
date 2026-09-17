@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against an auto-started Next.js server (development by default, production when opted in).
+// Runs against an auto-started Next.js server (production in CI, development locally by default).
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
@@ -10,7 +10,10 @@ import { randomUUID } from 'node:crypto'
 
 const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
 const e2eBaseUrl = `http://localhost:${e2ePort}`
-const useProductionServer = process.env.OPENBANK_E2E_SERVER === 'production'
+const useProductionServer = process.env.OPENBANK_E2E_SERVER === 'production' ||
+  (Boolean(process.env.CI) && process.env.OPENBANK_E2E_SERVER !== 'development')
+const buildProductionServer = useProductionServer && Boolean(process.env.CI) &&
+  process.env.OPENBANK_E2E_PREBUILT !== 'true'
 
 export default defineConfig({
   testDir: './e2e',
@@ -57,14 +60,15 @@ export default defineConfig({
   ],
 
   webServer: {
-    // Opt-in production runs serve the prebuilt bundle, avoiding on-demand compilation and
-    // dev-only HMR races. The caller must run `npm run build` before selecting this mode.
+    // CI builds before serving production, avoiding on-demand compilation and HMR races
+    // across the browser suite. Local production runs can reuse a prior build; CI callers
+    // that already built can opt out of the duplicate build with OPENBANK_E2E_PREBUILT.
     command: useProductionServer
-      ? `npm run start -- -p ${e2ePort}`
+      ? `${buildProductionServer ? 'npm run build && ' : ''}npm run start -- -p ${e2ePort}`
       : `npm run dev -- -p ${e2ePort}`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: buildProductionServer ? 300_000 : 120_000,
     env: {
       // Point docs bundle to the repo root so libs docs are found
       OPENBANK_REPO_ROOT: '../',

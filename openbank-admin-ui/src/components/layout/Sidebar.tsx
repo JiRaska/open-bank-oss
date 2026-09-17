@@ -258,6 +258,18 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   const navRef = useRef<HTMLElement>(null)
   const asideRef = useRef<HTMLElement>(null)
   useEffect(() => {
+    const aside = asideRef.current
+    if (!aside) return
+    const narrowViewport = window.matchMedia('(max-width: 860px)')
+    const syncInert = () => { aside.inert = narrowViewport.matches && !mobileOpen }
+    syncInert()
+    narrowViewport.addEventListener('change', syncInert)
+    return () => {
+      narrowViewport.removeEventListener('change', syncInert)
+      aside.inert = false
+    }
+  }, [mobileOpen])
+  useEffect(() => {
     if (!mobileOpen) return
     const frame = requestAnimationFrame(() => asideRef.current?.focus())
     return () => { cancelAnimationFrame(frame) }

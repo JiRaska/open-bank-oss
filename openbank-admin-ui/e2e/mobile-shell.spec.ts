@@ -70,12 +70,31 @@ test('keeps the mobile navigation keyboard-complete and removes it from focus wh
   await expect(menu).toHaveAttribute('aria-expanded', 'false')
   await expect(menu).toBeFocused()
   await expect(sidebar).toBeHidden()
+  await expect(page.locator('#admin-sidebar')).toHaveJSProperty('inert', true)
 
   await menu.press('Shift+Tab')
   const skipLink = page.locator('a.ob-skip-link:visible')
   await expect(skipLink).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page.locator('#main-content:visible')).toBeFocused()
+})
+
+test('keeps the desktop sidebar focusable across viewport changes', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/dashboard')
+  await expect(page.locator('body > .ob-app-content')).toHaveCount(0)
+  const sidebar = page.locator('#admin-sidebar')
+  await expect(sidebar).toHaveCount(1)
+  await expect(sidebar).toHaveJSProperty('inert', true)
+
+  await page.setViewportSize({ width: 1280, height: 844 })
+  await expect(sidebar).toHaveJSProperty('inert', false)
+  const dashboard = sidebar.locator('a[href="/dashboard"]').first()
+  await dashboard.focus()
+  await expect(dashboard).toBeFocused()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(sidebar).toHaveJSProperty('inert', true)
 })
 
 test('does not steal focus when an operator moves inside the drawer while permissions resolve', async ({ page }) => {
