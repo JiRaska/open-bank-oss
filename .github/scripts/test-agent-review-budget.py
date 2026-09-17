@@ -5,6 +5,7 @@
 import importlib.util
 import json
 import unittest
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -91,6 +92,44 @@ class BudgetTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     budget.main()
                 remote.assert_not_called()
+
+    def test_interrupted_usage_is_written_before_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            (directory / 'review.started').touch()
+            with self.assertRaises(ValueError):
+                budget.record_usage(directory)
+            evidence = json.loads((directory / 'review-usage.json').read_text())
+            self.assertTrue(evidence['invocation_started'])
+            self.assertIsNone(evidence['estimated_cost_usd'])
+
+    def test_no_invocation_is_distinct_from_unknown_invocation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            budget.record_usage(directory)
+            evidence = json.loads((directory / 'review-usage.json').read_text())
+            self.assertFalse(evidence['invocation_started'])
+            self.assertIsNone(evidence['estimated_cost_usd'])
+
+    def test_stale_or_nondefault_controller_cannot_query_allowance(self):
+        env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
+                   GITHUB_REPOSITORY='example/repo', GITHUB_SHA='old', GITHUB_REF='refs/heads/main')
+        for ref in ('refs/heads/main', 'refs/heads/feature'):
+            env['GITHUB_REF'] = ref
+            with patch.dict('os.environ', env, clear=True), patch.object(
+                    budget, 'gh', side_effect=[{'default_branch': 'main'}, {'sha': 'new'}]), \
+                    patch.object(budget.subprocess, 'check_output') as history:
+                with self.assertRaises(ValueError):
+                    budget.main()
+                history.assert_not_called()
+
+    def test_api_failure_does_not_admit(self):
+        env = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_RUN_ATTEMPT='1',
+                   GITHUB_REPOSITORY='example/repo')
+        with patch.dict('os.environ', env, clear=True), patch.object(
+                budget, 'gh', side_effect=RuntimeError('unavailable')):
+            with self.assertRaises(RuntimeError):
+                budget.main()
 
     def test_workflow_isolated_and_workers_parked(self):
         root = Path(__file__).resolve().parents[2]

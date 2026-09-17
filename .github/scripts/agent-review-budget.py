@@ -77,16 +77,20 @@ def gh(endpoint):
     return json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))
 
 
+def record_usage(directory):
+    raw = directory / 'review.raw'
+    evidence = usage(raw.read_text(errors='replace') if raw.exists() else '')
+    evidence['invocation_started'] = (directory / 'review.started').exists()
+    (directory / 'review-usage.json').write_text(json.dumps(evidence, indent=2) + '\n')
+    if evidence['invocation_started']:
+        require(evidence['estimated_cost_usd'] is not None
+                and all(v is not None for v in evidence['tokens'].values()),
+                'unknown provider usage; stop subsequent reviews')
+
+
 def main():
     if sys.argv[1:] == ['--usage']:
-        raw = Path('/tmp/review.raw')
-        evidence = usage(raw.read_text(errors='replace') if raw.exists() else '')
-        evidence['invocation_started'] = Path('/tmp/review.started').exists()
-        Path('/tmp/review-usage.json').write_text(json.dumps(evidence, indent=2) + '\n')
-        if evidence['invocation_started']:
-            require(evidence['estimated_cost_usd'] is not None
-                    and all(v is not None for v in evidence['tokens'].values()),
-                    'unknown provider usage; stop subsequent reviews')
+        record_usage(Path('/tmp'))
         return
     require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'manual dispatch required')
     require(os.environ.get('GITHUB_RUN_ATTEMPT') == '1', 'reruns are forbidden')
