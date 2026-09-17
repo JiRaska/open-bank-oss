@@ -435,6 +435,129 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** Joint grantee acceptance is distinct from the grantor's joint issuance operation. */
+    @POST
+    @Path("/statutory-acceptances/for-grant/{grantId}")
+    @Blocking
+    fun proposeStatutoryAcceptance(
+        @PathParam("grantId") grantId: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/for-grant/$grantId",
+            context.principal.toString(),
+            "",
+            key,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/statutory-acceptances/{id}")
+    @Blocking
+    fun statutoryAcceptance(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/statutory-acceptances/{id}/approval-intent")
+    @Blocking
+    fun statutoryAcceptanceIntent(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/approval-intent",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @POST
+    @Path("/statutory-acceptances/{id}/decisions")
+    @Blocking
+    fun decideStatutoryAcceptance(@PathParam("id") id: UUID, body: String?): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val decision = json.createObjectNode().apply {
+            requested.get("verdict")?.let { set<com.fasterxml.jackson.databind.JsonNode>("verdict", it) }
+            requested.get("scaSessionId")?.let { set<com.fasterxml.jackson.databind.JsonNode>("scaSessionId", it) }
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/decisions",
+            context.principal.toString(),
+            json.writeValueAsString(decision),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/statutory-acceptances/{id}/decisions")
+    @Blocking
+    fun statutoryAcceptanceDecisions(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/decisions",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @GET
+    @Path("/statutory-acceptances/{id}/progress")
+    @Blocking
+    fun statutoryAcceptanceProgress(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/progress",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
+    @POST
+    @Path("/statutory-acceptances/{id}/execute")
+    @Blocking
+    fun executeStatutoryAcceptance(@PathParam("id") id: UUID): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/$id/execute",
+            context.principal.toString(),
+            "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *

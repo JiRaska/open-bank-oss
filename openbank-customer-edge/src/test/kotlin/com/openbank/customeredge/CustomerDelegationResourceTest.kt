@@ -449,6 +449,65 @@ class CustomerDelegationResourceTest {
         assertThat(key.captured).isNull()
     }
 
+    @Test
+    fun `joint acceptance proposal is scoped to selected grantee company and token human`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val principal = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(capture(url), capture(principal), eq(""), eq("accept-1"), capture(headers)) } returns
+            Response.status(201).build()
+        val selected = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource(upstream).proposeStatutoryAcceptance(GRANT_ID, "accept-1").status).isEqualTo(403)
+        assertThat(selected.proposeStatutoryAcceptance(GRANT_ID, null).status).isEqualTo(400)
+        assertThat(selected.proposeStatutoryAcceptance(GRANT_ID, "accept-1").status).isEqualTo(201)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/statutory-acceptances/for-grant/$GRANT_ID")
+        assertThat(principal.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+        verify(exactly = 1) { upstream.post(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `joint acceptance ballot strips forged identities and execution reuses verified context`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val principal = slot<String>()
+        val body = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.post(capture(url), capture(principal), capture(body), any(), capture(headers)) } returns
+            Response.ok().build()
+        val selected = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(
+            selected.decideStatutoryAcceptance(
+                GRANT_ID,
+                """{"verdict":"REJECT","actorPartyId":"$stranger","granteePartyId":"$stranger"}""",
+            ).status,
+        ).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/statutory-acceptances/$GRANT_ID/decisions")
+        assertThat(body.captured).isEqualTo("""{"verdict":"REJECT"}""")
+        assertThat(principal.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+
+        assertThat(selected.executeStatutoryAcceptance(GRANT_ID).status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/statutory-acceptances/$GRANT_ID/execute")
+        assertThat(principal.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+    }
+
     /**
      * A preview exists to tell the customer whether the grant they are about to sign for can
      * succeed. Answering 400 to a cumulative ceiling would now be a lie — delegation-service both

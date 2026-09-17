@@ -144,6 +144,21 @@ test_only_edge_may_execute_joint_grant if {
     }
 }
 
+test_only_edge_may_manage_joint_acceptance if {
+    every action in {
+        "delegation.statutory.accept.propose",
+        "delegation.statutory.accept.read",
+        "delegation.statutory.accept.intent",
+        "delegation.statutory.accept.decide",
+        "delegation.statutory.accept.execute",
+    } {
+        allow.allow == true with input as {"principal": edge, "action": action}
+        every principal in [operator, admin, viewer, services_m2m] {
+            allow == false with input as {"principal": principal, "action": action}
+        }
+    }
+}
+
 test_shared_backend_identity_may_not_preview if {
 	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.preview"}
 }

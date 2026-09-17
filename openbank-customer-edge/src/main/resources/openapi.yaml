@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.75.0
+  version: 1.76.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3794,6 +3794,150 @@ paths:
         '404': {description: Proposal not found for this company}
         '409': {description: Proposal expired, stale or no longer pending}
         '503': {description: Live company representation cannot be verified}
+  /delegations/statutory-acceptances/for-grant/{grantId}:
+    post:
+      tags: [Delegation]
+      summary: Propose joint acceptance of an offer addressed to the selected company
+      description: >-
+        The selected company and human actor come only from the authenticated session. The
+        proposal freezes the exact existing offer and current JOINT rule; it grants no access.
+      operationId: proposeStatutoryAcceptance
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: grantId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 200}}
+      responses:
+        '201':
+          description: Inert acceptance proposal created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationAcceptance'}
+        '200':
+          description: Exact idempotent replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationAcceptance'}
+        '403': {description: No selected company or current joint representation}
+        '404': {description: Grant not addressed to this company}
+        '409': {description: Offer stale or idempotency key reused with different evidence}
+        '503': {description: Current legal rule cannot be verified}
+  /delegations/statutory-acceptances/{id}:
+    get:
+      tags: [Delegation]
+      summary: Read the exact offer and legal rule before accepting for a company
+      operationId: getStatutoryAcceptance
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Immutable acceptance evidence
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationAcceptance'}
+        '403': {description: No current joint representation}
+        '404': {description: Acceptance not found for selected company}
+        '409': {description: Pending acceptance stale}
+  /delegations/statutory-acceptances/{id}/approval-intent:
+    get:
+      tags: [Delegation]
+      summary: Get acceptance-specific device SCA purpose and bound fingerprint
+      operationId: getStatutoryAcceptanceIntent
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Personal acceptance intent for the authenticated representative
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryApprovalIntent'}
+        '403': {description: No current joint representation}
+        '409': {description: Acceptance no longer pending or exact offer changed}
+  /delegations/statutory-acceptances/{id}/decisions:
+    get:
+      tags: [Delegation]
+      summary: Read joint acceptance decisions without device SCA identifiers
+      operationId: getStatutoryAcceptanceDecisions
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Immutable signer decisions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/StatutoryDecisionSummary'}
+        '403': {description: No current joint representation}
+    post:
+      tags: [Delegation]
+      summary: Approve with bound personal SCA or reject without SCA
+      operationId: decideStatutoryAcceptance
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StatutoryDecisionRequest'}
+      responses:
+        '200':
+          description: Immutable ballot; exact retries return the original
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDecisionResponse'}
+        '403': {description: No current joint representation}
+        '409': {description: Stale offer, conflicting ballot or wrong SCA binding}
+        '503': {description: Legal rule or SCA consumption cannot be verified}
+  /delegations/statutory-acceptances/{id}/progress:
+    get:
+      tags: [Delegation]
+      summary: Show server-evaluated office-aware acceptance quorum
+      operationId: getStatutoryAcceptanceProgress
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Advisory signing progress
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutorySigningProgress'}
+        '403': {description: No current joint representation}
+        '409': {description: Acceptance no longer pending or exact offer changed}
+  /delegations/statutory-acceptances/{id}/execute:
+    post:
+      tags: [Delegation]
+      summary: Activate the offer atomically after the legal signing quorum
+      operationId: executeStatutoryAcceptance
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: ACTIVE grant, or current linked grant on exact retry
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: {type: string, format: uuid}
+                  status: {type: string}
+        '403': {description: No current joint representation}
+        '404': {description: Acceptance not found for selected company}
+        '409': {description: Quorum incomplete, offer stale or operation closed}
+        '503': {description: Current legal rule cannot be verified}
   /delegations/recertifications:
     get:
       tags: [Delegation]
@@ -5096,6 +5240,26 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+    StatutoryDelegationAcceptance:
+      type: object
+      required: [id, principalPartyId, initiatorPartyId, targetGrantId, expectedLifecycleRevision, requestHash, offer, ruleHash, rule, state, createdAt, expiresAt]
+      description: >-
+        Evidence for a company grantee's acceptance of an existing offer. PENDING creates no
+        access. Display the exact offer and legal rule before initiating personal device SCA.
+      properties:
+        id: {type: string, format: uuid}
+        principalPartyId: {type: string, format: uuid}
+        initiatorPartyId: {type: string, format: uuid}
+        targetGrantId: {type: string, format: uuid}
+        expectedLifecycleRevision: {type: integer, minimum: 0}
+        requestHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        offer: {type: object}
+        ruleHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        rule: {type: object}
+        state: {type: string, enum: [PENDING, EXECUTED, CANCELLED, EXPIRED]}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        grantId: {type: [string, 'null'], format: uuid}
     StatutoryDelegationProposalPage:
       type: object
       required: [items, nextCursor]
@@ -5127,7 +5291,7 @@ components:
       required: [operationId, purpose, operationHash]
       properties:
         operationId: {type: string, format: uuid}
-        purpose: {type: string, enum: [DELEGATION_STATUTORY_APPROVAL]}
+        purpose: {type: string, enum: [DELEGATION_STATUTORY_APPROVAL, DELEGATION_STATUTORY_ACCEPTANCE]}
         operationHash: {type: string, pattern: '^[0-9a-f]{64}$'}
     StatutoryDecisionRequest:
       type: object

@@ -12,6 +12,7 @@ import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryOperationState
@@ -24,6 +25,7 @@ import java.util.UUID
 
 /** Creates inert, content-addressed evidence for a joint grantee's acceptance of an existing offer. */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // One company-scoped authority boundary owns proposal, read and ballot checks.
 class StatutoryDelegationAcceptanceProposalService(
     private val grants: DelegationRepository,
     private val rules: StatutoryRuleClient,
@@ -107,6 +109,14 @@ class StatutoryDelegationAcceptanceProposalService(
             ensurePendingSnapshot(operation, target, rule)
         }
         return operation to rule
+    }
+
+    suspend fun get(id: UUID, company: UUID, caller: UUID?, actor: UUID?): StatutoryDelegationOperation =
+        current(id, company, caller, actor).first
+
+    suspend fun decisions(id: UUID, company: UUID, caller: UUID?, actor: UUID?): List<StatutoryDelegationDecision> {
+        current(id, company, caller, actor)
+        return operations.decisions(id)
     }
 
     private fun ensurePendingSnapshot(
