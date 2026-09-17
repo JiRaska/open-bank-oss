@@ -270,10 +270,14 @@ data class BusinessOnboardingCase(
         updatedAt = at,
     )
 
-    /** Last-signature recheck found a different active confirmation; keep signatures for review. */
+    /**
+     * Last-signature recheck found a different active confirmation. The document service cannot
+     * replace a ceremony after anyone has signed it; the old signatures must never authorize the
+     * newly attested rule. This case can be inspected/abandoned, but not manually completed.
+     */
     fun representationRuleChanged(at: Instant): BusinessOnboardingCase = review(
         requireNotNull(extract) { "a representation recheck requires its register extract" },
-        "representation attestation changed before the case could grant authority; re-confirm the current rule",
+        REPRESENTATION_RULE_CHANGED_REASON,
         at,
     )
 
@@ -647,6 +651,11 @@ data class BusinessOnboardingCase(
         currentAttestationId: UUID? = null,
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
+        if (reviewReason == REPRESENTATION_RULE_CHANGED_REASON) {
+            throw CaseTransitionException(
+                "the signed agreement belongs to a superseded representation rule; abandon this case and start a new ceremony",
+            )
+        }
         require(requiredSignatures >= 1) { "at least one signature is required" }
         val next = copy(
             requiredSignatures = requiredSignatures,
@@ -778,6 +787,9 @@ data class BusinessOnboardingCase(
     }
 
     companion object {
+        const val REPRESENTATION_RULE_CHANGED_REASON =
+            "representation attestation changed after signing; abandon this case and begin a new agreement ceremony"
+
         /**
          * The feminine spellings the register uses, mapped to the masculine stem — applied to both
          * the operator's office and the register's role, so `předsedkyně představenstva` satisfies

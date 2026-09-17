@@ -45,6 +45,7 @@ import com.openbank.kyb.domain.model.BeneficialOwner
 import com.openbank.kyb.domain.model.BusinessAgreementSigned
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.CrsStatus
 import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.EntityStatus
@@ -706,6 +707,15 @@ class BusinessOnboardingServiceTest {
         assertThat(reviewed.reviewReason).contains("attestation changed")
         assertThat(mandates).isEmpty()
         assertThat(events.last().eventType).isEqualTo(KybEvents.REVIEW_REQUIRED)
+
+        // A reviewer cannot relabel the new attestation onto signatures bound to the old
+        // document ceremony. The document service refuses replacing any signed agreement.
+        assertThatThrownBy {
+            runBlocking { service.resolveReview(ResolveReviewCommand(started.id, 2, "operator-anna")) }
+        }
+            .isInstanceOf(CaseTransitionException::class.java)
+            .hasMessageContaining("start a new ceremony")
+        assertThat(mandates).isEmpty()
     }
 
     @Test
