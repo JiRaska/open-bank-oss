@@ -118,7 +118,8 @@ jobs:
 
   worker:
     needs: admission
-    if: github.event_name != 'pull_request' && needs.admission.outputs.proceed == 'true'
+    # Parked until this mutating worker has shared budget admission and API isolation.
+    if: github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
     name: Pick one issue, open one draft PR
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -222,17 +223,17 @@ jobs:
           fi
 
       # ---- credential liveness, ASSERTED --------------------------------------------------
-      # NO continue-on-error, deliberately. This repo has shipped a dead CLAUDE_CODE_OAUTH_TOKEN
+      # NO continue-on-error, deliberately. This repo has shipped a dead ANTHROPIC_API_KEY
       # for over a month without noticing, because two independent copies of it exist (the repo
       # secret and a local launchd env file) and they rotate separately. A worker that runs on a
       # dead credential burns a runner and reports nothing; that must be a red, immediately.
       - name: Assert the Claude credential is alive
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: "" # no provider credential until budget admission is integrated
         run: |
           set -euo pipefail
-          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set for this job. Re-mint with \`claude setup-token\` and update BOTH copies."
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set for this job. Integrate budget admission before enabling this worker."
             exit 1
           fi
           npm ci --prefix .github/scripts/agent-review-claude-cli
@@ -240,7 +241,7 @@ jobs:
           echo "$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin" >> "$GITHUB_PATH"
           claude --version
           probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
-                    --max-turns 3 \
+                    --max-turns 2 --max-budget-usd 0.10 \
                     --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings 2>&1 | tail -3)
           echo "control-probe: ${probe}"
           # Assert on the REPLY, never on the exit code: the CLI exits 0 on its own recorded
@@ -274,14 +275,14 @@ jobs:
       - name: Work one issue
         if: steps.mode.outputs.mode == 'work'
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: "" # no provider credential until budget admission is integrated
           GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -uo pipefail
           git config user.name  "openbank-issue-worker"
           git config user.email "openbank-issue-worker@users.noreply.github.com"
           claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
-            --max-turns 200 \
+            --max-turns 12 --max-budget-usd 0.50 \
             --permission-mode bypassPermissions \
           | tee /tmp/worker-output.txt
           echo "--- worker output above ---"
