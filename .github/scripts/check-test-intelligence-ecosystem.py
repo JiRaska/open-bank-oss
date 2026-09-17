@@ -762,6 +762,9 @@ def check(root: Path) -> list[str]:
         ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
         ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
+        ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
+        ('"${archive}" "openbank-admin-ui/test-run-history/${artifact_name}.json"',
+         "immutable run history does not accept browser variant envelopes"),
     ):
         if needle not in history_stage:
             errors.append(message)

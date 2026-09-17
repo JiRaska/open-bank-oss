@@ -535,6 +535,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -u
+          python3 .github/scripts/extract-test-intelligence-envelope.py --self-test
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
@@ -569,13 +570,13 @@ jobs:
                 grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids && continue
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-                # actions/upload-artifact strips the uploaded directory prefix, so the
-                # immutable service envelope is normally `run.json` at the zip root.
-                # Keep accepting a nested path for compatibility with an artifact action
-                # layout change, but never require a source-tree path that is not retained.
-                envelope="$(unzip -Z1 "${archive}" | awk '$0 == "run.json" || /\/run\.json$/ { print; exit }' || true)"
-                [ -n "${envelope}" ] || continue
-                unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
+                # Browser variants retain run-chromium.json / run-firefox.json,
+                # unlike service envelopes named run.json. Require exactly one
+                # schema-valid main envelope; never guess among ZIP members.
+                if ! python3 .github/scripts/extract-test-intelligence-envelope.py \
+                  "${archive}" "openbank-admin-ui/test-run-history/${artifact_name}.json"; then
+                  continue
+                fi
                 echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) downloaded this build."
