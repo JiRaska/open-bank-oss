@@ -6,6 +6,123 @@ import rego.v1
 
 bundle := {"version": "v0.0.0-test"}
 
+test_kyb_ownership_requires_root_scope_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.kyb-case.read",
+		"attributes": {"assignmentVerified": true, "purpose": "KYB_OWNERSHIP_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_kyb_ownership_requires_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.kyb-case.read",
+		"attributes": {"rootScopeVerified": true, "purpose": "KYB_OWNERSHIP_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_kyb_ownership_allows_assigned_kyc if {
+	decision := rest.allow with input as {
+		"principal": {"id": "kyc-1", "type": "HUMAN", "roles": ["ROLE_KYC"]},
+		"action": "context.kyb-case.read",
+		"attributes": {
+			"assignmentVerified": true,
+			"rootScopeVerified": true,
+			"purpose": "KYB_OWNERSHIP_REVIEW",
+		},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow
+}
+
+test_kyb_ownership_denies_wrong_role_purpose_and_service_account if {
+	every example in [
+		{"id": "operator-1", "roles": ["ROLE_OPERATOR"], "purpose": "KYB_OWNERSHIP_REVIEW"},
+		{"id": "kyc-1", "roles": ["ROLE_KYC"], "purpose": "PAYMENT_COMPLAINT"},
+		{"id": "service-account-kyb", "roles": ["ROLE_ADMIN"], "purpose": "KYB_OWNERSHIP_REVIEW"},
+	] {
+		not rest.allow with input as {
+			"principal": {"id": example.id, "type": "HUMAN", "roles": example.roles},
+			"action": "context.kyb-case.read",
+			"attributes": {
+				"assignmentVerified": true,
+				"rootScopeVerified": true,
+				"purpose": example.purpose,
+			},
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
+test_aml_case_read_requires_root_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.aml-case.read",
+		"attributes": {"assignmentVerified": true, "purpose": "AML_INVESTIGATION"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_aml_case_read_allows_assigned_compliance if {
+	decision := rest.allow with input as {
+		"principal": {"id": "analyst-1", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "context.aml-case.read",
+		"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": "AML_INVESTIGATION"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow
+}
+
+test_aml_case_read_denies_operator_and_other_purpose if {
+	every example in [
+		{"roles": ["ROLE_OPERATOR"], "purpose": "AML_INVESTIGATION"},
+		{"roles": ["ROLE_ADMIN"], "purpose": "AUTHORIZATION_REVIEW"},
+	] {
+		not rest.allow with input as {
+			"principal": {"id": "analyst-1", "type": "HUMAN", "roles": example.roles},
+			"action": "context.aml-case.read",
+			"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": example.purpose},
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
+test_authority_history_requires_scoped_assignment_even_for_admin if {
+	not rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "context.authorization.read",
+		"attributes": {"assignmentVerified": true, "purpose": "AUTHORIZATION_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_authority_history_allows_root_assigned_compliance if {
+	decision := rest.allow with input as {
+		"principal": {"id": "analyst-1", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "context.authorization.read",
+		"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": "AUTHORIZATION_REVIEW"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow
+}
+
+test_authority_history_denies_operator_and_wrong_purpose if {
+	every example in [
+		{"roles": ["ROLE_OPERATOR"], "purpose": "AUTHORIZATION_REVIEW"},
+		{"roles": ["ROLE_ADMIN"], "purpose": "PAYMENT_COMPLAINT"},
+	] {
+		not rest.allow with input as {
+			"principal": {"id": "analyst-1", "type": "HUMAN", "roles": example.roles},
+			"action": "context.authorization.read",
+			"attributes": {"assignmentVerified": true, "rootScopeVerified": true, "purpose": example.purpose},
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
 test_context_assignment_allows_human_admin if {
 	decision := rest.allow with input as {
 		"principal": {"id": "admin-7", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},

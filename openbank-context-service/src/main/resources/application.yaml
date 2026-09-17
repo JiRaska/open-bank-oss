@@ -21,6 +21,11 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  rest-client:
+    aml-service:
+      url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
+      connect-timeout: 250
+      read-timeout: 1250
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
@@ -45,6 +50,12 @@ quarkus:
     messaging:
       incoming:
         fraud-case-references-in:
+          connector: smallrye-in-memory
+        kyb-ubo-observation-references-in:
+          connector: smallrye-in-memory
+        aml-case-evidence-in:
+          connector: smallrye-in-memory
+        delegation-history-in:
           connector: smallrye-in-memory
         dispute-events-in:
           connector: smallrye-in-memory
@@ -87,6 +98,46 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.context-service.fraud-case-references
+      kyb-ubo-observation-references-in:
+        connector: smallrye-kafka
+        topic: openbank.kyb.ubo-observation-references
+        group:
+          id: openbank-context-service
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.kyb-ubo-observations
+      aml-case-evidence-in:
+        connector: smallrye-kafka
+        topic: openbank.aml.events
+        group:
+          id: openbank-context-service-aml-case-evidence
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.aml-case-evidence
+      delegation-history-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        # Nested keys avoid quoted dotted YAML leaves; ship with the consumer image.
+        group:
+          id: openbank-context-service-authority-history
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.delegation-history
       dispute-events-in:
         connector: smallrye-kafka
         topic: openbank.dispute.events

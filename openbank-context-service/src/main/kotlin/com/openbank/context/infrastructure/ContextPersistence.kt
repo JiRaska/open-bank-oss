@@ -134,6 +134,9 @@ class CaseAssignmentEntity : PanacheEntityBase() {
     @Column(name = "purpose")
     lateinit var purpose: String
 
+    @Column(name = "root_ref")
+    var rootRef: String? = null
+
     @Column(name = "valid_from")
     lateinit var validFrom: Instant
 
@@ -180,6 +183,12 @@ class ContextReadAuditEntity : PanacheEntityBase() {
 
     @Column(name = "occurred_at")
     lateinit var occurredAt: Instant
+
+    @Column(name = "effective_at")
+    var effectiveAt: Instant? = null
+
+    @Column(name = "known_at")
+    var knownAt: Instant? = null
 }
 
 @ApplicationScoped
@@ -422,6 +431,22 @@ class CaseAssignmentRepository(
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : CaseAssignmentPort {
+    override suspend fun isAssignedToRoot(
+        principalId: String,
+        caseId: String,
+        purpose: String,
+        root: String,
+        at: Instant,
+    ): Boolean = sessions.withSession { session ->
+        session.createQuery(
+            "select count(a) from CaseAssignmentEntity a where bankScope = :bankScope and principalId = :principal " +
+                "and caseId = :caseId and purpose = :purpose and rootRef = :root and validFrom <= :at and validTo > :at",
+            java.lang.Long::class.java,
+        ).setParameter("bankScope", bankScope).setParameter("principal", principalId)
+            .setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("root", root)
+            .setParameter("at", at).singleResult
+    }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
+
     override suspend fun isAssigned(principalId: String, caseId: String, purpose: String, at: Instant): Boolean =
         sessions.withSession { session ->
             session.createQuery(
@@ -456,6 +481,8 @@ class ContextReadAuditRepository(
                 entry.policyVersion
             reasonCode = entry.reasonCode
             occurredAt = entry.occurredAt
+            effectiveAt = entry.effectiveAt
+            knownAt = entry.knownAt
         }
         sessions.withTransaction { session, _ -> session.persist(entity) }
             .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
