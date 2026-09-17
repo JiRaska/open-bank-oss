@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.`in`.DelegationCandidate
 import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
+import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
@@ -20,6 +21,30 @@ import java.util.UUID
 
 /** Byte-stable v1 evidence: the signed hash is over these exact UTF-8 JSON bytes, not a DTO re-render. */
 internal class StatutoryOperationEvidence(private val mapper: ObjectMapper) {
+    /** Acceptance signs the exact existing offer, not a caller-supplied reconstruction of it. */
+    fun acceptance(grant: DelegationGrant): String = mapper.writeValueAsString(
+        linkedMapOf(
+            "version" to 1,
+            "kind" to "ACCEPT",
+            "grantId" to grant.id.toString(),
+            "lifecycleRevision" to grant.lifecycleRevision,
+            "grantorPartyId" to grant.grantorPartyId.toString(),
+            "granteePartyId" to grant.granteePartyId.toString(),
+            "resourceType" to grant.resourceType.name,
+            "resourceId" to grant.resourceId.toString(),
+            "capabilities" to grant.capabilities.map { it.name }.sorted(),
+            "approvalPolicy" to grant.approvalPolicy.name,
+            "requiredApprovals" to grant.requiredApprovals,
+            "perTransactionLimit" to money(grant.perTransactionLimit),
+            "dailyLimit" to money(grant.dailyLimit),
+            "monthlyLimit" to money(grant.monthlyLimit),
+            "recertificationAudience" to grant.recertificationAudience?.name,
+            "validFrom" to grant.validFrom.toString(),
+            "validTo" to grant.validTo?.toString(),
+            "grantScaSessionId" to grant.grantScaSessionId?.toString(),
+        ),
+    )
+
     fun payload(candidate: DelegationCandidate): String = mapper.writeValueAsString(
         linkedMapOf(
             "version" to 1,

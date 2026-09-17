@@ -125,6 +125,9 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "accept_sca_session_id")
     var acceptScaSessionId: UUID? = null
 
+    @Column(name = "accept_statutory_operation_id")
+    var acceptStatutoryOperationId: UUID? = null
+
     @Column(name = "note")
     var note: String? = null
 
@@ -165,6 +168,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
         lifecycleRevision = lifecycleRevision,
         grantScaSessionId = grantScaSessionId,
         acceptScaSessionId = acceptScaSessionId,
+        acceptStatutoryOperationId = acceptStatutoryOperationId,
         note = note,
         createdAt = createdAt,
         updatedAt = updatedAt,
@@ -236,6 +240,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
             lifecycleRevision = g.lifecycleRevision
             grantScaSessionId = g.grantScaSessionId
             acceptScaSessionId = g.acceptScaSessionId
+            acceptStatutoryOperationId = g.acceptStatutoryOperationId
             note = g.note
             createdAt = g.createdAt
             updatedAt = g.updatedAt

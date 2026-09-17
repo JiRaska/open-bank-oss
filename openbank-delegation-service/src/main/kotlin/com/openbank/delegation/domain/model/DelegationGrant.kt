@@ -123,6 +123,8 @@ data class DelegationGrant(
     val lifecycleRevision: Long = 0,
     val grantScaSessionId: UUID? = null,
     val acceptScaSessionId: UUID? = null,
+    /** Joint company acceptance is evidenced by its executed, quorum-signed operation instead of one SCA. */
+    val acceptStatutoryOperationId: UUID? = null,
     val note: String? = null,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
@@ -131,6 +133,9 @@ data class DelegationGrant(
     val closedReason: String? = null,
 ) {
     init {
+        require(acceptScaSessionId == null || acceptStatutoryOperationId == null) {
+            "acceptance has exactly one proof channel"
+        }
         require(grantorPartyId != granteePartyId) { "grantor and grantee must differ" }
         require(capabilities.isNotEmpty()) { "DelegationGrant must have at least one capability" }
         val allowed = CAPABILITY_MATRIX.getValue(resourceType)
@@ -205,10 +210,22 @@ data class DelegationGrant(
 
     fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
+        check(acceptStatutoryOperationId == null) { "joint acceptance evidence already exists" }
         return copy(
             status = DelegationStatus.ACTIVE,
             lifecycleRevision = nextLifecycleRevision(),
             acceptScaSessionId = scaSessionId,
+            updatedAt = now,
+        )
+    }
+
+    fun acceptJoint(operationId: UUID, now: OffsetDateTime): DelegationGrant {
+        check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
+        check(acceptScaSessionId == null && acceptStatutoryOperationId == null) { "acceptance evidence already exists" }
+        return copy(
+            status = DelegationStatus.ACTIVE,
+            lifecycleRevision = nextLifecycleRevision(),
+            acceptStatutoryOperationId = operationId,
             updatedAt = now,
         )
     }
