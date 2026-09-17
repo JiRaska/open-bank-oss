@@ -847,6 +847,15 @@ components:
           description: >-
             Companies House PSC record path scoped to this company. This identifies the source
             observation, not the natural or legal person across companies. Null when absent or invalid.
+        registrationNumber:
+          type: [string, 'null']
+          description: >-
+            Corporate PSC registration number as filed by Companies House. Together with its
+            jurisdiction this is candidate identity evidence, not an automatic entity match.
+        countryRegistered:
+          type: [string, 'null']
+          description: >-
+            Filed jurisdiction of a corporate PSC. Null when absent, invalid or not corporate.
         dateOfBirth:
           type: string
           format: date

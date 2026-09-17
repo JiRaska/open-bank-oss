@@ -125,6 +125,8 @@ class CompaniesHousePscAdapter : UboAdapter {
     private fun toOwner(item: JsonNode, companyNumber: String): BeneficialOwner? {
         val name = item.text("name") ?: return null
         val natures = item.path("natures_of_control").mapNotNull { it.takeIf { n -> n.isTextual }?.asText() }
+        val corporate = item.text("kind")?.let { it.startsWith("corporate") || it.startsWith("legal-person") } == true
+        val identification = item.path("identification")
         return BeneficialOwner(
             fullName = name,
             sourceRecordRef = item.path("links").text("self")?.takeIf { ref ->
@@ -142,7 +144,15 @@ class CompaniesHousePscAdapter : UboAdapter {
             band = bandOf(natures),
             natureOfControl = natures,
             notifiedOn = item.date("notified_on"),
-            corporate = item.text("kind")?.let { it.startsWith("corporate") || it.startsWith("legal-person") } == true,
+            corporate = corporate,
+            registrationNumber = identification.text("registration_number")?.takeIf { number ->
+                corporate &&
+                    number.length <= MAX_REGISTRATION_NUMBER_LENGTH &&
+                    REGISTRATION_NUMBER_PATTERN.matches(number)
+            },
+            countryRegistered = identification.text("country_registered")?.takeIf { country ->
+                corporate && country.length <= MAX_COUNTRY_LENGTH
+            },
         )
     }
 
@@ -181,7 +191,10 @@ class CompaniesHousePscAdapter : UboAdapter {
         private const val DATE_LENGTH = 10
         private const val PSC_PAGE = 100
         private const val MAX_RECORD_REF_LENGTH = 256
+        private const val MAX_REGISTRATION_NUMBER_LENGTH = 64
+        private const val MAX_COUNTRY_LENGTH = 80
         private val RECORD_REF_PATTERN = Regex("(/[A-Za-z0-9-]+)+")
+        private val REGISTRATION_NUMBER_PATTERN = Regex("[A-Za-z0-9-]+")
 
         /**
          * Ordering for "the strongest control this person holds". A person can hold shares in one

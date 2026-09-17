@@ -358,6 +358,8 @@ data class CaseResponse(
 data class BeneficialOwnerResponse(
     val fullName: String,
     val sourceRecordRef: String?,
+    val registrationNumber: String?,
+    val countryRegistered: String?,
     val dateOfBirth: LocalDate?,
     val nationality: String?,
     val countryOfResidence: String?,
@@ -397,6 +399,8 @@ data class UboResponse(
                 BeneficialOwnerResponse(
                     fullName = it.fullName,
                     sourceRecordRef = it.sourceRecordRef,
+                    registrationNumber = it.registrationNumber,
+                    countryRegistered = it.countryRegistered,
                     dateOfBirth = it.dateOfBirth,
                     nationality = it.nationality,
                     countryOfResidence = it.countryOfResidence,

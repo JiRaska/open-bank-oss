@@ -60,6 +60,9 @@ class UboMappingTest {
         // The register publishes month and year only; a reconstructed day would be a fact nobody filed.
         assertThat(finding.owners[0].dateOfBirth).isNull()
         assertThat(finding.owners[1].corporate).isTrue()
+        assertThat(finding.owners[1].registrationNumber).isEqualTo("12345678")
+        assertThat(finding.owners[1].countryRegistered).isEqualTo("United Kingdom")
+        assertThat(finding.owners[0].registrationNumber).isNull()
         // A control with no figure is UNQUANTIFIED, never below-threshold: the register named this
         // person for a reason, and below-threshold would drop them from reportableOwners.
         assertThat(finding.owners[2].band).isEqualTo(OwnershipBand.UNQUANTIFIED)
@@ -86,6 +89,24 @@ class UboMappingTest {
     }
 
     @Test
+    fun `corporate identifiers stay source evidence and malformed or personal fields are omitted`() {
+        val body = json.readTree(
+            """
+            {"items":[
+              {"name":"Person", "kind":"individual-person-with-significant-control",
+               "identification":{"registration_number":"12345678","country_registered":"United Kingdom"}},
+              {"name":"Company", "kind":"corporate-entity-person-with-significant-control",
+               "identification":{"registration_number":"../OTHER","country_registered":"United Kingdom"}}
+            ]}
+            """.trimIndent(),
+        )
+        val finding = adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb)
+        assertThat(finding.owners.map { it.registrationNumber }).containsOnlyNulls()
+        assertThat(finding.owners[0].countryRegistered).isNull()
+        assertThat(finding.owners[1].countryRegistered).isEqualTo("United Kingdom")
+    }
+
+    @Test
     fun `the wire response and OpenAPI expose a nullable source observation reference`() {
         val finding = adapter().map(
             LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"),
@@ -100,6 +121,8 @@ class UboMappingTest {
 
         assertThat(response.at("/owners/0/sourceRecordRef").asText())
             .isEqualTo("/company/OC123456/persons-with-significant-control/individual/psc-1")
+        assertThat(response.at("/owners/1/registrationNumber").asText()).isEqualTo("12345678")
+        assertThat(response.at("/owners/1/countryRegistered").asText()).isEqualTo("United Kingdom")
         assertThat(response.at("/owners/2/sourceRecordRef").isNull).isTrue()
         assertThat(field.path("type").map { it.asText() }).containsExactly("string", "null")
     }
