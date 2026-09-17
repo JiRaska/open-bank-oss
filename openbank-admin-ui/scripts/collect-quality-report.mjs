@@ -166,7 +166,47 @@ export async function providerHasMainVersion(baseUrl, auth, provider) {
   }
 }
 
-export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
+function canonicalPact(value) {
+  if (Array.isArray(value)) return value.map(canonicalPact)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalPact(value[key])]))
+  }
+  return value
+}
+
+function committedPact(pactFile) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'pacts', pactFile), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+async function equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact) {
+  const base = baseUrl.replace(/\/$/, '')
+  const headers = { Accept: 'application/hal+json' }
+  if (auth) headers.Authorization = auth
+  try {
+    const versionUrl = `${base}/pacticipants/${encodeURIComponent(consumer)}/branches/main/latest-version`
+    const versionResponse = await fetch(versionUrl, { headers, signal: AbortSignal.timeout(15000) })
+    if (!versionResponse.ok) return null
+    const version = (await versionResponse.json())?.number
+    if (typeof version !== 'string' || !version) return null
+    const pactUrl = `${base}/pacts/provider/${encodeURIComponent(provider)}/consumer/${encodeURIComponent(consumer)}/version/${encodeURIComponent(version)}`
+    const pactResponse = await fetch(pactUrl, { headers, signal: AbortSignal.timeout(15000) })
+    if (!pactResponse.ok) return null
+    const publishedPact = await pactResponse.json()
+    if (publishedPact === null || typeof publishedPact !== 'object' || Array.isArray(publishedPact)) return null
+    delete publishedPact._links
+    return JSON.stringify(canonicalPact(publishedPact)) === JSON.stringify(canonicalPact(committedPact)) ? version : null
+  } catch {
+    // A failed proof of equivalence is not a failed verification and never authorizes
+    // replacing the committed pact's version with a different broker version.
+    return null
+  }
+}
+
+export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider, committedPact = null) {
   if (!consumerVersion) return { status: 'pending', verifiedAt: null, providerVersion: null }
   // Matrix API — pin the consumer to the commit that authored this exact pact
   // file. Pin the provider to its latest main-branch version so a newer feature
@@ -203,6 +243,13 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
+  if (rows.length === 0 && committedPact) {
+    const equivalentVersion = await equivalentMainConsumerVersion(baseUrl, auth, consumer, provider, committedPact)
+    if (equivalentVersion && equivalentVersion !== consumerVersion) {
+      const latest = await fetchPairVerification(baseUrl, auth, consumer, equivalentVersion, provider)
+      return { ...latest, consumerVersion: equivalentVersion }
+    }
+  }
   const verifs = rows.map(r => r?.verificationResult).filter(Boolean)
   const providerVersion = rows.map(r => r?.providerVersion?.number).find(version => typeof version === 'string') ?? null
 
@@ -236,10 +283,11 @@ export async function enrichWithVerification(contracts) {
   let resolved = 0
   for (const c of contracts) {
     try {
-      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.consumerVersion, c.provider)
+      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.consumerVersion, c.provider, committedPact(c.pactFile))
       c.status = v.status
       c.verifiedAt = v.verifiedAt
       c.providerVersion = v.providerVersion
+      if (v.consumerVersion) c.consumerVersion = v.consumerVersion
       c.interactions = c.interactions.map(i => ({ ...i, status: v.status }))
       c.reasonCode = v.reasonCode ?? null
       c.detail = v.detail ?? null

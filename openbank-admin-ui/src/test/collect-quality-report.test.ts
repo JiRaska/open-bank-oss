@@ -85,6 +85,50 @@ describe('collect-quality-report contract classification (#7544)', () => {
     })
   })
 
+  it('uses a newer main consumer version only when its published pact matches the committed pact', async () => {
+    const committedPact = {
+      consumer: { name: 'openbank-alpha-service' }, provider: { name: 'openbank-real-provider' },
+      interactions: [{ description: 'reads an account' }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/matrix')) {
+        const version = new URL(url).searchParams.get('q[][version]')
+        return jsonResponse(200, { matrix: version === 'new-main'
+          ? [{ providerVersion: { number: 'provider-main' }, verificationResult: { success: true, verifiedAt: '2026-09-17T00:00:00Z' } }]
+          : [] })
+      }
+      if (url.includes('/openbank-alpha-service/branches/main/latest-version')) return jsonResponse(200, { number: 'new-main' })
+      if (url.includes('/pacts/provider/')) return jsonResponse(200, { ...committedPact, _links: { self: { href: 'broker-link' } } })
+      throw new Error(`unexpected url ${url}`)
+    }))
+
+    const v = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-alpha-service', 'old-file-commit', 'openbank-real-provider', committedPact,
+    )
+    expect(v).toEqual({
+      status: 'passed', verifiedAt: '2026-09-17T00:00:00Z', providerVersion: 'provider-main', consumerVersion: 'new-main',
+    })
+  })
+
+  it('does not borrow a newer verdict when the published pact differs from the committed file', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      if (url.includes('/matrix')) return jsonResponse(200, { matrix: [] })
+      if (url.includes('/openbank-alpha-service/branches/main/latest-version')) return jsonResponse(200, { number: 'new-main' })
+      if (url.includes('/pacts/provider/')) return jsonResponse(200, { interactions: [{ description: 'different operation' }] })
+      if (url.includes('/openbank-real-provider/branches/main/latest-version')) return jsonResponse(200, { number: 'provider-main' })
+      throw new Error(`unexpected url ${url}`)
+    }))
+
+    const v = await fetchPairVerification(
+      'http://broker.example', null, 'openbank-alpha-service', 'old-file-commit', 'openbank-real-provider',
+      { interactions: [{ description: 'reads an account' }] },
+    )
+    expect(v).toMatchObject({ status: 'pending', reasonCode: 'pending-verification' })
+    expect(calls.filter(url => url.includes('/matrix'))).toHaveLength(1)
+  })
+
   it('resolves a real passed/failed verdict with no reasonCode — a broker query error cannot override an authoritative result', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {
       matrix: [{ verificationResult: { success: true, verifiedAt: '2026-08-28T00:00:00Z' } }],
