@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.29.0...account-service-v0.30.0) (2026-09-17)
+
+
+### Features
+
+* **account:** open the business current account at digital onboarding ([#10173](https://github.com/JiRaska/open-bank-oss/issues/10173)) ([b8cbf1d](https://github.com/JiRaska/open-bank-oss/commit/b8cbf1d928d84ff360cf0560f2c7d725eb711dc7))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.28.0...account-service-v0.29.0) (2026-09-13)
 
 
