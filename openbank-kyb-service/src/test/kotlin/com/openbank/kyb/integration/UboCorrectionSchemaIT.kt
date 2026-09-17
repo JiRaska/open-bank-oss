@@ -88,6 +88,50 @@ class UboCorrectionSchemaIT {
         assertStoredSuccessor(priorId, correctionId, successorId)
     }
 
+    @Test
+    fun `correction candidate reads are case scoped and append only`() {
+        val (caseId, priorId) = seed()
+        val (otherCaseId, _) = seed()
+        val (json, hash) = candidate()
+        val correctionId = UUID.randomUUID()
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
+            insertProposal(connection, correctionId, caseId, priorId, json, hash)
+            val readId = UUID.randomUUID()
+            assertThatThrownBy { insertCorrectionRead(connection, UUID.randomUUID(), otherCaseId, correctionId) }
+                .hasMessageContaining("fk_kyb_ubo_correction_read_case")
+            insertCorrectionRead(connection, readId, caseId, correctionId)
+            assertThatThrownBy {
+                connection.prepareStatement(
+                    "UPDATE kyb_ubo_correction_reads SET principal_id = 'other' WHERE read_id = ?",
+                )
+                    .use { statement ->
+                        statement.setObject(1, readId)
+                        statement.executeUpdate()
+                    }
+            }.hasMessageContaining("append-only")
+            assertThatThrownBy {
+                connection.prepareStatement("DELETE FROM kyb_ubo_correction_reads WHERE read_id = ?")
+                    .use { statement ->
+                        statement.setObject(1, readId)
+                        statement.executeUpdate()
+                    }
+            }.hasMessageContaining("append-only")
+        }
+    }
+
+    private fun insertCorrectionRead(connection: java.sql.Connection, readId: UUID, caseId: UUID, correctionId: UUID) {
+        connection.prepareStatement(
+            """INSERT INTO kyb_ubo_correction_reads
+               (read_id, case_id, correction_id, principal_id, purpose, read_at)
+               VALUES (?, ?, ?, 'reviewer', 'KYB_OWNERSHIP_REVIEW', now())""",
+        ).use { statement ->
+            statement.setObject(1, readId)
+            statement.setObject(2, caseId)
+            statement.setObject(3, correctionId)
+            statement.executeUpdate()
+        }
+    }
+
     private fun assertInvalidApprovals(correctionId: UUID) {
         DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { connection ->
             assertThatThrownBy { approve(connection, correctionId, "maker") }
