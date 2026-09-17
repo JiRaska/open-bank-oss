@@ -272,16 +272,24 @@ class InterestServiceTest {
 
     @Test
     fun `createConfig persists a genuinely new config`() {
-        val config = sampleConfig(annualRate = BigDecimal("0.04"))
+        val config = sampleConfig(annualRate = BigDecimal("0.04")).copy(
+            effectiveTo = LocalDate.of(2026, 12, 31),
+        )
+        val saved = slot<InterestRateConfig>()
 
         every {
-            configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+            configRepo.findActiveTwin("SAVINGS", null, "EUR", LocalDate.of(2026, 1, 1))
         } returns Uni.createFrom().nullItem()
-        every { configRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestRateConfig>()) }
+        every { configRepo.save(capture(saved)) } answers { Uni.createFrom().item(saved.captured) }
 
         val result = service.createConfig(config).await().indefinitely()
 
         assertThat(result).isEqualTo(config)
+        assertThat(saved.captured.productId).isEqualTo("SAVINGS")
+        assertThat(saved.captured.currency).isEqualTo("EUR")
+        assertThat(saved.captured.maxBalance).isEqualByComparingTo(BigDecimal("1000000.00"))
+        assertThat(saved.captured.effectiveTo).isEqualTo(LocalDate.of(2026, 12, 31))
+        assertThat(saved.captured.active).isTrue()
         verify(exactly = 1) { configRepo.save(any()) }
     }
 
