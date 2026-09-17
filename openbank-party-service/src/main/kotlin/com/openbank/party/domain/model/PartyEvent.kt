@@ -95,6 +95,34 @@ object PartyEvents {
         )
     }
 
+    /**
+     * A new personal AML profile version (AML Act §9 declaration). Published as the existing
+     * `PARTY_UPDATED` — consumers already subscribe to it — with the derived party facts and the
+     * declaration's risk factors ADDED to the envelope, so an EDD consumer never has to call back
+     * for them. Nothing else in the declaration (income, purpose, TINs) goes on the broadcast topic.
+     */
+    fun amlProfileDeclared(
+        before: Party,
+        party: Party,
+        profile: PartyAmlProfile,
+        at: Instant,
+        actor: PartyActor,
+    ): PartyEvent {
+        val base = updated(before, party, at, actor)
+        return base.copy(
+            envelope = LinkedHashMap(base.envelope).apply {
+                put("changeKind", "AML_PROFILE_DECLARED")
+                put("amlProfileVersion", profile.version)
+                put("pepFlag", party.knownPepFlag)
+                put("pepCategory", party.pepCategory)
+                put("fatcaStatus", party.fatcaStatus)
+                put("crsStatus", party.crsStatus)
+                put("amlRiskFactors", profile.riskFactors.map { it.name })
+                put("eddRequired", profile.eddRequired)
+            },
+        )
+    }
+
     fun kycStatusChanged(party: Party, at: Instant, actor: PartyActor): PartyEvent =
         lifecycle("KYC_STATUS_CHANGED", party, at, actor)
 

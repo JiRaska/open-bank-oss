@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.4...document-service-v0.15.0) (2026-09-17)
+
+
+### Features
+
+* **document:** render and sign the business onboarding agreement ([#10209](https://github.com/JiRaska/open-bank-oss/issues/10209)) ([4f382d9](https://github.com/JiRaska/open-bank-oss/commit/4f382d9803a0e5d32d2bf5b49e2e0206d9540b42))
+
 ## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.3...document-service-v0.14.4) (2026-09-13)
 
 

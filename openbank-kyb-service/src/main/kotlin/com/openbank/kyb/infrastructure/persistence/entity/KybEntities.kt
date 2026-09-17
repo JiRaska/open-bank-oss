@@ -59,6 +59,15 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "review_reason", columnDefinition = "TEXT")
     var reviewReason: String? = null
 
+    @Column(name = "questionnaire_json", columnDefinition = "TEXT")
+    var questionnaireJson: String? = null
+
+    @Column(name = "declarations_json", columnDefinition = "TEXT")
+    var declarationsJson: String? = null
+
+    @Column(name = "agreement_json", columnDefinition = "TEXT")
+    var agreementJson: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 
