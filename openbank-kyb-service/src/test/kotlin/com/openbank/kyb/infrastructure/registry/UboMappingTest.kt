@@ -12,6 +12,9 @@ import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.OwnershipBand
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.rest.dto.UboResponse
+import io.mockk.coEvery
+import io.mockk.mockk
+import jakarta.ws.rs.NotFoundException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -20,6 +23,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.Optional
 
 /**
  * PSC register JSON → [com.openbank.kyb.domain.model.UboFinding] (ADR-0284 D5), and the
@@ -36,6 +40,20 @@ class UboMappingTest {
     private fun fixture(name: String) = json.readTree(javaClass.getResourceAsStream("/fixtures/$name")!!)
 
     private fun adapter() = CompaniesHousePscAdapter().also { it.clock = clock }
+
+    @Test
+    fun `missing PSC resource is unknown rather than evidence of no owners`() {
+        val client = mockk<CompaniesHouseRestClient>()
+        coEvery { client.personsWithSignificantControl("OC123456", any(), any()) } throws NotFoundException()
+        val adapter = adapter().also {
+            it.companiesHouse = client
+            it.apiKey = Optional.of("test-key")
+        }
+
+        assertThatThrownBy {
+            runBlocking { adapter.lookup(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), gb) }
+        }.isInstanceOf(RegistryUnavailableException::class.java)
+    }
 
     @Test
     fun `a ceased PSC is history and the strongest stated band wins`() {

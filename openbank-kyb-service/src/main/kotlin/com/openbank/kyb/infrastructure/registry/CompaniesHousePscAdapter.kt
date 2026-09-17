@@ -73,10 +73,9 @@ class CompaniesHousePscAdapter : UboAdapter {
         val body = try {
             companiesHouse.personsWithSignificantControl(identifier.value, auth, PSC_PAGE)
         } catch (e: jakarta.ws.rs.WebApplicationException) {
-            // 404 here means the COMPANY has no PSC resource, which for a live company is itself a
-            // finding: the register answered, and it holds nothing. It is not an outage, and it is
-            // not "we did not look" — both of which would send an analyst chasing the wrong thing.
-            if (e.response?.status == NOT_FOUND) return empty(identifier, pack)
+            // This endpoint lists PSCs, not the separately published PSC statements. A 404 does
+            // not prove the company has no owners or has filed a "no PSC" statement. Keep the
+            // finding unknown until both register resources can be reconciled.
             log.warnf("Companies House PSC answered %s", e.response?.status)
             throw RegistryUnavailableException(SOURCE, e)
         } catch (e: RegistryUnavailableException) {
@@ -124,17 +123,6 @@ class CompaniesHousePscAdapter : UboAdapter {
         }
         return items
     }
-
-    private fun empty(identifier: LegalEntityIdentifier, pack: CountryPack) = UboFinding(
-        identifier = identifier,
-        source = UboSource.REGISTER,
-        owners = emptyList(),
-        registerStatements = emptyList(),
-        threshold = pack.uboRegister.threshold,
-        registerName = pack.uboRegister.name,
-        sourceRef = identifier.value,
-        fetchedAt = Instant.now(clock),
-    )
 
     private fun toOwner(item: JsonNode, companyNumber: String): BeneficialOwner? {
         val name = item.text("name") ?: return null
@@ -200,7 +188,6 @@ class CompaniesHousePscAdapter : UboAdapter {
 
     companion object {
         const val SOURCE = "companies-house-psc"
-        private const val NOT_FOUND = 404
         private const val PSC_TIMEOUT_MS = 4000L
         private const val DATE_LENGTH = 10
         private const val PSC_PAGE = 100

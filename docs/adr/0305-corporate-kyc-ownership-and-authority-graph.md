@@ -47,6 +47,8 @@ Corporate PSC registration number and country are candidate entity evidence, sub
 source verification and reviewed resolution. `notified_on` is the date the register was
 notified, not proof of when legal ownership began. A truncated PSC page or an active
 withheld-identity record remains unknown; it must not produce a complete ownership chain.
+Companies House serves PSC statements from a separate endpoint; a missing PSC-list
+resource alone is not proof that the company has no reportable controllers.
 
 Before this lens ingests UBO evidence, KYB must persist a bounded, versioned source
 observation with its source hash, fetched/recorded time, record references, statements,
