@@ -5,9 +5,15 @@
 package com.openbank.kyb.it
 
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
+import com.openbank.kyb.application.port.out.AgreementDisclosure
+import com.openbank.kyb.application.port.out.BusinessAgreementRequest
+import com.openbank.kyb.application.port.out.BusinessAgreementView
+import com.openbank.kyb.application.port.out.CeremonySigner
+import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
+import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryAdapter
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
@@ -29,6 +35,7 @@ import jakarta.enterprise.inject.Alternative
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -132,4 +139,55 @@ class StubPartyGateway : PartyGateway {
     @Volatile var identity: InitiatorIdentity? = null
 
     override suspend fun initiatorIdentity(partyId: UUID): InitiatorIdentity? = identity
+
+    /** PEP facts per party; absent = party-service holds none, so the person must declare. */
+    val pep = ConcurrentHashMap<UUID, Boolean>()
+
+    override suspend fun pepProfile(partyId: UUID): PepProfile? = PepProfile(pep[partyId], null)
+}
+
+/**
+ * document-service double. It renders one agreement per case and records the ceremony decisions a
+ * test hands it via [signedBy] — exactly the fact kyb must ask for and never take from the client.
+ */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubDocumentGateway : DocumentGateway {
+    private val agreements = ConcurrentHashMap<UUID, BusinessAgreementView>()
+    val signedBy = ConcurrentHashMap<UUID, MutableSet<UUID>>()
+
+    override suspend fun ensureBusinessAgreement(request: BusinessAgreementRequest): BusinessAgreementView {
+        val view = agreements.computeIfAbsent(request.caseId) {
+            BusinessAgreementView(
+                caseId = request.caseId,
+                documentId = UUID.randomUUID(),
+                templateCode = "RAMCOVA_SMLOUVA_PO_${request.lang.uppercase()}",
+                templateVersion = "1.0.0",
+                sha256 = "a".repeat(64),
+                ceremonyId = UUID.randomUUID(),
+                ceremonyStatus = "PENDING",
+                signers = request.signers.mapNotNull { it.partyRef }.map { CeremonySigner(it, "PENDING") },
+                disclosures = DISCLOSURES,
+            )
+        }
+        return withSignatures(view)
+    }
+
+    override suspend fun businessAgreement(caseId: UUID, lang: String): BusinessAgreementView? =
+        agreements[caseId]?.let(::withSignatures)
+
+    private fun withSignatures(v: BusinessAgreementView): BusinessAgreementView {
+        val signed = signedBy[v.caseId].orEmpty()
+        return v.copy(
+            signers = v.signers.map { if (it.partyRef in signed) it.copy(status = "SIGNED") else it },
+        )
+    }
+
+    companion object {
+        val DISCLOSURES = listOf(
+            AgreementDisclosure("VOP_CS", "1.1.0", "Všeobecné obchodní podmínky", "b".repeat(64), null),
+            AgreementDisclosure("SAZEBNIK_PO_CS", "1.0.0", "Sazebník", "c".repeat(64), null),
+        )
+    }
 }
