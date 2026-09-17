@@ -832,7 +832,11 @@ components:
         kycStatus: { type: string }
         pepFlag:
           type: boolean
-          description: Derived from the current AML profile; false until one is declared.
+          nullable: true
+          description: >-
+            true if the party is flagged PEP (by a declaration or a screening); false ONLY when a
+            personal AML profile was declared and says not PEP; null when unknown (never declared).
+            Never read null as false.
         pepCategory:
           type: string
           nullable: true
@@ -841,6 +845,7 @@ components:
         fatcaStatus:
           type: string
           nullable: true
+          description: null until a personal AML profile is declared
           enum: [US_PERSON, NON_US]
         crsStatus:
           type: string

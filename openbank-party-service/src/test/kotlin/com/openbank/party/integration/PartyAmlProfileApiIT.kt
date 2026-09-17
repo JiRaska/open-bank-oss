@@ -108,13 +108,16 @@ class PartyAmlProfileApiIT {
     @Test
     @Order(1)
     @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
-    fun `a person with no declaration answers 404, and the party GET shows the empty derived facts`() {
+    fun `a person with no declaration answers 404, and the party GET reports every derived fact as unknown`() {
         val id = createParty("INDIVIDUAL")
         personId = id
         Given { this } When { get("/api/v1/parties/$id/aml-profile") } Then { statusCode(404) }
         Given { this } When { get("/api/v1/parties/$id") } Then {
             statusCode(200)
-            body("pepFlag", equalTo(false))
+            // The column defaults to false; the API must still say "unknown", or a reader such as
+            // kyb takes an undeclared person for a known non-PEP and skips the PEP question.
+            body("pepFlag", equalTo(null))
+            body("pepCategory", equalTo(null))
             body("fatcaStatus", equalTo(null))
             body("crsStatus", equalTo(null))
         }
@@ -138,6 +141,14 @@ class PartyAmlProfileApiIT {
             listOf(it.getBoolean(1), it.getString(2), it.getString(3), it.getString(4))
         }.single()
         assertThat(party).containsExactly(false, null, "NON_US", "NON_REPORTABLE")
+
+        // Declared "not a PEP": now, and only now, false is a known fact.
+        Given { this } When { get("/api/v1/parties/$id") } Then {
+            statusCode(200)
+            body("pepFlag", equalTo(false))
+            body("fatcaStatus", equalTo("NON_US"))
+            body("crsStatus", equalTo("NON_REPORTABLE"))
+        }
 
         val events =
             query("SELECT payload FROM party_outbox WHERE aggregate_id = ? AND event_type = 'PARTY_UPDATED'", id) {
@@ -249,6 +260,25 @@ class PartyAmlProfileApiIT {
         put(stranger, CZ_ONLY, 404)
         Given { this } When { get("/api/v1/parties/$stranger/aml-profile") } Then { statusCode(404) }
         put(createParty("COMPANY"), CZ_ONLY, 422)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "staff-reader", roles = ["ROLE_VIEWER", "ROLE_ADMIN", "ROLE_OPERATOR"])
+    fun `a PEP flag set by a screening before any declaration reads true, the rest stays unknown`() {
+        val id = createParty("INDIVIDUAL")
+        dataSource.connection.use { conn ->
+            val ps = conn.prepareStatement("UPDATE parties SET pep_flag = TRUE WHERE party_id = ?")
+            ps.setObject(1, id)
+            assertThat(ps.executeUpdate()).isEqualTo(1)
+        }
+        Given { this } When { get("/api/v1/parties/$id") } Then {
+            statusCode(200)
+            body("pepFlag", equalTo(true))
+            body("fatcaStatus", equalTo(null))
+            body("crsStatus", equalTo(null))
+        }
+        Given { this } When { get("/api/v1/parties/$id/aml-profile") } Then { statusCode(404) }
     }
 
     @Test

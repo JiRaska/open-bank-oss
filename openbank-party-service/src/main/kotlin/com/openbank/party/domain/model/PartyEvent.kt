@@ -113,7 +113,7 @@ object PartyEvents {
             envelope = LinkedHashMap(base.envelope).apply {
                 put("changeKind", "AML_PROFILE_DECLARED")
                 put("amlProfileVersion", profile.version)
-                put("pepFlag", party.pepFlag)
+                put("pepFlag", party.knownPepFlag)
                 put("pepCategory", party.pepCategory)
                 put("fatcaStatus", party.fatcaStatus)
                 put("crsStatus", party.crsStatus)
