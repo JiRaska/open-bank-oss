@@ -72,7 +72,9 @@ describe('credit-risk console', () => {
     render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
     await waitFor(() => expect(screen.getByText(/code-seeded/i)).toBeInTheDocument())
     expect(screen.getByText(/All five responses passed schema validation/i)).toBeInTheDocument()
-    expect(screen.getByText(/Unavailable bureau evidence refers to manual review/i)).toBeInTheDocument()
+    expect(screen.getByText('StarterCreditPolicy')).toBeInTheDocument()
+    expect(screen.getByText(/Changing it requires a PR \+ release; four-eyes activation is not available here/i)).toBeInTheDocument()
+    expect(screen.getByText(/Unavailable bureau evidence requires manual review/i)).toBeInTheDocument()
     expect(screen.getByText(/accounting use is disabled by default/i)).toBeInTheDocument()
   })
 
