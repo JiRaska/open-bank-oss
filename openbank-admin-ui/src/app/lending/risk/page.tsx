@@ -41,6 +41,7 @@ import type { PortfolioSummary } from '@/components/lending/risk/contracts'
 import type { z } from 'zod'
 import { PolicyTables } from '@/components/lending/risk/PolicyTables'
 import { C_STAGE } from '@/components/lending/risk/palette'
+import styles from './RiskEvidence.module.css'
 
 // The console can prove loading, denial and partial-service states without a chart engine. Load
 // Recharts only after validated evidence reaches a visible chart, and reserve each final footprint.
@@ -229,57 +230,57 @@ function CreditRiskConsole() {
         }
       />
 
-      {/* The evidence state always occupies the same place above the KPIs. A failed response
-          must not insert a new banner after first paint and move the risk numbers. */}
-      <div
-        className="card"
-        role={!loading && unavailable.length > 0 ? 'alert' : 'status'}
-        aria-live={!loading && unavailable.length > 0 ? 'assertive' : 'polite'}
-        aria-busy={loading}
-        style={{ padding: 12, marginBottom: 16, minHeight: 128, borderLeft: `3px solid ${!loading && unavailable.length > 0 ? 'var(--danger)' : 'var(--accent)'}`, fontSize: 13 }}
-      >
-        <strong style={{ display: 'block', color: !loading && unavailable.length > 0 ? 'var(--danger-text)' : 'var(--text-primary)' }}>
-          {loading
-            ? t('Ověřuji podklady kreditního rizika', 'Validating credit-risk evidence')
-            : unavailable.length > 0
-              ? t('Podklady kreditního rizika nejsou úplné', 'Credit-risk evidence is incomplete')
-              : t('Podklady kreditního rizika jsou načtené', 'Credit-risk evidence is loaded')}
-        </strong>
-        <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
-          {loading
-            ? t('Kontroluji pět odpovědí služby; žádné chybějící hodnoty neodhadujeme jako nulu.', 'Checking five service responses; missing values are never inferred as zero.')
-            : unavailable.length > 0
-              ? t(`${unavailable.length}/5 zdrojů nedostupných nebo neplatných; dotčené ukazatele zůstávají —.`, `${unavailable.length}/5 feeds unavailable or invalid; affected metrics remain —.`)
-              : t('Všech pět odpovědí prošlo kontrolou formátu. Původ politiky a omezení modelu jsou uvedeny níže.', 'All five responses passed schema validation. Policy provenance and model limitations appear below.')}
+      {/* Evidence and policy provenance have one stable footprint. A risk committee must see
+          both the data state and whether the policy can actually be changed here. */}
+      <section className={`card ${styles.panel}`} aria-label={t('Podklady a původ politiky', 'Evidence and policy provenance')}>
+        <div role={!loading && unavailable.length > 0 ? 'alert' : 'status'} aria-live={!loading && unavailable.length > 0 ? 'assertive' : 'polite'} aria-busy={loading}>
+          <strong className={!loading && unavailable.length > 0 ? styles.danger : undefined}>
+            {loading
+              ? t('Ověřuji podklady kreditního rizika', 'Validating credit-risk evidence')
+              : unavailable.length > 0
+                ? t('Podklady kreditního rizika nejsou úplné', 'Credit-risk evidence is incomplete')
+                : t('Podklady kreditního rizika jsou načtené', 'Credit-risk evidence is loaded')}
+          </strong>
+          <div className={styles.explanation}>
+            {loading
+              ? t('Kontroluji pět odpovědí služby; žádné chybějící hodnoty neodhadujeme jako nulu.', 'Checking five service responses; missing values are never inferred as zero.')
+              : unavailable.length > 0
+                ? t(`${unavailable.length}/5 zdrojů nedostupných nebo neplatných; dotčené ukazatele zůstávají —.`, `${unavailable.length}/5 feeds unavailable or invalid; affected metrics remain —.`)
+                : t('Všech pět odpovědí prošlo kontrolou formátu.', 'All five responses passed schema validation.')}
+          </div>
+          {!loading && unavailable.length > 0 && (
+            <details className={styles.details}>
+              <summary className={styles.danger}>{t('Zobrazit dotčené zdroje', 'Show affected feeds')}</summary>
+              <ul>{unavailable.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+            </details>
+          )}
         </div>
-        {!loading && unavailable.length > 0 && (
-          <details style={{ marginTop: 6 }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--danger-text)' }}>
-              {t('Zobrazit dotčené zdroje', 'Show affected feeds')}
-            </summary>
-            <ul style={{ margin: '6px 0 0', paddingLeft: 22 }}>
-              {unavailable.map(path => <li key={path}><code>{path}</code></li>)}
-            </ul>
-          </details>
-        )}
-      </div>
-
-      {/* Provenance first. A risk committee reading a table must know whether anyone can change it. */}
-      {policy?.data && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: `3px solid ${policy.data.codeSeeded ? 'var(--warning)' : 'var(--success)'}`, fontSize: 13, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <AlertTriangle size={14} style={{ color: policy.data.codeSeeded ? 'var(--warning)' : 'var(--success)' }} aria-hidden="true" />
-          <span>
-            {policy.data.codeSeeded
-              ? t(`Politika je zadrátovaná v kódu (${policy.data.source}, ADR-0213 D3). Změna = PR + release, ne four-eyes aktivace v UI (D4 table store není postaven).`,
-                  `Policy is code-seeded (${policy.data.source}, ADR-0213 D3). Changing it is a PR + release, not a four-eyes activation here (the D4 table store is not built).`)
-              : t(`Politika z governovaného úložiště: ${policy.data.source}.`, `Policy from the governed store: ${policy.data.source}.`)}
-          </span>
-          <span style={{ color: 'var(--text-tertiary)' }}>
-            {t('Nedostupná evidence registru vede k ručnímu posouzení. Demonstrační PD/LGD nejsou validovaný IFRS 9 model; účetní použití je ve výchozím stavu zakázáno.',
-               'Unavailable bureau evidence refers to manual review. Demonstration PD/LGD are not a validated IFRS 9 model; accounting use is disabled by default.')}
-          </span>
+        <div className={styles.provenance}>
+          <strong className={policy?.data?.codeSeeded ? styles.warning : undefined}>
+            {loading
+              ? t('Ověřuji původ politiky', 'Checking policy provenance')
+              : policy?.data
+                ? policy.data.codeSeeded
+                  ? t('Politika je zadrátovaná v kódu', 'Policy is code-seeded')
+                  : t('Politika z governovaného úložiště', 'Policy from the governed store')
+                : t('Původ politiky není dostupný', 'Policy provenance is unavailable')}
+          </strong>
+          {policy?.data && <code className={styles.source} title={policy.data.source}>{policy.data.source}</code>}
+          <div className={styles.explanation}>
+            {loading
+              ? t('Prahové hodnoty nepředpokládáme, dokud politika neodpoví.', 'Decision thresholds are not assumed until policy evidence arrives.')
+              : policy?.data
+                ? policy.data.codeSeeded
+                  ? t('Změna vyžaduje PR + release; four-eyes aktivace zde není dostupná (ADR-0213 D3/D4).', 'Changing it requires a PR + release; four-eyes activation is not available here (ADR-0213 D3/D4).')
+                  : t('Prahové hodnoty se čtou z governovaného úložiště.', 'Thresholds are read from the governed store.')
+                : t('Bez politiky zůstávají její prahy nedostupné.', 'Policy thresholds remain unavailable without policy evidence.')}
+          </div>
+          <div className={styles.explanation}>
+            {t('Chybějící evidence registru vyžaduje ruční posouzení. Demonstrační PD/LGD nejsou validované; účetní použití je ve výchozím stavu zakázané.',
+               'Unavailable bureau evidence requires manual review. Demo PD/LGD are not validated; accounting use is disabled by default.')}
+          </div>
         </div>
-      )}
+      </section>
 
       <div className="grid-4" style={{ marginBottom: 12 }}>
         <StatCard label={t('Schváleno enginem', 'Engine approve rate')} value={kpiSource ? rate(kpiSource.APPROVE) : UNKNOWN} tone={kpiSource ? 'success' : undefined} hint={kpiSource ? `${kpiSource.APPROVE.toLocaleString(numberLocale)} · ${kpiHint}` : t('čeká na data', 'waiting for data')} icon={<Activity size={13} />} />
