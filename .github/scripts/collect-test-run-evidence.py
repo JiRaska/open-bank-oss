@@ -1151,6 +1151,11 @@ def main() -> None:
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004", "variant": "chromium"}]
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-security-excellence","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
+            wrong_journey = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            right_journey = specialized_evidence(None, None, synthetic_journey="admin-ui-security-excellence", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert wrong_journey[0]["state"] == "not-run", wrong_journey
+            assert right_journey[0]["state"] == "passed" and right_journey[0]["source"] == "journey:admin-ui-security-excellence", right_journey
             # A browser summary may encode an unavailable FCP as zero. That must stay
             # explicit instead of becoming a green Web Vitals sample; zero CLS remains valid.
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":0,"cls":0}}')

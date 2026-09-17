@@ -768,6 +768,18 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in history_stage:
             errors.append(message)
+    browser_workflow = text(root / ".github/workflows/admin-ui-browser-synthetic.yml")
+    browser_producer = text(root / "openbank-admin-ui/scripts/admin-login-synthetic.mjs")
+    for needle, message in (
+        ("OPENBANK_SYNTHETIC_JOURNEY: admin-ui-sso-boundary", "SSO browser evidence lacks its journey identity"),
+        ("OPENBANK_SYNTHETIC_JOURNEY: admin-ui-security-excellence",
+         "security-excellence browser evidence lacks its journey identity"),
+    ):
+        if needle not in browser_workflow:
+            errors.append(message)
+    if "journey = process.env.OPENBANK_SYNTHETIC_JOURNEY" not in browser_producer or \
+            "schemaVersion: 1, journey, browser: engine" not in browser_producer:
+        errors.append("browser Web Vitals are not attributed to the configured journey")
     # A staged Pact file is not a provider-verification verdict. The deploy collector
     # can query the existing read-only Broker credentials and must receive them only
     # in its build/collection step; without this wiring the UI bakes every Pact as
