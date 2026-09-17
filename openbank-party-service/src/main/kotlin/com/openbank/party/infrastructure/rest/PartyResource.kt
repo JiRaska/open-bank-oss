@@ -855,6 +855,9 @@ fun Party.toResponse() = mapOf(
     // ADR-0179: non-null only on a MERGED party — tells a consumer holding a stale id which
     // party to follow instead.
     "mergedIntoPartyId" to mergedIntoPartyId,
+    // Derived from the personal AML profile (null/false until one is declared); the source of
+    // truth kyb and other readers use for these four facts.
+    "pepFlag" to pepFlag, "pepCategory" to pepCategory, "fatcaStatus" to fatcaStatus, "crsStatus" to crsStatus,
 )
 
 fun PartyGdprExport.toResponse() = mapOf(

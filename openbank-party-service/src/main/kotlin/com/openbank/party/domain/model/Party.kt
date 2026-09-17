@@ -76,6 +76,15 @@ data class Party(
      * [PartyStatus.MERGED] — the DB carries the same biconditional as a CHECK constraint.
      */
     val mergedIntoPartyId: UUID? = null,
+    /**
+     * Derived from the current personal AML profile ([PartyAmlProfile]); `parties` is the source
+     * of truth other services (kyb for business onboarding) read these four facts from. Null /
+     * false until the person has declared a profile.
+     */
+    val pepFlag: Boolean = false,
+    val pepCategory: String? = null,
+    val fatcaStatus: String? = null,
+    val crsStatus: String? = null,
 )
 
 data class Address(
