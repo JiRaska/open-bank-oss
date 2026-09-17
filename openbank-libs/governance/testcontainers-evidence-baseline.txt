@@ -10,7 +10,5 @@
 # Money-path entries (ledger, transaction, account, balance, sepa-*, domestic-payment,
 # clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
 # need the two-approval + threat-model process before their topology is touched.
-openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
-openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
 openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
 openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresTestResource.kt
