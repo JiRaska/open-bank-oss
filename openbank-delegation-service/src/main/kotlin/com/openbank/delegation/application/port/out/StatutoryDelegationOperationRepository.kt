@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.application.port.out
 
+import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
@@ -58,6 +59,18 @@ interface StatutoryDelegationOperationRepository {
         expectedRuleHash: String,
         grant: DelegationGrant,
         event: DelegationOffered,
+        at: Instant,
+    ): DelegationGrant
+
+    /** Lock operation and target grant; activation, proof link, event and EXECUTED commit together. */
+    suspend fun executeAcceptance(
+        operationId: UUID,
+        principalPartyId: UUID,
+        rule: StatutoryRepresentationRule,
+        expectedRuleHash: String,
+        expectedPayloadJson: String,
+        offered: DelegationGrant,
+        event: DelegationActivated,
         at: Instant,
     ): DelegationGrant
 }

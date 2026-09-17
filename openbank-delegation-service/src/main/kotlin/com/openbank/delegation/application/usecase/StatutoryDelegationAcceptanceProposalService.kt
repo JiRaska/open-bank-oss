@@ -87,15 +87,26 @@ class StatutoryDelegationAcceptanceProposalService(
         company: UUID,
         caller: UUID?,
         actorPartyId: UUID?,
-    ): StatutoryDelegationOperation {
+    ): StatutoryDelegationOperation = current(id, company, caller, actorPartyId).first
+        .takeIf { it.state == StatutoryOperationState.PENDING }
+        ?: throw StatutoryProposalStale(id)
+
+    internal suspend fun current(
+        id: UUID,
+        company: UUID,
+        caller: UUID?,
+        actorPartyId: UUID?,
+    ): Pair<StatutoryDelegationOperation, StatutoryRepresentationRule> {
         val actor = requireActor(company, caller, actorPartyId)
         val operation = operations.find(id, company)
             ?.takeIf { it.operationKind == StatutoryOperationKind.ACCEPT }
             ?: throw StatutoryProposalNotFound(id)
-        val target = loadOffered(requireNotNull(operation.targetGrantId), company, clock.instant())
         val rule = resolve(company, actor)
-        ensurePendingSnapshot(operation, target, rule)
-        return operation
+        if (operation.state == StatutoryOperationState.PENDING) {
+            val target = loadOffered(requireNotNull(operation.targetGrantId), company, clock.instant())
+            ensurePendingSnapshot(operation, target, rule)
+        }
+        return operation to rule
     }
 
     private fun ensurePendingSnapshot(

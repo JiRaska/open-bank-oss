@@ -12,8 +12,10 @@ import com.openbank.delegation.application.port.out.StatutoryDelegationOperation
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete
+import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
@@ -29,11 +31,13 @@ import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
 /** The unique principal/request key is the concurrent replay serialisation point. */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // One ledger adapter owns both operation kinds' row locks and atomic outbox commits.
 class StatutoryDelegationOperationRepositoryImpl(
     private val outboxRepository: DelegationOutboxRepository,
     private val mapper: ObjectMapper,
@@ -219,6 +223,131 @@ class StatutoryDelegationOperationRepositoryImpl(
         }
     }.awaitSuspending()
 
+    override suspend fun executeAcceptance(
+        operationId: UUID,
+        principalPartyId: UUID,
+        rule: StatutoryRepresentationRule,
+        expectedRuleHash: String,
+        expectedPayloadJson: String,
+        offered: DelegationGrant,
+        event: DelegationActivated,
+        at: Instant,
+    ): DelegationGrant = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(LOCK_OPERATION_SQL, StatutoryDelegationOperationEntity::class.java)
+                .setParameter("operation", operationId)
+                .setParameter("principal", principalPartyId)
+                .singleResultOrNull
+                .flatMap { operation ->
+                    when {
+                        operation == null || operation.operationKind != StatutoryOperationKind.ACCEPT ->
+                            Uni.createFrom().failure(StatutoryDecisionClosed())
+                        operation.state == StatutoryOperationState.EXECUTED ->
+                            session.find(DelegationGrantEntity::class.java, operation.grantId)
+                                .map { requireNotNull(it) { "executed acceptance grant is missing" }.toDomain() }
+                        !validAcceptanceOperation(
+                            operation,
+                            rule,
+                            expectedRuleHash,
+                            expectedPayloadJson,
+                            offered,
+                            at,
+                        ) -> Uni.createFrom().failure(StatutoryDecisionClosed())
+                        else -> executePendingAcceptance(session, operationId, rule, offered, event, at)
+                    }
+                }
+        }
+    }.awaitSuspending()
+
+    private fun validAcceptanceOperation(
+        operation: StatutoryDelegationOperationEntity,
+        rule: StatutoryRepresentationRule,
+        expectedRuleHash: String,
+        expectedPayloadJson: String,
+        offered: DelegationGrant,
+        at: Instant,
+    ): Boolean = operation.state == StatutoryOperationState.PENDING &&
+        operation.expiresAt.isAfter(at) &&
+        operation.principalPartyId == offered.granteePartyId &&
+        operation.targetGrantId == offered.id &&
+        operation.expectedLifecycleRevision == offered.lifecycleRevision &&
+        offered.status == DelegationStatus.OFFERED &&
+        operation.payloadJson == expectedPayloadJson &&
+        operation.requestHash == sha256(expectedPayloadJson) &&
+        operation.ruleHash == expectedRuleHash &&
+        operation.policyId == rule.policyId &&
+        operation.policyRevision == rule.revision
+
+    private fun executePendingAcceptance(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        operationId: UUID,
+        rule: StatutoryRepresentationRule,
+        offered: DelegationGrant,
+        event: DelegationActivated,
+        at: Instant,
+    ): Uni<DelegationGrant> = session.createNativeQuery(LOCK_GRANT_SQL, DelegationGrantEntity::class.java)
+        .setParameter("grant", offered.id)
+        .singleResultOrNull
+        .flatMap { locked ->
+            if (locked == null || locked.toDomain() != offered) {
+                Uni.createFrom().failure(StatutoryDecisionClosed())
+            } else {
+                executeLockedAcceptance(session, operationId, rule, offered, event, at)
+            }
+        }
+
+    private fun executeLockedAcceptance(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        operationId: UUID,
+        rule: StatutoryRepresentationRule,
+        offered: DelegationGrant,
+        event: DelegationActivated,
+        at: Instant,
+    ): Uni<DelegationGrant> = session.createQuery(
+        "from StatutoryDelegationDecisionEntity where operationId = :operation",
+        StatutoryDelegationDecisionEntity::class.java,
+    )
+        .setParameter("operation", operationId)
+        .resultList
+        .flatMap { rows ->
+            val approvers = rows.filter { it.verdict == StatutoryDecisionVerdict.APPROVE }
+                .map { it.actorPartyId }.toSet()
+            if (!rule.satisfiedBy(approvers)) {
+                Uni.createFrom().failure(StatutoryQuorumIncomplete())
+            } else {
+                val activated = offered.acceptJoint(operationId, at.atOffset(java.time.ZoneOffset.UTC))
+                session.createNativeQuery<Any>(ACTIVATE_ACCEPTED_GRANT_SQL)
+                    .setParameter("grant", offered.id)
+                    .setParameter("revision", offered.lifecycleRevision)
+                    .setParameter("nextRevision", activated.lifecycleRevision)
+                    .setParameter("operation", operationId)
+                    .setParameter("at", at)
+                    .executeUpdate()
+                    .flatMap { changed ->
+                        if (changed != 1) return@flatMap Uni.createFrom().failure(StatutoryDecisionClosed())
+                        outboxRepository.persistInTransaction(
+                            OutboxMessage(
+                                aggregateId = event.aggregateId,
+                                eventType = event.eventType,
+                                payload = mapper.writeValueAsString(event),
+                                createdAt = event.occurredAt,
+                            ),
+                        )
+                    }
+                    .flatMap {
+                        session.createNativeQuery<Any>(MARK_EXECUTED_SQL)
+                            .setParameter("operation", operationId)
+                            .setParameter("grant", offered.id)
+                            .setParameter("at", at)
+                            .executeUpdate()
+                    }
+                    .map { changed ->
+                        check(changed == 1) { "statutory acceptance execution lost its row lock" }
+                        activated
+                    }
+            }
+        }
+
     private fun executePending(
         session: org.hibernate.reactive.mutiny.Mutiny.Session,
         operationId: UUID,
@@ -278,12 +407,26 @@ class StatutoryDelegationOperationRepositoryImpl(
             targetGrantId == other.targetGrantId &&
             expectedLifecycleRevision == other.expectedLifecycleRevision
 
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
     private companion object {
         const val MAX_PENDING_RESULTS = 50
         const val LOCK_OPERATION_SQL = """
             SELECT * FROM delegation_statutory_operations
             WHERE operation_id = :operation AND principal_party_id = :principal
             FOR UPDATE
+        """
+        const val LOCK_GRANT_SQL = """
+            SELECT * FROM delegation_grants WHERE id = :grant FOR UPDATE
+        """
+        const val ACTIVATE_ACCEPTED_GRANT_SQL = """
+            UPDATE delegation_grants
+            SET status = 'ACTIVE', lifecycle_revision = :nextRevision,
+                accept_statutory_operation_id = :operation, updated_at = :at
+            WHERE id = :grant AND status = 'OFFERED' AND lifecycle_revision = :revision
+                AND accept_sca_session_id IS NULL AND accept_statutory_operation_id IS NULL
         """
         const val MARK_EXECUTED_SQL = """
             UPDATE delegation_statutory_operations

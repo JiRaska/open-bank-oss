@@ -7,10 +7,12 @@ package com.openbank.delegation.integration
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
@@ -443,6 +445,103 @@ class StatutoryDelegationOperationSchemaIT {
                 operations.find(proposed.id, proposed.principalPartyId)
             }?.grantId,
         ).isEqualTo(grant.id)
+    }
+
+    @Test
+    @Suppress("LongMethod") // Keep the real-DB offer, quorum, rollback and committed evidence assertions together.
+    fun `joint acceptance atomically activates existing offer and records one proof and event`() {
+        val at = OffsetDateTime.ofInstant(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC)
+        val offered = DelegationGrant(
+            grantorPartyId = UUID.randomUUID(),
+            granteePartyId = UUID.randomUUID(),
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            validFrom = at,
+            validTo = null,
+            createdAt = at,
+            updatedAt = at,
+        )
+        val offerEvent = DelegationOffered(
+            aggregateId = offered.id,
+            lifecycleRevision = 0,
+            grantorPartyId = offered.grantorPartyId,
+            granteePartyId = offered.granteePartyId,
+            resourceType = offered.resourceType,
+            resourceId = offered.resourceId,
+            capabilities = offered.capabilities,
+            validFrom = offered.validFrom,
+            occurredAt = at.toInstant(),
+        )
+        onVertxContext { grants.save(offered, offerEvent) }
+        val payload = """{"kind":"ACCEPT","grantId":"${offered.id}"}"""
+        val proposed = operation().copy(
+            principalPartyId = offered.granteePartyId,
+            payloadJson = payload,
+            requestHash = sha256(payload),
+            operationKind = StatutoryOperationKind.ACCEPT,
+            targetGrantId = offered.id,
+            expectedLifecycleRevision = 0,
+        )
+        onVertxContext { operations.create(proposed) }
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val rule = jointRule(proposed, first, second)
+        val acceptedAt = proposed.createdAt.plusSeconds(60)
+        val event = DelegationActivated(
+            aggregateId = offered.id,
+            lifecycleRevision = 1,
+            grantorPartyId = offered.grantorPartyId,
+            granteePartyId = offered.granteePartyId,
+            resourceType = offered.resourceType,
+            resourceId = offered.resourceId,
+            capabilities = offered.capabilities,
+            validFrom = offered.validFrom,
+            occurredAt = acceptedAt,
+        )
+        fun sign(actor: UUID) = onVertxContext {
+            operations.recordDecision(
+                StatutoryDelegationDecision(
+                    proposed.id,
+                    actor,
+                    StatutoryDecisionVerdict.APPROVE,
+                    UUID.randomUUID(),
+                    acceptedAt,
+                ),
+            )
+        }
+        fun execute(expected: DelegationGrant = offered) = onVertxContext {
+            operations.executeAcceptance(
+                proposed.id,
+                offered.granteePartyId,
+                rule,
+                proposed.ruleHash,
+                payload,
+                expected,
+                event,
+                acceptedAt,
+            )
+        }
+
+        sign(first)
+        assertThatThrownBy { execute() }
+            .isInstanceOf(com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete::class.java)
+        assertThat(onVertxContext { grants.findById(offered.id) }?.status).isEqualTo(DelegationStatus.OFFERED)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", offered.id)).isEqualTo(1)
+
+        sign(second)
+        assertThatThrownBy { execute(offered.copy(lifecycleRevision = 1)) }
+            .isInstanceOf(com.openbank.delegation.application.port.out.StatutoryDecisionClosed::class.java)
+        val activated = execute()
+        assertThat(activated.status).isEqualTo(DelegationStatus.ACTIVE)
+        assertThat(activated.lifecycleRevision).isEqualTo(1)
+        assertThat(activated.acceptStatutoryOperationId).isEqualTo(proposed.id)
+        assertThat(activated.acceptScaSessionId).isNull()
+        assertThat(execute().id).isEqualTo(offered.id)
+        assertThat(onVertxContext { grants.findById(offered.id) }?.acceptStatutoryOperationId).isEqualTo(proposed.id)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", offered.id)).isEqualTo(2)
+        assertThat(onVertxContext { operations.find(proposed.id, offered.granteePartyId) }?.grantId)
+            .isEqualTo(offered.id)
     }
 
     private fun jointRule(proposed: StatutoryDelegationOperation, first: UUID, second: UUID) =
