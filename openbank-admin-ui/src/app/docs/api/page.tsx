@@ -674,11 +674,25 @@ export default function ApiCatalogPage() {
 
           return (
             <div key={svc.id} className="card" style={{ overflow: 'hidden' }}>
-              <div style={{
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={isExpanded}
+                aria-controls={`api-service-${svc.id}`}
+                onClick={() => setExpanded(e => e === svc.id ? null : svc.id)}
+                onKeyDown={event => {
+                  // Nested documentation links own their keyboard activation. Handling their
+                  // bubbled Enter here would prevent navigation and toggle the disclosure.
+                  if (event.target !== event.currentTarget) return
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  setExpanded(e => e === svc.id ? null : svc.id)
+                }}
+                style={{
                 display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px',
                 borderLeft: `3px solid ${groupColor}`,
                 cursor: 'pointer',
-              }} onClick={() => setExpanded(e => e === svc.id ? null : svc.id)}>
+              }}>
                 {loading ? (
                   <RefreshCw size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} className="animate-spin" />
                 ) : status?.health === 'up' ? (
@@ -780,7 +794,7 @@ export default function ApiCatalogPage() {
               </div>
 
               {isExpanded && status && (
-                <div style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                <div id={`api-service-${svc.id}`} style={{ padding: '16px', borderTop: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: status.info ? '1fr 280px' : '1fr', gap: '16px' }}>
                     <div>
                       <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
@@ -817,14 +831,17 @@ export default function ApiCatalogPage() {
 
                             return (
                               <div key={`${path}-${method}`} style={{ display: 'flex', flexDirection: 'column' }}>
-                                <div
+                                <button
+                                  type="button"
+                                  aria-expanded={isMethodExpanded}
+                                  aria-controls={`api-operation-${svc.id}-${i}-${method}`}
                                   onClick={() => setExpandedMethod(e => e?.svc === svc.id && e?.path === path && e?.method === method ? null : {svc: svc.id, path, method})}
                                   style={{
                                     display: 'flex', alignItems: 'center', gap: '10px',
                                     fontFamily: 'JetBrains Mono, monospace', fontSize: '12px',
                                     padding: '6px 10px', background: 'var(--surface)', borderRadius: '4px',
                                     border: '1px solid var(--border)', cursor: 'pointer',
-                                    userSelect: 'none'
+                                    userSelect: 'none', width: '100%', textAlign: 'left', color: 'inherit'
                                   }}>
                                   <span style={{
                                     textTransform: 'uppercase', fontWeight: 800, width: '50px',
@@ -834,9 +851,11 @@ export default function ApiCatalogPage() {
                                   <span style={{ color: 'var(--text-tertiary)' }}>
                                     {isMethodExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                   </span>
-                                </div>
+                                </button>
                                 {isMethodExpanded && (
-                                  <MethodDetailView path={path} method={method} operation={op} openapi={status.openapi || null} />
+                                  <div id={`api-operation-${svc.id}-${i}-${method}`}>
+                                    <MethodDetailView path={path} method={method} operation={op} openapi={status.openapi || null} />
+                                  </div>
                                 )}
                               </div>
                             )

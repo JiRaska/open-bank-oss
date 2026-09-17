@@ -12,7 +12,8 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { LanguageProvider, type Language } from '@/lib/i18n/LanguageContext'
-import { ThemeBootstrap } from '@/lib/theme/useTheme'
+import { ThemeProvider } from '@/lib/theme/useTheme'
+import type { Theme } from '@/lib/theme/theme'
 
 /**
  * Keeps authenticated-only infrastructure off public entry and policy surfaces.
@@ -21,21 +22,24 @@ import { ThemeBootstrap } from '@/lib/theme/useTheme'
 export function AppProviders({
   children,
   initialLanguage = null,
+  initialTheme = 'light',
 }: {
   children: React.ReactNode
   initialLanguage?: Language | null
+  initialTheme?: Theme
 }) {
   const pathname = usePathname()
   const router = useRouter()
   const refreshServerContent = useCallback(() => router.refresh(), [router])
   const publicSurface = isPublicSurface(pathname)
   const shared = (
-    <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
-      {!publicSurface && <ThemeBootstrap />}
-      {children}
-      {!publicSurface && <AgentDock />}
-      <Toaster richColors position="top-right" />
-    </LanguageProvider>
+    <ThemeProvider initialTheme={initialTheme}>
+      <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
+        {children}
+        {!publicSurface && <AgentDock />}
+        <Toaster richColors position="top-right" />
+      </LanguageProvider>
+    </ThemeProvider>
   )
 
   return (

@@ -90,8 +90,10 @@ data class BusinessOnboardingCase(
      *
      * [decision] is what the attestation store says about THIS entity's current rule text (#9711).
      * The parser's own verdict never reaches [requiredSignatures] any more: it is a suggestion the
-     * operator sees, and only [RepresentationDecision.Attested] — a human's confirmation of this
-     * exact text — lets a case proceed automatically. Everything else reviews.
+     * operator sees, and only [RepresentationDecision.Attested] — a confirmation of this exact text —
+     * lets a case proceed automatically. That confirmation is a human's, except for the one case no
+     * text can make ambiguous (a single statutory member with a SOLE rule), which the attestation
+     * service confirms itself. Everything else reviews.
      */
     fun registryVerified(
         extract: RegistryExtract,

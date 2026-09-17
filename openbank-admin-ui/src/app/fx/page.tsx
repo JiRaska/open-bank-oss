@@ -131,7 +131,7 @@ function CurrencyCell({ code, meta }: { code: string; meta?: CurrencyMetaType })
 function MidCell({ mid, symbol }: { mid: number; symbol?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-      {symbol && <span style={{ fontSize: '9px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
+      {symbol && <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{symbol}</span>}
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>{mid.toFixed(4)}</span>
     </div>
   )
@@ -440,7 +440,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('cnb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ČNB', 'Scrollable CNB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -489,7 +489,7 @@ export default function FxPage() {
                   <Download size={12} style={{ animation: isRefreshing('ecb') ? 'spin 1s linear infinite' : 'none' }} /> {t('Stáhnout', 'Download')}
                 </button>
               </div>
-              <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka kurzů ECB', 'Scrollable ECB rates table')} tabIndex={0} style={{ maxHeight: '420px', overflowY: 'auto' }}>
                 {loading ? (
                   <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '12px' }}>
                     <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite', marginBottom: '6px' }} /><div>{t('Načítám…', 'Loading…')}</div>
@@ -530,14 +530,14 @@ export default function FxPage() {
                   {editingMargin ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--success-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
                         <input type="number" aria-label={t('Nákupní marže v procentech', 'Buy margin percent')} step="0.1" min="0" max="20" value={marginDraft.buyPct}
                           onChange={e => setMarginDraft(p => ({ ...p, buyPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--danger-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         <input type="number" aria-label={t('Prodejní marže v procentech', 'Sell margin percent')} step="0.1" min="0" max="20" value={marginDraft.sellPct}
                           onChange={e => setMarginDraft(p => ({ ...p, sellPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
@@ -553,11 +553,11 @@ export default function FxPage() {
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: 'var(--success-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
                         −{margin.buyPct}%
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: 'var(--danger-text)' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
+                        <span style={{ fontSize: '10px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         +{margin.sellPct}%
                       </span>
                       <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -571,7 +571,7 @@ export default function FxPage() {
                 </span>
               </div>
 
-              <div style={{ maxHeight: '480px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvný bankovní kurzovní lístek', 'Scrollable bank rate sheet')} tabIndex={0} style={{ maxHeight: '480px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Publikovat', 'Publish'), t('Měna', 'Currency'), t('ECB Střed', 'ECB Mid'), t('Nákup (banka)', 'Buy (bank)'), t('Prodej (banka)', 'Sell (bank)'), t('Override', 'Override'), t('Datum', 'Date')].map(h => (
@@ -584,7 +584,7 @@ export default function FxPage() {
                         <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
                       </td></tr>
                     ) : bankRateRows.map(r => (
-                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', opacity: r.published ? 1 : 0.45 }}
+                      <tr key={r.code} style={{ borderBottom: '1px solid var(--border)', background: r.published ? undefined : 'var(--surface-2)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>
@@ -778,7 +778,7 @@ export default function FxPage() {
               <History size={14} style={{ color: 'var(--text-primary)' }} />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
-            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+            <div role="region" aria-label={t('Posuvná historie akcí operátora', 'Scrollable operator action history')} tabIndex={0} style={{ maxHeight: '220px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {[t('Čas', 'Time'), t('Zdroj', 'Source'), t('Pár', 'Pair'), t('Kurz', 'Rate')].map(h => (
@@ -816,7 +816,7 @@ export default function FxPage() {
                 {t('Žádné konverze v interním systému.', 'No conversions in internal system.')}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
+              <div role="region" aria-label={t('Posuvná tabulka posledních konverzí', 'Scrollable recent conversions table')} tabIndex={0} style={{ overflowX: 'auto', maxHeight: '220px', overflowY: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
                     {[t('Datum', 'Date'), t('Z → Na', 'From → To'), t('Částka Z', 'From'), t('Částka Na', 'To'), t('Status', 'Status')].map(h => (

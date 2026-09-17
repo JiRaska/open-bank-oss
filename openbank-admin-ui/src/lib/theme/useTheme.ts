@@ -4,11 +4,10 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { THEME_COOKIE_KEY, THEME_STORAGE_KEY, parseTheme, type Theme } from './theme'
 
-export type Theme = 'light' | 'dark'
-
-export const THEME_STORAGE_KEY = 'ob-admin-theme'
+export { THEME_COOKIE_KEY, THEME_STORAGE_KEY, type Theme } from './theme'
 
 /**
  * Why this file exists (#9831).
@@ -33,8 +32,7 @@ function readStoredTheme(): Theme | null {
   // localStorage throws in a private window, with site data blocked, and during thumbnail
   // capture — a theme preference is not worth a blank console, so every access is guarded.
   try {
-    const raw = window.localStorage.getItem(THEME_STORAGE_KEY)
-    return raw === 'dark' || raw === 'light' ? raw : null
+    return parseTheme(window.localStorage.getItem(THEME_STORAGE_KEY))
   } catch {
     return null
   }
@@ -42,56 +40,78 @@ function readStoredTheme(): Theme | null {
 
 /** The theme to start from when the operator has expressed no choice. See the note above. */
 export function initialTheme(): Theme {
-  return readStoredTheme() ?? 'light'
+  return readCookieTheme()
+    ?? readStoredTheme()
+    ?? (document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+}
+
+function readCookieTheme(): Theme | null {
+  const cookie = document.cookie
+    .split(';')
+    .map(part => part.trim())
+    .find(part => part.startsWith(`${THEME_COOKIE_KEY}=`))
+    ?.slice(THEME_COOKIE_KEY.length + 1)
+  return parseTheme(cookie)
 }
 
 export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('dark', theme === 'dark')
 }
 
-/** Applies the operator choice while an App Router loading boundary is still on screen. */
-export function ThemeBootstrap() {
-  useEffect(() => {
-    applyTheme(initialTheme())
-    return () => document.documentElement.classList.remove('dark')
-  }, [])
-  return null
+function persistTheme(theme: Theme): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+  } catch {
+    // The cookie still preserves the choice when storage is blocked.
+  }
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${THEME_COOKIE_KEY}=${theme}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`
 }
 
-export function useTheme(): { theme: Theme; setTheme: (next: Theme) => void; toggle: () => void } {
-  // Starts light on the server AND on the first client render: reading localStorage during render
-  // would make the two disagree, which React resolves by discarding the server HTML. The stored
-  // choice is applied in the effect below, one frame later.
-  const [theme, setThemeState] = useState<Theme>('light')
+type ThemeContextValue = { theme: Theme; setTheme: (next: Theme) => void; toggle: () => void }
+
+const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+export function ThemeProvider({ children, initialTheme: serverTheme }: { children: ReactNode; initialTheme: Theme }) {
+  // The server read the same cookie that produced the <html class="dark"> marker, so CSS and
+  // control state agree on the first paint and hydration never needs a corrective render.
+  const [theme, setThemeState] = useState<Theme>(serverTheme)
 
   useEffect(() => {
-    const stored = initialTheme()
-    setThemeState(stored)
-    applyTheme(stored)
-  }, [])
+    // One-time compatibility bridge for preferences saved before the server-readable cookie
+    // existed. New and migrated sessions never take this path, so normal hydration remains a
+    // single render with no theme flash.
+    if (readCookieTheme()) return
+    const legacyTheme = readStoredTheme()
+    if (!legacyTheme || legacyTheme === serverTheme) return
+    persistTheme(legacyTheme)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- bounded legacy migration
+    setThemeState(legacyTheme)
+  }, [serverTheme])
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next)
-    applyTheme(next)
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, next)
-    } catch {
-      // The choice still applies to this session; it simply will not survive a reload.
-    }
+    persistTheme(next)
   }, [])
 
   const toggle = useCallback(() => {
     setThemeState(current => {
       const next: Theme = current === 'dark' ? 'light' : 'dark'
-      applyTheme(next)
-      try {
-        window.localStorage.setItem(THEME_STORAGE_KEY, next)
-      } catch {
-        // as above
-      }
+      persistTheme(next)
       return next
     })
   }, [])
 
-  return { theme, setTheme, toggle }
+  const value = useMemo(() => ({ theme, setTheme, toggle }), [setTheme, theme, toggle])
+  return createElement(ThemeContext.Provider, { value }, children)
+}
+
+export function useTheme(): ThemeContextValue {
+  const value = useContext(ThemeContext)
+  if (!value) throw new Error('useTheme must be used within ThemeProvider')
+  return value
 }

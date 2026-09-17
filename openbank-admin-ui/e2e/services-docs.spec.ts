@@ -109,7 +109,7 @@ test.describe('/services — Service Documentation page', () => {
     // App shell rule (ADR-0076 / graceful-state guard): sidebar must be visible.
     // The Sidebar component renders <aside><nav>…, so match the outer landmark only —
     // matching both would be a strict-mode violation (2 elements for 1 locator).
-    await expect(page.locator('aside').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('aside:visible')).toBeVisible({ timeout: 10_000 })
   })
 
   test('gracefully handles health endpoint failure (falls back to static candidates)', async ({ page }) => {

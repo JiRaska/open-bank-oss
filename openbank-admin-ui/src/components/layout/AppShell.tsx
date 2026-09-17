@@ -87,13 +87,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mobileNavOpen || sessionStatus === 'loading') return
     const frame = requestAnimationFrame(() => {
-      const sidebar = document.querySelector<HTMLElement>('#admin-sidebar')
-      const opener = document.querySelector<HTMLElement>('button[aria-controls="admin-sidebar"]')
+      const sidebar = Array.from(document.querySelectorAll<HTMLElement>('#admin-sidebar'))
+        .find(element => element.checkVisibility())
+      const opener = Array.from(document.querySelectorAll<HTMLElement>('button[aria-controls="admin-sidebar"]'))
+        .find(element => element.checkVisibility())
       if (document.activeElement !== sidebar && document.activeElement !== opener) return
       sidebar?.querySelector<HTMLElement>('a, button:not([disabled])')?.focus()
     })
     return () => { cancelAnimationFrame(frame) }
   }, [mobileNavOpen, sessionStatus])
+  const toggleMobileNav = () => { setMobileNavOpen(open => !open) }
   return (
     <div className="ob-app-shell">
       <SkipLink />
@@ -107,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
       <div className="ob-app-frame">
-        <Header mobileNavOpen={mobileNavOpen} onMenuToggle={() => setMobileNavOpen(open => !open)} />
+        <Header mobileNavOpen={mobileNavOpen} onMenuToggle={toggleMobileNav} />
         <main id="main-content" className="ob-app-content" tabIndex={-1}>{children}</main>
       </div>
     </div>
