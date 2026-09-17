@@ -2,9 +2,30 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.4.0
+  version: 1.5.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/kyb-cases/{id}/ownership-observations:
+    get:
+      operationId: getKybOwnershipObservationReferences
+      summary: Read bounded reference-only ownership history for an assigned KYB case
+      description: Owner attributes remain in KYB. recordedAt is Context ingestion time, not finding time.
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: At most 50 case-scoped references with a truncation flag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KybObservationHistory' }
+        '400': { description: Case and purpose mismatch or future knownAt }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/aml-cases/{id}/network:
     get:
       operationId: getAssignedAmlCaseNetwork
@@ -195,6 +216,26 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    KybObservationHistory:
+      type: object
+      required: [root, knownAt, observations, truncated]
+      properties:
+        root: { type: string, pattern: '^kyb-case:[0-9a-f-]{36}$' }
+        knownAt: { type: string, format: date-time }
+        observations:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/KybObservationSummary' }
+        truncated: { type: boolean }
+    KybObservationSummary:
+      type: object
+      required: [observationId, revision, sourceSha256, recordedAt]
+      additionalProperties: false
+      properties:
+        observationId: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+        sourceSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        recordedAt: { type: string, format: date-time }
     IncidentImpact:
       type: object
       required: [incidentRef, affectedByType, total, drilldownAvailable, projectionStatus]
@@ -224,7 +265,7 @@ components:
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required delegation UUID root for AUTHORIZATION_REVIEW or aml-case UUID root for AML_INVESTIGATION; absent for other purposes
+          description: Required delegation UUID root for AUTHORIZATION_REVIEW, aml-case UUID root for AML_INVESTIGATION, or kyb-case UUID root for KYB_OWNERSHIP_REVIEW; absent for other purposes
     DecideAssignment:
       type: object
       required: [approve]

@@ -53,12 +53,46 @@ class KybObservationReferenceEntity {
     lateinit var recordedAt: Instant
 }
 
+/** Bounded reference history. recordedAt is Context ingestion time, not KYB finding time. */
+data class KybObservationHistory(
+    val root: String,
+    val knownAt: Instant,
+    val observations: List<KybObservationSummary>,
+    val truncated: Boolean,
+)
+
+data class KybObservationSummary(
+    val observationId: UUID,
+    val revision: Long,
+    val sourceSha256: String,
+    val recordedAt: Instant,
+)
+
 @ApplicationScoped
 class KybObservationReferenceRepository(
     private val sessions: Mutiny.SessionFactory,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val timeoutMs: Int,
 ) {
+    suspend fun history(caseId: UUID, knownAt: Instant): KybObservationHistory {
+        val rows = transaction { session ->
+            session.createQuery(
+                "from KybObservationReferenceEntity where bankScope = :bank and caseId = :caseId " +
+                    "and recordedAt <= :knownAt order by revision desc, recordedAt desc",
+                KybObservationReferenceEntity::class.java,
+            ).setParameter("bank", bankScope).setParameter("caseId", caseId).setParameter("knownAt", knownAt)
+                .setMaxResults(MAX_OBSERVATIONS + 1).resultList
+        }.ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+        return KybObservationHistory(
+            root = "kyb-case:$caseId",
+            knownAt = knownAt,
+            observations = rows.take(MAX_OBSERVATIONS).map {
+                KybObservationSummary(it.observationId, it.revision, it.sourceSha256, it.recordedAt)
+            },
+            truncated = rows.size > MAX_OBSERVATIONS,
+        )
+    }
+
     suspend fun append(reference: KybObservationReference) {
         transaction { session ->
             session.createNativeMutationQuery(
@@ -95,5 +129,9 @@ class KybObservationReferenceRepository(
                 session.createNativeQuery("select set_config('statement_timeout', :timeout, true)", String::class.java)
                     .setParameter("timeout", "${timeoutMs}ms").singleResult
             }.flatMap { block(session) }
+    }
+
+    private companion object {
+        const val MAX_OBSERVATIONS = 50
     }
 }

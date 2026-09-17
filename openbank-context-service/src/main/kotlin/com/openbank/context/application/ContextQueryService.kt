@@ -59,6 +59,21 @@ class ContextQueryService(
         block,
     )
 
+    internal suspend fun <T> kybCaseEvidence(
+        ref: String,
+        actor: Investigator,
+        context: InvestigationContext,
+        block: suspend () -> T,
+    ): T = authorized(
+        "context.kyb-case.read",
+        "KYB_OWNERSHIP_REVIEW",
+        ContextNamespace.KYB,
+        "kyb-case:$ref",
+        actor,
+        context,
+        block,
+    )
+
     suspend fun complaint(ref: String, actor: Investigator, context: InvestigationContext): ContextNeighborhood? =
         authorized(
             "context.complaint.read",
@@ -126,7 +141,7 @@ class ContextQueryService(
             decisionMetric(action, "denied", "purpose_mismatch")
             throw ContextAccessDenied()
         }
-        val rootScoped = namespace in setOf(ContextNamespace.AUTHORIZATION, ContextNamespace.AML)
+        val rootScoped = namespace in setOf(ContextNamespace.AUTHORIZATION, ContextNamespace.AML, ContextNamespace.KYB)
         val assigned = if (rootScoped) {
             assignments.isAssignedToRoot(actor.id, context.caseId, context.purpose, root, now)
         } else {

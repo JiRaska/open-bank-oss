@@ -4,15 +4,19 @@
 
 package com.openbank.context.integration
 
+import com.openbank.context.infrastructure.AssignmentAdministrationService
 import com.openbank.context.infrastructure.KybObservationReferenceConsumer
 import com.openbank.context.infrastructure.KybObservationReferenceDecoder
 import com.openbank.context.infrastructure.KybObservationReferenceRepository
+import com.openbank.context.infrastructure.ProposeAssignmentRequest
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.inject.Inject
@@ -30,6 +34,7 @@ import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.Metadata
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -42,6 +47,8 @@ import java.util.concurrent.atomic.AtomicInteger
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
 class KybObservationReferenceIT {
+    @Inject lateinit var assignments: AssignmentAdministrationService
+
     @Inject lateinit var repository: KybObservationReferenceRepository
 
     @Inject lateinit var consumer: KybObservationReferenceConsumer
@@ -82,6 +89,53 @@ class KybObservationReferenceIT {
         assertThat(rejected.nacked.get()).isEqualTo(1)
         assertThat(visibleRows(rejectedId, scoped = true)).isZero()
     }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_KYC"])
+    fun `case scoped history needs an approved root and revocation removes access`() {
+        val caseId = UUID.randomUUID()
+        val observationId = UUID.randomUUID()
+        onVertx {
+            repository.append(decoder.decode(payload(caseId, observationId), UUID.randomUUID().toString(), EVENT_TYPE))
+        }
+        request(caseId).then().statusCode(403)
+        val proposal = onVertx {
+            assignments.propose(
+                ProposeAssignmentRequest(
+                    ACTOR,
+                    caseId.toString(),
+                    PURPOSE,
+                    null,
+                    Instant.now().plusSeconds(3600),
+                    "kyb-case:$caseId",
+                ),
+                "kyb-maker",
+            )
+        }
+        val assignmentId = requireNotNull(
+            onVertx { assignments.decide(proposal.id, true, "kyb-checker") }.assignmentId,
+        )
+        request(caseId).then().statusCode(200).header("Cache-Control", "no-store")
+            .body("root", org.hamcrest.Matchers.equalTo("kyb-case:$caseId"))
+            .body("observations.size()", org.hamcrest.Matchers.equalTo(1))
+            .body("observations[0].observationId", org.hamcrest.Matchers.equalTo(observationId.toString()))
+        given().header("X-Investigation-Case-Id", UUID.randomUUID().toString())
+            .header("X-Investigation-Purpose", PURPOSE)
+            .get("/api/v1/context/kyb-cases/$caseId/ownership-observations").then().statusCode(400)
+        onVertx { assignments.revoke(assignmentId, "kyb-revoker") }
+        request(caseId).then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
+    fun `operator cannot list KYB ownership references`() {
+        request(UUID.randomUUID()).then().statusCode(403)
+    }
+
+    private fun request(caseId: UUID) = given()
+        .header("X-Investigation-Case-Id", caseId.toString())
+        .header("X-Investigation-Purpose", PURPOSE)
+        .get("/api/v1/context/kyb-cases/$caseId/ownership-observations")
 
     private fun payload(caseId: UUID, observationId: UUID) =
         """{"schemaVersion":1,"eventType":"$EVENT_TYPE","caseId":"$caseId", """ +
@@ -162,6 +216,8 @@ class KybObservationReferenceIT {
     private data class Delivery(val value: Message<String>, val acked: AtomicInteger, val nacked: AtomicInteger)
 
     private companion object {
+        const val ACTOR = "kyb-history-analyst"
+        const val PURPOSE = "KYB_OWNERSHIP_REVIEW"
         const val TOPIC = "openbank.kyb.ubo-observation-references"
         const val EVENT_TYPE = "KybUboObservationRecorded"
     }
