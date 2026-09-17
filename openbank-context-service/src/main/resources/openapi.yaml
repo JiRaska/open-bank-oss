@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.4.0
+  version: 1.5.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
   /api/v1/context/aml-cases/{id}/network:
@@ -144,7 +144,7 @@ paths:
         - $ref: '#/components/parameters/purpose'
         - $ref: '#/components/parameters/asOf'
       responses:
-        '200': { description: Authorized bounded neighborhood }
+        '200': { description: Authorized bounded neighborhood; a source-confirmed SEPA return may include a REVERSAL_TRANSACTION node and REVERSED_BY edge when transaction-service returned a reversal ID }
         '400': { description: Invalid investigation context or asOf timestamp }
         '403': { description: No active assignment or policy denied }
         '404': { description: Root not projected }

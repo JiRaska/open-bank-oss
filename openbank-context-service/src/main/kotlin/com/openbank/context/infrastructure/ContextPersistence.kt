@@ -296,7 +296,9 @@ class ContextGraphRepository(
                     "(sourceSystem = :clearingSource and toKey like :clearingItemPrefix and " +
                     "relationType = :submittedTo) or " +
                     "(sourceSystem = :sepaSource and toKey like :returnPrefix and " +
-                    "relationType = :returnedBy)) and " +
+                    "relationType = :returnedBy) or " +
+                    "(sourceSystem = :sepaSource and toKey like :reversalPrefix and " +
+                    "relationType = :reversedBy)) and " +
                     "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
                 ContextEdgeEntity::class.java,
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
@@ -311,6 +313,8 @@ class ContextGraphRepository(
                 .setParameter("submittedTo", SUBMITTED_TO)
                 .setParameter("returnPrefix", RETURN_EVIDENCE_PREFIX)
                 .setParameter("returnedBy", RETURNED_BY)
+                .setParameter("reversalPrefix", REVERSAL_TRANSACTION_PREFIX)
+                .setParameter("reversedBy", REVERSED_BY)
                 .setParameter("keys", transactionKeys)
                 .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
                 .setParameter("asOf", asOf).setMaxResults(limit).resultList
@@ -388,10 +392,12 @@ class ContextGraphRepository(
         const val CLEARING_ITEM_PREFIX = "clearing-item:%"
         const val CLEARING_EVIDENCE_PREFIX = "clearing-evidence:%"
         const val RETURN_EVIDENCE_PREFIX = "return-evidence:sepa:%"
+        const val REVERSAL_TRANSACTION_PREFIX = "reversal-transaction:%"
         const val BOOKING_REQUESTED = "BOOKING_REQUESTED"
         const val BOOKED_AS = "BOOKED_AS"
         const val SUBMITTED_TO = "SUBMITTED_TO"
         const val RETURNED_BY = "RETURNED_BY"
+        const val REVERSED_BY = "REVERSED_BY"
         const val SETTLED = "SETTLED"
         val COMPLAINT_LIFECYCLE_RELATIONS = setOf(
             "CREATED",
@@ -400,6 +406,7 @@ class ContextGraphRepository(
             "SETTLED",
             "REJECTED",
             "RETURNED_BY",
+            "REVERSED_BY",
             "CANCELLED",
         )
     }

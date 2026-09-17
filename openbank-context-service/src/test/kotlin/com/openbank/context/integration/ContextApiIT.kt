@@ -89,14 +89,13 @@ class ContextApiIT {
         val ledger = connector.source<String>("ledger-events-in")
         val clearing = connector.source<String>("clearing-events-in")
         val sepaReturns = connector.source<String>("sepa-payment-events-in")
+        val reversalId = UUID.randomUUID()
         listOf(source, payments, transactions, ledger, clearing, sepaReturns)
             .forEach { it.runOnVertxContext(true) }
 
-        source.send(payload)
-        source.send(payload)
+        repeat(2) { source.send(payload) }
         source.send(complaintEvent(complaintId, reference, accountId, transactionId, disputeId, version - 1))
-        source.send("""{"eventType":"dispute.opened","disputeId":"${UUID.randomUUID()}"}""")
-        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId)
+        val clearingItemId = sendRailEvidence(clearing, sepaReturns, transactionId, reversalId)
         sendPaymentLifecycle(payments, transactionId)
         val bookingTransactionId = UUID.randomUUID()
         val journalId = UUID.randomUUID()
@@ -108,6 +107,7 @@ class ContextApiIT {
             bookingTransactionId,
             journalId,
             clearingItemId,
+            reversalId,
             complaintId,
         )
         val unrelatedComplaint = seedUnrelatedComplaint(transactionId)
@@ -118,14 +118,16 @@ class ContextApiIT {
             .header("X-Investigation-Purpose", PURPOSE)
             .`when`().get("/api/v1/context/complaints/$reference")
             .then().statusCode(200)
-            .body("nodes.size()", equalTo(12))
-            .body("edges.size()", equalTo(11))
+            .body("nodes.size()", equalTo(13))
+            .body("nodes.key", org.hamcrest.Matchers.hasItem("reversal-transaction:$reversalId"))
+            .body("edges.size()", equalTo(12))
             .body(
                 "edges.relation",
                 org.hamcrest.Matchers.hasItems(
                     "CREATED",
                     "SUBMITTED_TO",
                     "RETURNED_BY",
+                    "REVERSED_BY",
                     "BOOKING_REQUESTED",
                     "BOOKED_AS",
                     "SETTLED",
@@ -133,6 +135,21 @@ class ContextApiIT {
             )
             .extract().asString()
         assertThat(response).doesNotContain(unrelatedComplaint)
+    }
+
+    @Test
+    fun `older SEPA return without reversal ID retains return evidence without inventing an ID`() {
+        val paymentId = UUID.randomUUID()
+        val reversalId = UUID.randomUUID()
+        val payload = sepaReturnedEvent(paymentId, reversalId)
+            .replace("\"reversalTransactionId\":\"$reversalId\",", "")
+        val source = connector.source<String>("sepa-payment-events-in")
+        source.runOnVertxContext(true)
+
+        source.send(payload)
+
+        awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
+        assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isZero()
     }
 
     @Test
@@ -422,9 +439,10 @@ class ContextApiIT {
         clearing: InMemorySource<String>,
         sepaReturns: InMemorySource<String>,
         paymentId: UUID,
+        reversalId: UUID,
     ): UUID = UUID.randomUUID().also { itemId ->
         clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
-        sepaReturns.send(sepaReturnedEvent(paymentId))
+        sepaReturns.send(sepaReturnedEvent(paymentId, reversalId))
     }
 
     private fun seedUnrelatedComplaint(paymentId: UUID): String =
@@ -440,6 +458,7 @@ class ContextApiIT {
         bookingTransactionId: UUID,
         journalId: UUID,
         clearingItemId: UUID,
+        reversalId: UUID,
         complaintId: UUID,
     ) {
         awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 2)
@@ -448,6 +467,7 @@ class ContextApiIT {
         awaitCount("context_projection_events", "aggregate_ref", "ledger-booking:$journalId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$clearingItemId", 1)
         awaitCount("context_projection_events", "aggregate_ref", "return-evidence:sepa:$paymentId:4", 1)
+        assertThat(count("context_nodes", "node_key = ?", "reversal-transaction:$reversalId")).isEqualTo(1)
         assertThat(count("context_nodes", "node_key LIKE ?", "%$complaintId%")).isZero()
         assertThat(count("context_nodes", "node_key = ?", "complaint:$reference")).isEqualTo(1)
         assertThat(count("context_edges", "from_key = ?", "complaint:$reference")).isEqualTo(3)
@@ -473,9 +493,10 @@ class ContextApiIT {
             """"itemId":"$itemId","batchId":"$batchId","paymentId":"$paymentId","version":2,""" +
             """"status":"SETTLED","occurredAt":"${NOW.minusSeconds(2)}"}"""
 
-    private fun sepaReturnedEvent(paymentId: UUID): String =
+    private fun sepaReturnedEvent(paymentId: UUID, reversalId: UUID): String =
         """{"eventType":"sepa.payment.returned","sourceService":"sepa-payment","paymentId":"$paymentId",""" +
             """"version":4,"returnReasonCode":"AC04","reversalPerformed":true,""" +
+            """"reversalTransactionId":"$reversalId",""" +
             """"occurredAt":"${NOW.minusSeconds(1)}"}"""
 
     private fun execute(sql: String, vararg values: Any) = connection().use { connection ->
