@@ -55,9 +55,9 @@
 # WHAT THIS CANNOT DO
 # A human who cancels a run WHILE its jobs are running is indistinguishable from a spot reclaim
 # with the data GitHub exposes — both leave `cancelled` jobs carrying recorded steps — and is
-# still re-run once. That is the accepted waste #2330 priced, not an oversight. The only human
-# cancel this can rule out is the queue drain, where no cancelled job ever started a step
-# (#3208); the self-test proves that one is declined.
+# still re-run once if the associated PR remains open at that run's immutable head.
+# Queue drains with no started steps (#3208), closed PRs and superseded PR heads are
+# declined; retry backoff never exempts the next mutation from a fresh head check.
 #
 # EXIT CODES
 #   0  a decision was reached and acted on (re-run issued, or correctly declined)
@@ -164,6 +164,66 @@ jobs_query() { # jobs_query <jq>
   gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" --jq "$1"
 }
 
+# Executed INSIDE the retry loop: a push during API backoff must prevent the next
+# mutation. Non-PR runs retain their per-commit semantics (including main pushes).
+current_rerun_attempt() {
+  local run pull event number
+  run="$(gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")" || return $?
+  event="$(jq -er --arg repo "$GITHUB_REPOSITORY" --arg id "$RUN_ID" '
+    select(.repository.full_name == $repo and (.id | tostring) == $id)
+    | .event | select(type == "string" and length > 0)' <<< "$run")" || {
+    echo 'Cannot determine rerun event/repository identity' >&2; return 1;
+  }
+  case "$event" in
+    pull_request|pull_request_target)
+      number="$(jq -er '
+        select((.head_sha | type) == "string" and (.head_sha | test("^[0-9a-f]{40}$")))
+        | select((.head_branch | type) == "string" and (.head_branch | length) > 0)
+        | select((.head_repository.id | type) == "number" and .head_repository.id > 0)
+        | select((.head_repository.full_name | type) == "string" and (.head_repository.full_name | length) > 0)
+        | select((.pull_requests | type) == "array" and (.pull_requests | length) == 1)
+        | . as $run | .pull_requests[0]
+        | select(.head.ref == $run.head_branch
+                 and .head.repo.id == $run.head_repository.id and .base.repo.id == $run.repository.id)
+        | .number | select(type == "number" and . > 0 and floor == .)' <<< "$run")" || {
+        echo 'Cannot determine associated PR head/repository/branch' >&2; return 1;
+      }
+      pull="$(gh_ api "repos/${GITHUB_REPOSITORY}/pulls/${number}")" || return $?
+      jq -e --argjson number "$number" --arg repo "$GITHUB_REPOSITORY" '
+        .number == $number and (.state == "open" or .state == "closed")
+        and .base.repo.full_name == $repo
+        and (.head.sha | type) == "string" and (.head.sha | test("^[0-9a-f]{40}$"))
+        and (.head.ref | type) == "string" and (.head.ref | length) > 0
+        and (.head.repo.id | type) == "number" and .head.repo.id > 0
+        and (.head.repo.full_name | type) == "string" and (.head.repo.full_name | length) > 0
+      ' <<< "$pull" >/dev/null || {
+        echo 'Cannot determine current PR eligibility' >&2; return 1;
+      }
+      if ! jq -e --argjson run "$run" '
+        .state == "open" and .head.sha == $run.head_sha and .head.ref == $run.head_branch
+        and .head.repo.id == $run.head_repository.id
+        and .head.repo.full_name == $run.head_repository.full_name
+      ' <<< "$pull" >/dev/null; then
+        printf '%s' 'DECLINED_STALE_PR'
+        return 0
+      fi ;;
+  esac
+  gh_ run rerun -R "$GITHUB_REPOSITORY" "$RUN_ID" "$@"
+}
+
+rerun_current() {
+  local result
+  RERUN_DECLINED=false
+  result="$(with_retry 'fresh-head check and gh run rerun' current_rerun_attempt "$@")" || {
+    decide eligibility-or-rerun-unreadable 'fresh eligibility or rerun failed; no unchecked retry issued'
+    return 1
+  }
+  if [ "$result" = DECLINED_STALE_PR ]; then
+    RERUN_DECLINED=true
+    decide skipped-stale-pr 'associated PR is closed or its head/repository/branch changed; no rerun issued'
+  fi
+}
+
 # ── THE TEXTUAL SIGNATURE (#9787) ────────────────────────────────────────────────────────────
 # The structural rule above models a reclaim as "the runner agent marked the step cancelled". That
 # is not what happens when the step's OWN process takes the SIGTERM and exits first: GitHub then
@@ -251,7 +311,8 @@ main() {
     fi
     echo "Re-running cancelled run ${RUN_URL:-${RUN_ID}} (${count} job(s) interrupted mid-flight; issue #2330)"
     # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
-    with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" || return 1
+    rerun_current || return 1
+    [ "$RERUN_DECLINED" = false ] || return 0
     echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
     decide rerun-cancelled "${count} job(s) interrupted mid-flight — full re-run issued (attempt 2 of max 2)"
     return 0
@@ -266,7 +327,8 @@ main() {
     reclaimed_id="$(reclaimed_job_from_logs || true)"
     if [ -n "${reclaimed_id}" ]; then
       echo "Re-running ${RUN_URL:-${RUN_ID}}: job ${reclaimed_id} has no cancelled step, but its log carries the reclaim signature and exit 143 (issue #9787)"
-      with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+      rerun_current --failed || return 1
+      [ "$RERUN_DECLINED" = false ] || return 0
       echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — job ${reclaimed_id}'s own process took the SIGTERM and exited 143, so no step was marked cancelled (attempt 2 of max 2)."
       decide rerun-log-signature "job ${reclaimed_id} exited 143 after a runner shutdown signal — failed jobs re-run (attempt 2 of max 2)"
       return 0
@@ -276,7 +338,8 @@ main() {
     return 0
   fi
   echo "Re-running ${RUN_URL:-${RUN_ID}}: ${count} job(s) killed mid-step by a runner reclaim (issue #2841)"
-  with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+  rerun_current --failed || return 1
+  [ "$RERUN_DECLINED" = false ] || return 0
   echo "::notice title=spot-kill auto-retry::Re-ran ${count} spot-killed job(s) in ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
   decide rerun-partial "${count} job(s) carry the spot-kill signature — failed jobs re-run (attempt 2 of max 2)"
 }
@@ -301,6 +364,24 @@ self_test() {
 # newline inside a logged call would desynchronise the call counter from the script — the exact
 # way this stub was wrong on its first run, which showed up as two cases failing.
 echo "$*" | tr '\n' ' ' >> "${CALL_LOG}"; echo >> "${CALL_LOG}"
+# Eligibility reads have their own fixtures so the original spot/retry scripts
+# still exercise exactly the same classifier and mutation responses.
+if [ "$1" = api ] && [ "$2" = repos/owner/repo/actions/runs/1 ]; then
+  if [ "${STUB_RUN:-push-run}" = api-error ]; then
+    echo 'Resource not accessible by integration (HTTP 403)' >&2; exit 1
+  fi
+  cat "${FIXTURE_DIR}/${STUB_RUN:-push-run}.json"; exit 0
+fi
+if [ "$1" = api ] && [ "$2" = repos/owner/repo/pulls/12 ]; then
+  if [ "${STUB_PULL:-current-pr}" = api-error ]; then
+    echo 'Resource not accessible by integration (HTTP 403)' >&2; exit 1
+  fi
+  fixture="${STUB_PULL:-current-pr}"
+  if [ -n "${STUB_PULL_AFTER_RERUN:-}" ] && grep -q '^run rerun' "${CALL_LOG}"; then
+    fixture="$STUB_PULL_AFTER_RERUN"
+  fi
+  cat "${FIXTURE_DIR}/${fixture}.json"; exit 0
+fi
 n=$(( $(cat "${CALL_LOG}.n" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${CALL_LOG}.n"
 line="$(sed -n "${n}p" "${STUB_SCRIPT}")"
 [ -n "${line}" ] || { echo "stub: no scripted answer for call ${n}: $*" >&2; exit 99; }
@@ -317,6 +398,25 @@ STUB
 
   # Fixtures — real jobs-API shapes, fed to the real jq programs by the stub above.
   export FIXTURE_DIR="${tmp}"
+  cat > "${tmp}/push-run.json" <<'FIX'
+{"id":1,"event":"push","repository":{"id":1,"full_name":"owner/repo"},"head_branch":"main","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+FIX
+  cat > "${tmp}/pr-run.json" <<'FIX'
+{"id":1,"event":"pull_request","repository":{"id":1,"full_name":"owner/repo"},"head_repository":{"id":2,"full_name":"fork/repo"},"head_branch":"fix/topic","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","pull_requests":[{"number":12,"head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ref":"fix/topic","repo":{"id":2}},"base":{"repo":{"id":1}}}]}
+FIX
+  cat > "${tmp}/current-pr.json" <<'FIX'
+{"number":12,"state":"open","head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ref":"fix/topic","repo":{"id":2,"full_name":"fork/repo"}},"base":{"repo":{"id":1,"full_name":"owner/repo"}}}
+FIX
+  jq '.head.sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "${tmp}/current-pr.json" > "${tmp}/stale-pr.json"
+  jq '.state = "closed"' "${tmp}/current-pr.json" > "${tmp}/closed-pr.json"
+  jq '.head.ref = "other-branch"' "${tmp}/current-pr.json" > "${tmp}/branch-pr.json"
+  jq '.head.repo.id = 3' "${tmp}/current-pr.json" > "${tmp}/repository-pr.json"
+  jq 'del(.head.repo)' "${tmp}/current-pr.json" > "${tmp}/missing-pr.json"
+  jq '.pull_requests = []' "${tmp}/pr-run.json" > "${tmp}/missing-run.json"
+  jq '.pull_requests[0].head.repo.id = 3' "${tmp}/pr-run.json" > "${tmp}/mismatched-run.json"
+  # GitHub refreshes the embedded PR head after a push; only run.head_sha is immutable.
+  jq '.pull_requests[0].head.sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' "${tmp}/pr-run.json" > "${tmp}/refreshed-run.json"
+  unset STUB_RUN STUB_PULL STUB_PULL_AFTER_RERUN || true
   # A spot reclaim: two cancelled jobs that were RUNNING (they carry recorded steps), alongside
   # queued siblings that never started. Modelled on run 32499371733, the run #6255 stranded.
   cat > "${tmp}/reclaim.json" <<'FIX'
@@ -450,6 +550,45 @@ FIX
   case_ "rerun already-running is success" cancelled 0 1 "0|@reclaim" "1|run 1 cannot be rerun; This workflow is already running"
   case_ "rerun rate-limited 5/5 escalates" cancelled 1 5 "0|@reclaim" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}"
   case_ "rerun 404 escalates immediately"  cancelled 1 1 "0|@reclaim" "1|HTTP 404: Not Found"
+
+  # The same immutable SHA on an open, associated fork PR is eligible. Every
+  # mutation retry must repeat the live read, including after a transient error.
+  export STUB_RUN=pr-run
+  case_ "current associated fork PR is rerun" cancelled 0 1 "0|@reclaim" "0|ok"
+  case_ "current PR keeps transient rerun handling" cancelled 0 2 "0|@reclaim" "1|HTTP 502: Server Error" "0|ok"
+  export STUB_PULL=stale-pr
+  case_ "superseded PR is declined" cancelled 0 0 "0|@reclaim"
+  export STUB_RUN=refreshed-run
+  case_ "embedded live PR head cannot replace immutable run SHA" cancelled 0 0 "0|@reclaim"
+  export STUB_RUN=pr-run
+  export STUB_PULL=closed-pr
+  case_ "closed PR is declined" cancelled 0 0 "0|@reclaim"
+  export STUB_PULL=branch-pr
+  case_ "same SHA on a different branch is declined" failure 0 0 "0|@partial-kill"
+  export STUB_PULL=repository-pr
+  case_ "same SHA from a different head repository is declined" cancelled 0 0 "0|@reclaim"
+  export STUB_PULL=missing-pr
+  case_ "missing current PR metadata fails closed" cancelled 1 0 "0|@reclaim"
+  export STUB_PULL=api-error
+  case_ "unreadable current PR fails closed" cancelled 1 0 "0|@reclaim"
+  unset STUB_PULL
+  export STUB_RUN=missing-run
+  case_ "missing run PR association fails closed" cancelled 1 0 "0|@reclaim"
+  export STUB_RUN=mismatched-run
+  case_ "mismatched associated head repository fails closed" cancelled 1 0 "0|@reclaim"
+  export STUB_RUN=api-error
+  case_ "unreadable run identity fails closed" cancelled 1 0 "0|@reclaim"
+  export STUB_RUN=pr-run STUB_PULL_AFTER_RERUN=stale-pr
+  case_ "push during rerun backoff prevents second mutation" cancelled 0 1 "0|@reclaim" "1|HTTP 502: Server Error"
+  subjects=$(( subjects + 1 ))
+  if [ "$(grep -c '^api repos/owner/repo/pulls/12' "${CALL_LOG}")" -eq 2 ] \
+     && grep -q 'decision=skipped-stale-pr' "${tmp}/out" \
+     && ! grep -q 'decision=rerun-cancelled' "${tmp}/out"; then
+    echo 'PASS  backoff drift is reread and reported as a decline'; pass=$(( pass + 1 ))
+  else
+    echo 'FAIL  backoff drift was not freshly read and reported'; fail=$(( fail + 1 ))
+  fi
+  unset STUB_RUN STUB_PULL_AFTER_RERUN
 
   # ── the decision line must NAME the failure, not call it "unknown" ─────────────────────────
   # Run 33738356244 answered `(last: unknown)` while holding the full rate-limit text: the old
