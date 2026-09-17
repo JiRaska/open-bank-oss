@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.248.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.248.0...admin-ui-v0.248.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** harden operator evidence, contrast and table access ([#10205](https://github.com/JiRaska/open-bank-oss/issues/10205)) ([3b981fe](https://github.com/JiRaska/open-bank-oss/commit/3b981fe2d87cc128b87412198cf5cc196fa0edc1))
+
 ## [0.248.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.247.2...admin-ui-v0.248.0) (2026-09-17)
 
 
