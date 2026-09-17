@@ -35,7 +35,9 @@ class GrantorAuthorityClientTest {
     fun `active organization requires principal in actor mandate set`(): Unit = runBlocking {
         coEvery { rest.getParty(principal) } returns
             AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
-        coEvery { rest.actingFor(actor) } returns listOf(ActingForResponse(principal))
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, ActingForMandateResponse("SOLE", 1)),
+        )
 
         val result = client.authorityFor(principal, actor)
 
@@ -43,6 +45,28 @@ class GrantorAuthorityClientTest {
         assertThat(result.displayName).isEqualTo("Acme s.r.o.")
         assertThat(result.partyType).isEqualTo("COMPANY")
         coVerify(exactly = 1) { rest.getParty(principal) }
+    }
+
+    @Test
+    fun `a single JOINT signatory cannot issue a company delegation`(): Unit = runBlocking {
+        coEvery { rest.getParty(principal) } returns
+            AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, ActingForMandateResponse("JOINT", 2)),
+        )
+
+        assertThat(client.authorityFor(principal, actor).verdict)
+            .isEqualTo(GrantorAuthorityVerdict.DENIED)
+    }
+
+    @Test
+    fun `missing mandate authority does not default to sole`(): Unit = runBlocking {
+        coEvery { rest.getParty(principal) } returns
+            AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
+        coEvery { rest.actingFor(actor) } returns listOf(ActingForResponse(principal))
+
+        assertThat(client.authorityFor(principal, actor).verdict)
+            .isEqualTo(GrantorAuthorityVerdict.DENIED)
     }
 
     @Test

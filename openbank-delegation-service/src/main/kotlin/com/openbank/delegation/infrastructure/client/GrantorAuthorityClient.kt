@@ -31,7 +31,10 @@ data class AuthorityPartyResponse(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ActingForResponse(val partyId: UUID)
+data class ActingForMandateResponse(val authority: String? = null, val requiredSignatures: Int? = null)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ActingForResponse(val partyId: UUID, val mandate: ActingForMandateResponse? = null)
 
 @Path("/api/v1/parties")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
@@ -49,9 +52,10 @@ interface PartyAuthorityRestClient {
 
 /**
  * Resolves the principal type and re-checks an organisation mandate at the authority boundary.
- * `acting-for` returns only active, in-window mandates over live entities, so matching the
- * principal is the complete ADR-0284 representation decision. Every transport or parse failure
- * remains distinguishable from a real denial and fails closed in the use case.
+ * `acting-for` returns active, in-window mandates over live entities. A profile match is not
+ * sufficient for JOINT representation: one signer cannot issue a delegation alone. Until the
+ * durable co-signing workflow exists, only an explicit SOLE/1 mandate is independently usable.
+ * Every transport or parse failure remains distinguishable from a real denial.
  */
 @ApplicationScoped
 class RestGrantorAuthorityClient @Inject constructor(@RestClient private val client: PartyAuthorityRestClient) :
@@ -64,7 +68,12 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         val authorized = when (principal.partyType) {
             "INDIVIDUAL" -> actorPartyId == principalPartyId && principal.status == "ACTIVE"
             "SOLE_TRADER", "COMPANY", "TRUST" ->
-                principal.status == "ACTIVE" && client.actingFor(actorPartyId).any { it.partyId == principalPartyId }
+                principal.status == "ACTIVE" &&
+                    client.actingFor(actorPartyId).any {
+                        it.partyId == principalPartyId &&
+                            it.mandate?.authority == "SOLE" &&
+                            it.mandate.requiredSignatures == 1
+                    }
             else -> false
         }
         GrantorAuthority(

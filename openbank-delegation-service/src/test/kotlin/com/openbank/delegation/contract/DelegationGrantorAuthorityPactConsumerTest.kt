@@ -58,7 +58,13 @@ class DelegationGrantorAuthorityPactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonArray { array ->
-                array.`object` { represented -> represented.stringValue("partyId", PRINCIPAL_ID) }
+                array.`object` { represented ->
+                    represented.stringValue("partyId", PRINCIPAL_ID)
+                    represented.`object`("mandate") { mandate ->
+                        mandate.stringValue("authority", "SOLE")
+                        mandate.numberValue("requiredSignatures", 1)
+                    }
+                }
             }.build(),
         )
         .toPact()
@@ -95,6 +101,8 @@ class DelegationGrantorAuthorityPactConsumerTest {
             .then().statusCode(200).extract().jsonPath()
 
         assertThat(body.getString("[0].partyId")).isEqualTo(PRINCIPAL_ID)
+        assertThat(body.getString("[0].mandate.authority")).isEqualTo("SOLE")
+        assertThat(body.getInt("[0].mandate.requiredSignatures")).isEqualTo(1)
     }
 
     @Test
