@@ -18,8 +18,9 @@ test('identity deduplication remains understandable and accessible in both theme
   await expect(page.getByText('NEEDS_MANUAL_VERIFICATION', { exact: true }).first()).toBeVisible()
 
   for (const dark of [false, true]) {
-    await page.locator('html').evaluate((element, enabled) => element.classList.toggle('dark', enabled), dark)
     if (dark) {
+      await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
+      await expect(page.locator('html')).toHaveClass(/dark/)
       await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
     } else {
       await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)

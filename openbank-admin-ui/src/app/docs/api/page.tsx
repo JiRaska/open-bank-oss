@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, type CSSProperties } from 'react'
 import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -706,11 +706,12 @@ export default function ApiCatalogPage() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{svc.name}</span>
-                    <span style={{
+                    <span className="api-group-chip" style={{
+                      '--api-group-color': groupColor,
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`, color: groupColor,
+                      background: `${groupColor}15`,
                       borderRadius: '4px', border: `1px solid ${groupColor}30`,
-                    }}>{groupLabel(svc.group)}</span>
+                    } as CSSProperties}>{groupLabel(svc.group)}</span>
                     <span style={{
                       fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',
                       color: 'var(--text-tertiary)',

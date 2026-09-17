@@ -184,6 +184,9 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.goto('/system/readiness')
     const main = page.locator('#main-content:visible')
     await expect(main).toHaveCount(1)
+    await expect(main.locator('.stat-card')
+      .filter({ has: page.locator('.stat-label', { hasText: /^Services$/ }) })
+      .locator('.stat-value').first()).toHaveText('2')
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
     // substring match, so it also selects the "NO-GO" card and the locator resolves to two
@@ -192,7 +195,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       main
         .locator('.stat-card')
         .filter({ has: page.locator('.stat-label', { hasText: new RegExp(`^${label}$`) }) })
-        .locator('.stat-value')
+        .locator('.stat-value').first()
         .evaluate(el => getComputedStyle(el).color)
 
     // GO and NO-GO carry a verdict, so their VALUES must differ in colour from each other
