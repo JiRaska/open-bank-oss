@@ -229,11 +229,40 @@ function CreditRiskConsole() {
         }
       />
 
-      {unavailable.length > 0 && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger-text)', fontSize: 13 }}>
-          {t('lending-service neodpověděl na:', 'lending-service did not answer:')} {unavailable.join(', ')}
+      {/* The evidence state always occupies the same place above the KPIs. A failed response
+          must not insert a new banner after first paint and move the risk numbers. */}
+      <div
+        className="card"
+        role={!loading && unavailable.length > 0 ? 'alert' : 'status'}
+        aria-live={!loading && unavailable.length > 0 ? 'assertive' : 'polite'}
+        aria-busy={loading}
+        style={{ padding: 12, marginBottom: 16, minHeight: 128, borderLeft: `3px solid ${!loading && unavailable.length > 0 ? 'var(--danger)' : 'var(--accent)'}`, fontSize: 13 }}
+      >
+        <strong style={{ display: 'block', color: !loading && unavailable.length > 0 ? 'var(--danger-text)' : 'var(--text-primary)' }}>
+          {loading
+            ? t('Ověřuji podklady kreditního rizika', 'Validating credit-risk evidence')
+            : unavailable.length > 0
+              ? t('Podklady kreditního rizika nejsou úplné', 'Credit-risk evidence is incomplete')
+              : t('Podklady kreditního rizika jsou načtené', 'Credit-risk evidence is loaded')}
+        </strong>
+        <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
+          {loading
+            ? t('Kontroluji pět odpovědí služby; žádné chybějící hodnoty neodhadujeme jako nulu.', 'Checking five service responses; missing values are never inferred as zero.')
+            : unavailable.length > 0
+              ? t(`${unavailable.length}/5 zdrojů nedostupných nebo neplatných; dotčené ukazatele zůstávají —.`, `${unavailable.length}/5 feeds unavailable or invalid; affected metrics remain —.`)
+              : t('Všech pět odpovědí prošlo kontrolou formátu. Původ politiky a omezení modelu jsou uvedeny níže.', 'All five responses passed schema validation. Policy provenance and model limitations appear below.')}
         </div>
-      )}
+        {!loading && unavailable.length > 0 && (
+          <details style={{ marginTop: 6 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--danger-text)' }}>
+              {t('Zobrazit dotčené zdroje', 'Show affected feeds')}
+            </summary>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 22 }}>
+              {unavailable.map(path => <li key={path}><code>{path}</code></li>)}
+            </ul>
+          </details>
+        )}
+      </div>
 
       {/* Provenance first. A risk committee reading a table must know whether anyone can change it. */}
       {policy?.data && (

@@ -71,6 +71,7 @@ describe('credit-risk console', () => {
   it('states the policy provenance and the placeholder caveats', async () => {
     render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
     await waitFor(() => expect(screen.getByText(/code-seeded/i)).toBeInTheDocument())
+    expect(screen.getByText(/All five responses passed schema validation/i)).toBeInTheDocument()
     expect(screen.getByText(/Unavailable bureau evidence refers to manual review/i)).toBeInTheDocument()
     expect(screen.getByText(/accounting use is disabled by default/i)).toBeInTheDocument()
   })
@@ -83,7 +84,10 @@ describe('credit-risk console', () => {
   it('does not claim a zero book while the endpoints are failing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'down' }, 503)))
     render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
-    await waitFor(() => expect(screen.getByText(/did not answer/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/unavailable or invalid/i)).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('5/5 feeds')
+    fireEvent.click(screen.getByText('Show affected feeds'))
+    expect(screen.getByText('/risk/policy')).toBeVisible()
     expect(tiles()).not.toContain('0')
     expect(tiles().filter(v => v === '—').length).toBeGreaterThan(0)
     expect(screen.getByText(/Decisions could not be loaded/i)).toBeInTheDocument()
@@ -101,7 +105,7 @@ describe('credit-risk console', () => {
   it('rejects malformed successful responses instead of claiming empty or zero data', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ unexpected: 'not a response' })))
     render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
-    await waitFor(() => expect(screen.getByText(/did not answer/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/unavailable or invalid/i)).toBeInTheDocument())
     expect(tiles()).toHaveLength(8)
     expect(tiles().every(value => value === '—')).toBe(true)
     expect(screen.queryByText(/No data yet/i)).not.toBeInTheDocument()
