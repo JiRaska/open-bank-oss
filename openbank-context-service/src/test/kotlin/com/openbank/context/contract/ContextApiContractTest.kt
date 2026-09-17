@@ -25,4 +25,12 @@ class ContextApiContractTest {
         )
         assertThat(contract).doesNotContain("bankScope", "queryLanguage", "cypher", "drilldownIds")
     }
+
+    @Test
+    fun `fraud source access contract exposes only a case scoped decision`() {
+        val operation = contract.substringAfter("/api/v1/context/fraud-cases/{caseId}/access:")
+            .substringBefore("/api/v1/context/kyb-cases/{id}/ownership-observations:")
+        assertThat(operation).contains("verifyAssignedFraudCaseAccess", "'204'", "'403'", "'503'")
+        assertThat(operation).doesNotContain("accountId", "counterpartyId", "score", "amount", "reason")
+    }
 }

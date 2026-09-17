@@ -6,6 +6,40 @@ import rego.v1
 
 bundle := {"version": "v0.0.0-test"}
 
+test_fraud_case_read_allows_assigned_human_admin if {
+    decision := rest.allow with input as {
+        "principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+        "action": "context.fraud-case.read",
+        "attributes": {
+            "assignmentVerified": true,
+            "rootScopeVerified": true,
+            "purpose": "FRAUD_INVESTIGATION",
+        },
+    }
+        with data.openbank.bundle as bundle
+    decision.allow
+}
+
+test_fraud_case_read_denies_unassigned_wrong_purpose_or_role if {
+    every example in [
+        {"roles": ["ROLE_ADMIN"], "assigned": false, "root": true, "purpose": "FRAUD_INVESTIGATION"},
+        {"roles": ["ROLE_ADMIN"], "assigned": true, "root": false, "purpose": "FRAUD_INVESTIGATION"},
+        {"roles": ["ROLE_ADMIN"], "assigned": true, "root": true, "purpose": "AML_INVESTIGATION"},
+        {"roles": ["ROLE_OPERATOR"], "assigned": true, "root": true, "purpose": "FRAUD_INVESTIGATION"},
+    ] {
+        not rest.allow with input as {
+            "principal": {"id": "investigator-1", "type": "HUMAN", "roles": example.roles},
+            "action": "context.fraud-case.read",
+            "attributes": {
+                "assignmentVerified": example.assigned,
+                "rootScopeVerified": example.root,
+                "purpose": example.purpose,
+            },
+        }
+            with data.openbank.bundle as bundle
+    }
+}
+
 test_kyb_ownership_requires_root_scope_even_for_admin if {
 	not rest.allow with input as {
 		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},

@@ -41,6 +41,35 @@ prohibited if {
 }
 
 prohibited if {
+    input.action == "context.fraud-case.read"
+    object.get(input.attributes, "rootScopeVerified", false) != true
+}
+
+prohibited if {
+    input.action == "context.fraud-case.read"
+    object.get(input.attributes, "assignmentVerified", false) != true
+}
+
+prohibited if {
+    input.action == "context.fraud-case.read"
+    object.get(input.attributes, "purpose", "") != "FRAUD_INVESTIGATION"
+}
+
+prohibited if {
+    input.action == "context.fraud-case.read"
+    count({r | r := input.principal.roles[_]; r == "ROLE_ADMIN"}) == 0
+}
+
+allowed_reasons contains "context-fraud-investigation" if {
+    input.action == "context.fraud-case.read"
+    input.principal.type == "HUMAN"
+    "ROLE_ADMIN" in input.principal.roles
+    object.get(input.attributes, "assignmentVerified", false) == true
+    object.get(input.attributes, "rootScopeVerified", false) == true
+    object.get(input.attributes, "purpose", "") == "FRAUD_INVESTIGATION"
+}
+
+prohibited if {
 	input.action == "context.kyb-case.read"
 	object.get(input.attributes, "assignmentVerified", false) != true
 }

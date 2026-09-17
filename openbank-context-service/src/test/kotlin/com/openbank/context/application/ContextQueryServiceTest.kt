@@ -137,6 +137,50 @@ class ContextQueryServiceTest {
         assertThat(impact.toString()).doesNotContain("service:s1")
     }
 
+    @Test
+    fun `fraud evidence requires assignment to the exact root even for admin`(): Unit = runBlocking {
+        val admin = Investigator("admin-1", listOf("ROLE_ADMIN"))
+        val investigation = InvestigationContext("case-42", "FRAUD_INVESTIGATION", now)
+        coEvery {
+            assignments.isAssignedToRoot(
+                admin.id,
+                investigation.caseId,
+                investigation.purpose,
+                "fraud-case:case-42",
+                now,
+            )
+        } returns false
+
+        assertThatThrownBy {
+            runBlocking { service.fraudCaseEvidence("case-42", admin, investigation) { "secret" } }
+        }.isInstanceOf(ContextAccessDenied::class.java)
+        coVerify(exactly = 0) { pdp.allow(any()) }
+        coVerify {
+            audit.record(match { it.rootRef == "fraud-case:case-42" && it.decision == "DENIED" })
+        }
+    }
+
+    @Test
+    fun `fraud evidence passes scoped policy and audits before returning`(): Unit = runBlocking {
+        val admin = Investigator("admin-1", listOf("ROLE_ADMIN"))
+        val investigation = InvestigationContext("case-42", "FRAUD_INVESTIGATION", now)
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(true, policyVersion = "fraud-policy-1")
+
+        assertThat(service.fraudCaseEvidence("case-42", admin, investigation) { "allowed" }).isEqualTo("allowed")
+        coVerify {
+            pdp.allow(
+                match {
+                    it.action == "context.fraud-case.read" &&
+                        it.resource?.id == "fraud-case:case-42" &&
+                        it.attributes["rootScopeVerified"] == true &&
+                        it.attributes["purpose"] == "FRAUD_INVESTIGATION"
+                },
+            )
+        }
+        coVerify { audit.record(match { it.decision == "ALLOWED" && it.policyVersion == "fraud-policy-1" }) }
+    }
+
     private fun node(key: String, type: String) = ContextNode(
         key,
         ContextNamespace.INCIDENT,
