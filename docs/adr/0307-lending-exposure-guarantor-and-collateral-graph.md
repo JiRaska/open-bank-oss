@@ -111,7 +111,17 @@ writer and Context consumer while retaining approved source evidence and audit
 history. Dropping populated evidence tables is a separate retention decision,
 not a deployment rollback. A 1×/10× synthetic portfolio with one asset shared
 across facilities, partial guarantees and mixed currencies is required before
-the P3 pilot; these source capabilities and measurements do not exist yet.
+the P3 pilot. Flyway V18 is the **schema-only expand stage** for the four fact
+types; it enforces separate proposal/decision actors, immutable decided facts,
+and approved matching legacy collateral on an allocation insert. There is no
+application writer, source read contract, Context projector, UI or measured
+workload yet, so V18 alone does not deliver the P3 lens.
+The database checks proposal/decision separation and local referential lineage;
+it cannot establish that a guarantor party is verified, an asset identity is
+unique across documents, or a document hash matches the authoritative file.
+The future source adapter must verify these with their owners and recheck the
+current collateral status at publication/read time. No row in V18 alone is
+eligible to become a Context edge.
 
 ## Alternatives considered
 
