@@ -40,6 +40,26 @@ Missing/disputed values remain unknown. The graph does not infer UBO status sole
 a percentage. Direct, indirect and control-by-other-means bases remain distinct.
 Ownership cycles terminate through visited-node and depth guards.
 
+The current KYB `/ubo` lookup is a present-time answer, not an immutable historical
+source. Companies House PSC `links.self` identifies a record **within one company**;
+it does not establish that similarly named people in two companies are the same person.
+Corporate PSC registration number and country are candidate entity evidence, subject to
+source verification and reviewed resolution. `notified_on` is the date the register was
+notified, not proof of when legal ownership began. A truncated PSC page or an active
+withheld-identity record remains unknown; it must not produce a complete ownership chain.
+
+Before this lens ingests UBO evidence, KYB must persist a bounded, versioned source
+observation with its source hash, fetched/recorded time, record references, statements,
+corrections and restriction state. An outbox event can then refer to that observation.
+The existing `openbank.kyb.events` lifecycle topic is unsuitable for owner-level facts:
+onboarding and the analytics sink already consume it, and the latter can retain raw
+payloads. Owner evidence therefore needs a dedicated topic and Kafka ACLs limited to
+KYB as producer and context-service as consumer, with an isolated DLQ and retention.
+No owner name, date of birth, address or free text goes on the topic. Context rebuilds
+from KYB's durable observation API under service authorization, never from Kafka
+retention alone. This is an egress and access review gate, not permission to publish
+before the contract, ACLs, threat model and consumer are tested together.
+
 The UI supports an `effectiveAt` snapshot and identifies late-recorded evidence. It must
 not render a current representative as authorized at a past date or a revoked power as
 current. Indirect ownership calculations show formula, path and source percentages and
