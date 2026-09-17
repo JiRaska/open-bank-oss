@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComplaintContextInvestigation } from '@/components/context/ComplaintContextInvestigation'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -74,8 +74,23 @@ describe('complaint context investigation', () => {
     expect(items[4]).toHaveTextContent('SUBMITTED TO')
     expect(items[5]).toHaveTextContent('SETTLED')
     expect(items[6]).toHaveTextContent('RETURNED BY')
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-other' } })
+    expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/context/complaints/CMP-42?caseId=case-7&purpose=PAYMENT_COMPLAINT',
     )
   })
+  it('discards a late response after the investigation purpose changes', async () => {
+    let resolve!: (value: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(done => { resolve = done })))
+    render(<LanguageProvider initialLanguage="en"><ComplaintContextInvestigation /></LanguageProvider>)
+    fireEvent.change(screen.getByLabelText('Complaint reference'), { target: { value: 'CMP-42' } })
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Show graph' }))
+    fireEvent.change(screen.getByLabelText('Investigation purpose'), { target: { value: 'OTHER' } })
+    await act(async () => { resolve(new Response(JSON.stringify(graph))) })
+    expect(screen.queryByRole('heading', { name: 'Payment timeline' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Complaint relationship graph' })).not.toBeInTheDocument()
+  })
+
 })
