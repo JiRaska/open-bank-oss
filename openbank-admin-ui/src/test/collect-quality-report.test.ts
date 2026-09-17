@@ -46,6 +46,19 @@ describe('collect-quality-report contract classification (#7544)', () => {
     expect(v.detail).not.toMatch(/do-not-leak/)
   })
 
+  it('classifies a matrix 400 caused by an unpublished provider as no-provider-main-version', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/matrix')) return jsonResponse(400, { error: 'Pacticipant not found' })
+      if (url.includes('/branches/main/latest-version')) return jsonResponse(404, { error: 'not found' })
+      throw new Error(`unexpected url ${url}`)
+    }))
+    const v = await fetchPairVerification('http://broker.example', null, 'openbank-admin-ui', 'sha-consumer', 'openbank-context-service')
+    expect(v).toMatchObject({
+      status: 'pending', reasonCode: 'no-provider-main-version',
+      detail: expect.stringMatching(/no published main-branch version/),
+    })
+  })
+
   it('classifies an empty matrix with no published provider main version as no-provider-main-version', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/matrix')) return jsonResponse(200, { matrix: [] })

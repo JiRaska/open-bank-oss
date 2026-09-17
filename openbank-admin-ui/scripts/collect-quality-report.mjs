@@ -186,6 +186,15 @@ export async function fetchPairVerification(baseUrl, auth, consumer, consumerVer
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
   if (!res.ok) {
+    // An unpublished provider can make the Matrix API answer 400 before it can
+    // return an empty matrix. Confirm the missing main version independently;
+    // any other 400 (or an inconclusive version probe) remains a query error.
+    if ((res.status === 400 || res.status === 404) && !(await providerHasMainVersion(baseUrl, auth, provider))) {
+      return {
+        status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'no-provider-main-version',
+        detail: `${provider} has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet.`,
+      }
+    }
     return {
       status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'query-error',
       detail: `Pact Broker matrix query returned HTTP ${res.status} for ${consumer} → ${provider}.`,
