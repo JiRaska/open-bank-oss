@@ -4,8 +4,12 @@
 
 package com.openbank.delegation.application.port.out
 
+import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryRepresentationRule
+import java.time.Instant
 import java.util.UUID
 
 sealed interface StatutoryOperationCreateOutcome {
@@ -19,6 +23,7 @@ sealed interface StatutoryOperationCreateOutcome {
 class StatutoryOperationCreateConflict : RuntimeException("request key belongs to different statutory evidence")
 class StatutoryDecisionConflict : RuntimeException("representative already decided differently")
 class StatutoryDecisionClosed : RuntimeException("statutory proposal is no longer pending")
+class StatutoryQuorumIncomplete : RuntimeException("statutory approval quorum is incomplete")
 
 interface StatutoryDelegationOperationRepository {
     /** Exact replay returns the existing operation id; changed evidence under one request key fails. */
@@ -31,4 +36,15 @@ interface StatutoryDelegationOperationRepository {
     suspend fun recordDecision(decision: StatutoryDelegationDecision): StatutoryDelegationDecision
 
     suspend fun findDecision(operationId: UUID, actorPartyId: UUID): StatutoryDelegationDecision?
+
+    /** Lock operation, check signed quorum, then commit grant + outbox + EXECUTED as one SQL transaction. */
+    suspend fun execute(
+        operationId: UUID,
+        principalPartyId: UUID,
+        rule: StatutoryRepresentationRule,
+        expectedRuleHash: String,
+        grant: DelegationGrant,
+        event: DelegationOffered,
+        at: Instant,
+    ): DelegationGrant
 }

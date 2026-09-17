@@ -12,6 +12,7 @@ import com.openbank.delegation.application.port.out.StatutoryRuleClient
 import com.openbank.delegation.application.port.out.StatutoryRuleResolution
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.delegation.domain.model.StatutoryOperationState
+import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -83,7 +84,14 @@ class StatutoryDelegationProposalService(
         principalPartyId: UUID,
         callerPartyId: UUID?,
         actorPartyId: UUID?,
-    ): StatutoryDelegationOperation {
+    ): StatutoryDelegationOperation = current(id, principalPartyId, callerPartyId, actorPartyId).first
+
+    internal suspend fun current(
+        id: UUID,
+        principalPartyId: UUID,
+        callerPartyId: UUID?,
+        actorPartyId: UUID?,
+    ): Pair<StatutoryDelegationOperation, StatutoryRepresentationRule> {
         val actor = requireActor(principalPartyId, callerPartyId, actorPartyId)
         val operation = repository.find(id, principalPartyId) ?: throw StatutoryProposalNotFound(id)
         val currentRule = resolve(principalPartyId, actor)
@@ -92,7 +100,7 @@ class StatutoryDelegationProposalService(
         ) {
             throw StatutoryProposalStale(id)
         }
-        return operation
+        return operation to currentRule
     }
 
     private fun requireActor(command: PreviewDelegationCommand): UUID =

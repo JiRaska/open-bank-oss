@@ -140,30 +140,7 @@ class DelegationService(
             errorPrefix = "grant SCA",
         )
 
-        val grant = DelegationGrant(
-            grantorPartyId = command.grantorPartyId,
-            granteePartyId = command.granteePartyId,
-            // Snapshotted from the eligibility lookup that just ran — no extra call, and no new
-            // authority anywhere: this service is already permitted to read both parties (#3604).
-            grantorName = parties.grantorName,
-            granteeName = parties.granteeName,
-            resourceType = command.resourceType,
-            resourceId = command.resourceId,
-            capabilities = command.capabilities,
-            approvalPolicy = command.approvalPolicy,
-            requiredApprovals = command.requiredApprovals,
-            perTransactionLimit = command.perTransactionLimit,
-            dailyLimit = command.dailyLimit,
-            monthlyLimit = command.monthlyLimit,
-            exposure = command.exposure,
-            recertificationAudience = command.recertificationAudience,
-            validFrom = now,
-            validTo = command.validTo,
-            grantScaSessionId = command.grantScaSessionId,
-            note = command.note,
-            createdAt = now,
-            updatedAt = now,
-        )
+        val grant = newGrant(command, parties, now, command.grantScaSessionId, command.note)
         return delegationRepository.save(
             grant,
             DelegationOffered(
@@ -197,6 +174,44 @@ class DelegationService(
         }
         validateCandidate(command, GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, partyType = "COMPANY"))
     }
+
+    /** Recheck every ordinary offer gate at execution, but use the freshly proven JOINT roster as authority. */
+    internal suspend fun buildStatutoryGrant(command: PreviewDelegationCommand, now: OffsetDateTime): DelegationGrant {
+        require(command.callerPartyId == command.grantorPartyId && command.actorPartyId != null)
+        val parties =
+            validateCandidate(command, GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, partyType = "COMPANY"))
+        // Individual SCA sessions live in immutable decision rows; no single session represents the quorum.
+        return newGrant(command, parties, now, null, null)
+    }
+
+    private fun newGrant(
+        command: DelegationCandidate,
+        parties: CounterpartyNames,
+        now: OffsetDateTime,
+        grantScaSessionId: UUID?,
+        note: String?,
+    ): DelegationGrant = DelegationGrant(
+        grantorPartyId = command.grantorPartyId,
+        granteePartyId = command.granteePartyId,
+        grantorName = parties.grantorName,
+        granteeName = parties.granteeName,
+        resourceType = command.resourceType,
+        resourceId = command.resourceId,
+        capabilities = command.capabilities,
+        approvalPolicy = command.approvalPolicy,
+        requiredApprovals = command.requiredApprovals,
+        perTransactionLimit = command.perTransactionLimit,
+        dailyLimit = command.dailyLimit,
+        monthlyLimit = command.monthlyLimit,
+        exposure = command.exposure,
+        recertificationAudience = command.recertificationAudience,
+        validFrom = now,
+        validTo = command.validTo,
+        grantScaSessionId = grantScaSessionId,
+        note = note,
+        createdAt = now,
+        updatedAt = now,
+    )
 
     private suspend fun validateCandidate(
         command: DelegationCandidate,

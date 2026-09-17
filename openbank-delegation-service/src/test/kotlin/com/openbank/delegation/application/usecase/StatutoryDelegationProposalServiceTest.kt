@@ -147,6 +147,16 @@ class StatutoryDelegationProposalServiceTest {
         )
     }
 
+    @Test
+    fun `frozen payload round trips to the same draft for execution revalidation`() {
+        val evidence = StatutoryOperationEvidence(mapper)
+        val draft = draft()
+
+        val restored = evidence.decode(evidence.payload(draft), principal, actor)
+
+        assertThat(evidence.payload(restored)).isEqualTo(evidence.payload(draft))
+    }
+
     private fun draft() = PreviewDelegationCommand(
         callerPartyId = principal,
         actorPartyId = actor,

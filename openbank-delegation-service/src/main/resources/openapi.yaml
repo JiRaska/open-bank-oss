@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.21.0
+  version: 1.22.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -284,6 +284,30 @@ paths:
         '403': { description: No current joint mandate }
         '409': { description: Stale proposal, conflicting decision or mismatched SCA binding }
         '503': { description: Current legal rule or SCA consumption cannot be verified }
+  /api/v1/delegations/statutory-operations/{id}/execute:
+    post:
+      tags: [Statutory delegation proposals]
+      summary: Atomically issue one offered grant after live-rule and signed-quorum checks
+      description: >-
+        Revalidates the frozen draft, current representation rule, parties and ownership.
+        Under the proposal row lock, checks the immutable approval decisions and commits
+        the grant, DelegationOffered outbox event and EXECUTED marker in one transaction.
+        A missing quorum issues nothing. Grantee acceptance is still required for ACTIVE access.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: New OFFERED grant, or the linked grant in its current state on an exact retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: Caller lacks a current joint mandate }
+        '404': { description: Proposal not found under this company }
+        '409': { description: Quorum incomplete, proposal stale or already closed }
+        '422': { description: Grant eligibility or resource ownership failed fresh validation }
+        '503': { description: Legal rule or an authoritative validation source is unavailable }
   /api/v1/delegations/recertifications/grantor/{partyId}:
     get:
       tags: [Delegations]

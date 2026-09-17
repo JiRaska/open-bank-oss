@@ -8,6 +8,7 @@ import com.openbank.delegation.application.port.out.DelegationConcurrentTransiti
 import com.openbank.delegation.application.port.out.StatutoryDecisionClosed
 import com.openbank.delegation.application.port.out.StatutoryDecisionConflict
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateConflict
+import com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
 import com.openbank.delegation.application.usecase.DelegationGrantorAuthorityException
@@ -96,6 +97,12 @@ class StatutoryDecisionUnavailableMapper : ExceptionMapper<StatutoryDecisionUnav
         Response.status(Response.Status.SERVICE_UNAVAILABLE)
             .header("Retry-After", "2")
             .entity(errorBody(Response.Status.SERVICE_UNAVAILABLE.statusCode, exception.message)).build()
+}
+
+@Provider
+class StatutoryQuorumIncompleteMapper : ExceptionMapper<StatutoryQuorumIncomplete> {
+    override fun toResponse(exception: StatutoryQuorumIncomplete): Response = Response.status(Response.Status.CONFLICT)
+        .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
 }
 
 @Provider

@@ -137,6 +137,13 @@ test_only_edge_may_record_joint_decision if {
     }
 }
 
+test_only_edge_may_execute_joint_grant if {
+    allow.allow == true with input as {"principal": edge, "action": "delegation.statutory.execute"}
+    every principal in [operator, admin, viewer, services_m2m] {
+        allow == false with input as {"principal": principal, "action": "delegation.statutory.execute"}
+    }
+}
+
 test_shared_backend_identity_may_not_preview if {
 	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.preview"}
 }

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "f8fa3dbb36b41c95"
+    openbank.tech/policy-checksum: "3f139106a203997b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -599,7 +599,7 @@ data:
     #   delegation.check      — "does an active grant cover this?" for services with no projection
     #   delegation.recertification.read    — customer reads own pending review tasks
     #   delegation.recertification.confirm — customer records an authority-neutral review
-    #   delegation.statutory.{propose,read,intent,decide} — JOINT signer evidence, customer-edge only
+    #   delegation.statutory.{propose,read,intent,decide,execute} — JOINT issuance, customer-edge only
     #
     # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
     # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -684,6 +684,7 @@ data:
             "delegation.statutory.read",
             "delegation.statutory.intent",
             "delegation.statutory.decide",
+            "delegation.statutory.execute",
     		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
     		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
     		# any handler whose claimed party differs from it, so these carry no more authority than

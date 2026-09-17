@@ -8,10 +8,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
 import com.openbank.delegation.application.usecase.StatutoryDelegationDecisionService
+import com.openbank.delegation.application.usecase.StatutoryDelegationExecutionService
 import com.openbank.delegation.application.usecase.StatutoryDelegationProposalService
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.toCommand
 import com.openbank.libs.authz.Authorize
@@ -90,6 +92,7 @@ data class StatutoryDecisionResponse(
 class StatutoryDelegationResource(
     private val service: StatutoryDelegationProposalService,
     private val decisions: StatutoryDelegationDecisionService,
+    private val execution: StatutoryDelegationExecutionService,
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
@@ -162,6 +165,20 @@ class StatutoryDelegationResource(
         val principal = requireNotNull(customerPartyId) { "customer profile is required" }
         val actor = requireNotNull(actorPartyId) { "human actor is required" }
         return StatutoryDecisionResponse.from(decisions.decide(id, principal, actor, verdict, body.scaSessionId))
+    }
+
+    @POST
+    @Path("/{id}/execute")
+    @Authorize(action = "delegation.statutory.execute", resource = "#id")
+    suspend fun execute(
+        @PathParam("id") id: UUID,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): DelegationResponse {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        val actor = requireNotNull(actorPartyId) { "human actor is required" }
+        return DelegationResponse.from(execution.execute(id, principal, actor))
     }
 
     private fun requireEdge() {

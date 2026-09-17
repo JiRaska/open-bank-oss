@@ -6,9 +6,17 @@ package com.openbank.delegation.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.DelegationCandidate
+import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
+import com.openbank.delegation.domain.model.ApprovalPolicy
+import com.openbank.delegation.domain.model.DelegationCapability
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
+import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import com.openbank.libs.domain.money.Money
+import java.math.BigDecimal
 import java.security.MessageDigest
+import java.time.OffsetDateTime
+import java.util.UUID
 
 /** Byte-stable v1 evidence: the signed hash is over these exact UTF-8 JSON bytes, not a DTO re-render. */
 internal class StatutoryOperationEvidence(private val mapper: ObjectMapper) {
@@ -56,6 +64,37 @@ internal class StatutoryOperationEvidence(private val mapper: ObjectMapper) {
     fun hash(json: String): String = MessageDigest.getInstance("SHA-256")
         .digest(json.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+
+    /** Rehydrate only the versioned, immutable offer fields; live gates run again before execution. */
+    fun decode(payload: String, principal: UUID, actor: UUID): PreviewDelegationCommand {
+        val node = mapper.readTree(payload)
+        require(node.path("version").asInt() == 1) { "unsupported statutory proposal evidence version" }
+        fun uuid(field: String): UUID = UUID.fromString(node.path(field).asText())
+        fun money(field: String): Money? = node.path(field).takeUnless { it.isMissingNode || it.isNull }?.let {
+            Money.of(BigDecimal(it.path("amount").asText()), it.path("currency").asText())
+        }
+        val grantor = uuid("grantorPartyId")
+        require(grantor == principal) { "statutory proposal principal changed" }
+        return PreviewDelegationCommand(
+            callerPartyId = principal,
+            actorPartyId = actor,
+            grantorPartyId = grantor,
+            granteePartyId = uuid("granteePartyId"),
+            resourceType = DelegationResourceType.valueOf(node.path("resourceType").asText()),
+            resourceId = uuid("resourceId"),
+            capabilities = node.path("capabilities").map { DelegationCapability.valueOf(it.asText()) }.toSet(),
+            approvalPolicy = ApprovalPolicy.valueOf(node.path("approvalPolicy").asText()),
+            requiredApprovals = node.path("requiredApprovals").takeUnless { it.isMissingNode || it.isNull }?.asInt(),
+            perTransactionLimit = money("perTransactionLimit"),
+            dailyLimit = money("dailyLimit"),
+            monthlyLimit = money("monthlyLimit"),
+            recertificationAudience = node.path("recertificationAudience")
+                .takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let(DelegationRecertificationAudience::valueOf),
+            validTo = node.path("validTo").takeUnless { it.isMissingNode || it.isNull }
+                ?.asText()?.let(OffsetDateTime::parse),
+        )
+    }
 
     private fun money(value: Money?): Map<String, String>? = value?.let {
         linkedMapOf("amount" to it.amount.toPlainString(), "currency" to it.currency.code)

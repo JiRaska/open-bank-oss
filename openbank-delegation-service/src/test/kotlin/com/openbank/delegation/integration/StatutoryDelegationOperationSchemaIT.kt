@@ -6,9 +6,16 @@ package com.openbank.delegation.integration
 
 import com.openbank.delegation.application.port.out.StatutoryDelegationOperationRepository
 import com.openbank.delegation.application.port.out.StatutoryOperationCreateOutcome
+import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.model.DelegationCapability
+import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.StatutoryDecisionVerdict
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryRepresentationRule
+import com.openbank.delegation.domain.model.StatutoryRepresentative
+import com.openbank.delegation.domain.model.StatutoryRuleMode
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -25,6 +32,8 @@ import org.junit.jupiter.api.Test
 import java.security.MessageDigest
 import java.sql.SQLException
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -191,6 +200,143 @@ class StatutoryDelegationOperationSchemaIT {
                         assertThat(rows.getInt(1)).isZero()
                     }
                 }
+        }
+    }
+
+    @Test
+    @Suppress("NestedBlockDepth") // Keep both JDBC transactions open to prove the real row-lock wait.
+    fun `decision insertion waits on the operation row lock used by quorum execution`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+        dataSource.connection.use { executor ->
+            executor.autoCommit = false
+            try {
+                executor.prepareStatement(
+                    "SELECT operation_id FROM delegation_statutory_operations WHERE operation_id = ? FOR UPDATE",
+                ).use { lock ->
+                    lock.setObject(1, proposed.id)
+                    lock.executeQuery().use { rows -> assertThat(rows.next()).isTrue() }
+                }
+                dataSource.connection.use { signer ->
+                    signer.autoCommit = false
+                    try {
+                        signer.createStatement().use { it.execute("SET LOCAL statement_timeout = '150ms'") }
+                        signer.prepareStatement(
+                            "WITH eligible AS (SELECT operation_id FROM delegation_statutory_operations " +
+                                "WHERE operation_id = ? AND state = 'PENDING' FOR UPDATE) " +
+                                "INSERT INTO delegation_statutory_decisions " +
+                                "(operation_id, actor_party_id, sca_session_id, decision, decided_at) " +
+                                "SELECT operation_id, ?, NULL, 'REJECT', now() FROM eligible WHERE true " +
+                                "ON CONFLICT DO NOTHING",
+                        ).use { insert ->
+                            insert.setObject(1, proposed.id)
+                            insert.setObject(2, UUID.randomUUID())
+                            assertThatThrownBy { insert.executeUpdate() }
+                                .isInstanceOf(SQLException::class.java)
+                                .hasMessageContaining("statement timeout")
+                        }
+                    } finally {
+                        signer.rollback()
+                    }
+                }
+            } finally {
+                executor.rollback()
+            }
+        }
+    }
+
+    @Test
+    fun `quorum execution commits one grant and one outbox row or nothing`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val rule = jointRule(proposed, first, second)
+        val at = proposed.createdAt.plusSeconds(60)
+        val now = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
+        val grant = DelegationGrant(
+            grantorPartyId = proposed.principalPartyId,
+            granteePartyId = UUID.randomUUID(),
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            validFrom = now,
+            validTo = null,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val event = DelegationOffered(
+            aggregateId = grant.id,
+            lifecycleRevision = grant.lifecycleRevision,
+            grantorPartyId = grant.grantorPartyId,
+            granteePartyId = grant.granteePartyId,
+            resourceType = grant.resourceType,
+            resourceId = grant.resourceId,
+            capabilities = grant.capabilities,
+            approvalPolicy = grant.approvalPolicy,
+            requiredApprovals = grant.requiredApprovals,
+            validFrom = grant.validFrom,
+            validTo = grant.validTo,
+            occurredAt = at,
+        )
+        fun sign(actor: UUID) = onVertxContext {
+            operations.recordDecision(
+                StatutoryDelegationDecision(
+                    proposed.id,
+                    actor,
+                    StatutoryDecisionVerdict.APPROVE,
+                    UUID.randomUUID(),
+                    at,
+                ),
+            )
+        }
+        fun execute() = onVertxContext {
+            operations.execute(proposed.id, proposed.principalPartyId, rule, proposed.ruleHash, grant, event, at)
+        }
+
+        sign(first)
+        assertThatThrownBy { execute() }
+            .isInstanceOf(com.openbank.delegation.application.port.out.StatutoryQuorumIncomplete::class.java)
+        assertThat(rowCount("delegation_grants", "grantor_party_id", proposed.principalPartyId)).isZero()
+        assertThat(rowCount("delegation_outbox", "aggregate_id", grant.id)).isZero()
+
+        sign(second)
+        assertThat(execute().id).isEqualTo(grant.id)
+        assertThat(execute().id).isEqualTo(grant.id)
+        assertThat(rowCount("delegation_grants", "grantor_party_id", proposed.principalPartyId)).isEqualTo(1)
+        assertThat(rowCount("delegation_outbox", "aggregate_id", grant.id)).isEqualTo(1)
+        assertThat(
+            onVertxContext {
+                operations.find(proposed.id, proposed.principalPartyId)
+            }?.grantId,
+        ).isEqualTo(grant.id)
+    }
+
+    private fun jointRule(proposed: StatutoryDelegationOperation, first: UUID, second: UUID) =
+        StatutoryRepresentationRule(
+            policyId = proposed.policyId,
+            principalPartyId = proposed.principalPartyId,
+            revision = proposed.policyRevision,
+            sourceCaseId = proposed.sourceCaseId,
+            attestationId = UUID.randomUUID(),
+            ruleTextHash = "a".repeat(64),
+            mode = StatutoryRuleMode.JOINT_ALL,
+            requiredSignatures = 2,
+            requiredOffices = listOf("director"),
+            registryRepresentativeCount = 2,
+            eligibleRepresentatives = listOf(
+                StatutoryRepresentative(first, setOf(0), setOf("director")),
+                StatutoryRepresentative(second, setOf(1), setOf("director")),
+            ),
+        )
+
+    private fun rowCount(table: String, column: String, id: UUID): Int = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT count(*) FROM $table WHERE $column = ?").use { statement ->
+            statement.setObject(1, id)
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                rows.getInt(1)
+            }
         }
     }
 

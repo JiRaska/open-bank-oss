@@ -17,7 +17,7 @@
 #   delegation.check      — "does an active grant cover this?" for services with no projection
 #   delegation.recertification.read    — customer reads own pending review tasks
 #   delegation.recertification.confirm — customer records an authority-neutral review
-#   delegation.statutory.{propose,read,intent,decide} — JOINT signer evidence, customer-edge only
+#   delegation.statutory.{propose,read,intent,decide,execute} — JOINT issuance, customer-edge only
 #
 # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
 # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -102,6 +102,7 @@ allowed_reasons contains "edge-service-delegation" if {
         "delegation.statutory.read",
         "delegation.statutory.intent",
         "delegation.statutory.decide",
+        "delegation.statutory.execute",
 		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
 		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
 		# any handler whose claimed party differs from it, so these carry no more authority than
