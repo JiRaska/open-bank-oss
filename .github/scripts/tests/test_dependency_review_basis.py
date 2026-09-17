@@ -11,12 +11,31 @@ import textwrap
 WORKFLOW = Path(__file__).resolve().parents[2] / "workflows" / "dependency-review.yml"
 SUBMISSION = WORKFLOW.with_name("dependency-submission.yml")
 GH = """#!/usr/bin/env python3
-import json, os, sys
+import base64, json, os, sys
 args=sys.argv[1:]
 with open(os.environ['CALLS'], 'a') as out: out.write(json.dumps(args)+'\\n')
 case=os.environ['CASE']
 if '--arg' in args or ('--jq' in args and args[args.index('--jq')+1]=='--arg'):
  sys.exit(2)
+if any('/dependency-graph/compare/' in a for a in args):
+ if case=='snapshot-api-failure': sys.exit(1)
+ print('HTTP/2.0 503 Service Unavailable' if case=='snapshot-non200' else 'HTTP/2.0 200 OK')
+ warnings={
+  'snapshot-base-zero': (0,1),
+  'snapshot-head-zero': (1,0),
+  'snapshot-both-positive': (1,2),
+ }
+ if case in warnings:
+  base,head=warnings[case]
+  message=f'The number of snapshots compared for the base SHA ({base}) and the head SHA ({head}) do not match. You may see unexpected additions in the diff.'
+  print('X-GitHub-Dependency-Graph-Snapshot-Warnings: '+base64.b64encode(message.encode()).decode())
+ if case=='snapshot-malformed-warning':
+  print('X-GitHub-Dependency-Graph-Snapshot-Warnings: not-base64')
+ if case=='snapshot-unknown-warning':
+  print('X-GitHub-Dependency-Graph-Snapshot-Warnings: '+base64.b64encode(b'Unknown snapshot state').decode())
+ print()
+ print('[]')
+ sys.exit(0)
 if any('/compare/' in a for a in args):
  if case=='compare-failure': sys.exit(1)
  print('mergebase'); sys.exit(0)
@@ -157,7 +176,7 @@ class BasisTests(unittest.TestCase):
         r, calls = self.run_case("valid")
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertIn(
-            "Both sides of the dependency diff had a submitted graph", r.stdout
+            "Both sides had successful producers and the comparison reported no missing snapshot", r.stdout
         )
         self.assertNotIn('"--arg"', calls)
 
@@ -176,11 +195,27 @@ class BasisTests(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertNotEqual(self.run_case(case)[0].returncode, 0)
 
+    def test_successful_producer_does_not_hide_missing_snapshot(self):
+        for case in [
+            "snapshot-base-zero",
+            "snapshot-head-zero",
+            "snapshot-malformed-warning",
+            "snapshot-unknown-warning",
+            "snapshot-non200",
+            "snapshot-api-failure",
+        ]:
+            with self.subTest(case=case):
+                self.assertNotEqual(self.run_case(case)[0].returncode, 0)
+
+    def test_repeated_successful_snapshot_is_not_missing(self):
+        result, _ = self.run_case("snapshot-both-positive")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
     def test_submission_on_later_page_is_found(self):
         r, calls = self.run_case("paginated")
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         self.assertIn(
-            "Both sides of the dependency diff had a submitted graph", r.stdout
+            "Both sides had successful producers and the comparison reported no missing snapshot", r.stdout
         )
         self.assertIn('"--paginate"', calls)
 

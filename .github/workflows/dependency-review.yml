@@ -356,4 +356,46 @@ jobs:
           fi
           [ "${fail}" -eq 0 ] || exit 1
 
-          echo "Both sides of the dependency diff had a submitted graph — the verdict above is about this PR's delta."
+          # A green legacy producer is not proof that GitHub indexed its snapshot. On
+          # 2026-09-17 main's job succeeded, yet this endpoint reported base=0,
+          # head=1 and classified 1,257 packages as additions. Check the comparison
+          # response itself, not just the producer checks. The head producer on this
+          # PR is independently validated above; the warning identifies a missing
+          # side (or unequal positive snapshot counts after a re-run).
+          graph_response="$(mktemp)"
+          trap 'rm -f "$graph_response"' EXIT
+          if ! gh api -i "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${mb}...${HEAD_SHA}" \
+              > "$graph_response"; then
+            echo "::error title=basis unverified::Dependency comparison API is unavailable."
+            exit 1
+          fi
+          python3 - "$graph_response" <<'PY'
+          import base64
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8", errors="replace") as response:
+              status = response.readline().strip()
+              if not re.match(r"^HTTP/\S+ 200(?: |$)", status):
+                  sys.exit("::error title=basis unverified::Dependency comparison HTTP status is not 200")
+              warning = None
+              for line in response:
+                  if not line.strip():
+                      break
+                  name, sep, value = line.partition(":")
+                  if sep and name.lower() == "x-github-dependency-graph-snapshot-warnings":
+                      warning = value.strip()
+              if warning:
+                  try:
+                      decoded = base64.b64decode(warning, validate=True).decode("utf-8")
+                  except (ValueError, UnicodeDecodeError):
+                      sys.exit("::error title=basis unverified::Malformed dependency snapshot warning")
+                  counts = re.search(r"base SHA \((\d+)\) and the head SHA \((\d+)\)", decoded)
+                  if not counts:
+                      sys.exit("::error title=basis unverified::Unknown dependency snapshot warning")
+                  base_count, head_count = map(int, counts.groups())
+                  if not base_count or not head_count:
+                      sys.exit(f"::error title=Dependency review missing graph::GitHub compared base={base_count}, head={head_count} snapshots; a successful producer check did not establish a valid basis.")
+                  print(f"Snapshot warning records unequal but nonzero counts: base={base_count}, head={head_count}.")
+          PY
+          echo "Both sides had successful producers and the comparison reported no missing snapshot."
