@@ -54,7 +54,6 @@ image-rescan.yml|job:escalate|issues
 labels.yml|top|issues
 main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
-pact-drift-check.yml|job:verify-admin-ui-providers|id-token
 pact-verification-reconcile.yml|top|actions
 perf-gate.yml|job:raise-issue|issues
 platform-tofu.yml|top|id-token

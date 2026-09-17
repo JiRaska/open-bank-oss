@@ -14,6 +14,10 @@ pact_build_modules() {
   printf '%s\n' "$prov"
 }
 
+admin_ui_pact_changed() {
+  grep -qE '^pacts/openbank-admin-ui-openbank-[a-z0-9-]+\.json$' <<< "$1"
+}
+
 pact_build_modules_self_test() {
   is_inert_service_path ".github/scripts/publish-admin-ui-pacts.py" \
     || { echo "selector self-test: Pact publisher must not full-fleet" >&2; return 1; }
@@ -27,4 +31,8 @@ pact_build_modules_self_test() {
     echo "selector self-test: malformed Pact filename must fail" >&2
     return 1
   fi
+  admin_ui_pact_changed $'pacts/openbank-admin-ui-openbank-context-service.json\nopenbank-admin-ui/src/app/page.tsx' \
+    || { echo "selector self-test: changed admin UI pact needs publication" >&2; return 1; }
+  ! admin_ui_pact_changed 'openbank-admin-ui/src/app/page.tsx' \
+    || { echo "selector self-test: UI source alone needs no publication wait" >&2; return 1; }
 }

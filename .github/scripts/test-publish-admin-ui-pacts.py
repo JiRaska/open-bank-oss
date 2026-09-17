@@ -68,6 +68,8 @@ class PublicationTest(unittest.TestCase):
                          "openbank-libs-testing/src/main/kotlin/TestSupport.kt",
                          "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts",
                          "gradle/libs.versions.toml", "gradle.properties", "settings.gradle.kts",
+                         ".github/scripts/await-admin-ui-pact-publication.py",
+                         ".github/scripts/test-await-admin-ui-pact-publication.py",
                          ".github/workflows/verify-provider.yml"]:
                 with self.subTest(event=event, path=path):
                     self.assertTrue(any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns))
