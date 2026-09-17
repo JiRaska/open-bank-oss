@@ -119,7 +119,7 @@ jobs:
   worker:
     needs: admission
     # Parked until this mutating worker has shared budget admission and API isolation.
-    if: github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && needs.admission.outputs.proceed == 'true' && github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
     name: Pick one issue, open one draft PR
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -78,7 +78,7 @@ jobs:
 
   steward:
     # Parked until this mutating worker has shared budget admission and API isolation.
-    if: github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && github.event_name == 'workflow_dispatch' && vars.AGENT_MUTATING_WORKERS_ENABLED == 'true'
     name: Tend one agent PR
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -27,6 +27,12 @@ on:
         default: true
         type: boolean
 
+concurrency:
+  # Supersede old validation runs for a PR. Paid manual dispatches keep their own
+  # workflow run; the review job below serializes all admitted provider calls.
+  group: ${{ github.event_name == 'pull_request' && format('agent-review-validation-{0}', github.event.pull_request.number) || format('agent-review-dispatch-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   actions: read        # rolling-window admission history
