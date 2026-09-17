@@ -51,6 +51,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // ADR-0104 D3 cross-service IT: stub the clearing simulator over real HTTP so the scheme
     // gateway adapter's REST-client / XML / oidc-client wiring is exercised, not mocked.
     testImplementation(libs.wiremock.standalone)
