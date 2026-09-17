@@ -4,6 +4,7 @@
 
 package com.openbank.document.application.port.`in`
 
+import com.openbank.document.domain.model.CeremonyStatus
 import com.openbank.document.domain.model.Document
 import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.document.domain.model.DocumentTemplate
@@ -12,6 +13,7 @@ import com.openbank.document.domain.model.SignatureLevel
 import com.openbank.document.domain.model.SignerStatus
 import com.openbank.document.domain.model.TemplateEngine
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -44,6 +46,9 @@ data class RenderDocumentCommand(
     // Onboarding sets this ("onboarding:<accountId>") to make issuance idempotent under at-least-once
     // redelivery (ADR-0162 D7); ad-hoc REST renders leave it null. See [Document.idempotencyKey].
     val idempotencyKey: String? = null,
+    // Extra metadata recorded on the Document next to the template snapshot (e.g. the business
+    // agreement's input digest). Template keys always win on a clash.
+    val metadata: Map<String, String> = emptyMap(),
 )
 
 data class OpenCeremonyCommand(
@@ -184,3 +189,69 @@ data class OnboardingAgreement(
     val sha256: String,
     val documentStatus: DocumentStatus,
 )
+
+// ── Business onboarding agreement ─────────────────────────────────────────────────────────────
+
+/** The company being onboarded, as the public register shows it. */
+data class AgreementEntity(val name: String, val ico: String, val seat: String, val legalForm: String)
+
+/** A statutory representative listed in the agreement; [partyRef] is null for one with no party yet. */
+data class AgreementRepresentative(val partyRef: String?, val name: String, val role: String)
+
+/** A person who signs for the company — each becomes one signer of the ceremony, in this order. */
+data class AgreementSigner(val partyRef: String, val name: String, val role: String)
+
+data class AgreementProduct(val code: String, val name: String, val currency: String)
+
+data class EnsureBusinessAgreementCommand(
+    val caseId: UUID,
+    val entityPartyId: UUID,
+    val lang: String,
+    val entity: AgreementEntity,
+    val representatives: List<AgreementRepresentative>,
+    val signers: List<AgreementSigner>,
+    val signingRule: String,
+    val product: AgreementProduct,
+)
+
+data class BusinessAgreementSigner(val partyRef: String, val status: SignerStatus, val signedAt: Instant?)
+
+data class BusinessDisclosure(
+    val code: String,
+    val version: String,
+    val title: String,
+    val sha256: String,
+    val documentId: UUID,
+)
+
+/**
+ * The company's framework agreement for one onboarding case. [sha256] is the digest the signers
+ * approve (the SCA dynamic-linking value) and never changes for a given document; [sealedSha256] is
+ * the digest of the stored PDF after the bank's seal, present only once the ceremony completed.
+ */
+data class BusinessAgreement(
+    val caseId: UUID,
+    val documentId: UUID,
+    val templateCode: String,
+    val templateVersion: String,
+    val sha256: String,
+    val sealedSha256: String?,
+    val ceremonyId: UUID,
+    val ceremonyStatus: CeremonyStatus,
+    val signers: List<BusinessAgreementSigner>,
+    val disclosures: List<BusinessDisclosure>,
+)
+
+/** The agreement for this case is already (partly) signed and cannot be re-rendered. */
+class BusinessAgreementConflictException(message: String) : RuntimeException(message)
+
+/**
+ * Renders and opens signing for a company's onboarding agreement (kyb-service is the caller).
+ * Idempotent per (caseId, lang); see [com.openbank.document.application.usecase.BusinessAgreementService].
+ */
+interface BusinessAgreementUseCase {
+    suspend fun ensure(cmd: EnsureBusinessAgreementCommand): BusinessAgreement
+
+    /** The agreement for [caseId] in [lang], or — with no [lang] — the signed one, else the first found. */
+    suspend fun find(caseId: UUID, lang: String?): BusinessAgreement?
+}

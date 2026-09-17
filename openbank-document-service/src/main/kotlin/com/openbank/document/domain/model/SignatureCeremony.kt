@@ -80,6 +80,17 @@ data class SignatureCeremony(
         return copy(signers = updatedSigners, status = recomputeStatus(updatedSigners))
     }
 
+    /**
+     * Withdraws a ceremony nobody has signed yet — its document is being replaced by a re-render.
+     * Refused once any signature landed: a partially signed contract is never silently dropped.
+     */
+    fun expire(): SignatureCeremony {
+        require(status == CeremonyStatus.DRAFT || status == CeremonyStatus.PENDING) {
+            "Only a ceremony nobody has signed can be withdrawn (status $status)"
+        }
+        return copy(status = CeremonyStatus.EXPIRED)
+    }
+
     private fun recomputeStatus(current: List<Signer>): CeremonyStatus = when {
         current.any { it.status == SignerStatus.DECLINED } -> CeremonyStatus.DECLINED
         current.all { it.status == SignerStatus.SIGNED } -> CeremonyStatus.COMPLETED

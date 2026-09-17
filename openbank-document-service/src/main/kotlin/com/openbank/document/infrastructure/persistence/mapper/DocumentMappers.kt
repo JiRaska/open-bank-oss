@@ -60,6 +60,7 @@ fun DocumentEntity.toDomain(mapper: ObjectMapper) = Document(
     retainUntil = retainUntil,
     createdAt = createdAt,
     idempotencyKey = idempotencyKey,
+    sealedSha256 = sealedSha256,
 )
 
 fun Document.toEntity(mapper: ObjectMapper) = DocumentEntity().also {
@@ -76,6 +77,7 @@ fun Document.toEntity(mapper: ObjectMapper) = DocumentEntity().also {
     it.caseRef = caseRef
     it.productRef = productRef
     it.idempotencyKey = idempotencyKey
+    it.sealedSha256 = sealedSha256
     it.retainUntil = retainUntil
     it.createdAt = createdAt
 }

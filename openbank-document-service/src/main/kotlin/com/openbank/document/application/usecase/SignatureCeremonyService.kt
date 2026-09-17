@@ -176,7 +176,7 @@ class SignatureCeremonyService(
         } else {
             document
         }
-        documentRepo.save(pending.markSigned())
+        documentRepo.save(pending.markSigned().sealed(Document.sha256(sealed)))
     }
 
     companion object {
