@@ -85,20 +85,43 @@ class CompaniesHousePscAdapter : UboAdapter {
         ) {
             throw RegistryUnavailableException(SOURCE, e)
         }
-        return map(identifier, body, pack)
+        val statementBody = try {
+            companiesHouse.personsWithSignificantControlStatements(identifier.value, auth, PSC_PAGE)
+        } catch (e: jakarta.ws.rs.WebApplicationException) {
+            if (e.response?.status == NOT_FOUND) null else throw RegistryUnavailableException(SOURCE, e)
+        } catch (e: RegistryUnavailableException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw RegistryUnavailableException(SOURCE, e)
+        }
+        val finding = map(identifier, body, pack, statementBody)
+        // Without an active controller or a filed statement, the register has not supplied
+        // evidence for a complete ownership finding, even if both list requests answered 200.
+        if (finding.owners.isEmpty() && finding.registerStatements.isEmpty()) {
+            throw RegistryUnavailableException(SOURCE)
+        }
+        return finding
     }
 
-    internal fun map(identifier: LegalEntityIdentifier, body: JsonNode, pack: CountryPack): UboFinding {
+    internal fun map(
+        identifier: LegalEntityIdentifier,
+        body: JsonNode,
+        pack: CountryPack,
+        statementBody: JsonNode? = null,
+    ): UboFinding {
         val items = completePageItems(body)
         val owners = items
             .filter { it.text("ceased_on") == null && it.text("kind")?.contains("statement") != true }
             .map { toOwner(it, identifier.value) ?: throw RegistryUnavailableException(SOURCE) }
-        // A statement item ("no individual or entity with significant control identified") is an
-        // answer the company filed under s.790 — carried as text so the analyst reads the register's
-        // own words rather than our summary of them.
-        val statements = items.mapNotNull { item ->
-            item.text("statement") ?: item.text("kind")?.takeIf { it.contains("statement") }
-        }
+        // Companies House publishes statements at a separate endpoint. Never assume an empty PSC
+        // list means the company filed "no PSC" or silently omit a statement from the evidence.
+        val statements = statementBody?.let(::completePageItems).orEmpty()
+            .filter { it.text("ceased_on") == null }
+            .map { item ->
+                item.text("statement") ?: throw RegistryUnavailableException(SOURCE)
+            }
         return UboFinding(
             identifier = identifier,
             source = UboSource.REGISTER,
@@ -188,6 +211,7 @@ class CompaniesHousePscAdapter : UboAdapter {
 
     companion object {
         const val SOURCE = "companies-house-psc"
+        private const val NOT_FOUND = 404
         private const val PSC_TIMEOUT_MS = 4000L
         private const val DATE_LENGTH = 10
         private const val PSC_PAGE = 100

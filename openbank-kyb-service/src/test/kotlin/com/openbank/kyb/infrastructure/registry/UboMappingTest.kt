@@ -56,6 +56,40 @@ class UboMappingTest {
     }
 
     @Test
+    fun `live lookup reads the separate PSC statements resource`(): Unit = runBlocking {
+        val client = mockk<CompaniesHouseRestClient>()
+        coEvery { client.personsWithSignificantControl("OC123456", any(), any()) } returns
+            json.readTree("""{"total_results":0,"items":[]}""")
+        coEvery { client.personsWithSignificantControlStatements("OC123456", any(), any()) } returns
+            json.readTree("""{"total_results":1,"items":[{"statement":"no-individual-psc-identified"}]}""")
+        val adapter = adapter().also {
+            it.companiesHouse = client
+            it.apiKey = Optional.of("test-key")
+        }
+
+        val finding = requireNotNull(adapter.lookup(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), gb))
+
+        assertThat(finding.registerStatements).containsExactly("no-individual-psc-identified")
+        assertThat(finding.source).isEqualTo(UboSource.REGISTER)
+    }
+
+    @Test
+    fun `empty PSC and statement lists do not establish known absence of owners`() {
+        val client = mockk<CompaniesHouseRestClient>()
+        val empty = json.readTree("""{"total_results":0,"items":[]}""")
+        coEvery { client.personsWithSignificantControl("OC123456", any(), any()) } returns empty
+        coEvery { client.personsWithSignificantControlStatements("OC123456", any(), any()) } returns empty
+        val adapter = adapter().also {
+            it.companiesHouse = client
+            it.apiKey = Optional.of("test-key")
+        }
+
+        assertThatThrownBy {
+            runBlocking { adapter.lookup(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), gb) }
+        }.isInstanceOf(RegistryUnavailableException::class.java)
+    }
+
+    @Test
     fun `a ceased PSC is history and the strongest stated band wins`() {
         val finding = adapter().map(
             LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"),
@@ -173,14 +207,15 @@ class UboMappingTest {
 
     @Test
     fun `a filed statement is an answer, not an absence`() {
-        val body = json.readTree(
+        val body = json.readTree("""{"total_results":0,"items":[]}""")
+        val statements = json.readTree(
             """
             {"total_results":1,"items":[{"kind":"persons-with-significant-control-statement",
                        "statement":"no-individual-or-entity-with-signficant-control"}]}
             """.trimIndent(),
         )
 
-        val finding = adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb)
+        val finding = adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb, statements)
 
         // Empty owners AND a statement: collapsing the two would show an analyst the same screen as
         // a company that simply has not filed, which is a different problem.
@@ -188,6 +223,23 @@ class UboMappingTest {
         assertThat(finding.registerStatements).hasSize(1)
         assertThat(finding.source).isEqualTo(UboSource.REGISTER)
         assertThat(finding.requiresDeclaration).isFalse()
+    }
+
+    @Test
+    fun `withdrawn PSC statement is not shown as current`() {
+        val empty = json.readTree("""{"total_results":0,"items":[]}""")
+        val statements = json.readTree(
+            """{"total_results":1,"items":[{"statement":"no-individual-psc-identified","ceased_on":"2025-01-01"}]}""",
+        )
+
+        val finding = adapter().map(
+            LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"),
+            empty,
+            gb,
+            statements,
+        )
+
+        assertThat(finding.registerStatements).isEmpty()
     }
 
     @Test
