@@ -94,6 +94,9 @@ jobs:
             -o jsonpath='{.spec.template.spec.containers[0].image}')"
           [ -n "$IMAGE" ] || { echo "::error::could not read the live ledger-service image — refusing to restore an unspecified build."; exit 1; }
 
+          # Create the isolation rule before starting the check workload. Failure aborts
+          # the drill; API acceptance alone does not prove CNI enforcement.
+          sed "s#\${NS}#${NS}#g" "$TEMPLATES/ledger-check-network-policy.yaml.tmpl" | kubectl create -f -
           sed "s#\${NS}#${NS}#g" "$TEMPLATES/cnpg-recovery-cluster.yaml.tmpl" | kubectl apply -f -
           sed "s#\${NS}#${NS}#g; s#\${IMAGE}#${IMAGE}#g" "$TEMPLATES/ledger-service-dr-check.yaml.tmpl" | kubectl apply -f -
 

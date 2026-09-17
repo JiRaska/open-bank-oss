@@ -46,6 +46,11 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  # Create the check workload's isolation policy in its fresh namespace. The
+  # workflow uses create, so this grant needs no policy update/delete capability.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create"]
   # CNPG: read the source clusters/backups (to pick the restore point) and
   # manage the recovery cluster in the verify namespace.
   - apiGroups: ["postgresql.cnpg.io"]
@@ -69,8 +74,8 @@ subjects:
 ---
 # Kyverno: the openbank-dr SA may ONLY be used by GitHub ARC runner pods in the
 # arc-runners namespace — never by an application workload, and a dr-verify
-# namespace name is mandatory on anything it creates. This is the control that
-# keeps the ClusterRole above from being a general-purpose backdoor.
+# other resource grants are not namespace-prefix constrained by this rule.
+# The native admission policy below restricts the new NetworkPolicy grant.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -96,3 +101,36 @@ spec:
               - key: "{{ request.object.spec.serviceAccountName || '' }}"
                 operator: Equals
                 value: openbank-dr
+
+---
+# Native admission is used so webhook namespace exclusions cannot bypass this
+# boundary. Install policy and binding before granting NetworkPolicy creation.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: openbank-dr-network-policy-scope
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["networkpolicies"]
+  validations:
+    - expression: >-
+        request.userInfo.username != 'system:serviceaccount:arc-runners:openbank-dr' ||
+        (request.namespace.startsWith('dr-verify-') && size(request.namespace) > 10)
+      message: "The DR runner may create NetworkPolicies only in nonempty dr-verify-* namespaces."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: openbank-dr-network-policy-scope
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  policyName: openbank-dr-network-policy-scope
+  validationActions: [Deny]

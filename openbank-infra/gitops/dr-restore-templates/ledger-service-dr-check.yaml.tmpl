@@ -21,6 +21,7 @@ spec:
       labels:
         app.kubernetes.io/name: ledger-service-dr-check
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -47,9 +48,8 @@ spec:
                 secretKeyRef:
                   name: ledger-db-restored-app
                   key: password
-            # The whole point of the isolation guarantee: dispatch off means the outbox
-            # dispatcher never calls the Kafka emitter, so this restored pod cannot
-            # publish, no matter what a bug elsewhere in the request path might attempt.
+            # Disable dispatch as defense in depth. This flag does not isolate
+            # other connectors or clients; the separate NetworkPolicy limits egress.
             - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
               value: "false"
             # No live Keycloak in a throwaway namespace; the drill calls only the

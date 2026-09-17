@@ -30,10 +30,16 @@ if args[:2] == ['delete', 'namespace'] and os.environ['DR_TEST_CASE'] == 'delete
     sys.exit(1)
 if args[:2] == ['get', 'rollout']:
     print('registry.invalid/ledger:fixture')
-elif args[:2] == ['apply', '-f']:
+elif args[:2] in (['apply', '-f'], ['create', '-f']):
     path = root / 'resources'
     docs = json.loads(path.read_text()) if path.exists() else []
-    docs += [[d['kind'].lower(), d['metadata']['name']] for d in yaml.safe_load_all(sys.stdin) if d]
+    incoming = [d for d in yaml.safe_load_all(sys.stdin) if d]
+    if any(d['kind'] == 'NetworkPolicy' for d in incoming) and os.environ['DR_TEST_CASE'] == 'policy-failure':
+        sys.exit(1)
+    if any(d['kind'] == 'Deployment' for d in incoming):
+        if ['networkpolicy', 'ledger-dr-check-isolation'] not in docs:
+            sys.exit(1)
+    docs += [[d['kind'].lower(), d['metadata']['name']] for d in incoming]
     path.write_text(json.dumps(docs))
 elif 'port-forward' in args:
     target = args[args.index('port-forward') + 1]
@@ -94,6 +100,32 @@ class DrRestoreWorkflowTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(any(c[:2] == ['delete', 'namespace'] for c in calls))
         self.assertTrue(stopped, 'port-forward must be reaped during cleanup')
+
+    def test_policy_failure_aborts_before_restoring_or_starting_workloads(self):
+        result, calls, stopped = self.run_step('policy-failure')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c[:2] == ['apply', '-f'] for c in calls))
+        self.assertFalse(any('port-forward' in c for c in calls))
+        self.assertTrue(any(c[:2] == ['delete', 'namespace'] for c in calls))
+        self.assertFalse(stopped)
+
+    def test_isolation_selects_check_pod_and_only_restored_database_and_dns(self):
+        templates = ROOT / 'openbank-infra/gitops/dr-restore-templates'
+        policy = yaml.safe_load((templates / 'ledger-check-network-policy.yaml.tmpl').read_text())['spec']
+        pod = yaml.safe_load((templates / 'ledger-service-dr-check.yaml.tmpl').read_text())['spec']['template']
+        self.assertEqual(policy['podSelector']['matchLabels'], pod['metadata']['labels'])
+        self.assertEqual(set(policy['policyTypes']), {'Ingress', 'Egress'})
+        self.assertEqual(policy['ingress'], [])
+        self.assertEqual(policy['egress'], [
+            {'to': [{'podSelector': {'matchLabels': {'cnpg.io/cluster': 'ledger-db-restored'}}}],
+             'ports': [{'protocol': 'TCP', 'port': 5432}]},
+            {'to': [{'namespaceSelector': {'matchLabels': {'kubernetes.io/metadata.name': 'kube-system'}},
+                     'podSelector': {'matchLabels': {'k8s-app': 'kube-dns'}}}],
+             'ports': [{'protocol': 'UDP', 'port': 53}, {'protocol': 'TCP', 'port': 53}]}])
+        self.assertIs(pod['spec']['automountServiceAccountToken'], False)
+        roles = list(yaml.safe_load_all((ROOT / 'openbank-infra/gitops/components/platform/dr-runner-rbac.yaml').read_text()))
+        grants = [r for r in roles[0]['rules'] if 'networkpolicies' in r['resources']]
+        self.assertEqual(grants, [{'apiGroups': ['networking.k8s.io'], 'resources': ['networkpolicies'], 'verbs': ['create']}])
 
     def test_cleanup_failure_is_not_a_successful_drill(self):
         result, _, stopped = self.run_step('delete-failure')
