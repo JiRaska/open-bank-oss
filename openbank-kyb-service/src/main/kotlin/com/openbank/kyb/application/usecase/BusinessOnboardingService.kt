@@ -26,6 +26,7 @@ import com.openbank.kyb.application.port.out.BusinessAgreementView
 import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.BusinessOnboardingSettings
 import com.openbank.kyb.application.port.out.BusinessOnboardingWorkflowPort
+import com.openbank.kyb.application.port.out.CeremonySignerStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
@@ -275,7 +276,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             )
         }
         val ceremonySigner = view.signers.firstOrNull { it.partyRef == cmd.signerPartyId }
-        if (ceremonySigner?.status != CEREMONY_SIGNED) {
+        if (ceremonySigner?.status != CeremonySignerStatus.SIGNED) {
             throw AgreementConflictException(
                 AgreementConflictException.CEREMONY_NOT_SIGNED,
                 "the signature ceremony does not record a completed signature by this party",
@@ -485,7 +486,6 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     private companion object {
         val AGREEMENT_LANGS = setOf("cs", "en")
-        const val CEREMONY_SIGNED = "SIGNED"
     }
 
     private fun entityPartyRequest(caseId: UUID, extract: RegistryExtract) = EntityPartyRequest(

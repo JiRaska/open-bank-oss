@@ -24,6 +24,8 @@ import com.openbank.kyb.application.port.out.BusinessOnboardingSettings
 import com.openbank.kyb.application.port.out.BusinessOnboardingWorkflowPort
 import com.openbank.kyb.application.port.out.BusinessRegistryPort
 import com.openbank.kyb.application.port.out.CeremonySigner
+import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
@@ -217,8 +219,8 @@ class BusinessOnboardingServiceTest {
                         templateVersion = "1.0.0",
                         sha256 = "a".repeat(64),
                         ceremonyId = UUID.randomUUID(),
-                        ceremonyStatus = "PENDING",
-                        signers = request.signers.map { CeremonySigner(it.partyRef!!, "PENDING") },
+                        ceremonyStatus = CeremonyStatus.PENDING,
+                        signers = request.signers.map { CeremonySigner(it.partyRef!!, CeremonySignerStatus.PENDING) },
                         disclosures = listOf(
                             AgreementDisclosure("VOP_CS", "1.1.0", "VOP", "b".repeat(64)),
                             AgreementDisclosure("SAZEBNIK_PO_CS", "1.0.0", "Sazebník", "c".repeat(64)),
@@ -236,7 +238,7 @@ class BusinessOnboardingServiceTest {
                 if (it.partyRef in
                     signed[v.caseId].orEmpty()
                 ) {
-                    it.copy(status = "SIGNED")
+                    it.copy(status = CeremonySignerStatus.SIGNED)
                 } else {
                     it
                 }

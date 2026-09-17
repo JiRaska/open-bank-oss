@@ -176,9 +176,9 @@ data class BusinessAgreementResponse(
             sha256 = v.sha256,
             sealedSha256 = v.sealedSha256,
             ceremonyId = v.ceremonyId,
-            ceremonyStatus = v.ceremonyStatus,
+            ceremonyStatus = v.ceremonyStatus.name,
             signers = v.signers.map {
-                mapOf("partyRef" to it.partyRef, "status" to it.status, "signedAt" to it.signedAt)
+                mapOf("partyRef" to it.partyRef, "status" to it.status.name, "signedAt" to it.signedAt)
             },
             disclosures = v.disclosures.map {
                 mapOf(

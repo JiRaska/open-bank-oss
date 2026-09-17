@@ -9,6 +9,8 @@ import com.openbank.kyb.application.port.out.AgreementDisclosure
 import com.openbank.kyb.application.port.out.BusinessAgreementRequest
 import com.openbank.kyb.application.port.out.BusinessAgreementView
 import com.openbank.kyb.application.port.out.CeremonySigner
+import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -115,8 +117,8 @@ class DocumentServiceGateway : DocumentGateway {
         sha256 = sha256,
         sealedSha256 = sealedSha256,
         ceremonyId = ceremonyId,
-        ceremonyStatus = ceremonyStatus,
-        signers = signers.map { CeremonySigner(it.partyRef, it.status, it.signedAt) },
+        ceremonyStatus = CeremonyStatus.parse(ceremonyStatus),
+        signers = signers.map { CeremonySigner(it.partyRef, CeremonySignerStatus.parse(it.status), it.signedAt) },
         disclosures = disclosures.map { AgreementDisclosure(it.code, it.version, it.title, it.sha256, it.documentId) },
     )
 

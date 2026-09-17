@@ -25,7 +25,35 @@ data class BusinessAgreementRequest(
     val product: AgreementProduct,
 )
 
-data class CeremonySigner(val partyRef: UUID, val status: String, val signedAt: String? = null)
+/** document-service's per-signer ceremony state — its vocabulary, not kyb's [com.openbank.kyb.domain.model.SignerStatus]. */
+enum class CeremonySignerStatus {
+    PENDING,
+    SIGNED,
+    DECLINED,
+    ;
+
+    companion object {
+        /** An unknown value is never read as SIGNED. */
+        fun parse(value: String?): CeremonySignerStatus = entries.firstOrNull { it.name == value } ?: PENDING
+    }
+}
+
+/** document-service's ceremony state. */
+enum class CeremonyStatus {
+    PENDING,
+    PARTIALLY_SIGNED,
+    COMPLETED,
+    DECLINED,
+    EXPIRED,
+    ;
+
+    companion object {
+        /** An unknown value is never read as COMPLETED. */
+        fun parse(value: String?): CeremonyStatus = entries.firstOrNull { it.name == value } ?: PENDING
+    }
+}
+
+data class CeremonySigner(val partyRef: UUID, val status: CeremonySignerStatus, val signedAt: String? = null)
 
 data class AgreementDisclosure(
     val code: String,
@@ -44,7 +72,7 @@ data class BusinessAgreementView(
     val sha256: String,
     val sealedSha256: String? = null,
     val ceremonyId: UUID,
-    val ceremonyStatus: String,
+    val ceremonyStatus: CeremonyStatus,
     val signers: List<CeremonySigner>,
     val disclosures: List<AgreementDisclosure>,
 )

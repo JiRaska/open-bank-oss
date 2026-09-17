@@ -9,6 +9,8 @@ import com.openbank.kyb.application.port.out.AgreementDisclosure
 import com.openbank.kyb.application.port.out.BusinessAgreementRequest
 import com.openbank.kyb.application.port.out.BusinessAgreementView
 import com.openbank.kyb.application.port.out.CeremonySigner
+import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.CeremonyStatus
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.MandateRequest
@@ -166,8 +168,10 @@ class StubDocumentGateway : DocumentGateway {
                 templateVersion = "1.0.0",
                 sha256 = "a".repeat(64),
                 ceremonyId = UUID.randomUUID(),
-                ceremonyStatus = "PENDING",
-                signers = request.signers.mapNotNull { it.partyRef }.map { CeremonySigner(it, "PENDING") },
+                ceremonyStatus = CeremonyStatus.PENDING,
+                signers = request.signers.mapNotNull {
+                    it.partyRef
+                }.map { CeremonySigner(it, CeremonySignerStatus.PENDING) },
                 disclosures = DISCLOSURES,
             )
         }
@@ -180,7 +184,15 @@ class StubDocumentGateway : DocumentGateway {
     private fun withSignatures(v: BusinessAgreementView): BusinessAgreementView {
         val signed = signedBy[v.caseId].orEmpty()
         return v.copy(
-            signers = v.signers.map { if (it.partyRef in signed) it.copy(status = "SIGNED") else it },
+            signers = v.signers.map {
+                if (it.partyRef in
+                    signed
+                ) {
+                    it.copy(status = CeremonySignerStatus.SIGNED)
+                } else {
+                    it
+                }
+            },
         )
     }
 
