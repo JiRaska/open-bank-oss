@@ -2,9 +2,30 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/fraud-cases/{caseId}/network:
+    get:
+      operationId: getAssignedFraudCaseNetwork
+      summary: Explore explicit shared source references among independently authorized open Fraud cases
+      description: The candidate cap makes this an incomplete one-hop view, never a fraud finding or identity inference.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+      responses:
+        '200':
+          description: Root and at most four related open cases with evidence for each explicit equality
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FraudCaseNetwork' }
+        '400': { description: Case or purpose mismatch }
+        '403': { description: Root role, assignment, policy or current source state denied }
+        '503': { description: Authorization, reference store or source unavailable }
   /api/v1/context/fraud-cases/{caseId}/access:
     get:
       operationId: verifyAssignedFraudCaseAccess
@@ -233,6 +254,42 @@ components:
       required: false
       schema: { type: string, format: date-time }
   schemas:
+    FraudCaseNetwork:
+      type: object
+      required: [root, related, inspectedCandidates, candidateTruncated]
+      properties:
+        root: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+        inspectedCandidates: { type: integer, minimum: 0, maximum: 4 }
+        candidateTruncated: { type: boolean }
+        related:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [evidence, shared]
+            properties:
+              evidence: { $ref: '#/components/schemas/FraudCaseSourceEvidence' }
+              shared:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  required: [type, sourceId]
+                  properties:
+                    type: { type: string, enum: [ACCOUNT, COUNTERPARTY] }
+                    sourceId: { type: string, format: uuid }
+    FraudCaseSourceEvidence:
+      type: object
+      required: [caseId, scoreId, accountId, status, revision, openedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        scoreId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        counterpartyId: { type: [string, "null"], format: uuid }
+        status: { type: string, enum: [OPEN] }
+        revision: { type: integer, format: int64, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
     KybObservationHistory:
       type: object
       required: [root, knownAt, observations, truncated]
@@ -282,7 +339,7 @@ components:
         rootRef:
           type: [string, "null"]
           maxLength: 300
-          description: Required delegation UUID root for AUTHORIZATION_REVIEW, aml-case UUID root for AML_INVESTIGATION, or kyb-case UUID root for KYB_OWNERSHIP_REVIEW; absent for other purposes
+          description: Required exact case root for authorization, AML, KYB or Fraud investigation; absent for complaint and incident purposes
     DecideAssignment:
       type: object
       required: [approve]

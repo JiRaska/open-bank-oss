@@ -323,3 +323,12 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   the investigator's token. Associations are leads, not a finding or payment action.
   Rollback: disable this detail route and remove the outbound Context edge and trust
   mount; preserve the source cases and minimal reference feed for audit continuity.
+
+- **2026-09-17** — Context's bounded Fraud network view calls this source association
+  route once per independently authorized, assigned OPEN case. The source still
+  authorizes each human bearer and exact case through Context before disclosing
+  account or counterparty UUIDs. Context inspects at most four candidates and
+  limits concurrent source calls; the route is not a bulk export. Matching UUIDs
+  are leads only. The Context URL is a required secret-backed HTTPS endpoint with
+  managed certificate trust; missing URL or trust material blocks readiness rather
+  than falling back to HTTP.

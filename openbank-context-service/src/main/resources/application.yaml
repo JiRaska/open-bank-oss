@@ -26,12 +26,28 @@ quarkus:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
       connect-timeout: 250
       read-timeout: 1250
+    fraud-service:
+      url: ${FRAUD_CASE_SOURCE_URL:http://localhost:8133}
+      connect-timeout: 250
+      read-timeout: 1250
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
     enabled: true
     port: 8085
     root-path: /q
+"%prod":
+  quarkus:
+    tls:
+      fraud-source:
+        trust-store:
+          pem:
+            certs: /mnt/fraud-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      fraud-service:
+        tls-configuration-name: fraud-source
+
 "%dev":
   quarkus:
     oidc:

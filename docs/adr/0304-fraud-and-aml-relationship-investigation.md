@@ -110,8 +110,20 @@ signals cannot be reused as an investigative case or an account restriction. A t
 fraud-case source contract, purpose-bound authorization and independent negative tests
 are prerequisites for the Fraud lens.
 
+The first Fraud network lens now uses a distinct reference-only Fraud topic. Context
+fetches live OPEN case associations from Fraud over HTTPS only after a case-scoped
+assignment, policy decision and committed audit; every candidate repeats that chain.
+Only exact account or counterparty UUID equality within the same identifier role
+becomes a visible edge. Discovery is limited to four currently assigned case
+references, and the UI labels a truncated or empty result as a partial search.
+No device graph, inferred identity, vector-generated edge or fraud finding is
+represented. The source URL is required runtime secret material, while the tracked
+deployment declares service identity for generated network policy. Missing secret,
+TLS trust, source, PDP or audit fails closed. This is an investigative pilot slice.
+
 Broader cross-case expansion, retention/restriction workflow, load evidence and a
-controlled pilot remain required. The bounded AML network is not completion of ADR-0304.
+controlled pilot remain required. The bounded AML and Fraud networks are not
+completion of ADR-0304.
 
 ## Alternatives considered
 

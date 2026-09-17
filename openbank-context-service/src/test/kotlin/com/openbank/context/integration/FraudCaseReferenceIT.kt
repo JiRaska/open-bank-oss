@@ -30,6 +30,7 @@ import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.Metadata
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.Optional
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -75,6 +76,50 @@ class FraudCaseReferenceIT {
         onVertx { consumer.consume(wrongKey.value) }
         assertThat(wrongKey.acked.get()).isZero()
         assertThat(wrongKey.nacked.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun `candidate discovery returns only exact active root assignments`() {
+        val root = UUID.randomUUID()
+        val assigned = UUID.randomUUID()
+        val wrongRoot = UUID.randomUUID()
+        val expired = UUID.randomUUID()
+        val now = Instant.now()
+        for (id in listOf(root, assigned, wrongRoot, expired)) {
+            onVertx { repository.append(decoder.decode(body(id), UUID.randomUUID().toString(), OPENED)) }
+        }
+        seedAssignment(assigned, "fraud-case:$assigned", "investigator-1", now.plusSeconds(3600))
+        seedAssignment(wrongRoot, "fraud-case:${UUID.randomUUID()}", "investigator-1", now.plusSeconds(3600))
+        seedAssignment(expired, "fraud-case:$expired", "investigator-1", now.minusSeconds(1))
+
+        val candidates = onVertx { repository.assignedCandidates(root, "investigator-1", now) }
+        assertThat(candidates.ids).containsExactly(assigned)
+        assertThat(candidates.truncated).isFalse()
+    }
+
+    private fun seedAssignment(caseId: UUID, rootRef: String, principal: String, validTo: Instant) {
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.prepareStatement(
+                """INSERT INTO context_case_assignments
+                   (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref, valid_from, valid_to, created_at)
+                   VALUES (?, 'openbank-cz', ?, ?, 'FRAUD_INVESTIGATION', ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, principal)
+                statement.setString(3, caseId.toString())
+                statement.setString(4, rootRef)
+                statement.setTimestamp(5, java.sql.Timestamp.from(Instant.now().minusSeconds(3600)))
+                statement.setTimestamp(6, java.sql.Timestamp.from(validTo))
+                statement.setTimestamp(7, java.sql.Timestamp.from(Instant.now()))
+                statement.executeUpdate()
+            }
+        }
     }
 
     private fun body(caseId: UUID) =

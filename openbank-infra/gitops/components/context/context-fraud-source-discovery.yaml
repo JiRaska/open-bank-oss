@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Separate source discovery from AML while retaining a required HTTPS endpoint at deployment.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: context-fraud-source-discovery
+  namespace: context
+  annotations:
+    openbank.io/rotation-deadline: "2027-09-17"
+spec:
+  refreshInterval: 1h
+  secretStoreRef: {name: vault-kv, kind: ClusterSecretStore}
+  target: {name: context-fraud-source-discovery, creationPolicy: Owner}
+  data:
+    - secretKey: FRAUD_CASE_SOURCE_URL
+      remoteRef: {key: context-fraud-source-discovery, property: FRAUD_CASE_SOURCE_URL}
