@@ -118,6 +118,26 @@ class StatutoryDelegationProposalServiceTest {
     }
 
     @Test
+    fun `pending inbox is company scoped and excludes proposals from an obsolete rule`(): Unit = runBlocking {
+        val current = operation()
+        val oldSnapshot = StatutoryOperationEvidence(mapper).rule(rule.copy(revision = 2))
+        val obsolete = current.copy(
+            id = UUID.randomUUID(),
+            policyRevision = 2,
+            ruleSnapshotJson = oldSnapshot,
+            ruleHash = StatutoryOperationEvidence(mapper).hash(oldSnapshot),
+        )
+        coEvery { rules.resolve(principal, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
+        coEvery { repository.pending(principal, current.ruleHash, clock.instant(), 50) } returns
+            listOf(current, obsolete)
+
+        assertThat(service.pending(principal, principal, actor)).containsExactly(current)
+        coVerify(exactly = 1) { repository.pending(principal, current.ruleHash, clock.instant(), 50) }
+        assertThatThrownBy { runBlocking { service.pending(principal, UUID.randomUUID(), actor) } }
+            .isInstanceOf(StatutoryProposalDenied::class.java)
+    }
+
+    @Test
     fun `an expired pending proposal is not revived by an exact idempotency replay`(): Unit = runBlocking {
         val draft = draft()
         val expired = operation().copy(

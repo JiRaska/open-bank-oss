@@ -86,6 +86,28 @@ class StatutoryDelegationOperationRepositoryImpl(
             .firstResult<StatutoryDelegationOperationEntity>()
     }.awaitSuspending()?.toDomain()
 
+    override suspend fun pending(
+        principalPartyId: UUID,
+        ruleHash: String,
+        after: Instant,
+        limit: Int,
+    ): List<StatutoryDelegationOperation> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "from StatutoryDelegationOperationEntity " +
+                    "where principalPartyId = :principal and ruleHash = :ruleHash " +
+                    "and state = :state and expiresAt > :after order by createdAt desc, id desc",
+                StatutoryDelegationOperationEntity::class.java,
+            )
+                .setParameter("principal", principalPartyId)
+                .setParameter("ruleHash", ruleHash)
+                .setParameter("state", StatutoryOperationState.PENDING)
+                .setParameter("after", after)
+                .setMaxResults(limit.coerceIn(1, MAX_PENDING_RESULTS))
+                .resultList
+        }
+    }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun findDecision(operationId: UUID, actorPartyId: UUID): StatutoryDelegationDecision? =
         Panache.withSession {
             Panache.getSession().flatMap { session ->
@@ -225,6 +247,7 @@ class StatutoryDelegationOperationRepositoryImpl(
             ruleSnapshotJson == other.ruleSnapshotJson
 
     private companion object {
+        const val MAX_PENDING_RESULTS = 50
         const val LOCK_OPERATION_SQL = """
             SELECT * FROM delegation_statutory_operations
             WHERE operation_id = :operation AND principal_party_id = :principal

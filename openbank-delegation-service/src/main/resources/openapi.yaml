@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive recertification routes after organization grant authority.
-  version: 1.22.0
+  version: 1.23.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -191,6 +191,26 @@ paths:
         '422': { description: Eligibility gate, or resource ownership could not be established }
         '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/statutory-operations:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: List actionable joint proposals for the selected company
+      description: >-
+        Returns at most 50 unexpired pending proposals under the current legal-rule snapshot.
+        The authenticated human must remain on the live statutory roster. This is an inbox,
+        not proof that a later signature or execution will succeed; those recheck the rule.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+      responses:
+        '200':
+          description: Recent actionable pending proposals, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StatutoryProposalResponse' }
+        '403': { description: Actor is not a current representative of the selected company }
+        '503': { description: Live company representation cannot be verified }
     post:
       tags: [Statutory delegation proposals]
       summary: Propose an immutable company delegation for joint statutory approval

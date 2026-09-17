@@ -96,6 +96,18 @@ class StatutoryDelegationResource(
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
+    @GET
+    @Authorize(action = "delegation.statutory.read", resource = "#customerPartyId")
+    suspend fun pending(
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): List<StatutoryProposalResponse> {
+        requireEdge()
+        val principal = requireNotNull(customerPartyId) { "customer profile is required" }
+        return service.pending(principal, customerPartyId, actorPartyId)
+            .map { StatutoryProposalResponse.from(it, mapper) }
+    }
+
     @POST
     @Authorize(action = "delegation.statutory.propose", resource = "#request.grantorPartyId")
     suspend fun propose(

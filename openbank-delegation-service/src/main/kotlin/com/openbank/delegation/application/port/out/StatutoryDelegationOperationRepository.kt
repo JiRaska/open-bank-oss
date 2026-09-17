@@ -32,6 +32,14 @@ interface StatutoryDelegationOperationRepository {
     /** Principal scope is mandatory so a guessed operation id never reveals another company. */
     suspend fun find(id: UUID, principalPartyId: UUID): StatutoryDelegationOperation?
 
+    /** Bounded company-scoped pending inbox; never enumerate another principal's evidence. */
+    suspend fun pending(
+        principalPartyId: UUID,
+        ruleHash: String,
+        after: Instant,
+        limit: Int,
+    ): List<StatutoryDelegationOperation>
+
     /** Insert only while PENDING and unexpired; exact same-actor retry returns original evidence. */
     suspend fun recordDecision(decision: StatutoryDelegationDecision): StatutoryDelegationDecision
 

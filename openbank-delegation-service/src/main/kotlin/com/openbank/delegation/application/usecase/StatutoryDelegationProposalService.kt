@@ -86,6 +86,18 @@ class StatutoryDelegationProposalService(
         actorPartyId: UUID?,
     ): StatutoryDelegationOperation = current(id, principalPartyId, callerPartyId, actorPartyId).first
 
+    suspend fun pending(
+        principalPartyId: UUID,
+        callerPartyId: UUID?,
+        actorPartyId: UUID?,
+    ): List<StatutoryDelegationOperation> {
+        val actor = requireActor(principalPartyId, callerPartyId, actorPartyId)
+        val rule = resolve(principalPartyId, actor)
+        val snapshot = evidence.rule(rule)
+        return repository.pending(principalPartyId, evidence.hash(snapshot), clock.instant(), MAX_PENDING_RESULTS)
+            .filter { it.ruleSnapshotJson == snapshot }
+    }
+
     internal suspend fun current(
         id: UUID,
         principalPartyId: UUID,
@@ -121,6 +133,7 @@ class StatutoryDelegationProposalService(
 
     private companion object {
         const val MAX_REQUEST_KEY_LENGTH = 200
+        const val MAX_PENDING_RESULTS = 50
         val PROPOSAL_LIFETIME: Duration = Duration.ofHours(24)
     }
 }

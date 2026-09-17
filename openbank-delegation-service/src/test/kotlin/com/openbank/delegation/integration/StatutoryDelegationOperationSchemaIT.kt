@@ -69,7 +69,6 @@ class StatutoryDelegationOperationSchemaIT {
         assertThat(onVertxContext { operations.find(proposed.id, proposed.principalPartyId) })
             .isEqualTo(proposed)
         assertThat(onVertxContext { operations.find(proposed.id, UUID.randomUUID()) }).isNull()
-
         val changedPayload = """{"resourceId":"${UUID.randomUUID()}"}"""
         assertThatThrownBy {
             onVertxContext {
@@ -101,6 +100,33 @@ class StatutoryDelegationOperationSchemaIT {
                     }
                 }
         }
+    }
+
+    @Test
+    fun `pending inbox selects only current rule and company before expiry`() {
+        val proposed = operation()
+        onVertxContext { operations.create(proposed) }
+
+        assertThat(
+            onVertxContext {
+                operations.pending(proposed.principalPartyId, proposed.ruleHash, proposed.createdAt, 50)
+            },
+        )
+            .contains(proposed)
+        assertThat(onVertxContext { operations.pending(UUID.randomUUID(), proposed.ruleHash, proposed.createdAt, 50) })
+            .isEmpty()
+        assertThat(
+            onVertxContext {
+                operations.pending(proposed.principalPartyId, proposed.ruleHash, proposed.expiresAt, 50)
+            },
+        )
+            .doesNotContain(proposed)
+        assertThat(
+            onVertxContext {
+                operations.pending(proposed.principalPartyId, "0".repeat(64), proposed.createdAt, 50)
+            },
+        )
+            .isEmpty()
     }
 
     @Test
