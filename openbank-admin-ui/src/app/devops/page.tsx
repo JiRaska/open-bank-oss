@@ -52,10 +52,10 @@ interface DoraData {
 // ── DORA level colours + labels ───────────────────────────────────────────────
 
 const DORA_CFG: Record<NonNullable<DoraLevel>, { color: string; bg: string; border: string; label: string; labelCs: string }> = {
-  elite:  { color: '#16a34a', bg: '#dcfce7', border: '#86efac', label: 'Elite',  labelCs: 'Elite' },
-  high:   { color: '#2563eb', bg: '#dbeafe', border: '#93c5fd', label: 'High',   labelCs: 'Vysoký' },
-  medium: { color: '#d97706', bg: '#fef9c3', border: '#fde047', label: 'Medium', labelCs: 'Střední' },
-  low:    { color: '#dc2626', bg: '#fee2e2', border: '#fca5a5', label: 'Low',    labelCs: 'Nízký' },
+  elite:  { color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', label: 'Elite',  labelCs: 'Elite' },
+  high:   { color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', label: 'High',   labelCs: 'Vysoký' },
+  medium: { color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', label: 'Medium', labelCs: 'Střední' },
+  low:    { color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', label: 'Low',    labelCs: 'Nízký' },
 }
 
 // ── Helper components ─────────────────────────────────────────────────────────
@@ -139,10 +139,10 @@ function SourceChip({ available, label }: { available: boolean; label: string })
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
       fontSize: '10px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px',
-      background: available ? '#dcfce7' : 'var(--surface-3)',
-      color: available ? '#16a34a' : 'var(--text-tertiary)',
-      border: `1px solid ${available ? '#86efac' : 'var(--border)'}` }}>
-      <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: available ? '#16a34a' : 'var(--text-tertiary)', flexShrink: 0 }} />
+      background: available ? 'var(--success-bg)' : 'var(--surface-3)',
+      color: available ? 'var(--success-text)' : 'var(--text-tertiary)',
+      border: `1px solid ${available ? 'var(--success-border)' : 'var(--border)'}` }}>
+      <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: available ? 'var(--success)' : 'var(--text-tertiary)', flexShrink: 0 }} />
       {label}
     </span>
   )
@@ -438,7 +438,7 @@ function DevOpsContent() {
             <div style={{ marginBottom: '20px', padding: '14px 18px', borderRadius: '10px',
               border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <Info size={14} style={{ color: '#6366f1' }} />
+                <Info size={14} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Konfigurace datových zdrojů', 'Data Source Configuration')}
                 </span>
@@ -464,7 +464,7 @@ function DevOpsContent() {
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
               padding: '20px 24px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-                <GitBranch size={16} style={{ color: '#6366f1' }} />
+                <GitBranch size={16} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Poslední nasazení', 'Recent Deployments')}
                 </span>
@@ -476,8 +476,8 @@ function DevOpsContent() {
                 {dora.recentDeployments.slice(0, 8).map((d, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px',
                     padding: '6px 0', borderBottom: i < dora.recentDeployments.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                    <span style={{ fontSize: '10px', fontFamily: 'monospace', color: '#6366f1',
-                      background: '#ede9fe', padding: '1px 6px', borderRadius: '4px', flexShrink: 0 }}>
+                    <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--accent-text)',
+                      background: 'var(--accent-bg)', padding: '1px 6px', borderRadius: '4px', flexShrink: 0 }}>
                       {d.sha}
                     </span>
                     <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)',

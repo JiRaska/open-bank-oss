@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.78.0...customer-edge-v0.79.0) (2026-09-17)
+
+
+### Features
+
+* **customer-edge:** route business questionnaire, agreement and entity documents ([#10197](https://github.com/JiRaska/open-bank-oss/issues/10197)) ([7457608](https://github.com/JiRaska/open-bank-oss/commit/7457608555574ab543c6f7fd75b80b72c87e2614))
+
 ## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.77.0...customer-edge-v0.78.0) (2026-09-14)
 
 

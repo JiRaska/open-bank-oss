@@ -12,8 +12,11 @@ describe('mobile operator shell accessibility contract', () => {
     const sidebar = read('components/layout/Sidebar.tsx')
     const css = read('app/globals.css')
     expect(appShell).toContain("'use client'")
-    expect(appShell).toContain("window.addEventListener('keydown', closeOnEscape)")
-    expect(appShell).toContain("event.key !== 'Escape'")
+    const keydownListener = appShell.match(/window\.addEventListener\('keydown', (\w+)\)/)?.[1]
+    expect(keydownListener).toBeTruthy()
+    expect(appShell).toContain(`window.removeEventListener('keydown', ${keydownListener})`)
+    expect(appShell).toContain("event.key === 'Escape'")
+    expect(appShell).toContain("event.key !== 'Tab'")
     expect(appShell).toContain("sessionStatus === 'loading'")
     expect(appShell).toContain('ob-mobile-nav-overlay')
     expect(appShell).toContain("t('Zavřít navigaci', 'Close navigation')")

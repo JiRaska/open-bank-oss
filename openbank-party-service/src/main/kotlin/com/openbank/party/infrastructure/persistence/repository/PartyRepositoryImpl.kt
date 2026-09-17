@@ -254,6 +254,10 @@ class PartyRepositoryImpl(
         it.consentCapturedAt = consentCapturedAt
         it.consentMarketingUpdatedAt = consentMarketingUpdatedAt
         it.mergedInto = mergedIntoPartyId
+        it.pepFlag = pepFlag
+        it.pepCategory = pepCategory
+        it.fatcaStatus = fatcaStatus
+        it.crsStatus = crsStatus
     }
 
     private fun PartyEntity.toDomain() = Party(
@@ -286,6 +290,10 @@ class PartyRepositoryImpl(
         consentCapturedAt = consentCapturedAt,
         consentMarketingUpdatedAt = consentMarketingUpdatedAt,
         mergedIntoPartyId = mergedInto,
+        pepFlag = pepFlag,
+        pepCategory = pepCategory,
+        fatcaStatus = fatcaStatus,
+        crsStatus = crsStatus,
     )
 }
 
