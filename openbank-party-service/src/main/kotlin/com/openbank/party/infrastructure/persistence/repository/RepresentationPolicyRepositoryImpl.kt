@@ -28,7 +28,10 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
             principalPartyId = snapshot.principalPartyId
             revision = snapshot.revision
             sourceCaseId = snapshot.sourceCaseId
+            attestationId = snapshot.attestationId
             ruleTextHash = snapshot.ruleTextHash
+            registrySource = snapshot.registrySource
+            registrySourceRef = snapshot.registrySourceRef
             mode = snapshot.mode.name
             requiredSignatures = snapshot.requiredSignatures
             requiredOfficesJson = mapper.writeValueAsString(snapshot.requiredOffices)
@@ -51,7 +54,10 @@ class RepresentationPolicyRepositoryImpl(private val mapper: ObjectMapper) :
         principalPartyId = principalPartyId,
         revision = revision,
         sourceCaseId = sourceCaseId,
+        attestationId = attestationId,
         ruleTextHash = ruleTextHash.trim(),
+        registrySource = registrySource,
+        registrySourceRef = registrySourceRef,
         mode = RepresentationPolicyMode.valueOf(mode),
         requiredSignatures = requiredSignatures,
         requiredOffices = mapper.readValue(requiredOfficesJson, object : TypeReference<List<String>>() {}),

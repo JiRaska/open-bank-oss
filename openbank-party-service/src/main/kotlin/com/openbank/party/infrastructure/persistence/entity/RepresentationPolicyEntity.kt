@@ -26,8 +26,17 @@ class RepresentationPolicyEntity : PanacheEntity() {
     @Column(name = "source_case_id", nullable = false, unique = true)
     lateinit var sourceCaseId: UUID
 
+    @Column(name = "attestation_id", nullable = false)
+    lateinit var attestationId: UUID
+
     @Column(name = "rule_text_hash", nullable = false, length = 64)
     lateinit var ruleTextHash: String
+
+    @Column(name = "registry_source", nullable = false, length = 64)
+    lateinit var registrySource: String
+
+    @Column(name = "registry_source_ref")
+    var registrySourceRef: String? = null
 
     @Column(name = "mode", nullable = false)
     lateinit var mode: String

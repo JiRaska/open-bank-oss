@@ -33,7 +33,10 @@ data class RepresentationPolicySnapshot(
     val principalPartyId: UUID,
     val revision: Long,
     val sourceCaseId: UUID,
+    val attestationId: UUID,
     val ruleTextHash: String,
+    val registrySource: String,
+    val registrySourceRef: String?,
     val mode: RepresentationPolicyMode,
     val requiredSignatures: Int,
     val requiredOffices: List<String>,
@@ -44,6 +47,7 @@ data class RepresentationPolicySnapshot(
     init {
         require(revision > 0) { "representation rule revision must be positive" }
         require(ruleTextHash.matches(Regex("[0-9a-f]{64}"))) { "rule text hash must be SHA-256 hex" }
+        require(registrySource.isNotBlank()) { "verified registry source is required" }
         require(evidenceRef.isNotBlank()) { "verified rule evidence is required" }
         require(eligibleRepresentatives.isNotEmpty()) { "a rule needs identified representatives" }
         require(eligibleRepresentatives.map { it.partyId }.distinct().size == eligibleRepresentatives.size) {
