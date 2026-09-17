@@ -30,6 +30,11 @@ spec:
         operations: [Write, Describe]
       - resource:
           type: topic
+          name: openbank.kyb.ubo-observation-references
+          patternType: literal
+        operations: [Write, Describe]
+      - resource:
+          type: topic
           name: openbank.party.events
           patternType: literal
         operations: [Read, Describe]
