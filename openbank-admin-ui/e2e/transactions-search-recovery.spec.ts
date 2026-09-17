@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.describe('Transaction ledger search recovery', () => {
@@ -192,5 +193,62 @@ test.describe('Transaction ledger search recovery', () => {
     await search.click()
     await expect(page.getByText(/Session expired|Vypršela relace/i)).toBeVisible()
     await expect(page.getByText('TXN-PRIVATE-42')).toHaveCount(0)
+  })
+
+  test('keeps movement types neutral and makes the bilingual result table keyboard-scrollable', async ({ page, context, baseURL }) => {
+    await context.addCookies([{ name: 'openbank-admin-lang', value: 'en', url: baseURL! }])
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [
+          {
+            id: '33333333-3333-4333-8333-333333333333', referenceNumber: 'TXN-CREDIT-42',
+            type: 'CREDIT', sourceAccountId: null, targetAccountId: null, amount: 1250,
+            currencyCode: 'CZK', status: 'COMPLETED', description: 'Incoming movement',
+            valueDate: '2026-08-31', bookingDate: '2026-08-31', initiatedAt: '2026-08-31T08:00:00Z', completedAt: '2026-08-31T08:00:01Z',
+          },
+          {
+            id: '44444444-4444-4444-8444-444444444444', referenceNumber: 'TXN-DEBIT-43',
+            type: 'DEBIT', sourceAccountId: null, targetAccountId: null, amount: 500,
+            currencyCode: 'CZK', status: 'FAILED', description: 'Unsettled movement',
+            valueDate: '2026-08-31', bookingDate: '2026-08-31', initiatedAt: '2026-08-31T09:00:00Z', completedAt: null,
+          },
+        ],
+        count: 2, limit: 51, offset: 0,
+      }),
+    }))
+
+    await page.goto('/transactions')
+    await page.getByRole('button', { name: 'Search transactions' }).click()
+    const tableRegion = page.getByRole('region', { name: 'Scrollable transaction results table' })
+    await expect(tableRegion.getByRole('row', { name: /TXN-CREDIT-42/ }).getByText('Credit', { exact: true })).toHaveClass(/badge-neutral/)
+    await expect(tableRegion.getByRole('row', { name: /TXN-DEBIT-43/ }).getByText('Debit', { exact: true })).toHaveClass(/badge-neutral/)
+    await expect(tableRegion.getByText('Completed')).toHaveClass(/badge-success/)
+    await expect(tableRegion.getByText('Failed')).toHaveClass(/badge-danger/)
+    expect(await tableRegion.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+    await tableRegion.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => tableRegion.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+
+    for (const dark of [false, true]) {
+      if (dark) {
+        await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
+        await expect(page.locator('html')).toHaveClass(/dark/)
+      }
+      const scan = await new AxeBuilder({ page })
+        .include('[aria-label="Scrollable transaction results table"]')
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+      expect(scan.violations, scan.violations.map(violation => violation.id).join(', ')).toEqual([])
+    }
+
+    await page.getByRole('button', { name: 'Switch to Czech' }).click()
+    const czechRegion = page.getByRole('region', { name: 'Posuvná tabulka výsledků transakcí' })
+    await expect(czechRegion.getByText('Kredit')).toHaveClass(/badge-neutral/)
+    await expect(czechRegion.getByText('Debet')).toHaveClass(/badge-neutral/)
+    await expect(czechRegion.getByText('Dokončeno')).toHaveClass(/badge-success/)
+    await expect(czechRegion.getByText('Selhalo')).toHaveClass(/badge-danger/)
   })
 })
