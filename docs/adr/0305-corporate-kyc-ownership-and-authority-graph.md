@@ -52,7 +52,7 @@ Companies House serves PSC statements from a separate endpoint; a missing PSC-li
 resource alone is not proof that the company has no reportable controllers.
 
 Before this lens ingests UBO evidence, KYB must persist a bounded, versioned source
-observation with its source hash, fetched/recorded time, record references, statements,
+observation with a mapped-finding hash, fetched/recorded time, record references, statements,
 corrections and restriction state. An outbox event can then refer to that observation.
 The existing `openbank.kyb.events` lifecycle topic is unsuitable for owner-level facts:
 onboarding and the analytics sink already consume it, and the latter can retain raw
@@ -64,9 +64,14 @@ retention alone. This is an egress and access review gate, not permission to pub
 before the contract, ACLs, threat model and consumer are tested together.
 
 The first bounded slice stores versioned PSC observations in KYB and emits only
-`caseId`, `observationId`, `revision` and `sourceSha256` on the dedicated topic. A
+`caseId`, `observationId`, `revision` and `sourceSha256` on the dedicated topic.
+Despite its compatibility name, `sourceSha256` currently hashes KYB's serialized
+mapped finding, not the original register response. It proves reference consistency
+between the event and source row, not authenticity of the upstream source. Capturing
+and verifying the original source artifact with its own digest remains required before
+the complete evidentiary lens can claim document-level provenance. A
 separate `KybUboObservationRestricted` reference event has the same minimized fields.
-KYB retains the original evidence and records a fixed restriction reason, actor and
+KYB retains the original mapped observation and records a fixed restriction reason, actor and
 time in a separate table; subsequent detail reads fail closed. Context persists a
 durable, bank-scoped tombstone and excludes the observation from every history read,
 including when the restriction event arrives before the recorded event. Replays are

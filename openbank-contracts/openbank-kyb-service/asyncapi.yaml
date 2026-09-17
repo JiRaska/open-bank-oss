@@ -169,6 +169,7 @@ components:
         sourceSha256:
           type: string
           pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of KYB's serialized mapped finding for reference consistency; not proof of the original register response.
     CaseEnvelope:
       type: object
       description: "Flat payload of `CaseEvent` (domain/model/KybEvent.kt) — the constructor properties ARE the wire fields."

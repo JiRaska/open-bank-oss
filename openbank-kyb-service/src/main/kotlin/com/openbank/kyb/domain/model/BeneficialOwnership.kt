@@ -109,6 +109,7 @@ data class UboObservation(
     val caseId: UUID,
     val revision: Long,
     val finding: UboFinding,
+    /** SHA-256 of KYB's serialized mapped finding, not of the upstream register response. */
     val sourceSha256: String,
     val recordedAt: Instant,
 )
