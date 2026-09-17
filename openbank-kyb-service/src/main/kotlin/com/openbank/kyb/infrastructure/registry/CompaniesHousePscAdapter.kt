@@ -92,7 +92,7 @@ class CompaniesHousePscAdapter : UboAdapter {
         val items = body.path("items").toList()
         val owners = items
             .filter { it.text("ceased_on") == null && it.text("kind")?.contains("statement") != true }
-            .mapNotNull { toOwner(it) }
+            .mapNotNull { toOwner(it, identifier.value) }
         // A statement item ("no individual or entity with significant control identified") is an
         // answer the company filed under s.790 — carried as text so the analyst reads the register's
         // own words rather than our summary of them.
@@ -122,11 +122,18 @@ class CompaniesHousePscAdapter : UboAdapter {
         fetchedAt = Instant.now(clock),
     )
 
-    private fun toOwner(item: JsonNode): BeneficialOwner? {
+    private fun toOwner(item: JsonNode, companyNumber: String): BeneficialOwner? {
         val name = item.text("name") ?: return null
         val natures = item.path("natures_of_control").mapNotNull { it.takeIf { n -> n.isTextual }?.asText() }
         return BeneficialOwner(
             fullName = name,
+            sourceRecordRef = item.path("links").text("self")?.takeIf { ref ->
+                // A PSC path identifies one register record for this company, not a person across companies.
+                // Never surface an arbitrary URL or a reference to a different company as evidence.
+                ref.length <= MAX_RECORD_REF_LENGTH &&
+                    ref.startsWith("/company/$companyNumber/persons-with-significant-control/") &&
+                    RECORD_REF_PATTERN.matches(ref)
+            },
             // The PSC register publishes month and year only. A reconstructed day would be a fact
             // nobody filed, so the field stays null and identity matching uses the other columns.
             dateOfBirth = null,
@@ -173,6 +180,8 @@ class CompaniesHousePscAdapter : UboAdapter {
         private const val PSC_TIMEOUT_MS = 4000L
         private const val DATE_LENGTH = 10
         private const val PSC_PAGE = 100
+        private const val MAX_RECORD_REF_LENGTH = 256
+        private val RECORD_REF_PATTERN = Regex("(/[A-Za-z0-9-]+)+")
 
         /**
          * Ordering for "the strongest control this person holds". A person can hold shares in one

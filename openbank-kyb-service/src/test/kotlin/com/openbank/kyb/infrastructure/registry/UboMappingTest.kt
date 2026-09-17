@@ -5,10 +5,12 @@
 package com.openbank.kyb.infrastructure.registry
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.OwnershipBand
 import com.openbank.kyb.domain.model.UboSource
+import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -47,6 +49,13 @@ class UboMappingTest {
         // Shares 50-75% and votes 25-50% for the same person: the threshold test is about the
         // higher one, so a mapping that took the first or the last would understate her.
         assertThat(finding.owners[0].band).isEqualTo(OwnershipBand.PCT_50_TO_75)
+        assertThat(finding.owners[0].sourceRecordRef)
+            .isEqualTo("/company/OC123456/persons-with-significant-control/individual/psc-1")
+        assertThat(UboResponse.from(finding).owners[0].sourceRecordRef)
+            .isEqualTo(finding.owners[0].sourceRecordRef)
+        assertThat(finding.owners[1].sourceRecordRef)
+            .isEqualTo("/company/OC123456/persons-with-significant-control/corporate-entity/psc-2")
+        assertThat(finding.owners[2].sourceRecordRef).isNull()
         assertThat(finding.owners[0].natureOfControl).hasSize(2)
         // The register publishes month and year only; a reconstructed day would be a fact nobody filed.
         assertThat(finding.owners[0].dateOfBirth).isNull()
@@ -57,6 +66,42 @@ class UboMappingTest {
         assertThat(finding.reportableOwners).hasSize(3)
         assertThat(finding.requiresDeclaration).isFalse()
         assertThat(finding.threshold).isEqualTo(0.25)
+    }
+
+    @Test
+    fun `a PSC reference cannot point to another company or arbitrary URL`() {
+        val body = json.readTree(
+            """
+            {"items":[
+              {"name":"Synthetic owner", "links":{"self":"/company/OTHER/persons-with-significant-control/individual/1"}},
+              {"name":"Synthetic owner 2", "links":{"self":"https://example.invalid/psc/2"}},
+              {"name":"Synthetic owner 3", "links":{"self":"/company/OC123456/persons-with-significant-control/individual/../3"}}
+            ]}
+            """.trimIndent(),
+        )
+        val finding = adapter().map(LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"), body, gb)
+
+        assertThat(finding.owners).hasSize(3)
+        assertThat(finding.owners.map { it.sourceRecordRef }).containsOnlyNulls()
+    }
+
+    @Test
+    fun `the wire response and OpenAPI expose a nullable source observation reference`() {
+        val finding = adapter().map(
+            LegalEntityIdentifier.of(IdentifierScheme.GB_CRN, "OC123456"),
+            fixture("companies-house-psc.json"),
+            gb,
+        )
+        val response = json.findAndRegisterModules().valueToTree<com.fasterxml.jackson.databind.JsonNode>(
+            UboResponse.from(finding),
+        )
+        val field = YAMLMapper().readTree(checkNotNull(javaClass.getResourceAsStream("/openapi.yaml")))
+            .at("/components/schemas/BeneficialOwner/properties/sourceRecordRef")
+
+        assertThat(response.at("/owners/0/sourceRecordRef").asText())
+            .isEqualTo("/company/OC123456/persons-with-significant-control/individual/psc-1")
+        assertThat(response.at("/owners/2/sourceRecordRef").isNull).isTrue()
+        assertThat(field.path("type").map { it.asText() }).containsExactly("string", "null")
     }
 
     @Test

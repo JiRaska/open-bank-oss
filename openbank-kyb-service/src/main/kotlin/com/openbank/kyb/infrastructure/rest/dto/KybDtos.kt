@@ -353,9 +353,11 @@ data class CaseResponse(
  * `band` is a band and not a percentage on purpose — see [com.openbank.kyb.domain.model.OwnershipBand].
  * `natureOfControl` carries the register's own vocabulary verbatim: an analyst deciding whether a
  * control is ownership or influence needs the words that were filed, not our paraphrase of them.
+ * `sourceRecordRef` points to this company's PSC record, not to a global person identity.
  */
 data class BeneficialOwnerResponse(
     val fullName: String,
+    val sourceRecordRef: String?,
     val dateOfBirth: LocalDate?,
     val nationality: String?,
     val countryOfResidence: String?,
@@ -394,6 +396,7 @@ data class UboResponse(
             owners = f.owners.map {
                 BeneficialOwnerResponse(
                     fullName = it.fullName,
+                    sourceRecordRef = it.sourceRecordRef,
                     dateOfBirth = it.dateOfBirth,
                     nationality = it.nationality,
                     countryOfResidence = it.countryOfResidence,
