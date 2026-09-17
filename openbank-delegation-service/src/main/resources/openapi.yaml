@@ -848,7 +848,10 @@ components:
       required: [id, principalPartyId, initiatorPartyId, requestHash, payload, ruleHash, rule, state, createdAt, expiresAt]
       description: >-
         Frozen offer and legal-rule evidence. A PENDING proposal grants no access. The app must
-        display the payload and rule before a representative signs requestHash through SCA.
+        display the payload and rule before signing. requestHash fingerprints the payload only;
+        it is not a decision-specific SCA binding and must never be used alone to record an
+        approval or rejection. A later decision API must bind the operation, rule, actor and
+        explicit decision together.
       properties:
         id: { type: string, format: uuid }
         principalPartyId: { type: string, format: uuid }

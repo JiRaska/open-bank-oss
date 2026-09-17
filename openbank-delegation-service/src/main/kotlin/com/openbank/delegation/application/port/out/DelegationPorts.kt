@@ -86,7 +86,15 @@ interface GrantorAuthorityClient {
     suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority
 }
 
-data class ScaChallengeSnapshot(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
+data class ScaChallengeSnapshot(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: String,
+    val status: String,
+    val consumedAt: String? = null,
+    val operationId: String? = null,
+    val operationHash: String? = null,
+)
 
 interface ScaChallengeClient {
     suspend fun getChallenge(challengeId: UUID): ScaChallengeSnapshot

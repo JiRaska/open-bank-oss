@@ -23,10 +23,18 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
-// sca-service's ScaChallengeResponse carries method/expiresAt/completedAt/consumedAt/attempt
-// counters too; this client only needs four fields and must not break when that DTO grows.
+// Keep the signed statutory binding and consumed timestamp for exact retry reconciliation;
+// older providers omit them and the eventual decision gate must fail closed on nulls.
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ScaChallengeClientResponse(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
+data class ScaChallengeClientResponse(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: String,
+    val status: String,
+    val consumedAt: String? = null,
+    val operationId: String? = null,
+    val operationHash: String? = null,
+)
 
 /** Mirrors sca-service's ConsumeScaRequest. Only the party is stated: a delegation challenge
  *  carries no dynamic-linking data, and sca-service authorises an unlinked challenge exactly
@@ -83,5 +91,8 @@ class ResilientScaChallengeClient @Inject constructor(@RestClient private val cl
         partyId = partyId,
         purpose = purpose,
         status = status,
+        consumedAt = consumedAt,
+        operationId = operationId,
+        operationHash = operationHash,
     )
 }
