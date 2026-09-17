@@ -27,7 +27,8 @@ class PublicationTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         (self.root / "pacts").mkdir()
         for provider in ["openbank-billing-service", "openbank-product-catalog",
-                         "openbank-flaky-test-hunter", "openbank-case-coordinator-agent"]:
+                         "openbank-flaky-test-hunter", "openbank-case-coordinator-agent",
+                         "openbank-context-service"]:
             p = self.root / "pacts" / f"openbank-admin-ui-{provider}.json"
             p.write_text(json.dumps({"consumer": {"name": "openbank-admin-ui"},
                                      "provider": {"name": provider},
@@ -73,12 +74,13 @@ class PublicationTest(unittest.TestCase):
 
     def test_complete_set_and_revision(self):
         body = self.body()
-        self.assertEqual(len(body["contracts"]), 4)
+        self.assertEqual(len(body["contracts"]), 5)
         self.assertEqual(body["pacticipantVersionNumber"], self.sha)
         self.assertEqual(body["branch"], "main")
         self.assertEqual({x["providerName"] for x in body["contracts"]},
                          {"openbank-billing-service", "openbank-product-catalog",
-                          "openbank-flaky-test-hunter", "openbank-case-coordinator-agent"})
+                          "openbank-flaky-test-hunter", "openbank-case-coordinator-agent",
+                          "openbank-context-service"})
 
     def test_revision_mismatch(self):
         with self.assertRaises(ValueError):
@@ -159,7 +161,7 @@ class PublicationTest(unittest.TestCase):
         with patch.object(publisher.urllib.request, "build_opener", return_value=opener):
             providers = publisher.publish(body, self.env)
         self.assertEqual(providers, sorted(x["providerName"] for x in body["contracts"]))
-        self.assertEqual([r.method for r in requests], ["POST"] + ["GET"] * 4)
+        self.assertEqual([r.method for r in requests], ["POST"] + ["GET"] * 5)
         self.assertTrue(all(f"/version/{self.sha}" in r.full_url for r in requests[1:]))
 
     def test_mismatched_readback_fails_closed(self):
