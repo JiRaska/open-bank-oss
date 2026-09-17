@@ -8,6 +8,7 @@ import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
@@ -146,4 +147,34 @@ class RepresentationAttestationEntity : PanacheEntity() {
 class KybOutboxEntity : PanacheOutboxEntity() {
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null
+}
+
+/** Immutable, case-scoped mapped register finding; no owner details leave KYB through Kafka. */
+@Entity
+@Table(name = "kyb_ubo_observations")
+class UboObservationEntity {
+    @Id
+    @Column(name = "observation_id", nullable = false)
+    lateinit var observationId: UUID
+
+    @Column(name = "case_id", nullable = false)
+    lateinit var caseId: UUID
+
+    @Column(name = "revision", nullable = false)
+    var revision: Long = 0
+
+    @Column(name = "source", nullable = false)
+    lateinit var source: String
+
+    @Column(name = "source_sha256", nullable = false)
+    lateinit var sourceSha256: String
+
+    @Column(name = "finding_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var findingJson: String
+
+    @Column(name = "fetched_at", nullable = false)
+    lateinit var fetchedAt: Instant
+
+    @Column(name = "recorded_at", nullable = false)
+    lateinit var recordedAt: Instant
 }

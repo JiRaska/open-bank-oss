@@ -17,6 +17,7 @@ import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.UboFinding
+import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import io.smallrye.mutiny.Uni
@@ -63,6 +64,14 @@ interface RegistryExtractCache {
 interface BusinessOnboardingCaseRepository {
     suspend fun save(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
     suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
+
+    /** Stores the case transition and immutable mapped source answer in the same transaction. */
+    suspend fun updateWithUboObservation(
+        case: BusinessOnboardingCase,
+        finding: UboFinding,
+        recordedAt: Instant,
+    ): UboObservation
+
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?
     suspend fun findByInvitationToken(token: String): BusinessOnboardingCase?
