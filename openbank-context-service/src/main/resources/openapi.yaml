@@ -2,9 +2,32 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/authorizations/{id}:
+    get:
+      operationId: getAuthorityHistory
+      summary: Read immutable source delegation observations for an explicitly approved root
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Bounded source observations; no assertion about authorization of a business action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthorityHistory' }
+        '400': { description: Invalid purpose, scope or future timestamp }
+        '403': { description: Role, root assignment or policy denied }
+        '503': { description: Authorization unavailable }
   /api/v1/context/assignment-proposals:
     post:
       operationId: proposeContextAssignment
@@ -152,8 +175,55 @@ components:
         purpose: { type: string, minLength: 1, maxLength: 80 }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
+        rootRef:
+          type: [string, "null"]
+          maxLength: 300
+          description: Required delegation UUID root for AUTHORIZATION_REVIEW; absent for other purposes
     DecideAssignment:
       type: object
       required: [approve]
       properties:
         approve: { type: boolean }
+    AuthorityHistory:
+      type: object
+      required: [root, effectiveAt, knownAt, observations, truncated, actionAuthorization]
+      properties:
+        root: { type: string, maxLength: 47 }
+        effectiveAt: { type: string, format: date-time }
+        knownAt: { type: string, format: date-time }
+        truncated: { type: boolean }
+        actionAuthorization: { type: string, const: UNKNOWN }
+        observations:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [evidence, recordedAt, evidenceRef, contentHash]
+            properties:
+              recordedAt: { type: string, format: date-time }
+              evidenceRef: { type: string, maxLength: 300 }
+              contentHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+              evidence: { $ref: '#/components/schemas/AuthorityEvidence' }
+    AuthorityEvidence:
+      type: object
+      required: [delegationId, revision, eventType, grantorPartyId, granteePartyId, capabilities, occurredAt]
+      properties:
+        delegationId: { type: string, format: uuid }
+        revision: { type: integer, format: int64, minimum: 0 }
+        eventType:
+          type: string
+          enum: [DelegationOffered, DelegationActivated, DelegationReinstated, DelegationDeclined, DelegationRevoked, DelegationSuspended, DelegationRenounced, DelegationExpired]
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: [string, "null"], maxLength: 80 }
+        resourceId: { type: [string, "null"], format: uuid }
+        capabilities:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, maxLength: 80 }
+        approvalPolicy: { type: [string, "null"], maxLength: 80 }
+        requiredApprovals: { type: [integer, "null"], minimum: 1, maximum: 100 }
+        validFrom: { type: [string, "null"], format: date-time }
+        validTo: { type: [string, "null"], format: date-time }
+        occurredAt: { type: string, format: date-time }

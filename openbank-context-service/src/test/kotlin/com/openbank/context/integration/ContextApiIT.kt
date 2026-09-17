@@ -505,6 +505,7 @@ class ContextApiIT {
 
 class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+        "delegation-history-in",
         "dispute-events-in",
         "ict-incident-events-in",
         "domestic-payment-events-in",

@@ -24,3 +24,5 @@ data:
     mp.messaging.incoming.clearing-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.sepa-payment-events-in.group.id=openbank-context-service
     mp.messaging.incoming.sepa-payment-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.delegation-history-in.group.id=openbank-context-service
+    mp.messaging.incoming.delegation-history-in.auto.offset.reset=earliest

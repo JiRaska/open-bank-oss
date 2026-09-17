@@ -44,6 +44,8 @@ quarkus:
   mp:
     messaging:
       incoming:
+        delegation-history-in:
+          connector: smallrye-in-memory
         dispute-events-in:
           connector: smallrye-in-memory
         ict-incident-events-in:
@@ -72,6 +74,14 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      delegation-history-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.delegation-history
       dispute-events-in:
         connector: smallrye-kafka
         topic: openbank.dispute.events

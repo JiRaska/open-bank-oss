@@ -245,7 +245,8 @@ admin UI, generation-scoped idempotent Kafka projectors for complaint and ICT-in
 events, bounded complaint and aggregate incident APIs, GitOps resources, DLQs, metrics,
 alerts and real-PostgreSQL HTTP integration tests. The repeatable 100 RPS workload profile
 is in `openbank-context-service/e2e`; production-sized benchmark evidence is still required
-before replicas are raised from the staged zero deployment.
+before expanding the pilot. The GitOps component declares one replica; deployment
+readiness alone is not production capacity evidence.
 
 P0/P1 keeps the latest source version in each rebuild generation. Full bitemporal version-row
 history, pgvector/full-text retrieval, P2/P3 lenses and production capacity evidence remain in

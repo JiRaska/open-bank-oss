@@ -28,7 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestProfile(IncidentImpactPactProfile::class)
 @Provider("openbank-context-service")
 @PactFolder("../pacts")
-@TestSecurity(user = "pact-operator", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "pact-operator", roles = ["ROLE_OPERATOR", "ROLE_COMPLIANCE"])
 class ContextPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var port: String
@@ -49,6 +49,12 @@ class ContextPactProviderVerificationTest {
 
     @State("an incident investigator is unauthorized for another case")
     fun unauthorizedCase() = IncidentImpactPactFixtures().seed(2)
+
+    @State("root-scoped authority history has no recorded evidence")
+    fun authorityHistory() = AuthorityHistoryPactFixtures().seed()
+
+    @State("authority history is unauthorized for another root")
+    fun unauthorizedAuthorityRoot() = AuthorityHistoryPactFixtures().seed()
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
