@@ -95,8 +95,15 @@ authority. A live status check still has a time-of-check/time-of-use race if a c
 immediately afterward; the response contains source observations, not a synchronous AML
 decision. Source-case updates and investigative assignments remain separate controls.
 
+The network endpoint discovers only candidates with the investigator's own approved
+case-root assignment, then repeats OPA, durable read audit and current-source checks
+for each candidate. Revocation between discovery and authorization omits that case.
+Candidate source or PDP outage fails the entire response; no unassigned case ID or
+count is returned. The endpoint caps candidates at four, so an empty or short result
+is not a completeness claim. Equal identifiers may be investigative leads only.
+
 The new event store also forces bank-scoped RLS and has no general graph traversal or
-cross-case search API. Its event UUIDs and party/account references remain personal
+unrestricted cross-case search API. Its event UUIDs and party/account references remain personal
 data: legal retention, restriction and deletion handling must be completed before a
 real-data rollout. The synthetic sandbox exercises do not establish those controls.
 

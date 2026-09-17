@@ -2,9 +2,32 @@
 openapi: 3.1.0
 info:
   title: Banking Context Service API
-  version: 1.3.0
+  version: 1.4.0
   description: Purpose-bound, case-assigned graph views for authorized investigations.
 paths:
+  /api/v1/context/aml-cases/{id}/network:
+    get:
+      operationId: getAssignedAmlCaseNetwork
+      summary: Find explicit shared references among source-open AML cases assigned to the same investigator
+      parameters:
+        - $ref: '#/components/parameters/id'
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/purpose'
+        - name: effectiveAt
+          in: query
+          schema: { type: string, format: date-time }
+        - name: knownAt
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Root and at most four independently authorized case histories; shared identifiers are leads
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmlCaseNetwork' }
+        '400': { description: Invalid case, purpose or future timestamp }
+        '403': { description: Root role, assignment, policy or current source state denied }
+        '503': { description: Authorization or AML case source unavailable }
   /api/v1/context/aml-cases/{id}:
     get:
       operationId: getAmlCaseEvidence
@@ -207,6 +230,15 @@ components:
       required: [approve]
       properties:
         approve: { type: boolean }
+    AmlCaseNetwork:
+      type: object
+      required: [root, related]
+      properties:
+        root: { $ref: '#/components/schemas/AmlCaseHistory' }
+        related:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/AmlCaseHistory' }
     AmlCaseHistory:
       type: object
       required: [root, effectiveAt, knownAt, observations, truncated]

@@ -16,6 +16,9 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import java.time.Clock
 import java.time.Instant
 import java.time.format.DateTimeParseException
@@ -31,6 +34,56 @@ class AmlCaseEvidenceResource(
     private val identity: SecurityIdentity,
     private val clock: Clock,
 ) {
+    @GET
+    @Path("/{id}/network")
+    suspend fun assignedNetwork(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Investigation-Case-Id") caseId: String?,
+        @HeaderParam("X-Investigation-Purpose") purpose: String?,
+        @QueryParam("effectiveAt") effectiveAt: String?,
+        @QueryParam("knownAt") knownAt: String?,
+    ): Response {
+        val now = clock.instant()
+        val effective = timestamp(effectiveAt, now)
+        val known = timestamp(knownAt, now)
+        require(effective <= now && known <= now) { "AML evidence cannot establish future activity" }
+        require(caseId == id.toString()) { "caseId must identify the assigned AML case" }
+        require(purpose == PURPOSE) { "AML_INVESTIGATION is required" }
+        val actor = Investigator(identity.principal.name, identity.roles.sorted())
+        return try {
+            queries.amlCaseEvidence(id.toString(), actor, InvestigationContext(caseId, purpose, effective, known)) {
+                if (!source.isOpen(id)) throw ContextAccessDenied()
+                val root = history.history(id, effective, known)
+                val candidates = history.assignedRelatedCases(root, actor.id, now)
+                val related = coroutineScope {
+                    candidates.map { candidate ->
+                        async {
+                            try {
+                                queries.amlCaseEvidence(
+                                    candidate.toString(),
+                                    actor,
+                                    InvestigationContext(candidate.toString(), purpose, effective, known),
+                                ) {
+                                    if (source.isOpen(candidate)) history.history(candidate, effective, known) else null
+                                }
+                            } catch (_: ContextAccessDenied) {
+                                // Revocation between candidate discovery and authorization is expected.
+                                null
+                            }
+                        }
+                    }.awaitAll().filterNotNull()
+                }
+                Response.ok(AmlCaseNetwork(root, related)).header("Cache-Control", "no-store").build()
+            }
+        } catch (_: ContextAccessDenied) {
+            Response.status(Response.Status.FORBIDDEN).header("Cache-Control", "no-store").build()
+        } catch (_: ContextAuthorizationUnavailable) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        } catch (_: AmlCaseSourceUnavailable) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).header("Cache-Control", "no-store").build()
+        }
+    }
+
     @GET
     @Path("/{id}")
     suspend fun caseHistory(
@@ -80,3 +133,6 @@ class AmlCaseEvidenceResource(
         const val PURPOSE = "AML_INVESTIGATION"
     }
 }
+
+/** Visible relationships are bounded by approved assignments, not the whole case store. */
+data class AmlCaseNetwork(val root: AmlCaseHistory, val related: List<AmlCaseHistory>)

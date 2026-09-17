@@ -82,14 +82,24 @@ knowledge-time view. The consumer has its own group, DLQ and bounded database ti
 
 The first read surface is limited to one assigned AML case. Before it returns evidence,
 it checks the current case status with the owning AML service through a bounded,
-uncached service-authenticated call (1.5 s total timeout, 16 in-flight calls per
+uncached call carrying the investigator's authenticated bearer (1.5 s total timeout, 16 in-flight calls per
 context instance, no retry); closed, unknown, overloaded or unavailable status yields no
 evidence. That dependency is configured outside the public repository. Authorization
 also binds the investigator, case, root and AML purpose through the existing assignment,
 OPA and durable audit path. The AML service has case lifecycle events but no monotonic
 revision in their body, so a timestamp alone cannot prove a complete transition
 sequence. Event history presents observations, never a final legal conclusion. No
-cross-case expansion, device-use edge, transaction settlement or inference is delivered.
+device-use edge, transaction settlement or inference is delivered.
+
+The next bounded read surface discovers cases with an explicitly equal party, account
+or transaction identifier in the same effective/knowledge window. Candidate discovery
+joins only currently approved assignments for that investigator and returns at most four
+cases. Every candidate is then independently re-authorized, read-audited and checked
+against its current source status before any evidence is returned. A revoked or terminal
+candidate is omitted; source or policy unavailability fails the whole request. The
+displayed network is intentionally incomplete: the four-case cap, assignment scope and
+source lag mean absence of an edge does not prove absence of a relationship. Exact
+identifier equality is a lead, not a fraud finding or inferred ownership.
 
 Fraud's current source emits a temporary fraud-hold change for marketing suppression;
 it does not have a case/assignment lifecycle or an authoritative fraud finding. Its
@@ -97,8 +107,8 @@ signals cannot be reused as an investigative case or an account restriction. A t
 fraud-case source contract, purpose-bound authorization and independent negative tests
 are prerequisites for the Fraud lens.
 
-Cross-case reads, retention/restriction workflow, load evidence and controlled pilot
-remain required. This single-case slice cannot be presented as completion of ADR-0304.
+Broader cross-case expansion, retention/restriction workflow, load evidence and a
+controlled pilot remain required. The bounded AML network is not completion of ADR-0304.
 
 ## Alternatives considered
 

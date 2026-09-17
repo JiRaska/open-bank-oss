@@ -18,21 +18,33 @@ const history = {
     recordedAt: '2026-02-02T00:00:00Z', evidenceRef: `aml-case:${caseId}:${eventId}`, contentHash: 'a'.repeat(64),
   }],
 }
+const relatedCaseId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const relatedEventId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const related = {
+  ...history, root: `aml-case:${relatedCaseId}`,
+  observations: [{ ...history.observations[0],
+    evidence: { ...history.observations[0].evidence, caseId: relatedCaseId, eventId: relatedEventId, accountId: null },
+    evidenceRef: `aml-case:${relatedCaseId}:${relatedEventId}`,
+  }],
+}
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('AML case investigation', () => {
   it('shows only validated source-linked nodes and evidence provenance', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(history))))
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [related] })))
+    vi.stubGlobal('fetch', fetcher)
     render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
     expect(await screen.findByRole('img', { name: 'Observed AML relationship graph' })).toHaveTextContent('Account')
+    expect(screen.getByRole('img', { name: 'Observed AML relationship graph' })).toHaveTextContent('Related case')
+    expect(fetcher).toHaveBeenCalledWith(`/api/context/aml-cases/${caseId}?view=network`, { cache: 'no-store' })
     expect(screen.getByText(/SHA-256:/)).toHaveTextContent('a'.repeat(64))
     expect(screen.getByText(/not proven fraud/)).toBeInTheDocument()
   })
 
   it('fails closed on malformed evidence and clears it when the case changes', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...history, root: 'aml-case:11111111-1111-4111-8111-111111111111' }))))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ root: history, related: [{ ...related, observations: [] }] }))))
     render(<LanguageProvider initialLanguage="en"><AmlCaseInvestigation initialCaseId={caseId} /></LanguageProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Explore connections' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be verified safely')

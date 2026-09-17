@@ -160,4 +160,46 @@ describe('Admin UI incident impact consumer contract', () => {
       })
   })
 
+  it('passes only independently assigned AML network histories through the real BFF', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'pact-operator', roles: ['ROLE_COMPLIANCE'] } } as never)
+    const id = '66666666-6666-4666-8666-666666666666'
+    const relatedId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const instant = '2026-03-01T00:00:00Z'
+    const evidence = (caseId: string, eventId: string, hash: string) => ({
+      root: `aml-case:${caseId}`, effectiveAt: instant, knownAt: instant, truncated: false,
+      observations: [{
+        evidence: {
+          eventId, caseId, partyId: '88888888-8888-4888-8888-888888888888',
+          accountId: null, transactionId: null, eventType: 'aml.case.created.v1',
+          status: 'OPEN', previousStatus: null, riskLevel: 'LOW', screeningType: 'MANUAL_INVESTIGATION',
+          occurredAt: '2026-02-01T00:00:00Z',
+        },
+        recordedAt: '2026-02-02T00:00:00Z', evidenceRef: `aml-case:${caseId}:${eventId}`, contentHash: hash.repeat(64),
+      }],
+    })
+    const network = {
+      root: evidence(id, '77777777-7777-4777-8777-777777777777', 'a'),
+      related: [evidence(relatedId, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'b')],
+    }
+    await createPact().given('an assigned AML case has open source evidence')
+      .uponReceiving('read independently assigned AML cases sharing a source party')
+      .withRequest({
+        method: 'GET', path: `/api/v1/context/aml-cases/${id}/network`,
+        query: { effectiveAt: instant, knownAt: instant },
+        headers: { Authorization: 'Bearer pact-operator', Accept: 'application/json',
+          'X-Investigation-Case-Id': id, 'X-Investigation-Purpose': 'AML_INVESTIGATION' },
+      }).willRespondWith({
+        status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: network,
+      })
+      .executeTest(async server => {
+        vi.mocked(contextServiceUrl).mockImplementation(route => `${server.url}${route}`)
+        const response = await getAml(new NextRequest(`http://localhost/api/context/aml-cases/${id}?view=network&effectiveAt=${instant}&knownAt=${instant}`), {
+          params: Promise.resolve({ id }),
+        })
+        expect(response.status).toBe(200)
+        expect(response.headers.get('Cache-Control')).toBe('no-store')
+        expect(await response.json()).toEqual(network)
+      })
+  })
+
 })

@@ -12,6 +12,7 @@ export interface RecordedAmlCaseEvidence {
 export interface AmlCaseEvidenceHistory {
   root: string; effectiveAt: string; knownAt: string; truncated: boolean; observations: RecordedAmlCaseEvidence[]
 }
+export interface AmlCaseNetwork { root: AmlCaseEvidenceHistory; related: AmlCaseEvidenceHistory[] }
 const STATUSES = new Set(['OPEN', 'UNDER_REVIEW', 'CLEARED', 'BLOCKED', 'ESCALATED'])
 const RISKS = new Set(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
 const SCREENINGS = new Set(['CUSTOMER_ONBOARDING', 'TRANSACTION_MONITORING', 'PERIODIC_REVIEW', 'MANUAL_INVESTIGATION'])
@@ -70,4 +71,30 @@ export function parseAmlCaseEvidence(value: unknown): AmlCaseEvidenceHistory {
     return { evidence, recordedAt, evidenceRef, contentHash }
   })
   return { root: `aml-case:${id}`, effectiveAt, knownAt, truncated: body.truncated, observations }
+}
+
+/** A relationship is shown only when both approved histories name the same source identifier. */
+export function amlReferences(history: AmlCaseEvidenceHistory): string[] {
+  return [...new Set(history.observations.flatMap(({ evidence }) => [
+    `party:${evidence.partyId}`,
+    ...(evidence.accountId ? [`account:${evidence.accountId}`] : []),
+    ...(evidence.transactionId ? [`transaction:${evidence.transactionId}`] : []),
+  ]))]
+}
+export function sharedAmlReferences(a: AmlCaseEvidenceHistory, b: AmlCaseEvidenceHistory): string[] {
+  const left = new Set(amlReferences(a))
+  return amlReferences(b).filter(id => left.has(id))
+}
+export function parseAmlCaseNetwork(value: unknown): AmlCaseNetwork {
+  const body = object(value)
+  const root = parseAmlCaseEvidence(body.root)
+  if (!Array.isArray(body.related) || body.related.length > 4) throw new Error('Invalid AML network')
+  const seen = new Set([root.root])
+  const related = body.related.map(raw => {
+    const history = parseAmlCaseEvidence(raw)
+    if (seen.has(history.root) || history.effectiveAt !== root.effectiveAt || history.knownAt !== root.knownAt || !sharedAmlReferences(root, history).length) throw new Error('Invalid AML relationship')
+    seen.add(history.root)
+    return history
+  })
+  return { root, related }
 }

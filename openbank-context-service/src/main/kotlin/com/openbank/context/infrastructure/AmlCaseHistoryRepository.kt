@@ -76,6 +76,44 @@ class AmlCaseHistoryRepository(
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val timeoutMs: Int,
 ) {
+    /** Candidate discovery is constrained to roots already assigned to this investigator. */
+    suspend fun assignedRelatedCases(root: AmlCaseHistory, principalId: String, at: Instant): List<UUID> {
+        val observations = root.observations.map { it.evidence }
+        if (observations.isEmpty()) return emptyList()
+        val parties = observations.map { it.partyId }.distinct()
+        val accounts = observations.mapNotNull { it.accountId }.distinct().ifEmpty { listOf(UUID(0, 0)) }
+        val transactions = observations.mapNotNull { it.transactionId }.distinct().ifEmpty { listOf(UUID(0, 0)) }
+        val ids = transaction { session ->
+            session.createNativeQuery(
+                """SELECT DISTINCT cast(related.case_id as text)
+                   FROM context_aml_case_evidence related
+                   JOIN context_case_assignments assignment
+                     ON assignment.bank_scope = related.bank_scope
+                    AND assignment.case_id = cast(related.case_id as text)
+                    AND assignment.root_ref = 'aml-case:' || cast(related.case_id as text)
+                   WHERE related.bank_scope = :bank
+                     AND related.case_id <> :root
+                     AND related.occurred_at <= :effective
+                     AND related.recorded_at <= :known
+                     AND (related.party_id IN (:parties) OR related.account_id IN (:accounts)
+                          OR related.transaction_id IN (:transactions))
+                     AND assignment.principal_id = :principal
+                     AND assignment.purpose = 'AML_INVESTIGATION'
+                     AND assignment.valid_from <= :now AND assignment.valid_to > :now
+                   ORDER BY cast(related.case_id as text)
+                """.trimIndent(),
+                String::class.java,
+            ).setParameter("bank", bankScope)
+                .setParameter("root", UUID.fromString(root.root.removePrefix("aml-case:")))
+                .setParameter("effective", root.effectiveAt).setParameter("known", root.knownAt)
+                .setParameter("parties", parties).setParameter("accounts", accounts)
+                .setParameter("transactions", transactions)
+                .setParameter("principal", principalId).setParameter("now", at)
+                .setMaxResults(MAX_RELATED_CASES).resultList
+        }.bounded().awaitSuspending()
+        return ids.map(UUID::fromString)
+    }
+
     suspend fun append(evidence: AmlCaseObservation) {
         val json = mapper.writeValueAsString(evidence)
         val hash = MessageDigest.getInstance("SHA-256").digest(json.toByteArray(Charsets.UTF_8))
@@ -141,5 +179,6 @@ class AmlCaseHistoryRepository(
 
     private companion object {
         const val MAX_OBSERVATIONS = 100
+        const val MAX_RELATED_CASES = 4
     }
 }

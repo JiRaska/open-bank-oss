@@ -34,6 +34,24 @@ class AmlCasePactFixtures {
                         ON CONFLICT (bank_scope, event_id) DO NOTHING
                     """.trimIndent(),
                 )
+                statement.executeUpdate(
+                    """INSERT INTO context_case_assignments
+                        (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref,
+                         valid_from, valid_to, created_at)
+                        VALUES ('${UUID.randomUUID()}', 'openbank-cz', 'pact-operator', '$RELATED_CASE',
+                        'AML_INVESTIGATION', 'aml-case:$RELATED_CASE',
+                        now() - interval '1 hour', now() + interval '1 hour', now())
+                    """.trimIndent(),
+                )
+                statement.executeUpdate(
+                    """INSERT INTO context_aml_case_evidence
+                        (bank_scope, event_id, case_id, party_id, event_type, occurred_at,
+                         recorded_at, evidence, content_hash)
+                        VALUES ('openbank-cz', '$RELATED_EVENT', '$RELATED_CASE', '$PARTY', 'aml.case.created.v1',
+                        '2026-02-01T00:00:00Z', '2026-02-02T00:00:00Z', '$RELATED_EVIDENCE', '${"b".repeat(64)}')
+                        ON CONFLICT (bank_scope, event_id) DO NOTHING
+                    """.trimIndent(),
+                )
             }
             connection.commit()
         }
@@ -43,7 +61,13 @@ class AmlCasePactFixtures {
         const val CASE = "66666666-6666-4666-8666-666666666666"
         const val EVENT = "77777777-7777-4777-8777-777777777777"
         const val PARTY = "88888888-8888-4888-8888-888888888888"
+        const val RELATED_CASE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const val RELATED_EVENT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         val EVIDENCE = """{"eventId":"$EVENT","caseId":"$CASE","partyId":"$PARTY",
+            "accountId":null,"transactionId":null,"eventType":"aml.case.created.v1",
+            "status":"OPEN","previousStatus":null,"riskLevel":"LOW","screeningType":"MANUAL_INVESTIGATION",
+            "occurredAt":"2026-02-01T00:00:00Z"}"""
+        val RELATED_EVIDENCE = """{"eventId":"$RELATED_EVENT","caseId":"$RELATED_CASE","partyId":"$PARTY",
             "accountId":null,"transactionId":null,"eventType":"aml.case.created.v1",
             "status":"OPEN","previousStatus":null,"riskLevel":"LOW","screeningType":"MANUAL_INVESTIGATION",
             "occurredAt":"2026-02-01T00:00:00Z"}"""

@@ -141,9 +141,57 @@ class AmlCaseEvidenceResourceIT {
         request(id).then().statusCode(403)
     }
 
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    fun `network includes only currently assigned and source-open cases with an observed shared party`() {
+        val root = UUID.randomUUID()
+        val related = UUID.randomUUID()
+        val unrelated = UUID.randomUUID()
+        val party = UUID.randomUUID().toString()
+        record(root, party = party)
+        record(related, party = party)
+        record(unrelated, party = UUID.randomUUID().toString())
+        grant(root)
+        requestNetwork(root).then().statusCode(200).body("related.size()", equalTo(0))
+
+        grant(related)
+        grant(unrelated)
+        requestNetwork(root).then().statusCode(200)
+            .body("root.root", equalTo("aml-case:$root"))
+            .body("related.size()", equalTo(1))
+            .body("related[0].root", equalTo("aml-case:$related"))
+
+        coEvery { sourceStatus.isOpen(related) } returns false
+        requestNetwork(root).then().statusCode(200).body("related.size()", equalTo(0))
+        coEvery { sourceStatus.isOpen(related) } throws AmlCaseSourceUnavailable()
+        requestNetwork(root).then().statusCode(503)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    fun `network requires root assignment before candidate discovery or source access`() {
+        val id = UUID.randomUUID()
+        record(id, party = UUID.randomUUID().toString())
+        requestNetwork(id).then().statusCode(403)
+        coVerify(exactly = 0) { sourceStatus.isOpen(id) }
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_OPERATOR"])
+    fun `network route denies a non-compliance operator even with root assignment`() {
+        val id = UUID.randomUUID()
+        record(id, party = UUID.randomUUID().toString())
+        grant(id)
+        requestNetwork(id).then().statusCode(403)
+    }
+
     private fun request(id: UUID) = given()
         .header("X-Investigation-Case-Id", id.toString()).header("X-Investigation-Purpose", PURPOSE)
         .get("/api/v1/context/aml-cases/$id")
+
+    private fun requestNetwork(id: UUID) = given()
+        .header("X-Investigation-Case-Id", id.toString()).header("X-Investigation-Purpose", PURPOSE)
+        .get("/api/v1/context/aml-cases/$id/network")
 
     private fun grant(id: UUID, purpose: String = PURPOSE, root: String? = "aml-case:$id"): UUID {
         val proposal = onVertx {
@@ -155,8 +203,8 @@ class AmlCaseEvidenceResourceIT {
         return requireNotNull(onVertx { assignments.decide(proposal.id, true, "aml-checker") }.assignmentId)
     }
 
-    private fun record(id: UUID, terminal: Boolean = false) {
-        val fields = mutableMapOf<String, Any?>("caseId" to id, "partyId" to PARTY)
+    private fun record(id: UUID, terminal: Boolean = false, party: String = PARTY) {
+        val fields = mutableMapOf<String, Any?>("caseId" to id, "partyId" to party)
         if (terminal) {
             fields.putAll(
                 mapOf(

@@ -79,6 +79,95 @@
       }
     },
     {
+      "description": "read independently assigned AML cases sharing a source party",
+      "providerStates": [
+        {
+          "name": "an assigned AML case has open source evidence"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json",
+          "Authorization": "Bearer pact-operator",
+          "X-Investigation-Case-Id": "66666666-6666-4666-8666-666666666666",
+          "X-Investigation-Purpose": "AML_INVESTIGATION"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/aml-cases/66666666-6666-4666-8666-666666666666/network",
+        "query": {
+          "effectiveAt": [
+            "2026-03-01T00:00:00Z"
+          ],
+          "knownAt": [
+            "2026-03-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "related": [
+            {
+              "effectiveAt": "2026-03-01T00:00:00Z",
+              "knownAt": "2026-03-01T00:00:00Z",
+              "observations": [
+                {
+                  "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "evidence": {
+                    "accountId": null,
+                    "caseId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "eventId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    "eventType": "aml.case.created.v1",
+                    "occurredAt": "2026-02-01T00:00:00Z",
+                    "partyId": "88888888-8888-4888-8888-888888888888",
+                    "previousStatus": null,
+                    "riskLevel": "LOW",
+                    "screeningType": "MANUAL_INVESTIGATION",
+                    "status": "OPEN",
+                    "transactionId": null
+                  },
+                  "evidenceRef": "aml-case:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                  "recordedAt": "2026-02-02T00:00:00Z"
+                }
+              ],
+              "root": "aml-case:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "truncated": false
+            }
+          ],
+          "root": {
+            "effectiveAt": "2026-03-01T00:00:00Z",
+            "knownAt": "2026-03-01T00:00:00Z",
+            "observations": [
+              {
+                "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "evidence": {
+                  "accountId": null,
+                  "caseId": "66666666-6666-4666-8666-666666666666",
+                  "eventId": "77777777-7777-4777-8777-777777777777",
+                  "eventType": "aml.case.created.v1",
+                  "occurredAt": "2026-02-01T00:00:00Z",
+                  "partyId": "88888888-8888-4888-8888-888888888888",
+                  "previousStatus": null,
+                  "riskLevel": "LOW",
+                  "screeningType": "MANUAL_INVESTIGATION",
+                  "status": "OPEN",
+                  "transactionId": null
+                },
+                "evidenceRef": "aml-case:66666666-6666-4666-8666-666666666666:77777777-7777-4777-8777-777777777777",
+                "recordedAt": "2026-02-02T00:00:00Z"
+              }
+            ],
+            "root": "aml-case:66666666-6666-4666-8666-666666666666",
+            "truncated": false
+          }
+        },
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "read minimized AML case evidence under its approved case scope",
       "providerStates": [
         {
