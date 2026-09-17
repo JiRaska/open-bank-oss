@@ -74,6 +74,24 @@ propagation and an egress review are required together before enabling the produ
 This design does not authorize owner evidence ingestion or change the P0/P1 invariant
 that their projection stores only opaque references.
 
+## Fraud case reference ingress
+
+The dedicated Fraud topic contains only an event type, case ID, revision and event
+time. Context checks the broker topic, partition key, event identity/type headers,
+the exact four-field payload and lifecycle revision before inserting an append-only,
+bank-scoped reference row. The consumer's own DLQ and Kafka group are isolated from
+payment, AML and KYB streams. Replay is idempotent; a conflicting event ID or case
+revision fails instead of rewriting prior knowledge. PostgreSQL forces bank-scoped
+RLS, and the application sets scope and statement timeout within each transaction.
+No read endpoint or inferred customer edge is introduced by this ingestion step.
+
+The remaining disclosure boundary is deliberately closed: a future Fraud lens must
+verify a live, open source case, current investigator assignment, purpose and OPA
+decision, then commit a read audit before returning even a case reference. A case
+pointer is not a finding, identity match or permission to inspect another customer.
+The source case and outbox remain authoritative if the topic or Context consumer
+lags. A malformed or unauthorized broker record is nacked to the dedicated DLQ.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.

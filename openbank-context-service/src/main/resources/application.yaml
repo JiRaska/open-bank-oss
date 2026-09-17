@@ -44,6 +44,8 @@ quarkus:
   mp:
     messaging:
       incoming:
+        fraud-case-references-in:
+          connector: smallrye-in-memory
         dispute-events-in:
           connector: smallrye-in-memory
         ict-incident-events-in:
@@ -72,6 +74,19 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      fraud-case-references-in:
+        connector: smallrye-kafka
+        topic: openbank.fraud.investigation.case.references
+        group:
+          id: openbank-context-service-fraud-cases
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.fraud-case-references
       dispute-events-in:
         connector: smallrye-kafka
         topic: openbank.dispute.events

@@ -58,6 +58,9 @@ spec:
       - resource: { type: topic, name: openbank.dlq.context-service.fraud-case-references, patternType: literal }
         operations: [Write, Describe]
         host: "*"
+      - resource: { type: group, name: openbank-context-service-fraud-cases, patternType: literal }
+        operations: [Read]
+        host: "*"
       - resource: { type: group, name: openbank-context-service, patternType: literal }
         operations: [Read]
         host: "*"
