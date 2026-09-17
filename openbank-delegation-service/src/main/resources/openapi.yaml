@@ -6,7 +6,7 @@ info:
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
   # Additive JOINT grantee acceptance routes after immutable statutory evidence.
-  version: 1.27.0
+  version: 1.28.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -398,6 +398,33 @@ paths:
         '404': { description: Proposal not found under this company }
         '409': { description: Proposal is expired, stale or no longer pending }
         '503': { description: Current statutory authority cannot be verified }
+  /api/v1/delegations/statutory-acceptances/pages:
+    get:
+      tags: [Statutory delegation proposals]
+      summary: Page through pending acceptance ballots for the selected grantee company
+      description: >-
+        Requires a current joint representative. The cursor is bound to the live legal-rule
+        snapshot; after a rule change restart from the first page. Deploy V32 before this route.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Pending acceptance ballots and next cursor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryAcceptancePageResponse' }
+        '400': { description: Invalid cursor or limit }
+        '403': { description: No current joint representation for this company }
+        '503': { description: Live legal authority unavailable }
   /api/v1/delegations/statutory-acceptances/for-grant/{grantId}:
     post:
       tags: [Statutory delegation acceptances]
@@ -1190,6 +1217,14 @@ components:
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
         grantId: { type: [string, 'null'], format: uuid }
+    StatutoryAcceptancePageResponse:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/StatutoryAcceptanceResponse' }
+        nextCursor: { type: [string, 'null'], maxLength: 256 }
     StatutoryProposalPageResponse:
       type: object
       required: [items, nextCursor]

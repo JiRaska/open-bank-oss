@@ -114,6 +114,35 @@ class StatutoryDelegationAcceptanceProposalService(
     suspend fun get(id: UUID, company: UUID, caller: UUID?, actor: UUID?): StatutoryDelegationOperation =
         current(id, company, caller, actor).first
 
+    /** Company-scoped inbox, visible only to a representative on the current JOINT roster. */
+    suspend fun page(
+        company: UUID,
+        caller: UUID?,
+        actorPartyId: UUID?,
+        cursor: String?,
+        limit: Int?,
+    ): StatutoryProposalPage {
+        val actor = requireActor(company, caller, actorPartyId)
+        val snapshot = evidence.rule(resolve(company, actor))
+        val hash = evidence.hash(snapshot)
+        val cursorScope = evidence.hash("ACCEPT\n$hash")
+        val pageSize = limit ?: DEFAULT_PAGE_SIZE
+        require(pageSize in 1..MAX_PENDING_RESULTS) { "limit must be between 1 and $MAX_PENDING_RESULTS" }
+        val position = cursor?.let { StatutoryInboxCursor.decode(it, cursorScope) }
+        val fetched = operations.pending(
+            company,
+            hash,
+            clock.instant(),
+            pageSize + 1,
+            position?.first,
+            position?.second,
+            StatutoryOperationKind.ACCEPT,
+        )
+        val visible = fetched.take(pageSize).filter { it.ruleSnapshotJson == snapshot }
+        val next = if (fetched.size > pageSize) fetched[pageSize - 1] else null
+        return StatutoryProposalPage(visible, next?.let { StatutoryInboxCursor.encode(cursorScope, it) })
+    }
+
     suspend fun decisions(id: UUID, company: UUID, caller: UUID?, actor: UUID?): List<StatutoryDelegationDecision> {
         current(id, company, caller, actor)
         return operations.decisions(id)
@@ -178,6 +207,8 @@ class StatutoryDelegationAcceptanceProposalService(
 
     private companion object {
         const val MAX_REQUEST_KEY_LENGTH = 200
+        const val MAX_PENDING_RESULTS = 50
+        const val DEFAULT_PAGE_SIZE = 20
         val PROPOSAL_LIFETIME: Duration = Duration.ofHours(24)
     }
 }

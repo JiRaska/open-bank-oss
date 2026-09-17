@@ -135,4 +135,43 @@ class StatutoryDelegationAcceptanceProposalServiceTest {
         assertThatThrownBy { runBlocking { service.pending(operation.id, company, company, actor) } }
             .isInstanceOf(StatutoryProposalStale::class.java)
     }
+
+    @Test
+    fun `acceptance inbox requests only the acceptance family under the live company rule`(): Unit = runBlocking {
+        coEvery { grants.findById(grant.id) } returns grant
+        coEvery { rules.resolve(company, actor) } returns StatutoryRuleResolution.RosterMatched(rule)
+        coEvery { operations.create(any()) } answers { StatutoryOperationCreateOutcome.Created(firstArg()) }
+        val acceptance = service.propose(grant.id, company, company, actor, "accept-page").operation
+        coEvery {
+            operations.pending(
+                company,
+                acceptance.ruleHash,
+                clock.instant(),
+                21,
+                null,
+                null,
+                StatutoryOperationKind.ACCEPT,
+            )
+        } returns listOf(acceptance)
+
+        assertThat(service.page(company, company, actor, null, null).operations).containsExactly(acceptance)
+        coVerify(exactly = 1) {
+            operations.pending(
+                company,
+                acceptance.ruleHash,
+                clock.instant(),
+                21,
+                null,
+                null,
+                StatutoryOperationKind.ACCEPT,
+            )
+        }
+        assertThatThrownBy { runBlocking { service.page(company, other, actor, null, null) } }
+            .isInstanceOf(StatutoryProposalDenied::class.java)
+        assertThatThrownBy { runBlocking { service.page(company, company, actor, null, 51) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        val issuanceCursor = StatutoryInboxCursor.encode(acceptance.ruleHash, acceptance)
+        assertThatThrownBy { runBlocking { service.page(company, company, actor, issuanceCursor, 20) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

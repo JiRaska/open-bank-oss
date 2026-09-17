@@ -19,7 +19,7 @@ info:
   # decisions are always the human signer's.
   # 1.68.0 -> 1.69.0: additive — GET/PUT /me/aml-profile (personal AML profile, AML Act §9 +
   # FATCA/CRS self-certification).
-  version: 1.76.0
+  version: 1.77.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3794,6 +3794,28 @@ paths:
         '404': {description: Proposal not found for this company}
         '409': {description: Proposal expired, stale or no longer pending}
         '503': {description: Live company representation cannot be verified}
+  /delegations/statutory-acceptances/pages:
+    get:
+      tags: [Delegation]
+      summary: Page through pending grantee-company acceptance ballots
+      description: >-
+        Requires a selected company profile and current joint representation. A changed legal
+        rule invalidates the cursor. Deploy the delegation-service V32 index and page route first.
+      operationId: pageStatutoryAcceptances
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Current acceptance page and next cursor
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryDelegationAcceptancePage'}
+        '400': {description: Invalid or obsolete cursor or limit}
+        '403': {description: No selected company or current joint representation}
+        '503': {description: Live company representation cannot be verified}
   /delegations/statutory-acceptances/for-grant/{grantId}:
     post:
       tags: [Delegation]
@@ -5260,6 +5282,14 @@ components:
         createdAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         grantId: {type: [string, 'null'], format: uuid}
+    StatutoryDelegationAcceptancePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StatutoryDelegationAcceptance'}
+        nextCursor: {type: [string, 'null'], maxLength: 256}
     StatutoryDelegationProposalPage:
       type: object
       required: [items, nextCursor]

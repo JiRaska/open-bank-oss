@@ -27,6 +27,7 @@ class StatutoryAcceptanceRoutingIT {
         RestAssured.given().contentType(ContentType.JSON).header("Idempotency-Key", "accept-1")
             .post("$root/for-grant/$id").then().statusCode(400)
         RestAssured.given().get("$root/$id").then().statusCode(400)
+        RestAssured.given().get("$root/pages").then().statusCode(400)
         RestAssured.given().get("$root/$id/approval-intent").then().statusCode(400)
         RestAssured.given().get("$root/$id/decisions").then().statusCode(400)
         RestAssured.given().get("$root/$id/progress").then().statusCode(400)

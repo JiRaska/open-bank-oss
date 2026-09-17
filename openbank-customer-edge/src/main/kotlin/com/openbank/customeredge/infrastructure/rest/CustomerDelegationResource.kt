@@ -258,6 +258,32 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         )
     }
 
+    /** Pending grantee-company acceptance ballots for the verified company profile. */
+    @GET
+    @Path("/statutory-acceptances/pages")
+    @Blocking
+    fun statutoryAcceptancePage(@QueryParam("cursor") cursor: String?, @QueryParam("limit") limit: Int?): Response {
+        val context = partyContext()
+        if (context.principal == context.actor) {
+            return refuse(Response.Status.FORBIDDEN, "select a company profile for joint representation")
+        }
+        if (limit != null && limit !in 1..MAX_STATUTORY_PAGE) {
+            return refuse(Response.Status.BAD_REQUEST, "limit must be between 1 and $MAX_STATUTORY_PAGE")
+        }
+        if (cursor != null && (cursor.isBlank() || cursor.length > MAX_STATUTORY_CURSOR_LENGTH)) {
+            return refuse(Response.Status.BAD_REQUEST, "invalid statutory inbox cursor")
+        }
+        val query = buildList {
+            cursor?.let { add("cursor=${URLEncoder.encode(it, StandardCharsets.UTF_8)}") }
+            limit?.let { add("limit=$it") }
+        }.joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
+        return upstream.get(
+            "$delegationServiceUrl$UPSTREAM/statutory-acceptances/pages$query",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
+    }
+
     /** A company signer may propose an exact grant for co-signature; this cannot create access. */
     @GET
     @Path("/statutory-operations")

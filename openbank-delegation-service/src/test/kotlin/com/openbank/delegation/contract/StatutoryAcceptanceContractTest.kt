@@ -45,4 +45,16 @@ class StatutoryAcceptanceContractTest {
         assertThat(json).contains("actorPartyId", "verdict", "decidedAt")
         assertThat(json).doesNotContain("scaSessionId")
     }
+
+    @Test
+    fun `acceptance inbox has bounded cursor and typed item contract`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val route = contract.substringAfter("  /api/v1/delegations/statutory-acceptances/pages:")
+            .substringBefore("  /api/v1/delegations/statutory-acceptances/for-grant/{grantId}:")
+        assertThat(route).contains("StatutoryAcceptancePageResponse", "maximum: 50", "CustomerActorPartyId")
+        assertThat(
+            contract.substringAfter("    StatutoryAcceptancePageResponse:")
+                .substringBefore("    StatutoryProposalPageResponse:"),
+        ).contains("StatutoryAcceptanceResponse", "nextCursor")
+    }
 }

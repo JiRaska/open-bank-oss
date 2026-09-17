@@ -25,6 +25,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.time.Instant
@@ -64,6 +65,8 @@ data class StatutoryAcceptanceResponse(
     }
 }
 
+data class StatutoryAcceptancePageResponse(val items: List<StatutoryAcceptanceResponse>, val nextCursor: String?)
+
 /** Company-grantee acceptance is a separate operation family from grantor issuance. */
 @Path("/api/v1/delegations/statutory-acceptances")
 @Produces(MediaType.APPLICATION_JSON)
@@ -77,6 +80,24 @@ class StatutoryAcceptanceResource(
     private val mapper: ObjectMapper,
     private val identity: SecurityIdentity,
 ) {
+    @GET
+    @Path("/pages")
+    @Authorize(action = "delegation.statutory.accept.read", resource = "#customerPartyId")
+    suspend fun page(
+        @QueryParam("cursor") cursor: String?,
+        @QueryParam("limit") limit: Int?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(DelegationResource.CUSTOMER_ACTOR_PARTY_HEADER) actorPartyId: UUID?,
+    ): StatutoryAcceptancePageResponse {
+        requireEdge()
+        val company = requireNotNull(customerPartyId) { "customer profile is required" }
+        val result = proposals.page(company, customerPartyId, actorPartyId, cursor, limit)
+        return StatutoryAcceptancePageResponse(
+            result.operations.map { StatutoryAcceptanceResponse.from(it, mapper) },
+            result.nextCursor,
+        )
+    }
+
     @POST
     @Path("/for-grant/{grantId}")
     @Authorize(action = "delegation.statutory.accept.propose", resource = "#grantId")

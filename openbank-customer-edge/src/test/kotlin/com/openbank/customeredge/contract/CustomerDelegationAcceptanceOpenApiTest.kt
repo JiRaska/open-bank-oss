@@ -25,4 +25,12 @@ class CustomerDelegationAcceptanceOpenApiTest {
         )
         assertThat(contract).contains("DELEGATION_STATUTORY_ACCEPTANCE")
     }
+
+    @Test
+    fun `acceptance inbox is explicitly published to selected company`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+        val route = contract.substringAfter("  /delegations/statutory-acceptances/pages:")
+            .substringBefore("  /delegations/statutory-acceptances/for-grant/{grantId}:")
+        assertThat(route).contains("pageStatutoryAcceptances", "maximum: 50", "StatutoryDelegationAcceptancePage")
+    }
 }

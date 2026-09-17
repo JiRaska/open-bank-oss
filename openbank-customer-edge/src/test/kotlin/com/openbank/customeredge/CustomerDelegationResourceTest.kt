@@ -26,6 +26,7 @@ import java.util.UUID
  * upstream. A test that only checked "the URL contains a UUID" would pass against exactly the bug
  * worth catching.
  */
+@Suppress("LargeClass") // Co-locate profile-bound edge contract tests for both statutory operation families.
 class CustomerDelegationResourceTest {
 
     private val caller: UUID = UUID.randomUUID()
@@ -303,6 +304,33 @@ class CustomerDelegationResourceTest {
         assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
         assertThat(selected.statutoryPage(null, 51).status).isEqualTo(400)
         assertThat(selected.statutoryPage("x".repeat(257), 10).status).isEqualTo(400)
+        verify(exactly = 1) { upstream.get(any(), any(), any()) }
+    }
+
+    @Test
+    fun `acceptance inbox is company scoped and forwards only bounded cursor`() {
+        val entity = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        val headers = slot<Map<String, String>>()
+        every { upstream.get(capture(url), capture(party), capture(headers)) } returns Response.ok("{}").build()
+        val selected = resource(upstream).apply {
+            actingForResolver = mockk { every { resolve(caller, entity.toString()) } returns entity }
+            requestHeaders = mockk<HttpHeaders> {
+                every { getHeaderString("X-Acting-For") } returns entity.toString()
+            }
+        }
+
+        assertThat(resource(upstream).statutoryAcceptancePage(null, null).status).isEqualTo(403)
+        assertThat(selected.statutoryAcceptancePage("abc+/=", 10).status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo(
+            "$svc/api/v1/delegations/statutory-acceptances/pages?cursor=abc%2B%2F%3D&limit=10",
+        )
+        assertThat(party.captured).isEqualTo(entity.toString())
+        assertThat(headers.captured["X-Customer-Actor-Party-Id"]).isEqualTo(caller.toString())
+        assertThat(selected.statutoryAcceptancePage(null, 51).status).isEqualTo(400)
+        assertThat(selected.statutoryAcceptancePage("x".repeat(257), 10).status).isEqualTo(400)
         verify(exactly = 1) { upstream.get(any(), any(), any()) }
     }
 

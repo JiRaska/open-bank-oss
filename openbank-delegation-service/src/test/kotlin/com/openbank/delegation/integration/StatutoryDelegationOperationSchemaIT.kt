@@ -177,6 +177,7 @@ class StatutoryDelegationOperationSchemaIT {
     }
 
     @Test
+    @Suppress("LongMethod") // One real-DB fixture proves both operation families and immutable target evidence.
     fun `acceptance target and lifecycle revision are immutable and absent from issuance inbox`() {
         val at = OffsetDateTime.ofInstant(Instant.parse("2026-09-18T12:00:00Z"), ZoneOffset.UTC)
         val grant = DelegationGrant(
@@ -224,6 +225,28 @@ class StatutoryDelegationOperationSchemaIT {
         assertThat(
             onVertxContext {
                 operations.pending(grant.granteePartyId, acceptance.ruleHash, acceptance.createdAt, 50)
+            },
+        ).doesNotContain(acceptance)
+        assertThat(
+            onVertxContext {
+                operations.pending(
+                    grant.granteePartyId,
+                    acceptance.ruleHash,
+                    acceptance.createdAt,
+                    50,
+                    kind = StatutoryOperationKind.ACCEPT,
+                )
+            },
+        ).contains(acceptance)
+        assertThat(
+            onVertxContext {
+                operations.pending(
+                    UUID.randomUUID(),
+                    acceptance.ruleHash,
+                    acceptance.createdAt,
+                    50,
+                    kind = StatutoryOperationKind.ACCEPT,
+                )
             },
         ).doesNotContain(acceptance)
         dataSource.connection.use { connection ->

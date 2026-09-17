@@ -9,6 +9,7 @@ import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.StatutoryDelegationDecision
 import com.openbank.delegation.domain.model.StatutoryDelegationOperation
+import com.openbank.delegation.domain.model.StatutoryOperationKind
 import com.openbank.delegation.domain.model.StatutoryRepresentationRule
 import java.time.Instant
 import java.util.UUID
@@ -41,6 +42,7 @@ interface StatutoryDelegationOperationRepository {
         limit: Int,
         beforeCreatedAt: Instant? = null,
         beforeId: UUID? = null,
+        kind: StatutoryOperationKind = StatutoryOperationKind.ISSUE,
     ): List<StatutoryDelegationOperation>
 
     /** Decisions belong to an operation already principal-scoped and roster-checked by the caller. */

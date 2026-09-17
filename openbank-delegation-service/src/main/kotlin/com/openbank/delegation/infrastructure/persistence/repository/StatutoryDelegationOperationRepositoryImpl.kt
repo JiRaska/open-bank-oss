@@ -101,6 +101,7 @@ class StatutoryDelegationOperationRepositoryImpl(
         limit: Int,
         beforeCreatedAt: Instant?,
         beforeId: UUID?,
+        kind: StatutoryOperationKind,
     ): List<StatutoryDelegationOperation> = Panache.withSession {
         Panache.getSession().flatMap { session ->
             require((beforeCreatedAt == null) == (beforeId == null)) { "incomplete statutory inbox cursor" }
@@ -115,7 +116,7 @@ class StatutoryDelegationOperationRepositoryImpl(
             val query = session.createNativeQuery(
                 "SELECT * FROM delegation_statutory_operations " +
                     "WHERE principal_party_id = :principal AND rule_hash = :ruleHash " +
-                    "AND state = 'PENDING' AND operation_kind = 'ISSUE' " +
+                    "AND state = 'PENDING' AND operation_kind = '${kind.name}' " +
                     "AND expires_at > :after $cursorPredicate" +
                     "ORDER BY created_at DESC, operation_id DESC",
                 StatutoryDelegationOperationEntity::class.java,
