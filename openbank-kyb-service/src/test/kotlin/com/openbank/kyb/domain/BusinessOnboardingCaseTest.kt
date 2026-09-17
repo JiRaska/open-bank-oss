@@ -117,6 +117,17 @@ class BusinessOnboardingCaseTest {
     private fun started() = BusinessOnboardingCase.start(UUID.randomUUID(), ico, initiator, now)
 
     @Test
+    fun `confirmed rule keeps its attestation identity and manual override clears it`() {
+        val ex = extract(LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf(rep("Jan Novák")))
+        val decision = attested(ex)
+        val verified = started().registryVerified(ex, decision, now)
+        assertThat(verified.representationAttestationId).isEqualTo(decision.attestation.id)
+
+        val overridden = verified.copy(status = CaseStatus.MANUAL_REVIEW).reviewResolved(1, now)
+        assertThat(overridden.representationAttestationId).isNull()
+    }
+
+    @Test
     fun `sole trader signs alone and the case is ready right after the initiator is matched`() {
         val case = started()
             .registryVerifiedAttested(

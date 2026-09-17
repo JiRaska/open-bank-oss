@@ -83,6 +83,8 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Exact active attestation that supplied the rule; null for legacy or manually overridden cases. */
+    val representationAttestationId: UUID? = null,
 ) {
 
     val initiator: Signer? get() = signers.firstOrNull { it.isInitiator }
@@ -135,6 +137,7 @@ data class BusinessOnboardingCase(
                     extract = extract,
                     requiredSignatures = a.confirmedSigners,
                     requiredSignerRoles = a.confirmedRoles,
+                    representationAttestationId = a.id,
                     updatedAt = at,
                 )
             } else {
@@ -143,6 +146,7 @@ data class BusinessOnboardingCase(
                     extract = extract,
                     requiredSignatures = a.confirmedSigners,
                     requiredSignerRoles = emptyList(),
+                    representationAttestationId = a.id,
                     updatedAt = at,
                 )
             }
@@ -258,8 +262,13 @@ data class BusinessOnboardingCase(
         else -> "${rule.mode} / ${rule.requiredSigners ?: "all"} signature(s)"
     }
 
-    private fun review(extract: RegistryExtract, reason: String, at: Instant) =
-        copy(status = CaseStatus.MANUAL_REVIEW, extract = extract, reviewReason = reason, updatedAt = at)
+    private fun review(extract: RegistryExtract, reason: String, at: Instant) = copy(
+        status = CaseStatus.MANUAL_REVIEW,
+        extract = extract,
+        representationAttestationId = null,
+        reviewReason = reason,
+        updatedAt = at,
+    )
 
     /** party-service has created the entity party. */
     fun entityPartyCreated(partyId: UUID, at: Instant): BusinessOnboardingCase =
@@ -641,6 +650,7 @@ data class BusinessOnboardingCase(
             requiredSignerRoles = requiredSignerRoles
                 .map { CzechRepresentationRuleParser.fold(it) }
                 .filter { it.isNotBlank() },
+            representationAttestationId = null,
             reviewReason = null,
             updatedAt = at,
         )

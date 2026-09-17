@@ -94,6 +94,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         entityPartyId = case.entityPartyId
         entityPartyActive = case.entityPartyActive
         requiredSignatures = case.requiredSignatures
+        representationAttestationId = case.representationAttestationId
         requiredSignerRoles = KybJson.writeStrings(case.requiredSignerRoles)
         signersJson = KybJson.writeSigners(case.signers)
         invitationTokens =
@@ -114,6 +115,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         extract = extractJson?.let { KybJson.readExtract(it) },
         entityPartyId = entityPartyId,
         requiredSignatures = requiredSignatures,
+        representationAttestationId = representationAttestationId,
         requiredSignerRoles = KybJson.readStrings(requiredSignerRoles),
         signers = KybJson.readSigners(signersJson),
         reviewReason = reviewReason,

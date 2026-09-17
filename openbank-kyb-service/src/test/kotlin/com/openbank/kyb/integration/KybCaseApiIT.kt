@@ -144,6 +144,21 @@ class KybCaseApiIT {
             }
             ).extract().path<String>("id")
         assertThat(parties.created).anyMatch { it.registrationNumber == "45274649" && it.partyType == "COMPANY" }
+        DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
+            c.prepareStatement(
+                "SELECT c.representation_attestation_id, a.attestation_id " +
+                    "FROM kyb_cases c JOIN kyb_representation_attestations a " +
+                    "ON a.identifier_scheme = c.identifier_scheme AND a.identifier_value = c.identifier_value " +
+                    "WHERE c.case_id = ? AND a.superseded_at IS NULL",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(caseId))
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject("representation_attestation_id", UUID::class.java))
+                        .isEqualTo(rows.getObject("attestation_id", UUID::class.java))
+                }
+            }
+        }
 
         // 4a. a customer whose VERIFIED identity is not the chosen representative is refused, whatever the
         //     body claims: the claimed name no longer decides who the initiator is.
