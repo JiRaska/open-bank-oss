@@ -49,6 +49,7 @@ class RepresentationPolicySchemaIT {
             ruleTextHash = "b".repeat(64),
             registrySource = "verified-registry",
             registrySourceRef = "register-entry",
+            registryRepresentativeCount = 2,
             mode = RepresentationPolicyMode.JOINT_N,
             requiredSignatures = 2,
             requiredOffices = listOf("Chair", "Member"),
@@ -109,10 +110,10 @@ class RepresentationPolicySchemaIT {
             """
             INSERT INTO party_representation_policies
                 (policy_id, principal_party_id, revision, source_case_id, attestation_id, rule_text_hash,
-                 registry_source, registry_source_ref, mode,
+                 registry_source, registry_source_ref, registry_representative_count, mode,
                  required_signatures, required_offices_json, eligible_representatives_json,
                  evidence_ref, effective_from)
-            VALUES (?, ?, 1, ?, ?, ?, 'verified-registry', 'register-entry', 'JOINT_N', 2, ?, ?, 'verified-case', now())
+            VALUES (?, ?, 1, ?, ?, ?, 'verified-registry', 'register-entry', 2, 'JOINT_N', 2, ?, ?, 'verified-case', now())
             """.trimIndent(),
         ).use { statement ->
             statement.setObject(1, policyId)

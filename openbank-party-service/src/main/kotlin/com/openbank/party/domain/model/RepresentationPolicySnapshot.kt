@@ -32,8 +32,9 @@ data class EligibleRepresentative(
 
 /**
  * Immutable evidence for a statutory signing rule. A count alone cannot express office constraints.
- * Legacy mandates do not acquire one by inference; a separate KYB writer must supply the complete
- * bank-mapped roster before this snapshot can be used to govern a customer operation.
+ * Legacy mandates do not acquire one by inference. The eligible roster may be a bank-identified
+ * subset for SOLE or JOINT_N: unmapped people cannot sign a bank operation. JOINT_ALL instead
+ * requires the whole verified register roster, or "all" would mean only all known to the bank.
  */
 data class RepresentationPolicySnapshot(
     val id: UUID,
@@ -44,6 +45,7 @@ data class RepresentationPolicySnapshot(
     val ruleTextHash: String,
     val registrySource: String,
     val registrySourceRef: String?,
+    val registryRepresentativeCount: Int,
     val mode: RepresentationPolicyMode,
     val requiredSignatures: Int,
     val requiredOffices: List<String>,
@@ -55,15 +57,23 @@ data class RepresentationPolicySnapshot(
         require(revision > 0) { "representation rule revision must be positive" }
         require(ruleTextHash.matches(Regex("[0-9a-f]{64}"))) { "rule text hash must be SHA-256 hex" }
         require(registrySource.isNotBlank()) { "verified registry source is required" }
+        require(registryRepresentativeCount > 0) { "verified register must list representatives" }
         require(evidenceRef.isNotBlank()) { "verified rule evidence is required" }
         require(eligibleRepresentatives.isNotEmpty()) { "a rule needs identified representatives" }
         require(eligibleRepresentatives.map { it.partyId }.distinct().size == eligibleRepresentatives.size) {
             "representatives must be distinct people"
         }
+        val mappedRows = eligibleRepresentatives.flatMap { it.registryRepresentativeIndices }
+        require(mappedRows.size == mappedRows.distinct().size) { "a register row cannot identify two different people" }
+        require(mappedRows.all { it < registryRepresentativeCount }) {
+            "mapped representative does not exist in the verified register"
+        }
         require(
-            eligibleRepresentatives.flatMap { it.registryRepresentativeIndices }.distinct().size ==
-                eligibleRepresentatives.sumOf { it.registryRepresentativeIndices.size },
-        ) { "a register row cannot identify two different people" }
+            mode != RepresentationPolicyMode.JOINT_ALL ||
+                mappedRows.toSet() == (0 until registryRepresentativeCount).toSet(),
+        ) {
+            "joint-all requires every verified register representative to be identified"
+        }
         require(requiredSignatures in 1..eligibleRepresentatives.size) { "quorum must fit the verified roster" }
         require(requiredOffices.all { it.isNotBlank() } && requiredOffices.size <= requiredSignatures) {
             "required offices must fit the quorum"

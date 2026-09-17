@@ -38,6 +38,9 @@ class RepresentationPolicyEntity : PanacheEntity() {
     @Column(name = "registry_source_ref")
     var registrySourceRef: String? = null
 
+    @Column(name = "registry_representative_count", nullable = false)
+    var registryRepresentativeCount: Int = 0
+
     @Column(name = "mode", nullable = false)
     lateinit var mode: String
 

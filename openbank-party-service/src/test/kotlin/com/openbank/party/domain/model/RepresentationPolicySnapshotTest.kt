@@ -24,6 +24,7 @@ class RepresentationPolicySnapshotTest {
         ruleTextHash = "a".repeat(64),
         registrySource = "verified-registry",
         registrySourceRef = "register-entry",
+        registryRepresentativeCount = 3,
         mode = RepresentationPolicyMode.JOINT_N,
         requiredSignatures = 2,
         requiredOffices = requiredOffices,
@@ -54,6 +55,13 @@ class RepresentationPolicySnapshotTest {
     }
 
     @Test
+    fun `joint all requires the full register roster and all mapped humans`() {
+        val rule = policy().copy(mode = RepresentationPolicyMode.JOINT_ALL, requiredSignatures = 3)
+        assertThat(rule.satisfiedBy(setOf(chair, memberA))).isFalse()
+        assertThat(rule.satisfiedBy(setOf(chair, memberA, memberB))).isTrue()
+    }
+
+    @Test
     fun `incomplete or contradictory verified rules cannot become snapshots`() {
         assertThatThrownBy { policy(listOf("Chair", "Secretary")) }
             .isInstanceOf(IllegalArgumentException::class.java)
@@ -69,6 +77,16 @@ class RepresentationPolicySnapshotTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { policy().copy(requiredOffices = listOf("Chair", "Chair")) }
             .isInstanceOf(IllegalArgumentException::class.java)
+        val twoOfFour = policy().copy(registryRepresentativeCount = 4)
+        assertThat(twoOfFour.satisfiedBy(setOf(chair, memberA))).isTrue()
+        assertThat(twoOfFour.satisfiedBy(setOf(chair, UUID.randomUUID()))).isFalse()
+        assertThatThrownBy {
+            policy().copy(
+                mode = RepresentationPolicyMode.JOINT_ALL,
+                requiredSignatures = 3,
+                registryRepresentativeCount = 4,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy {
             policy().copy(
                 eligibleRepresentatives = listOf(

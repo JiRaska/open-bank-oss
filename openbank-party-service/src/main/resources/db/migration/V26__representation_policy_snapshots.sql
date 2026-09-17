@@ -18,6 +18,7 @@ CREATE TABLE party_representation_policies (
     rule_text_hash                CHAR(64) NOT NULL CHECK (rule_text_hash ~ '^[0-9a-f]{64}$'),
     registry_source               VARCHAR(64) NOT NULL,
     registry_source_ref           VARCHAR(255),
+    registry_representative_count INTEGER NOT NULL CHECK (registry_representative_count > 0),
     mode                          VARCHAR(16) NOT NULL CHECK (mode IN ('SOLE', 'JOINT_N', 'JOINT_ALL')),
     required_signatures           INTEGER NOT NULL CHECK (required_signatures > 0),
     required_offices_json         TEXT NOT NULL CHECK (jsonb_typeof(required_offices_json::jsonb) = 'array'),
